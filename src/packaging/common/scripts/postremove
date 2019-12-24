@@ -1,0 +1,102 @@
+${packaging.scripts.header}
+
+#
+# This script is executed in the post-removal phase
+#
+#   On Debian,
+#       $1=remove    : indicates a removal
+#       $1=purge     : indicates an upgrade
+#
+#   On RedHat,
+#       $1=0         : indicates a removal
+#       $1=1         : indicates an upgrade
+
+
+
+# Sets the default values for fess variables used in this script
+FESS_HOME="${packaging.fess.home.dir}"
+FESS_USER="${packaging.fess.user}"
+FESS_GROUP="${packaging.fess.group}"
+FESS_APP_DIR="${packaging.fess.app.dir}"
+
+IS_UPGRADE=false
+
+case "$1" in
+
+    # Debian ####################################################
+    remove)
+    ;;
+
+    upgrade)
+        IS_UPGRADE=true
+    ;;
+
+    purge)
+    ;;
+    failed-upgrade|abort-install|abort-upgrade|disappear|disappear)
+    ;;
+
+    # RedHat ####################################################
+    0)
+        # If $1=0 this is a removal
+    ;;
+    1)
+        # If $1=1 this is an upgrade
+        IS_UPGRADE=true
+    ;;
+
+    *)
+        echo "post remove script called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+
+# Revert properties
+if [ "$IS_UPGRADE" = "false" ]; then
+  for file in `ls $FESS_APP_DIR/WEB-INF/classes/*.properties.fione` ; do
+    orig_file=`echo $file | sed -e "s/\.fione//"`
+    mv $file $orig_file
+  done
+fi
+
+
+# Restart fess
+echo -n "Restarting fess service..."
+if command -v systemctl >/dev/null; then
+    systemctl daemon-reload
+    systemctl restart fess.service || true
+
+elif [ -x /etc/init.d/fess ]; then
+    if command -v invoke-rc.d >/dev/null; then
+        invoke-rc.d fess stop >/dev/null || true
+        invoke-rc.d fess start >/dev/null || true
+    else
+        /etc/init.d/fess restart >/dev/null || true
+    fi
+
+elif [ -x /etc/rc.d/init.d/fess ] ; then
+    /etc/rc.d/init.d/fess restart >/dev/null || true
+fi
+echo " OK"
+
+# Restart httpd
+echo -n "Restarting httpd service..."
+if command -v systemctl >/dev/null; then
+    systemctl daemon-reload
+    systemctl restart httpd.service || true
+
+elif [ -x /etc/init.d/httpd ]; then
+    if command -v invoke-rc.d >/dev/null; then
+        invoke-rc.d httpd stop >/dev/null || true
+        invoke-rc.d httpd start >/dev/null || true
+    else
+        /etc/init.d/httpd restart >/dev/null || true
+    fi
+
+elif [ -x /etc/rc.d/init.d/httpd ] ; then
+    /etc/rc.d/init.d/httpd restart >/dev/null || true
+fi
+echo " OK"
+
+${packaging.scripts.footer}

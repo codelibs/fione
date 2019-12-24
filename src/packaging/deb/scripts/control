@@ -1,0 +1,12 @@
+Package: fione
+Version: [[version]]
+Architecture: all
+Summary: Fione is Machine Learning extension for Fess.
+License: Apache License
+Distribution: Fione
+Group: Application/Internet
+Maintainer: CodeLibs, Inc.
+Depends: libc6, adduser
+Section: web
+Priority: optional
+Description: This package is Machine Learning extension for Fess.
