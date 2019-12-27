@@ -1,9 +1,9 @@
-Fione: AutoML on Fess
+Fione: Fess AutoML
 =========
 
 ## Overview
 
-TBD...
+Fione is AutoML extension for Fess.
 
 ## Development
 

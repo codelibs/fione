@@ -38,7 +38,7 @@
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
 		<fess.version>13.6.0-SNAPSHOT</fess.version>
-		<h2o.version>3.8.2.11</h2o.version>
+		<retrofit.version>2.7.0</retrofit.version>
 
 		<!-- Main Framework -->
 		<dbflute.version>1.2.1</dbflute.version>
@@ -176,8 +176,11 @@
 				<artifactId>maven-jxr-plugin</artifactId>
 				<version>3.0.0</version>
 				<configuration>
-					<docTitle>&lt;a href="https://fess.codelibs.org/" target="_blank"&gt;Enterprise Search Server: Fess Reference&lt;/a&gt;</docTitle>
-					<windowTitle>Open Source Enterprise Search: Fess Source Code Reference</windowTitle>
+					<docTitle>&lt;a href="https://fess.codelibs.org/"
+						target="_blank"&gt;Enterprise Search Server: Fess
+						Reference&lt;/a&gt;</docTitle>
+					<windowTitle>Open Source Enterprise Search: Fess Source Code
+						Reference</windowTitle>
 				</configuration>
 			</plugin>
 			<plugin>
@@ -519,14 +522,25 @@
 			<version>${log4j.version}</version>
 		</dependency>
 		<dependency>
-			<groupId>ai.h2o</groupId>
-			<artifactId>h2o-java-rest-bindings</artifactId>
-			<version>${h2o.version}</version>
+			<groupId>com.squareup.retrofit2</groupId>
+			<artifactId>retrofit</artifactId>
+			<version>${retrofit.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.squareup.retrofit2</groupId>
+			<artifactId>converter-gson</artifactId>
+			<version>${retrofit.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>junit</groupId>
 			<artifactId>junit</artifactId>
 			<version>${junit.version}</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers</artifactId>
+			<version>1.12.4</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>

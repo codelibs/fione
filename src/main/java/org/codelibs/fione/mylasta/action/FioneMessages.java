@@ -15,8 +15,6 @@
  */
 package org.codelibs.fione.mylasta.action;
 
-import org.codelibs.fione.mylasta.action.FioneLabels;
-
 /**
  * The keys for message.
  * @author FreeGen

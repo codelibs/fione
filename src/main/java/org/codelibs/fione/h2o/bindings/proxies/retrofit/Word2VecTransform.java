@@ -1,0 +1,40 @@
+/*
+ * Copyright 2012-2019 CodeLibs Project and the Others.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+package org.codelibs.fione.h2o.bindings.proxies.retrofit;
+
+import org.codelibs.fione.h2o.bindings.pojos.Word2VecModelAggregateMethod;
+import org.codelibs.fione.h2o.bindings.pojos.Word2VecTransformV3;
+
+import retrofit2.Call;
+import retrofit2.http.GET;
+import retrofit2.http.Query;
+
+public interface Word2VecTransform {
+
+    /**
+     * Transform words to vectors using a word2vec model
+     *   @param model Source word2vec Model
+     *   @param words_frame Words Frame
+     *   @param aggregate_method Method of aggregating word-vector sequences into a single vector
+     */
+    @GET("/3/Word2VecTransform")
+    Call<Word2VecTransformV3> transform(@Query("model") String model, @Query("words_frame") String words_frame,
+            @Query("aggregate_method") Word2VecModelAggregateMethod aggregate_method);
+
+    @GET("/3/Word2VecTransform")
+    Call<Word2VecTransformV3> transform(@Query("model") String model, @Query("words_frame") String words_frame);
+
+}
