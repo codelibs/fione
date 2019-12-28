@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import org.codelibs.core.lang.StringUtil;
+
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
@@ -56,6 +58,8 @@ public class AutoMLBuildModelsV99 extends SchemaV3 {
      * Public constructor
      */
     public AutoMLBuildModelsV99() {
+        excludeAlgos = StringUtil.EMPTY_STRINGS;
+        monotoneConstraints = new KeyValueV3[0];
     }
 
     /**

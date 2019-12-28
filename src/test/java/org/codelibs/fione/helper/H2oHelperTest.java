@@ -19,6 +19,16 @@ import static org.junit.Assert.assertArrayEquals;
 
 import java.util.concurrent.CountDownLatch;
 
+import org.codelibs.fione.h2o.bindings.builder.AutoMLBuildControlBuilder;
+import org.codelibs.fione.h2o.bindings.builder.AutoMLBuildModelsBuilder;
+import org.codelibs.fione.h2o.bindings.builder.AutoMLInputBuilder;
+import org.codelibs.fione.h2o.bindings.builder.AutoMLStoppingCriteriaBuilder;
+import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
+import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
+import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildSpecV99;
+import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
+import org.codelibs.fione.h2o.bindings.pojos.AutoMLStoppingCriteriaV99;
+import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
 import org.codelibs.fione.h2o.bindings.pojos.ColV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
@@ -27,12 +37,14 @@ import org.codelibs.fione.h2o.bindings.pojos.JobV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseSetupV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
+import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.dbflute.utflute.lastaflute.LastaFluteTestCase;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 
 import junit.framework.AssertionFailedError;
+import okhttp3.logging.HttpLoggingInterceptor;
 
 public class H2oHelperTest extends LastaFluteTestCase {
 
@@ -47,22 +59,24 @@ public class H2oHelperTest extends LastaFluteTestCase {
         return "test_app.xml";
     }
 
+    @SuppressWarnings("resource")
     @Override
     public void setUp() throws Exception {
         super.setUp();
         h2o =
-                new GenericContainer<>("codelibs/h2o:3.28.0.1")
-                        //
-                        .withExposedPorts(54321)
-                        //
+                new GenericContainer<>("codelibs/h2o:3.28.0.1").withExposedPorts(54321)
                         .withClasspathResourceMapping("data/iris.csv", "/data/iris.csv", BindMode.READ_ONLY)
                         .withClasspathResourceMapping("data/tips.csv", "/data/tips.csv", BindMode.READ_ONLY)
                         .waitingFor(Wait.forHttp("/flow/index.html").forStatusCode(200));
         h2o.start();
         h2o.followOutput(o -> System.out.print(o.getUtf8String()));
 
+        final HttpLoggingInterceptor interceptor = new HttpLoggingInterceptor();
+        interceptor.setLevel(HttpLoggingInterceptor.Level.BODY);
+
         h2oHelper = new H2oHelper();
         h2oHelper.setEndpoint(getEndpoint());
+        h2oHelper.addHttpInterceptor(interceptor);
         h2oHelper.init();
         System.out.println("Endpoint: " + getEndpoint());
     }
@@ -80,7 +94,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     public void test_iris() throws Throwable {
         final CountDownLatch latch = new CountDownLatch(1);
         h2oHelper.importFiles("/data/iris.csv").execute((call, res) -> {
-            ImportFilesV3 result = res.body();
+            final ImportFilesV3 result = res.body();
             assertEquals("/data/iris.csv", result.path);
             assertArrayEquals(new String[] { "nfs://data/iris.csv" }, result.destinationFrames);
             test_iris_parseSetup(latch, result);
@@ -93,9 +107,9 @@ public class H2oHelperTest extends LastaFluteTestCase {
         }
     }
 
-    private void test_iris_parseSetup(final CountDownLatch latch, ImportFilesV3 data) {
+    private void test_iris_parseSetup(final CountDownLatch latch, final ImportFilesV3 data) {
         h2oHelper.setupParse(data.destinationFrames).execute((call, res) -> {
-            ParseSetupV3 result = res.body();
+            final ParseSetupV3 result = res.body();
             assertEquals(1, result.checkHeader);
             assertEquals(4194304, result.chunkSize);
             assertEquals(0, result.columnCount);
@@ -119,10 +133,10 @@ public class H2oHelperTest extends LastaFluteTestCase {
         });
     }
 
-    private void test_iris_parse(final CountDownLatch latch, ParseSetupV3 data) {
-        ParseV3 params = h2oHelper.convert(data);
+    private void test_iris_parse(final CountDownLatch latch, final ParseSetupV3 data) {
+        final ParseV3 params = h2oHelper.convert(data);
         h2oHelper.parseFiles(params).execute((call, res) -> {
-            ParseV3 result = res.body();
+            final ParseV3 result = res.body();
             assertEquals(1, result.checkHeader);
             assertEquals(4194304, result.chunkSize);
             assertArrayEquals(new String[] { "SepalLength", "SepalWidth", "PetalLength", "PetalWidth", "Name" }, result.columnNames);
@@ -143,15 +157,15 @@ public class H2oHelperTest extends LastaFluteTestCase {
         });
     }
 
-    private void test_iris_summary(final CountDownLatch latch, ParseV3 data, JobV3 job) {
+    private void test_iris_summary(final CountDownLatch latch, final ParseV3 data, final JobV3 job) {
         if ("DONE".equals(job.status)) {
             h2oHelper.getFrameSummary(data.destinationFrame.name).execute((call, res) -> {
-                FramesV3 result = res.body();
+                final FramesV3 result = res.body();
                 assertEquals(1, result.frames.length);
-                FrameV3 frame = result.frames[0];
+                final FrameV3 frame = result.frames[0];
                 assertEquals(5, frame.columns.length);
 
-                ColV3 col1 = frame.columns[0];
+                final ColV3 col1 = frame.columns[0];
                 assertEquals("SepalLength", col1.label);
                 assertEquals(4.3, col1.histogramBase);
                 assertEquals(7.9, col1.maxs[0]);
@@ -167,7 +181,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
                 assertEquals("real", col1.type);
                 assertNull(col1.domain);
 
-                ColV3 col5 = frame.columns[4];
+                final ColV3 col5 = frame.columns[4];
                 assertEquals("Name", col5.label);
                 assertEquals(0.0, col5.histogramBase);
                 assertEquals(2.0, col5.maxs[0]);
@@ -192,8 +206,8 @@ public class H2oHelperTest extends LastaFluteTestCase {
             fail(new AssertionFailedError("job.status: " + job.status), latch);
         } else {
             h2oHelper.fetchJobs(job.key.name).execute((call, res) -> {
-                JobsV3 result = res.body();
-                for (JobV3 j : result.jobs) {
+                final JobsV3 result = res.body();
+                for (final JobV3 j : result.jobs) {
                     if (j.key.name.equals(job.key.name)) {
                         test_iris_summary(latch, data, j);
                         return;
@@ -206,14 +220,14 @@ public class H2oHelperTest extends LastaFluteTestCase {
         }
     }
 
-    private void test_iris_columnSummary(final CountDownLatch latch, ParseV3 data) {
+    private void test_iris_columnSummary(final CountDownLatch latch, final ParseV3 data) {
         h2oHelper.getFrameColumnSummary(data.destinationFrame.name, "SepalLength").execute((call, res) -> {
-            FramesV3 result = res.body();
+            final FramesV3 result = res.body();
             assertEquals(1, result.frames.length);
-            FrameV3 frame = result.frames[0];
+            final FrameV3 frame = result.frames[0];
             assertEquals(1, frame.columns.length);
 
-            ColV3 col1 = frame.columns[0];
+            final ColV3 col1 = frame.columns[0];
             assertEquals("SepalLength", col1.label);
             assertEquals(4.3, col1.histogramBase);
             assertEquals(7.9, col1.maxs[0]);
@@ -229,13 +243,105 @@ public class H2oHelperTest extends LastaFluteTestCase {
             assertEquals("real", col1.type);
             assertNull(col1.domain);
 
-            latch.countDown();
+            test_iris_runAutoML(latch, data);
         }, (call, t) -> {
             fail(t, latch);
         });
     }
 
-    private void fail(Throwable t, CountDownLatch latch) {
+    private void test_iris_runAutoML(final CountDownLatch latch, final ParseV3 data) {
+        h2oHelper.runAutoML(
+                AutoMLBuildControlBuilder
+                        .create()
+                        .projectName("iris")
+                        .nfolds(5)
+                        .balanceClasses(false)
+                        .stoppingCriteria(
+                                AutoMLStoppingCriteriaBuilder.create().seed(-1).maxModels(0).maxRuntimeSecs(60).maxRuntimeSecsPerModel(0)
+                                        .stoppingRounds(3).stoppingMetric(ScoreKeeperStoppingMetric.AUTO).stoppingTolerance(0.001).build())
+                        .keepCrossValidationPredictions(true).keepCrossValidationModels(true).keepCrossValidationFoldAssignment(false)
+                        .build(),
+                AutoMLInputBuilder.create().trainingFrame(data.destinationFrame).responseColumn("Name", null)
+                        .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.AUTO).build(),
+                AutoMLBuildModelsBuilder.create().build()).execute((call, res) -> {
+            final AutoMLBuildSpecV99 result = res.body();
+            final AutoMLBuildControlV99 buildControl = result.buildControl;
+            assertFalse(buildControl.balanceClasses);
+            assertNull(buildControl.classSamplingFactors);
+            assertEquals("", buildControl.exportCheckpointsDir);
+            assertFalse(buildControl.keepCrossValidationFoldAssignment);
+            assertTrue(buildControl.keepCrossValidationModels);
+            assertTrue(buildControl.keepCrossValidationPredictions);
+            assertEquals(5.0f, buildControl.maxAfterBalanceSize);
+            assertEquals(5, buildControl.nfolds);
+            assertEquals("iris", buildControl.projectName);
+            final AutoMLStoppingCriteriaV99 stoppingCriteria = buildControl.stoppingCriteria;
+            assertEquals(0, stoppingCriteria.maxModels);
+            assertEquals(0, Double.compare(60.0, stoppingCriteria.maxRuntimeSecs));
+            assertEquals(0, Double.compare(0.0f, stoppingCriteria.maxRuntimeSecsPerModel));
+            assertEquals(-1, stoppingCriteria.seed);
+            assertEquals(ScoreKeeperStoppingMetric.AUTO, stoppingCriteria.stoppingMetric);
+            assertEquals(3, stoppingCriteria.stoppingRounds);
+            assertEquals(0, Double.compare(0.001, stoppingCriteria.stoppingTolerance));
+            final AutoMLBuildModelsV99 buildModels = result.buildModels;
+            assertNull(buildModels.algoParameters);
+            assertNull(buildModels.includeAlgos);
+            assertNull(buildModels.monotoneConstraints);
+            assertEquals(0, buildModels.excludeAlgos.length);
+            final AutoMLInputV99 inputSpec = result.inputSpec;
+            assertNull(inputSpec.blendingFrame);
+            assertNull(inputSpec.foldColumn);
+            assertNull(inputSpec.ignoredColumns);
+            assertNull(inputSpec.leaderboardFrame);
+            assertEquals("Name", inputSpec.responseColumn.columnName);
+            assertEquals(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.AUTO, inputSpec.sortMetric);
+            assertEquals("iris.hex", inputSpec.trainingFrame.name);
+            assertNull(inputSpec.validationFrame);
+            assertNull(inputSpec.weightsColumn);
+            final JobV3 job = result.job;
+            assertEquals("AutoML build", job.description);
+            assertEquals("iris@@Name", job.dest.name);
+            assertNotNull(job.key.name);
+            assertTrue(job.progress < 1.0f);
+            assertEquals("RUNNING", job.status);
+
+            test_iris_leaderboard(latch, result, job);
+        }, (call, t) -> {
+            fail(t, latch);
+        });
+    }
+
+    private void test_iris_leaderboard(final CountDownLatch latch, final AutoMLBuildSpecV99 data, final JobV3 job) {
+        if ("DONE".equals(job.status)) {
+            latch.countDown();
+        } else if ("CANCELLED".equals(job.status) || "FAILED".equals(job.status)) {
+            fail(new AssertionFailedError("job.status: " + job.status), latch);
+        } else {
+            sleep(1000L);
+            h2oHelper.fetchJobs(job.key.name).execute((call, res) -> {
+                final JobsV3 result = res.body();
+                for (final JobV3 j : result.jobs) {
+                    if (j.key.name.equals(job.key.name)) {
+                        test_iris_leaderboard(latch, data, j);
+                        return;
+                    }
+                }
+                fail();
+            }, (call, t) -> {
+                fail(t, latch);
+            });
+        }
+    }
+
+    private void sleep(long mills) {
+        try {
+            Thread.sleep(mills);
+        } catch (InterruptedException e) {
+            // ignore
+        }
+    }
+
+    private void fail(final Throwable t, final CountDownLatch latch) {
         throwable = t;
         latch.countDown();
     }

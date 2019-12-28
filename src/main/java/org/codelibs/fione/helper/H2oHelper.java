@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.helper;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.BiConsumer;
 
 import javax.annotation.PostConstruct;
@@ -36,6 +38,7 @@ import org.codelibs.fione.h2o.bindings.proxies.retrofit.AutoMLBuilder;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.Frames;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.Jobs;
 
+import okhttp3.Interceptor;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
@@ -57,9 +60,12 @@ public class H2oHelper {
 
     private H2oApi h2o;
 
+    private final List<Interceptor> httpInterceptorList = new ArrayList<>();
+
     @PostConstruct
     public void init() {
         h2o = new H2oApi(endpoint).connectTimeout(connectTimeout).readTimeout(readTimeout).writeTimeout(writeTimeout);
+        httpInterceptorList.stream().forEach(h2o::addInterceptor);
         if (StringUtil.isNotBlank(secretKeyId) && StringUtil.isNotBlank(secretAccessKey)) {
             new Callable<>(h2o.setS3Credentials(secretKeyId, secretAccessKey)).execute((call, res) -> {
                 logger.info("Use S3 credentials.");
@@ -175,6 +181,10 @@ public class H2oHelper {
 
     public void setSecretAccessKey(final String secretAccessKey) {
         this.secretAccessKey = secretAccessKey;
+    }
+
+    public void addHttpInterceptor(final Interceptor interceptor) {
+        httpInterceptorList.add(interceptor);
     }
 
 }

@@ -19,6 +19,8 @@ import java.io.IOException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import org.codelibs.fione.exception.H2oAccessException;
@@ -107,7 +109,9 @@ import com.google.gson.reflect.TypeToken;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
+import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
+import okhttp3.OkHttpClient.Builder;
 import retrofit2.Call;
 import retrofit2.Response;
 import retrofit2.Retrofit;
@@ -147,6 +151,11 @@ public class H2oApi {
     public H2oApi readTimeout(final int t) {
         readTimeout = t;
         retrofit = null;
+        return this;
+    }
+
+    public H2oApi addInterceptor(final Interceptor interceptor) {
+        interceptorList.add(interceptor);
         return this;
     }
 
@@ -3333,6 +3342,7 @@ public class H2oApi {
     private int writeTimeout = 60;
     private int readTimeout = 60;
     private int pollInterval = 1000;
+    private final List<Interceptor> interceptorList = new ArrayList<>();
 
     private void initializeRetrofit() {
         final Gson gson =
@@ -3344,9 +3354,11 @@ public class H2oApi {
                         .registerTypeAdapter(ModelOutputSchemaV3.class, new ModelOutputDeserializer())
                         .registerTypeAdapter(ModelParametersSchemaV3.class, new ModelParametersDeserializer()).setLenient().create();
 
-        final OkHttpClient client =
+        final Builder builder =
                 new OkHttpClient.Builder().connectTimeout(connectTimeout, TimeUnit.SECONDS).writeTimeout(writeTimeout, TimeUnit.SECONDS)
-                        .readTimeout(readTimeout, TimeUnit.SECONDS).build();
+                        .readTimeout(readTimeout, TimeUnit.SECONDS);
+        interceptorList.stream().forEach(builder::addInterceptor);
+        final OkHttpClient client = builder.build();
 
         this.retrofit = new Retrofit.Builder().client(client).baseUrl(url).addConverterFactory(GsonConverterFactory.create(gson)).build();
     }
@@ -3389,6 +3401,8 @@ public class H2oApi {
                 return context.deserialize(jobj, GridKeyV3.class);
             case "Key<Frame>":
                 return context.deserialize(jobj, FrameKeyV3.class);
+            case "Key<AutoML>":
+                return context.deserialize(jobj, AutoMLKeyV3.class);
             default:
                 throw new JsonParseException("Unable to deserialize key of type " + type);
             }

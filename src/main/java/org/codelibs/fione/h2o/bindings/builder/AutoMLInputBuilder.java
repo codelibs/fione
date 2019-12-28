@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.builder;
 
+import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
 import org.codelibs.fione.h2o.bindings.pojos.ColSpecifierV3;
@@ -79,7 +80,7 @@ public class AutoMLInputBuilder {
         public Context responseColumn(final String columnName, final String[] isMemberOfFrames) {
             final ColSpecifierV3 colSpecifier = new ColSpecifierV3();
             colSpecifier.columnName = columnName;
-            colSpecifier.isMemberOfFrames = isMemberOfFrames;
+            colSpecifier.isMemberOfFrames = isMemberOfFrames == null ? StringUtil.EMPTY_STRINGS : isMemberOfFrames;
             data.responseColumn = colSpecifier;
             return this;
         }
