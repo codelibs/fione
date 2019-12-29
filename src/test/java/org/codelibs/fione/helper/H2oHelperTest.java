@@ -30,14 +30,20 @@ import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLStoppingCriteriaV99;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
 import org.codelibs.fione.h2o.bindings.pojos.ColV3;
+import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.ImportFilesV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
+import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
+import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseSetupV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
+import org.codelibs.fione.h2o.bindings.pojos.TwoDimTableV3;
 import org.dbflute.utflute.lastaflute.LastaFluteTestCase;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
@@ -313,7 +319,27 @@ public class H2oHelperTest extends LastaFluteTestCase {
 
     private void test_iris_leaderboard(final CountDownLatch latch, final AutoMLBuildSpecV99 data, final JobV3 job) {
         if ("DONE".equals(job.status)) {
-            latch.countDown();
+            h2oHelper.getLeaderboard(job.dest.name).execute((call, res) -> {
+                final LeaderboardV99 result = res.body();
+                assertNull(result.leaderboardFrame);
+                assertEquals(0, result.leaderboardFrameChecksum);
+                assertNotNull(result.models);
+                assertEquals("iris@@Name", result.projectName);
+                assertFalse(result.sortDecreasing);
+                assertEquals("mean_per_class_error", result.sortMetric);
+                assertEquals(result.models.length, result.sortMetrics.length);
+                final TwoDimTableV3 table = result.table;
+                assertEquals("", table.columns[0].name);
+                assertEquals("model_id", table.columns[1].name);
+                assertEquals("mean_per_class_error", table.columns[2].name);
+                assertEquals("logloss", table.columns[3].name);
+                assertEquals("rmse", table.columns[4].name);
+                assertEquals("mse", table.columns[5].name);
+
+                test_iris_getModel(latch, result.models[0]);
+            }, (call, t) -> {
+                fail(t, latch);
+            });
         } else if ("CANCELLED".equals(job.status) || "FAILED".equals(job.status)) {
             fail(new AssertionFailedError("job.status: " + job.status), latch);
         } else {
@@ -333,10 +359,58 @@ public class H2oHelperTest extends LastaFluteTestCase {
         }
     }
 
-    private void sleep(long mills) {
+    private void test_iris_getModel(final CountDownLatch latch, final ModelKeyV3 modelKey) {
+        h2oHelper.getModel(modelKey).execute((call, res) -> {
+            final ModelsV3 result = res.body();
+            assertEquals("", result._excludeFields);
+            assertNull(result.compatibleFrames);
+            assertFalse(result.findCompatibleFrames);
+            assertNull(result.modelId);
+            assertFalse(result.preview);
+            assertEquals(1, result.models.length);
+
+            test_iris_predict(latch, modelKey);
+        }, (call, t) -> {
+            fail(t, latch);
+        });
+    }
+
+    private void test_iris_predict(final CountDownLatch latch, final ModelKeyV3 modelKey) {
+        final FrameKeyV3 frameKey = new FrameKeyV3();
+        frameKey.name = "iris.hex";
+        h2oHelper.predict(modelKey, frameKey).execute((call, res) -> {
+            final ModelMetricsListSchemaV3 result = res.body();
+            assertEquals("", result._excludeFields);
+            assertEquals("", result.customMetricFunc);
+            assertEquals(-1, result.deepFeaturesHiddenLayer);
+            assertEquals("", result.deepFeaturesHiddenLayerName);
+            assertFalse(result.deviances);
+            assertNull(result.deviancesFrame);
+            assertEquals(-1, result.exemplarIndex);
+            assertFalse(result.featureFrequencies);
+            assertEquals("iris.hex", result.frame.name);
+            assertFalse(result.leafNodeAssignment);
+            assertNull(result.leafNodeAssignmentType);
+            assertEquals(modelKey.name, result.model.name);
+            assertFalse(result.predictContributions);
+            assertNotNull(result.predictionsFrame);
+            assertFalse(result.predictStagedProba);
+            assertFalse(result.projectArchetypes);
+            assertFalse(result.reconstructionError);
+            assertFalse(result.reconstructionErrorPerFeature);
+            assertFalse(result.reconstructTrain);
+            assertFalse(result.reverseTransform);
+
+            latch.countDown();
+        }, (call, t) -> {
+            fail(t, latch);
+        });
+    }
+
+    private void sleep(final long mills) {
         try {
             Thread.sleep(mills);
-        } catch (InterruptedException e) {
+        } catch (final InterruptedException e) {
             // ignore
         }
     }

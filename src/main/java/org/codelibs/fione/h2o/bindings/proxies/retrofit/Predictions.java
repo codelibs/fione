@@ -77,7 +77,8 @@ public interface Predictions {
 
     @FormUrlEncoded
     @POST("/3/Predictions/models/{model}/frames/{frame}")
-    Call<ModelMetricsListSchemaV3> predict(@Path("model") String model, @Path("frame") String frame);
+    Call<ModelMetricsListSchemaV3> predict(@Path("model") String model, @Path("frame") String frame,
+            @Field("_exclude_fields") String _exclude_fields);
 
     /**
      * Score (generate predictions) for the specified Frame with the specified Model.  Both the Frame of predictions and

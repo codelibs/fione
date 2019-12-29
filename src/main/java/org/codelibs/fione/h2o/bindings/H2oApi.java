@@ -234,19 +234,19 @@ public class H2oApi {
     /**
      * Return the AutoML leaderboard for the given project.
      */
-    public LeaderboardV99 leaderboard(final String projectName) throws IOException {
+    public Call<LeaderboardV99> leaderboard(final String projectName) {
         final Leaderboards s = getService(Leaderboards.class);
-        return s.fetch(projectName).execute().body();
+        return s.fetch(projectName);
     }
 
-    public LeaderboardV99 leaderboard(final String projectName, final String[] extensions) throws IOException {
+    public Call<LeaderboardV99> leaderboard(final String projectName, final String[] extensions) {
         final Leaderboards s = getService(Leaderboards.class);
-        return s.fetch(projectName, extensions, "").execute().body();
+        return s.fetch(projectName, extensions, "");
     }
 
-    public LeaderboardV99 leaderboard(final String projectName, final String[] extensions, final String _excludeFields) throws IOException {
+    public Call<LeaderboardV99> leaderboard(final String projectName, final String[] extensions, final String _excludeFields) {
         final Leaderboards s = getService(Leaderboards.class);
-        return s.fetch(projectName, extensions, _excludeFields).execute().body();
+        return s.fetch(projectName, extensions, _excludeFields);
     }
 
     /**
@@ -2472,27 +2472,27 @@ public class H2oApi {
     /**
      * Return the specified Model from the H2O distributed K/V store, optionally with the list of compatible Frames.
      */
-    public ModelsV3 model(final ModelKeyV3 modelId) throws IOException {
+    public Call<ModelsV3> model(final ModelKeyV3 modelId) {
         final Models s = getService(Models.class);
-        return s.fetch(keyToString(modelId)).execute().body();
+        return s.fetch(keyToString(modelId));
     }
 
-    public ModelsV3 model(final ModelsV3 params) throws IOException {
+    public Call<ModelsV3> model(final ModelsV3 params) {
         final Models s = getService(Models.class);
-        return s.fetch(keyToString(params.modelId), params.preview, params.findCompatibleFrames, params._excludeFields).execute().body();
+        return s.fetch(keyToString(params.modelId), params.preview, params.findCompatibleFrames, params._excludeFields);
     }
 
     /**
      * Return all Models from the H2O distributed K/V store.
      */
-    public ModelsV3 models() throws IOException {
+    public Call<ModelsV3> models() {
         final Models s = getService(Models.class);
-        return s.list().execute().body();
+        return s.list();
     }
 
-    public ModelsV3 models(final ModelsV3 params) throws IOException {
+    public Call<ModelsV3> models(final ModelsV3 params) {
         final Models s = getService(Models.class);
-        return s.list(keyToString(params.modelId), params.preview, params.findCompatibleFrames, params._excludeFields).execute().body();
+        return s.list(keyToString(params.modelId), params.preview, params.findCompatibleFrames, params._excludeFields);
     }
 
     /**
@@ -2771,38 +2771,38 @@ public class H2oApi {
      * Score (generate predictions) for the specified Frame with the specified Model.  Both the Frame of predictions and
      * the metrics will be returned.
      */
-    public ModelMetricsListSchemaV3 predict(final ModelKeyV3 model, final FrameKeyV3 frame) throws IOException {
+    public Call<ModelMetricsListSchemaV3> predict(final ModelKeyV3 model, final FrameKeyV3 frame) {
         final Predictions s = getService(Predictions.class);
-        return s.predict(keyToString(model), keyToString(frame)).execute().body();
+        return s.predict(keyToString(model), keyToString(frame), null);
     }
 
-    public ModelMetricsListSchemaV3 predict(final ModelMetricsListSchemaV3 params) throws IOException {
+    public Call<ModelMetricsListSchemaV3> predict(final ModelMetricsListSchemaV3 params) {
         final Predictions s = getService(Predictions.class);
         return s.predict(keyToString(params.model), keyToString(params.frame), keyToString(params.predictionsFrame),
                 keyToString(params.deviancesFrame), params.reconstructionError, params.reconstructionErrorPerFeature,
                 params.deepFeaturesHiddenLayer, params.deepFeaturesHiddenLayerName, params.reconstructTrain, params.projectArchetypes,
                 params.reverseTransform, params.leafNodeAssignment, params.leafNodeAssignmentType, params.predictStagedProba,
                 params.predictContributions, params.featureFrequencies, params.exemplarIndex, params.deviances, params.customMetricFunc,
-                params._excludeFields).execute().body();
+                params._excludeFields);
     }
 
     /**
      * Score (generate predictions) for the specified Frame with the specified Model.  Both the Frame of predictions and
      * the metrics will be returned.
      */
-    public JobV3 predict_async(final ModelKeyV3 model, final FrameKeyV3 frame) throws IOException {
+    public Call<JobV3> predictAsync(final ModelKeyV3 model, final FrameKeyV3 frame) {
         final Predictions s = getService(Predictions.class);
-        return s.predictAsync(keyToString(model), keyToString(frame)).execute().body();
+        return s.predictAsync(keyToString(model), keyToString(frame));
     }
 
-    public JobV3 predict_async(final ModelMetricsListSchemaV3 params) throws IOException {
+    public Call<JobV3> predictAsync(final ModelMetricsListSchemaV3 params) throws IOException {
         final Predictions s = getService(Predictions.class);
         return s.predictAsync(keyToString(params.model), keyToString(params.frame), keyToString(params.predictionsFrame),
                 keyToString(params.deviancesFrame), params.reconstructionError, params.reconstructionErrorPerFeature,
                 params.deepFeaturesHiddenLayer, params.deepFeaturesHiddenLayerName, params.reconstructTrain, params.projectArchetypes,
                 params.reverseTransform, params.leafNodeAssignment, params.leafNodeAssignmentType, params.predictStagedProba,
                 params.predictContributions, params.featureFrequencies, params.exemplarIndex, params.deviances, params.customMetricFunc,
-                params._excludeFields).execute().body();
+                params._excludeFields);
     }
 
     /**

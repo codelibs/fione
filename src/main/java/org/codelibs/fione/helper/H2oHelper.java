@@ -29,9 +29,14 @@ import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildSpecV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
+import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.ImportFilesV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
+import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
+import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseSetupV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.AutoMLBuilder;
@@ -112,6 +117,18 @@ public class H2oHelper {
         final AutoMLBuilder service = h2o.getService(AutoMLBuilder.class);
         final Call<AutoMLBuildSpecV99> call = service.build(buildControl, inputSpec, buildModels);
         return new Callable<>(call);
+    }
+
+    public Callable<LeaderboardV99> getLeaderboard(final String projectName) {
+        return new Callable<>(h2o.leaderboard(projectName));
+    }
+
+    public Callable<ModelsV3> getModel(final ModelKeyV3 model) {
+        return new Callable<>(h2o.model(model));
+    }
+
+    public Callable<ModelMetricsListSchemaV3> predict(final ModelKeyV3 model, final FrameKeyV3 frame) {
+        return new Callable<>(h2o.predict(model, frame));
     }
 
     public ParseV3 convert(final ParseSetupV3 params) {
