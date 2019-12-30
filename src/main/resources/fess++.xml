@@ -6,4 +6,6 @@
 
 	<component name="h2oHelper" class="org.codelibs.fione.helper.H2oHelper">
 	</component>
+	<component name="prjectHelper" class="org.codelibs.fione.helper.ProjectHelper">
+	</component>
 </components>

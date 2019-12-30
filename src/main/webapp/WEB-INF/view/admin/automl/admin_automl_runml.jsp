@@ -24,16 +24,9 @@
 					<div class="col-md-12">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">
-									<la:message key="labels.crud_title_list" />
-								</h3>
-								<div class="btn-group pull-right">
-									<la:link href="newproject" styleClass="btn btn-success btn-xs ${f:h(editableClass)}">
-										<em class="fa fa-plus"></em>
-										<la:message key="labels.crud_link_create" />
-									</la:link>
-								</div>
+								<jsp:include page="/WEB-INF/view/common/admin/crud/header.jsp"></jsp:include>
 							</div>
+							<!-- /.box-header -->
 							<div class="box-body">
 								<%-- Message --%>
 								<div>
@@ -62,8 +55,8 @@
 												</thead>
 												<tbody>
 													<c:forEach var="data" varStatus="s" items="${projects}">
-														<tr data-href="${contextPath}/admin/automl/details/${f:u(data.id)}">
-															<td>${f:h(data.name)}</td>
+														<tr data-href="${contextPath}/admin/user/details/4/${f:u(data.id)}">
+															<td>${f:h(data.id)}</td>
 														</tr>
 													</c:forEach>
 												</tbody>

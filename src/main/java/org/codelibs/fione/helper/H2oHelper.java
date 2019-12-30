@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.helper;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -23,13 +24,14 @@ import javax.annotation.PostConstruct;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.codelibs.core.lang.StringUtil;
+import org.codelibs.core.exception.IORuntimeException;
 import org.codelibs.fione.h2o.bindings.H2oApi;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildSpecV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
 import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
+import org.codelibs.fione.h2o.bindings.pojos.FramesListV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.ImportFilesV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
@@ -71,13 +73,17 @@ public class H2oHelper {
     public void init() {
         h2o = new H2oApi(endpoint).connectTimeout(connectTimeout).readTimeout(readTimeout).writeTimeout(writeTimeout);
         httpInterceptorList.stream().forEach(h2o::addInterceptor);
-        if (StringUtil.isNotBlank(secretKeyId) && StringUtil.isNotBlank(secretAccessKey)) {
-            new Callable<>(h2o.setS3Credentials(secretKeyId, secretAccessKey)).execute((call, res) -> {
-                logger.info("Use S3 credentials.");
-            }, (call, t) -> {
-                logger.warn("Failed to set S3 credentials.", t);
-            });
-        }
+        //        if (StringUtil.isNotBlank(secretKeyId) && StringUtil.isNotBlank(secretAccessKey)) {
+        //            new Callable<>(h2o.setS3Credentials(secretKeyId, secretAccessKey)).execute((call, res) -> {
+        //                if (res.code() == 200) {
+        //                    logger.info("Use S3 credentials.");
+        //                } else {
+        //                    logger.warn("Failed to set S3 credentials: {}", res);
+        //                }
+        //            }, (call, t) -> {
+        //                logger.warn("Failed to set S3 credentials.", t);
+        //            });
+        //        }
     }
 
     public void setEndpoint(final String endpoint) {
@@ -86,6 +92,10 @@ public class H2oHelper {
 
     public Callable<ImportFilesV3> importFiles(final String path) {
         return new Callable<>(h2o.importFiles(path));
+    }
+
+    public Callable<FramesListV3> getFrames(final FrameKeyV3 frameId) {
+        return new Callable<>(h2o.frames(frameId));
     }
 
     public Callable<ParseSetupV3> setupParse(final String[] sourceFrames) {
@@ -178,6 +188,15 @@ public class H2oHelper {
                 }
             });
         }
+
+        public Response<T> execute() {
+            try {
+                return call.execute();
+            } catch (final IOException e) {
+                throw new IORuntimeException(e);
+            }
+        }
+
     }
 
     public void setConnectTimeout(final int connectTimeout) {

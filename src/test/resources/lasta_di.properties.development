@@ -8,3 +8,7 @@ smart.deploy.mode.location = fess_env.properties: lasta_di.smart.deploy.mode
 # package for smart deploy target e.g. org.docksidestage.app
 smart.package1 = org.codelibs.fess.app
 smart.package2 = org.codelibs.fione.app
+
+# script engine
+dixml.script.managed.engine.name = sai
+

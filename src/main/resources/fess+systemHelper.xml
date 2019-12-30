@@ -3,7 +3,7 @@
 	"http://dbflute.org/meta/lastadi10.dtd">
 <components>
 	<component name="systemHelper"
-		class="org.codelibs.fess.helper.SystemHelper">
+		class="org.codelibs.fione.helper.CustomSystemHelper">
 		<postConstruct name="addDesignJspFileName">
 			<arg>"index"</arg>
 			<arg>"index.jsp"</arg>

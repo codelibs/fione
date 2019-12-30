@@ -2416,49 +2416,49 @@ public class H2oApi {
     /**
      * Return all Frames in the H2O distributed K/V store.
      */
-    public FramesListV3 frames() throws IOException {
+    public Call<FramesListV3> frames() {
         final Frames s = getService(Frames.class);
-        return s.list().execute().body();
+        return s.list();
     }
 
-    public FramesListV3 frames(final FrameKeyV3 frameId) throws IOException {
+    public Call<FramesListV3> frames(final FrameKeyV3 frameId) {
         final Frames s = getService(Frames.class);
-        return s.list(keyToString(frameId), "").execute().body();
+        return s.list(keyToString(frameId), "");
     }
 
-    public FramesListV3 frames(final FrameKeyV3 frameId, final String _excludeFields) throws IOException {
+    public Call<FramesListV3> frames(final FrameKeyV3 frameId, final String _excludeFields) {
         final Frames s = getService(Frames.class);
-        return s.list(keyToString(frameId), _excludeFields).execute().body();
+        return s.list(keyToString(frameId), _excludeFields);
     }
 
     /**
      * Delete the specified Frame from the H2O distributed K/V store.
      */
-    public FramesV3 deleteFrame(final FrameKeyV3 frameId) throws IOException {
+    public Call<FramesV3> deleteFrame(final FrameKeyV3 frameId) {
         final Frames s = getService(Frames.class);
-        return s.delete(keyToString(frameId)).execute().body();
+        return s.delete(keyToString(frameId));
     }
 
-    public FramesV3 deleteFrame(final FramesV3 params) throws IOException {
+    public Call<FramesV3> deleteFrame(final FramesV3 params) {
         final Frames s = getService(Frames.class);
         return s.delete(keyToString(params.frameId), params.column, params.rowOffset, params.rowCount, params.columnOffset,
                 params.fullColumnCount, params.columnCount, params.findCompatibleModels, params.path, params.force, params.numParts,
-                params.compression, params.separator, params._excludeFields).execute().body();
+                params.compression, params.separator, params._excludeFields);
     }
 
     /**
      * Delete all Frames from the H2O distributed K/V store.
      */
-    public FramesV3 deleteAllFrames() throws IOException {
+    public Call<FramesV3> deleteAllFrames() {
         final Frames s = getService(Frames.class);
-        return s.deleteAll().execute().body();
+        return s.deleteAll();
     }
 
-    public FramesV3 deleteAllFrames(final FramesV3 params) throws IOException {
+    public Call<FramesV3> deleteAllFrames(final FramesV3 params) {
         final Frames s = getService(Frames.class);
         return s.deleteAll(keyToString(params.frameId), params.column, params.rowOffset, params.rowCount, params.columnOffset,
                 params.fullColumnCount, params.columnCount, params.findCompatibleModels, params.path, params.force, params.numParts,
-                params.compression, params.separator, params._excludeFields).execute().body();
+                params.compression, params.separator, params._excludeFields);
     }
 
     /**
@@ -3345,14 +3345,7 @@ public class H2oApi {
     private final List<Interceptor> interceptorList = new ArrayList<>();
 
     private void initializeRetrofit() {
-        final Gson gson =
-                new GsonBuilder().registerTypeAdapterFactory(new ModelV3TypeAdapter())
-                        .registerTypeAdapter(KeyV3.class, new KeySerializer())
-                        .registerTypeAdapter(ColSpecifierV3.class, new ColSerializer())
-                        .registerTypeAdapter(ModelBuilderSchema.class, new ModelDeserializer())
-                        .registerTypeAdapter(ModelSchemaBaseV3.class, new ModelSchemaDeserializer())
-                        .registerTypeAdapter(ModelOutputSchemaV3.class, new ModelOutputDeserializer())
-                        .registerTypeAdapter(ModelParametersSchemaV3.class, new ModelParametersDeserializer()).setLenient().create();
+        final Gson gson = createGson();
 
         final Builder builder =
                 new OkHttpClient.Builder().connectTimeout(connectTimeout, TimeUnit.SECONDS).writeTimeout(writeTimeout, TimeUnit.SECONDS)
@@ -3361,6 +3354,15 @@ public class H2oApi {
         final OkHttpClient client = builder.build();
 
         this.retrofit = new Retrofit.Builder().client(client).baseUrl(url).addConverterFactory(GsonConverterFactory.create(gson)).build();
+    }
+
+    public static Gson createGson() {
+        return new GsonBuilder().registerTypeAdapterFactory(new ModelV3TypeAdapter()).registerTypeAdapter(KeyV3.class, new KeySerializer())
+                .registerTypeAdapter(ColSpecifierV3.class, new ColSerializer())
+                .registerTypeAdapter(ModelBuilderSchema.class, new ModelDeserializer())
+                .registerTypeAdapter(ModelSchemaBaseV3.class, new ModelSchemaDeserializer())
+                .registerTypeAdapter(ModelOutputSchemaV3.class, new ModelOutputDeserializer())
+                .registerTypeAdapter(ModelParametersSchemaV3.class, new ModelParametersDeserializer()).setLenient().create();
     }
 
     private Retrofit getRetrofit() {

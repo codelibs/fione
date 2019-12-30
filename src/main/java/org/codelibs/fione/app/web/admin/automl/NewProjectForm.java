@@ -13,14 +13,13 @@
  * either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-package org.codelibs.fione.app.web.base;
+package org.codelibs.fione.app.web.admin.automl;
 
-import org.codelibs.fess.app.web.base.FessAdminAction;
-import org.codelibs.fione.mylasta.action.FioneHtmlPath;
+import org.hibernate.validator.constraints.Length;
+import org.lastaflute.web.validation.Required;
 
-/**
- * @author shinsuke
- */
-public abstract class FioneAdminAction extends FessAdminAction implements FioneHtmlPath {
-
+public class NewProjectForm {
+    @Required
+    @Length(max = 100)
+    public String name;
 }
