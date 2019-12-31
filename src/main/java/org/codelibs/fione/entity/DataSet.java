@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.entity;
 
+import org.apache.commons.codec.binary.Base64;
+import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 
 import com.google.gson.GsonBuilder;
@@ -26,9 +28,18 @@ public class DataSet {
 
     private String path;
 
-    private transient boolean imported = false;
+    private transient Status status = Status.UNLOAD;
 
     private ParseV3 meta;
+
+    public DataSet() {
+        // no-op
+    }
+
+    public DataSet(final String id) {
+        this.id = id;
+        this.name = new String(Base64.decodeBase64(id), Constants.UTF_8_CHARSET);
+    }
 
     public String getName() {
         return name;
@@ -62,16 +73,20 @@ public class DataSet {
         this.path = path;
     }
 
-    public boolean isImported() {
-        return imported;
+    public Status getStatus() {
+        return status;
     }
 
-    public void setImported(final boolean imported) {
-        this.imported = imported;
+    public void setStatus(final Status status) {
+        this.status = status;
     }
 
     @Override
     public String toString() {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+    }
+
+    public enum Status {
+        UNLOAD, LOADED, PARSED;
     }
 }

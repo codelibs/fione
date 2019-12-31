@@ -17,6 +17,7 @@ package org.codelibs.fione.entity;
 
 import org.apache.commons.codec.binary.Base64;
 import org.codelibs.fess.crawler.Constants;
+import org.lastaflute.web.validation.Required;
 
 import com.google.gson.GsonBuilder;
 
@@ -64,5 +65,16 @@ public class Project {
     @Override
     public String toString() {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+    }
+
+    public DataSet getDataSet(@Required final String dataSetId) {
+        if (dataSets != null && dataSetId != null) {
+            for (final DataSet dataSet : dataSets) {
+                if (dataSetId.equals(dataSet.getId())) {
+                    return dataSet;
+                }
+            }
+        }
+        return null;
     }
 }

@@ -45,9 +45,9 @@ public class FioneLabels extends UserMessages {
      * Assert the property is not null.
      * @param property The value of the property. (NotNull)
      */
-    protected void assertPropertyNotNull(final String property) {
+    protected void assertPropertyNotNull(String property) {
         if (property == null) {
-            final String msg = "The argument 'property' for message should not be null.";
+            String msg = "The argument 'property' for message should not be null.";
             throw new IllegalArgumentException(msg);
         }
     }
