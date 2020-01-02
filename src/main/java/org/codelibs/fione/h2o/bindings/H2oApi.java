@@ -215,20 +215,19 @@ public class H2oApi {
     /**
      * Return all the AutoML leaderboards.
      */
-    public LeaderboardsV99 leaderboards() throws IOException {
+    public Call<LeaderboardsV99> leaderboards() {
         final Leaderboards s = getService(Leaderboards.class);
-        return s.list().execute().body();
+        return s.list();
     }
 
-    public LeaderboardsV99 leaderboards(final String projectName, final String[] extensions) throws IOException {
+    public Call<LeaderboardsV99> leaderboards(final String projectName, final String[] extensions) {
         final Leaderboards s = getService(Leaderboards.class);
-        return s.list(projectName, extensions, "").execute().body();
+        return s.list(projectName, extensions, "");
     }
 
-    public LeaderboardsV99 leaderboards(final String projectName, final String[] extensions, final String _excludeFields)
-            throws IOException {
+    public Call<LeaderboardsV99> leaderboards(final String projectName, final String[] extensions, final String _excludeFields) {
         final Leaderboards s = getService(Leaderboards.class);
-        return s.list(projectName, extensions, _excludeFields).execute().body();
+        return s.list(projectName, extensions, _excludeFields);
     }
 
     /**

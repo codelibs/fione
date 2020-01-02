@@ -44,6 +44,7 @@ import org.codelibs.fione.h2o.bindings.pojos.FramesListV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
+import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.util.StringCodecUtil;
 
@@ -155,7 +156,7 @@ public class ProjectHelper {
                 logger.warn("Failed to get frames: {}", response);
             }
         }
-        return frameIdList.toArray(n -> new String[n]);
+        return frameIdList.stream().distinct().toArray(n -> new String[n]);
     }
 
     protected DataSet[] getDataSets(final FessConfig fessConfig, final MinioClient minioClient, final String projectId) {
@@ -443,6 +444,19 @@ public class ProjectHelper {
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
+    }
+
+    public LeaderboardV99 getLeaderboard(final String projectId, final String modelId) {
+        // TODO cache?
+        final Response<LeaderboardV99> response = h2oHelper.getLeaderboard(modelId).execute();
+        if (logger.isDebugEnabled()) {
+            logger.debug("getLeaderboard: {}", response);
+        }
+        if (response.code() == 200) {
+            return response.body();
+        }
+        logger.warn("Failed to read leaderboard: {}", response);
+        return null;
     }
 
     private String getDataPath(final String projectId, final String fileName) {

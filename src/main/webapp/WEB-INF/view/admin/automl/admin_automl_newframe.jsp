@@ -47,7 +47,7 @@
 										</la:info>
 										<la:errors property="_global" />
 									</div>
-									<h2>Columns</h2>
+									<h4>Columns</h4>
 									<c:forEach var="item" varStatus="s" items="${columnItems}">
 									<div class="form-group">
 										<label for="${f:u(item.id)}" class="col-sm-3 control-label">${f:h(item.name)}</label>

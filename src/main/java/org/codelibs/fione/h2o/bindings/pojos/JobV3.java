@@ -109,13 +109,33 @@ public class JobV3 extends SchemaV3 {
     }
 
     public String getIconType() {
-        if (StringUtil.isBlank(description)) {
-            return "question";
-        } else if (description.indexOf("AutoML build") >= 0) {
+        switch (getKind()) {
+        case MODEL:
+        case AUTO_ML:
             return "hammer";
-        } else if (description.indexOf("Parse") >= 0) {
+        case FRAME:
             return "table";
+        case GRID:
+            return "th";
+        default:
+            return "question";
         }
-        return "question";
+    }
+
+    public Kind getKind() {
+        if (StringUtil.isBlank(description)) {
+            return Kind.UNKNOWN;
+        } else if (description.indexOf("AutoML build") >= 0) {
+            return Kind.AUTO_ML;
+        } else if (description.indexOf("Parse") >= 0) {
+            return Kind.FRAME;
+        } else if (description.indexOf("Grid Search") >= 0) {
+            return Kind.GRID;
+        }
+        return Kind.MODEL;
+    }
+
+    public enum Kind {
+        FRAME, MODEL, AUTO_ML, GRID, UNKNOWN;
     }
 }

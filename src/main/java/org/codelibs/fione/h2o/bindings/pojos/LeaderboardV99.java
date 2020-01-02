@@ -15,6 +15,13 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.codelibs.core.lang.StringUtil;
+
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
@@ -84,4 +91,27 @@ public class LeaderboardV99 extends SchemaV3 {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
+    public String[] getColumnNames() {
+        return Arrays.stream(table.columns).filter(c -> StringUtil.isNotBlank(c.name)).map(c -> c.name).toArray(n -> new String[n]);
+    }
+
+    private transient AtomicInteger counter = new AtomicInteger(0);
+
+    public String[] getRow() {
+        final int index = counter.getAndAdd(1);
+        if (index >= models.length) {
+            return StringUtil.EMPTY_STRINGS;
+        }
+        final List<String> list = new ArrayList<>();
+        for (int i = 0; i < table.columns.length; i++) {
+            final ColumnSpecsBase column = table.columns[i];
+            if (StringUtil.isBlank(column.name)) {
+                continue;
+            }
+            final Object value = table.data[i][index];
+            final String formattedValue = String.format(column.format, value);
+            list.add(formattedValue);
+        }
+        return list.toArray(n -> new String[n]);
+    }
 }

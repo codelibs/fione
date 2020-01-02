@@ -42,6 +42,9 @@ import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
+import org.codelibs.fione.h2o.bindings.pojos.JobV3;
+import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
+import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.helper.ProjectHelper;
@@ -142,13 +145,37 @@ public class AdminAutomlAction extends FioneAdminAction {
                 }
                 return null;
             }).orElse(null);
+            final String modelId = LaRequestUtil.getOptionalRequest().map(req -> {
+                final String mid = req.getParameter("modelId");
+                String lastId = null;
+                if (mid != null) {
+                    for (final JobV3 id : project.getJobs()) {
+                        if (id.getKind() == Kind.AUTO_ML && "DONE".equals(id.status)) {
+                            if (mid.equals(id.dest.name)) {
+                                return id.dest.name;
+                            }
+                            lastId = id.dest.name;
+                        }
+                    }
+                }
+                if (lastId != null) {
+                    return lastId;
+                }
+                return null;
+            }).orElse(StringUtil.EMPTY);
+
+            final FrameV3 columnSummaries = frameId != null ? projectHelper.getColumnSummaries(frameId) : null;
+            final LeaderboardV99 leaderboard = modelId != null ? projectHelper.getLeaderboard(projectId, modelId) : null;
 
             return asHtml(path_AdminAutoml_AdminAutomlDetailsJsp).renderWith(data -> {
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, "frameId", frameId);
-                if (frameId != null) {
-                    final FrameV3 columnSummaries = projectHelper.getColumnSummaries(frameId);
+                RenderDataUtil.register(data, "modelId", modelId);
+                if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
+                }
+                if (leaderboard != null) {
+                    RenderDataUtil.register(data, "leaderboard", leaderboard);
                 }
             });
         } catch (final Exception e) {

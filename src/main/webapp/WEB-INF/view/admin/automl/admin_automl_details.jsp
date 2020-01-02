@@ -160,6 +160,11 @@
 							<div class="box box-primary">
 								<div class="box-header with-border">
 									<h3 class="box-title">Column Summaries</h3>
+									<div class="btn-group pull-right">
+										<button type="button" class="btn btn-box-tool" data-widget="collapse">
+											<i class="fa fa-minus"></i>
+										</button>
+									</div>
 								</div>
 								<div class="box-body">
 									<%-- List --%>
@@ -202,25 +207,67 @@
 								</div>
 							</div>
 						</c:if>
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title">Models</h3>
-								<div class="btn-group pull-right">
-									<c:if test="${frameId != null}">
-										<la:link href="/admin/automl/setupml/${f:u(project.id)}/${f:u(frameId)}"
-											styleClass="btn btn-success btn-xs ${f:h(editableClass)}"
-										>
-											<em class="fa fa-plus"></em>
-										Run
-									</la:link>
+						<c:if test="${leaderboard != null}">
+							<div class="box box-primary">
+								<div class="box-header with-border">
+									<h3 class="box-title">Models in ${f:h(leaderboard.projectName)}</h3>
+									<div class="btn-group pull-right">
+										<button type="button" class="btn btn-box-tool" data-widget="collapse">
+											<i class="fa fa-minus"></i>
+										</button>
+									</div>
+								</div>
+								<div class="box-body">
+									<%-- List --%>
+									<c:if test="${fn:length(leaderboard.models) == 0}">
+										<div class="row top10">
+											<div class="col-sm-12">
+												<em class="fa fa-info-circle text-light-blue"></em>
+												<la:message key="labels.list_could_not_find_crud_table" />
+											</div>
+										</div>
+									</c:if>
+									<c:if test="${fn:length(leaderboard.models) gt 0}">
+										<div class="row">
+											<div class="col-sm-12">
+												<table class="table table-bordered table-striped small">
+													<thead>
+														<tr>
+															<c:forEach var="data" varStatus="s" items="${leaderboard.columnNames}">
+																<th>${f:h(data)}</th>
+															</c:forEach>
+														</tr>
+													</thead>
+													<tbody>
+														<c:forEach var="data" varStatus="s" items="${leaderboard.models}">
+															<tr>
+																<c:forEach var="data" varStatus="x" items="${leaderboard.row}">
+																	<td>${f:h(data)}</td>
+																</c:forEach>
+															</tr>
+														</c:forEach>
+													</tbody>
+												</table>
+											</div>
+										</div>
 									</c:if>
 								</div>
 							</div>
-							<div class="box-body">TODO</div>
-						</div>
+						</c:if>
 						<div class="box box-primary">
 							<div class="box-header with-border">
 								<h3 class="box-title">Jobs</h3>
+								<div class="btn-group pull-right">
+									<button type="button" class="btn btn-box-tool dropdown-toggle" data-toggle="dropdown" aria-expanded="true">
+										<i class="fas fa-th-list"></i>
+									</button>
+									<ul class="dropdown-menu" role="menu">
+										<c:if test="${frameId != null}">
+											<li><la:link href="/admin/automl/setupml/${f:u(project.id)}/${f:u(frameId)}">Run AutoML</la:link></li>
+										</c:if>
+										<li><a href="#">Delete All</a></li>
+									</ul>
+								</div>
 							</div>
 							<div class="box-body">
 								<%-- List --%>
@@ -257,25 +304,35 @@
 																	</c:when>
 																	<c:otherwise>${f:h(data.dest.name)}</c:otherwise>
 																</c:choose></td>
-															<td class="text-center"><fmt:formatDate value="${fe:date(data.startTime)}" type="BOTH"/></td>
-															<td class="text-center">
-															<c:if test="${data.status == 'RUNNING'}">-</c:if>
-															<c:if test="${data.status != 'RUNNING'}">
-																<fmt:formatDate value="${fe:date(data.startTime+data.msec)}" type="BOTH"/>
-															</c:if>
-															</td>
-															<td class="text-center">
-															<c:if test="${data.status == 'RUNNING'}">-</c:if>
-															<c:if test="${data.status != 'RUNNING'}">${fe:formatDuration(data.msec)}</c:if>
-															</td>
+															<td class="text-center"><fmt:formatDate value="${fe:date(data.startTime)}" type="BOTH" /></td>
+															<td class="text-center"><c:if test="${data.status == 'RUNNING'}">-</c:if> <c:if
+																	test="${data.status != 'RUNNING'}"
+																>
+																	<fmt:formatDate value="${fe:date(data.startTime+data.msec)}" type="BOTH" />
+																</c:if></td>
+															<td class="text-center"><c:if test="${data.status == 'RUNNING'}">-</c:if> <c:if
+																	test="${data.status != 'RUNNING'}"
+																>${fe:formatDuration(data.msec)}</c:if></td>
 															<td class="text-center"><c:choose>
-																	<c:when test="${data.status == 'CANCELLED' }"><i class="fas fa-ban"></i></c:when>
-																	<c:when test="${data.status == 'FAILED' }"><i class="fas fa-times"></i></c:when>
-																	<c:when test="${data.status == 'RUNNING' }"><i class="fas fa-running"></i></c:when>
-																	<c:when test="${data.status == 'DONE' }"><i class="fas fa-check"></i></c:when>
-																	<c:otherwise><i class="fas fa-question"></i></c:otherwise>
+																	<c:when test="${data.status == 'CANCELLED' }">
+																		<i class="fas fa-ban"></i>
+																	</c:when>
+																	<c:when test="${data.status == 'FAILED' }">
+																		<i class="fas fa-times"></i>
+																	</c:when>
+																	<c:when test="${data.status == 'RUNNING' }">
+																		<i class="fas fa-running"></i>
+																	</c:when>
+																	<c:when test="${data.status == 'DONE' }">
+																		<i class="fas fa-check"></i>
+																	</c:when>
+																	<c:otherwise>
+																		<i class="fas fa-question"></i>
+																	</c:otherwise>
 																</c:choose></td>
-															<td class="text-center"><la:link href="/admin/automl/deletejob/${f:u(project.id)}/${f:u(data.key.name)}">
+															<td class="text-center"><la:link
+																	href="/admin/automl/deletejob/${f:u(project.id)}/${f:u(data.key.name)}"
+																>
 																	<i class="fas fa-trash-alt"></i>
 																</la:link></td>
 														</tr>
