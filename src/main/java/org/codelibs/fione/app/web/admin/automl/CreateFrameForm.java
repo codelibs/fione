@@ -15,14 +15,17 @@
  */
 package org.codelibs.fione.app.web.admin.automl;
 
-import org.lastaflute.web.ruts.multipart.MultipartFormFile;
+import java.util.HashMap;
+import java.util.Map;
+
 import org.lastaflute.web.validation.Required;
 
-public class UploadDataSetForm {
+public class CreateFrameForm {
     @Required
     public String projectId;
 
     @Required
-    public MultipartFormFile dataFile;
+    public String dataSetId;
 
+    public Map<String, String> columns = new HashMap<>();
 }

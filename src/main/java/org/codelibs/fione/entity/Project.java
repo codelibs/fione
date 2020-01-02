@@ -15,9 +15,9 @@
  */
 package org.codelibs.fione.entity;
 
-import org.apache.commons.codec.binary.Base64;
-import org.codelibs.fess.crawler.Constants;
-import org.lastaflute.web.validation.Required;
+import org.codelibs.core.lang.StringUtil;
+import org.codelibs.fione.h2o.bindings.pojos.JobV3;
+import org.codelibs.fione.util.StringCodecUtil;
 
 import com.google.gson.GsonBuilder;
 
@@ -27,7 +27,11 @@ public class Project {
 
     private String name;
 
-    private transient DataSet[] dataSets;
+    private transient DataSet[] dataSets = new DataSet[0];
+
+    private transient String[] frameIds = StringUtil.EMPTY_STRINGS;
+
+    private transient JobV3[] jobs = new JobV3[0];
 
     public Project() {
         // no-op
@@ -35,7 +39,7 @@ public class Project {
 
     public Project(final String id) {
         this.id = id;
-        this.name = new String(Base64.decodeBase64(id), Constants.UTF_8_CHARSET);
+        this.name = StringCodecUtil.decode(id);
     }
 
     public String getId() {
@@ -62,12 +66,7 @@ public class Project {
         return dataSets;
     }
 
-    @Override
-    public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
-    }
-
-    public DataSet getDataSet(@Required final String dataSetId) {
+    public DataSet getDataSet(final String dataSetId) {
         if (dataSets != null && dataSetId != null) {
             for (final DataSet dataSet : dataSets) {
                 if (dataSetId.equals(dataSet.getId())) {
@@ -77,4 +76,26 @@ public class Project {
         }
         return null;
     }
+
+    public String[] getFrameIds() {
+        return frameIds;
+    }
+
+    public void setFrameIds(final String[] frames) {
+        this.frameIds = frames;
+    }
+
+    public JobV3[] getJobs() {
+        return jobs;
+    }
+
+    public void setJobs(final JobV3[] jobs) {
+        this.jobs = jobs;
+    }
+
+    @Override
+    public String toString() {
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+    }
+
 }

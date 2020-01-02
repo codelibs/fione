@@ -28,9 +28,7 @@ public class DataSet {
 
     private String path;
 
-    private transient Status status = Status.UNLOAD;
-
-    private ParseV3 meta;
+    private ParseV3 schema;
 
     public DataSet() {
         // no-op
@@ -49,12 +47,12 @@ public class DataSet {
         this.name = name;
     }
 
-    public ParseV3 getMeta() {
-        return meta;
+    public ParseV3 getSchema() {
+        return schema;
     }
 
-    public void setMeta(final ParseV3 meta) {
-        this.meta = meta;
+    public void setSchema(final ParseV3 meta) {
+        this.schema = meta;
     }
 
     public String getId() {
@@ -73,20 +71,9 @@ public class DataSet {
         this.path = path;
     }
 
-    public Status getStatus() {
-        return status;
-    }
-
-    public void setStatus(final Status status) {
-        this.status = status;
-    }
-
     @Override
     public String toString() {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
-    public enum Status {
-        UNLOAD, LOADED, PARSED;
-    }
 }

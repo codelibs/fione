@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import javax.annotation.PostConstruct;
 
@@ -34,6 +35,7 @@ import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesListV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.ImportFilesV3;
+import org.codelibs.fione.h2o.bindings.pojos.JobKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
 import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
@@ -98,6 +100,22 @@ public class H2oHelper {
         return new Callable<>(h2o.frames(frameId));
     }
 
+    public Callable<FramesListV3> getFrames(final String frameId) {
+        final FrameKeyV3 key = new FrameKeyV3();
+        key.name = frameId;
+        return getFrames(key);
+    }
+
+    public Callable<FramesV3> deleteFrame(final FrameKeyV3 frameId) {
+        return new Callable<>(h2o.deleteFrame(frameId));
+    }
+
+    public Callable<FramesV3> deleteFrame(final String frameId) {
+        final FrameKeyV3 key = new FrameKeyV3();
+        key.name = frameId;
+        return deleteFrame(key);
+    }
+
     public Callable<ParseSetupV3> setupParse(final String[] sourceFrames) {
         return new Callable<>(h2o.guessParseSetup(sourceFrames));
     }
@@ -141,6 +159,16 @@ public class H2oHelper {
         return new Callable<>(h2o.predict(model, frame));
     }
 
+    public Callable<JobsV3> getJobs(final JobKeyV3 jobId) {
+        return new Callable<>(h2o.jobs(jobId));
+    }
+
+    public Callable<JobsV3> getJobs(final String jobId) {
+        final JobKeyV3 key = new JobKeyV3();
+        key.name = jobId;
+        return getJobs(key);
+    }
+
     public ParseV3 convert(final ParseSetupV3 params) {
         final ParseV3 newParams = new ParseV3();
         newParams._excludeFields = params._excludeFields;
@@ -169,6 +197,10 @@ public class H2oHelper {
 
         protected Callable(final Call<T> call) {
             this.call = call;
+        }
+
+        public void execute(final Consumer<Response<T>> onResponse, final Consumer<Throwable> onFailure) {
+            execute((x, res) -> onResponse.accept(res), (x, t) -> onFailure.accept(t));
         }
 
         public void execute(final BiConsumer<Call<T>, Response<T>> onResponse, final BiConsumer<Call<T>, Throwable> onFailure) {

@@ -15,14 +15,11 @@
  */
 package org.codelibs.fione.app.web.admin.automl;
 
-import org.lastaflute.web.ruts.multipart.MultipartFormFile;
+import org.hibernate.validator.constraints.Length;
 import org.lastaflute.web.validation.Required;
 
-public class UploadDataSetForm {
+public class CreateProjectForm {
     @Required
-    public String projectId;
-
-    @Required
-    public MultipartFormFile dataFile;
-
+    @Length(max = 100)
+    public String name;
 }

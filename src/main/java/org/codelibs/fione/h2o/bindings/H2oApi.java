@@ -2056,19 +2056,19 @@ public class H2oApi {
     /**
      * Get a list of all the H2O Jobs (long-running actions).
      */
-    public JobsV3 jobs() throws IOException {
+    public Call<JobsV3> jobs() {
         final Jobs s = getService(Jobs.class);
-        return s.list().execute().body();
+        return s.list();
     }
 
-    public JobsV3 jobs(final JobKeyV3 jobId) throws IOException {
+    public Call<JobsV3> jobs(final JobKeyV3 jobId) {
         final Jobs s = getService(Jobs.class);
-        return s.list(keyToString(jobId), "").execute().body();
+        return s.list(keyToString(jobId), "");
     }
 
-    public JobsV3 jobs(final JobKeyV3 jobId, final String _excludeFields) throws IOException {
+    public Call<JobsV3> jobs(final JobKeyV3 jobId, final String _excludeFields) {
         final Jobs s = getService(Jobs.class);
-        return s.list(keyToString(jobId), _excludeFields).execute().body();
+        return s.list(keyToString(jobId), _excludeFields);
     }
 
     /**
@@ -3390,6 +3390,13 @@ public class H2oApi {
         public KeyV3 deserialize(final JsonElement json, final Type typeOfT, final JsonDeserializationContext context) {
             if (json.isJsonNull()) {
                 return null;
+            }
+            if (!json.isJsonObject()) {
+                final KeyV3 key = new KeyV3();
+                key.name = json.getAsString();
+                key.type = "Key<?>";
+                key.url = "";
+                return key;
             }
             final JsonObject jobj = json.getAsJsonObject();
             final String type = jobj.get("type").getAsString();

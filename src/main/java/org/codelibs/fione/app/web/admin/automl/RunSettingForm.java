@@ -26,7 +26,7 @@ public class RunSettingForm {
     public String projectId;
 
     @Required
-    public String dataSetId;
+    public String frameId;
 
     @Min(value = 0)
     @Max(value = 2147483647)

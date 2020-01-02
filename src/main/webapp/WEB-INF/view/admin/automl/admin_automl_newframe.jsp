@@ -14,22 +14,25 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Upload Data</h1>
+				<h1>Create New Frame</h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../list">
 							<la:message key="labels.crud_link_list" />
 						</la:link></li>
-					<li class="active">New Data</li>
+					<li class="active">New Frame</li>
 				</ol>
 			</section>
 			<section class="content">
-				<la:form action="/admin/automl/uploaddataset" styleClass="form-horizontal" enctype="multipart/form-data">
-					<la:hidden property="projectId" />
+				<la:form action="/admin/automl" styleClass="form-horizontal">
+					<la:hidden property="projectId"/>
+					<la:hidden property="dataSetId"/>
 					<div class="row">
 						<div class="col-md-12">
 							<div class="box box-success">
 								<div class="box-header with-border">
-									<h3 class="box-title">New Data</h3>
+									<h3 class="box-title">
+										<la:message key="labels.crud_title_create" />
+									</h3>
 									<div class="btn-group pull-right">
 										<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
 											<em class="fas fa-project-diagram"></em>
@@ -44,13 +47,19 @@
 										</la:info>
 										<la:errors property="_global" />
 									</div>
+									<h2>Columns</h2>
+									<c:forEach var="item" varStatus="s" items="${columnItems}">
 									<div class="form-group">
-										<label for="dataFile" class="col-sm-3 control-label">File</label>
+										<label for="${f:u(item.id)}" class="col-sm-3 control-label">${f:h(item.name)}</label>
 										<div class="col-sm-9">
-											<la:errors property="dataFile" />
-											<input type="file" name="dataFile" />
+											<select name="columns.${f:u(item.id)}" id="columns.${f:u(item.id)}" class="form-control">
+											<c:forEach var="colType" items="${columnTypeItems}">
+												<option value="${f:u(colType.value)}" <c:if test="${colType.value == item.value}">selected</c:if>>${f:h(colType.label)}</option>
+											</c:forEach>
+											</select>
 										</div>
 									</div>
+									</c:forEach>
 								</div>
 								<div class="box-footer">
 									<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-default">
@@ -58,9 +67,11 @@
 										<la:message key="labels.crud_button_back" />
 									</la:link>
 									<c:if test="${editable}">
-										<button type="submit" class="btn btn-success" name="uploaddataset" value="Upload">
+										<button type="submit" class="btn btn-success" name="createframe"
+											value="<la:message key="labels.crud_button_create" />"
+										>
 											<em class="fa fa-plus"></em>
-											Upload
+											<la:message key="labels.crud_button_create" />
 										</button>
 									</c:if>
 								</div>

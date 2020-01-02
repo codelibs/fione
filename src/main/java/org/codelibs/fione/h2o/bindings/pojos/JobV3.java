@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import org.codelibs.core.lang.StringUtil;
+
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
@@ -106,4 +108,14 @@ public class JobV3 extends SchemaV3 {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
+    public String getIconType() {
+        if (StringUtil.isBlank(description)) {
+            return "question";
+        } else if (description.indexOf("AutoML build") >= 0) {
+            return "hammer";
+        } else if (description.indexOf("Parse") >= 0) {
+            return "table";
+        }
+        return "question";
+    }
 }

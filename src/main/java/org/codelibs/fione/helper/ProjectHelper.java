@@ -20,11 +20,11 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import javax.annotation.Resource;
 
-import org.apache.commons.codec.binary.Base64;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.codelibs.fess.crawler.Constants;
@@ -32,8 +32,8 @@ import org.codelibs.fess.exception.StorageException;
 import org.codelibs.fess.mylasta.direction.FessConfig;
 import org.codelibs.fess.util.ComponentUtil;
 import org.codelibs.fione.entity.DataSet;
-import org.codelibs.fione.entity.DataSet.Status;
 import org.codelibs.fione.entity.Project;
+import org.codelibs.fione.exception.H2oAccessException;
 import org.codelibs.fione.h2o.bindings.H2oApi;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
@@ -42,12 +42,17 @@ import org.codelibs.fione.h2o.bindings.pojos.FrameBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesListV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
+import org.codelibs.fione.h2o.bindings.pojos.JobV3;
+import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
+import org.codelibs.fione.util.StringCodecUtil;
 
+import com.google.common.collect.Lists;
 import com.google.gson.Gson;
 
 import io.minio.MinioClient;
 import io.minio.Result;
+import io.minio.errors.ErrorResponseException;
 import io.minio.messages.Item;
 import retrofit2.Response;
 
@@ -59,8 +64,6 @@ public class ProjectHelper {
 
     protected String projectFolderName = "fione";
 
-    protected final String projectJsonName = "project.json";
-
     protected final Gson gson = H2oApi.createGson();
 
     public Project[] getProjects() {
@@ -71,6 +74,9 @@ public class ProjectHelper {
             for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), projectFolderName + "/", false)) {
                 final Item item = result.get();
                 final String objectName = item.objectName();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("objectName: {}", objectName);
+                }
                 final String[] values = objectName.split("/");
                 if (values.length == 2) {
                     final Project project = new Project(values[1]);
@@ -123,15 +129,37 @@ public class ProjectHelper {
         try (Reader reader =
                 new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
             final Project project = gson.fromJson(reader, Project.class);
-            project.setDataSets(parseDataSets(fessConfig, minioClient, projectId));
+            project.setDataSets(getDataSets(fessConfig, minioClient, projectId));
+            project.setFrameIds(getFrames(project));
+            project.setJobs(getJobs(projectId));
             return project;
         } catch (final Exception e) {
             throw new StorageException("Failed to read " + objectName, e);
         }
     }
 
-    protected DataSet[] parseDataSets(final FessConfig fessConfig, final MinioClient minioClient, final String id) {
-        final String prefix = projectFolderName + "/" + id + "/data/";
+    protected String[] getFrames(final Project project) {
+        final List<String> frameIdList = new ArrayList<>();
+        for (final String baseName : Arrays.stream(project.getDataSets()).map(d -> d.getName().split("\\.")[0]).toArray(n -> new String[n])) {
+            final Response<FramesListV3> response = h2oHelper.getFrames(baseName).execute();
+            if (logger.isDebugEnabled()) {
+                logger.debug("getFrames: {}", response);
+            }
+            if (response.code() == 200) {
+                for (final FrameBaseV3 frame : response.body().frames) {
+                    if (frame.frameId.name.startsWith(baseName)) {
+                        frameIdList.add(frame.frameId.name);
+                    }
+                }
+            } else {
+                logger.warn("Failed to get frames: {}", response);
+            }
+        }
+        return frameIdList.toArray(n -> new String[n]);
+    }
+
+    protected DataSet[] getDataSets(final FessConfig fessConfig, final MinioClient minioClient, final String projectId) {
+        final String prefix = projectFolderName + "/" + projectId + "/data/";
         final List<DataSet> list = new ArrayList<>();
         for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), prefix, false)) {
             try {
@@ -139,8 +167,8 @@ public class ProjectHelper {
                 final String objectName = item.objectName();
                 final String[] values = objectName.split("/");
                 if (values.length == 4) {
-                    final String dataSetId = Base64.encodeBase64URLSafeString(values[3].getBytes(Constants.UTF_8_CHARSET));
-                    final DataSet dataSet = createDataSet(fessConfig, minioClient, id, dataSetId);
+                    final String dataSetId = StringCodecUtil.encodeUrlSafe(values[3]);
+                    final DataSet dataSet = getDataSet(fessConfig, minioClient, projectId, dataSetId);
                     list.add(dataSet);
                 }
             } catch (final Exception e) {
@@ -153,33 +181,20 @@ public class ProjectHelper {
     public DataSet getDataSet(final String projectId, final String dataSetId) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final MinioClient minioClient = createClient(fessConfig);
-        return createDataSet(fessConfig, minioClient, projectId, dataSetId);
+        return getDataSet(fessConfig, minioClient, projectId, dataSetId);
     }
 
-    private DataSet createDataSet(final FessConfig fessConfig, final MinioClient minioClient, final String projectId, final String dataSetId) {
+    protected DataSet getDataSet(final FessConfig fessConfig, final MinioClient minioClient, final String projectId, final String dataSetId) {
         final String objectName = getDataSetConfigPath(projectId, dataSetId);
         try (Reader reader =
                 new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
-            final DataSet dataSet = gson.fromJson(reader, DataSet.class);
-            if (dataSet.getMeta() != null) {
-                final Response<FramesListV3> response = h2oHelper.getFrames(dataSet.getMeta().sourceFrames[0]).execute();
-                if (logger.isDebugEnabled()) {
-                    logger.debug("getFrames: {}", response);
-                }
-                if (response.code() == 200) {
-                    final FrameBaseV3[] frames = response.body().frames;
-                    if (frames.length == 1) {
-                        dataSet.setStatus(frames[0].isText ? Status.LOADED : Status.PARSED);
-                    }
-                }
-            }
-            return dataSet;
+            return gson.fromJson(reader, DataSet.class);
         } catch (final Exception e) {
             if (logger.isDebugEnabled()) {
-                logger.debug("Failed to read " + objectName, e);
+                logger.warn("Failed to read " + objectName, e);
             }
-            return new DataSet(dataSetId);
         }
+        return createDataSet(projectId, dataSetId);
     }
 
     public void addDataSet(final String projectId, final String fileName, final InputStream in) {
@@ -192,53 +207,81 @@ public class ProjectHelper {
             throw new StorageException("Failed to store " + objectName, e);
         }
 
-        final DataSet dataSet = new DataSet();
-        final String dataSetId = Base64.encodeBase64URLSafeString(fileName.getBytes(Constants.UTF_8_CHARSET));
-        dataSet.setId(dataSetId);
-        dataSet.setName(fileName);
-        dataSet.setPath(getS3Path(projectId, fileName));
+        final DataSet dataSet = createDataSet(projectId, StringCodecUtil.encodeUrlSafe(fileName));
         store(projectId, dataSet);
 
-        importFile(projectId, dataSet.getId());
+        loadDataSetSchema(projectId, dataSet);
     }
 
-    protected void setupParse(final String projectId, final DataSet dataSet, final String[] sourceFrames) {
-        h2oHelper.setupParse(sourceFrames).execute((call, res) -> {
-            if (logger.isDebugEnabled()) {
-                logger.debug("setupParse: {}", res);
-            }
-            if (res.code() == 200) {
-                final ParseV3 meta = h2oHelper.convert(res.body());
-                dataSet.setMeta(meta);
-                store(projectId, dataSet);
-            } else {
-                logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet);
-            }
-        }, (call, t) -> {
-            logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t);
-        });
+    protected DataSet createDataSet(final String projectId, final String dataSetId) {
+        final DataSet dataSet = new DataSet(dataSetId);
+        dataSet.setPath(getS3Path(projectId, dataSet.getName()));
+        return dataSet;
     }
 
-    public void importFile(final String projectId, final String dataSetId) {
+    public void deleteDataSet(final String projectId, final String dataSetId) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
-        final MinioClient minioClient = createClient(fessConfig);
-        final DataSet dataSet = createDataSet(fessConfig, minioClient, projectId, dataSetId);
-        if (dataSet.getStatus() == Status.UNLOAD || dataSet.getMeta() == null) {
-            h2oHelper.importFiles(dataSet.getPath()).execute((call, res) -> {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("importFiles: {}", res);
-                }
-                if (res.code() == 200) {
-                    if (dataSet.getMeta() == null) {
-                        setupParse(projectId, dataSet, res.body().destinationFrames);
+
+        final String name = StringCodecUtil.decode(dataSetId);
+        h2oHelper.getFrames(name.split("\\.")[0]).execute(frameResponse -> {
+            if (logger.isDebugEnabled()) {
+                logger.debug("getFrames: {}", frameResponse);
+            }
+            if (frameResponse.code() == 200) {
+                for (final FrameBaseV3 frame : frameResponse.body().frames) {
+                    final Response<FramesV3> response = h2oHelper.deleteFrame(frame.frameId).execute();
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("deleteFrame: {}", response);
                     }
-                } else {
-                    logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet);
+                    if (frameResponse.code() == 200) {
+                        logger.info("Delete frame: {}", frame.frameId);
+                    } else {
+                        logger.warn("Failed to delete {}", response);
+                    }
                 }
-            }, (call, t) -> {
-                logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t);
-            });
+            } else {
+                logger.warn("Failed to get frames: {}", frameResponse);
+            }
+        }, t -> logger.warn("Failed to get frames.", t));
+
+        final MinioClient minioClient = createClient(fessConfig);
+        final String dataPath = getDataPath(projectId, name);
+        final String configPath = getDataSetConfigPath(projectId, dataSetId);
+        try {
+            minioClient.removeObjects(fessConfig.getStorageBucket(), Lists.newArrayList(dataPath, configPath));
+        } catch (final Exception e) {
+            throw new StorageException("Failed to delete data files.", e);
         }
+    }
+
+    public void loadDataSetSchema(final String projectId, final DataSet dataSet) {
+        h2oHelper.importFiles(dataSet.getPath()).execute(importResponse -> {
+            if (logger.isDebugEnabled()) {
+                logger.debug("importFiles: {}", importResponse);
+            }
+            if (importResponse.code() == 200) {
+                final String[] frames = importResponse.body().destinationFrames;
+                h2oHelper.setupParse(frames).execute(setupResponse -> {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("setupParse: {}", setupResponse);
+                    }
+                    if (setupResponse.code() == 200) {
+                        final ParseV3 meta = h2oHelper.convert(setupResponse.body());
+                        dataSet.setSchema(meta);
+                        store(projectId, dataSet);
+                        h2oHelper.deleteFrame(frames[0]).execute(deleteResponse -> {
+                            if (logger.isDebugEnabled()) {
+                                logger.debug("deleteFrame: {}", deleteResponse);
+                            }
+                        }, t3 -> logger.warn("Failed to delete frame: {}", frames[0], t3));
+                    } else {
+                        logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet);
+                    }
+                }, t2 -> logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t2));
+            } else {
+                logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet);
+            }
+        }, t1 -> logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t1));
     }
 
     public void store(final String projectId, final DataSet dataSet) {
@@ -259,8 +302,8 @@ public class ProjectHelper {
         }
     }
 
-    public FrameV3 getColumnSummaries(final DataSet dataSet) {
-        final Response<FramesV3> response = h2oHelper.getFrameSummary(dataSet.getMeta().destinationFrame.name).execute();
+    public FrameV3 getColumnSummaries(final String frameId) {
+        final Response<FramesV3> response = h2oHelper.getFrameSummary(frameId).execute();
         if (logger.isDebugEnabled()) {
             logger.debug("getFrameSummary: {}", response);
         }
@@ -273,42 +316,133 @@ public class ProjectHelper {
         return null;
     }
 
-    public void parseData(final String projectId, final String dataSetId) {
-        final FessConfig fessConfig = ComponentUtil.getFessConfig();
-        final MinioClient minioClient = createClient(fessConfig);
-        final DataSet dataSet = createDataSet(fessConfig, minioClient, projectId, dataSetId);
-        if (dataSet.getStatus() == Status.LOADED) {
-            h2oHelper.parseFiles(dataSet.getMeta()).execute((call, res) -> {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("importFiles: {}", res);
-                }
-                if (res.code() == 200) {
-                    // TODO job
-                } else {
-                    logger.warn("Failed to parse data: projectId:{}, dataSet:{}, res:{}", projectId, dataSet, res);
-                }
-            }, (call, t) -> {
-                logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t);
-            });
+    public void createFrame(final String projectId, final DataSet dataSet) {
+        h2oHelper.importFiles(dataSet.getPath()).execute(importResponse -> {
+            if (logger.isDebugEnabled()) {
+                logger.debug("importFiles: {}", importResponse);
+            }
+            if (importResponse.code() == 200) {
+                h2oHelper.parseFiles(dataSet.getSchema()).execute(parseResponse -> {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("parseRes: {}", parseResponse);
+                    }
+                    if (parseResponse.code() == 200) {
+                        logger.info("Create frame: {}", parseResponse.body().destinationFrame.name);
+                        insert(projectId, parseResponse.body().job);
+                    } else {
+                        logger.warn("Failed to parse data: dataSet:{}", dataSet);
+                    }
+                }, t2 -> logger.warn("Failed to parse data: dataSet:{}", dataSet, t2));
+            } else {
+                logger.warn("Failed to import data: dataSet:{}", dataSet);
+            }
+        }, t1 -> logger.warn("Failed to import data: dataSet:{}", dataSet, t1));
+
+    }
+
+    public void deleteFrame(final String frameId) {
+        final Response<FramesV3> response = h2oHelper.deleteFrame(frameId).execute();
+        if (logger.isDebugEnabled()) {
+            logger.debug("deleteFrame: {}", response);
+        }
+        if (response.code() == 200) {
+            logger.info("Deleted frame: {}", frameId);
         } else {
-            // TODO status check
+            throw new H2oAccessException("Failed to delete frame " + frameId + " : " + response);
         }
     }
 
-    public void runAutoML(final Project project, final AutoMLBuildControlV99 buildControl, final AutoMLInputV99 inputSpec,
+    public void runAutoML(final String projectId, final AutoMLBuildControlV99 buildControl, final AutoMLInputV99 inputSpec,
             final AutoMLBuildModelsV99 buildModels) {
-        h2oHelper.runAutoML(buildControl, inputSpec, buildModels).execute((call, res) -> {
+        h2oHelper.runAutoML(buildControl, inputSpec, buildModels).execute(autoMLResponse -> {
             if (logger.isDebugEnabled()) {
-                logger.debug("importFiles: {}", res);
+                logger.debug("runAutoML: {}", autoMLResponse);
             }
-            if (res.code() == 200) {
-                // TODO job
+            if (autoMLResponse.code() == 200) {
+                logger.info("AutoML process started: {}", autoMLResponse.body().job.dest.name);
+                insert(projectId, autoMLResponse.body().job);
             } else {
-                logger.warn("Failed to run AutoML: project:{}, res:{}", project, res);
+                logger.warn("Failed to run AutoML: {}", autoMLResponse);
             }
-        }, (call, t) -> {
-            logger.warn("Failed to run AutoML: project:{}", project, t);
-        });
+        }, t -> logger.warn("Failed to run AutoML.", t));
+    }
+
+    protected JobV3[] getJobs(final String projectId) {
+        return getJobs(projectId, true);
+    }
+
+    protected JobV3[] getJobs(final String projectId, final boolean update) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+        final String objectName = getJobsConfigPath(projectId);
+        try (Reader reader =
+                new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
+            final JobV3[] jobs = gson.fromJson(reader, JobV3[].class);
+            if (update) {
+                final List<JobV3> list = new ArrayList<>();
+                for (final JobV3 job : jobs) {
+                    if ("RUNNING".equals(job.status)) {
+                        final Response<JobsV3> response = h2oHelper.getJobs(job.key.name).execute();
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("getJobs: {}", response);
+                        }
+                        if (response.code() == 200) {
+                            JobV3 target = null;
+                            for (final JobV3 j : response.body().jobs) {
+                                if (job.key.name.equals(j.key.name)) {
+                                    target = j;
+                                }
+                            }
+                            list.add(target != null ? target : job);
+                        } else {
+                            list.add(job);
+                        }
+                    } else {
+                        list.add(job);
+                    }
+                }
+                new Thread(() -> store(projectId, list.toArray(n -> new JobV3[n])), "UpdateJobs").start();
+            }
+            return jobs;
+        } catch (final ErrorResponseException e) {
+            final String code = e.errorResponse().code();
+            if ("NoSuchKey".equals(code)) {
+                return new JobV3[0];
+            }
+            throw new StorageException("Failed to read " + objectName, e);
+        } catch (final Exception e) {
+            throw new StorageException("Failed to read " + objectName, e);
+        }
+
+    }
+
+    public void insert(final String projectId, final JobV3 job) {
+        if (logger.isDebugEnabled()) {
+            logger.debug("Insert job:{}", job);
+        }
+        final JobV3[] oldJobs = getJobs(projectId, false);
+        final JobV3[] jobs = Arrays.copyOf(oldJobs, oldJobs.length + 1);
+        jobs[jobs.length - 1] = job;
+        store(projectId, jobs);
+    }
+
+    public void deleteJob(final String projectId, final String jobId) {
+        store(projectId, Arrays.stream(getJobs(projectId, false)).filter(j -> !jobId.equals(j.key.name)).toArray(n -> new JobV3[n]));
+    }
+
+    protected synchronized void store(final String projectId, final JobV3[] jobs) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+        final String json = gson.toJson(jobs);
+        if (logger.isDebugEnabled()) {
+            logger.debug("jobs: {}", json);
+        }
+        final String objectName = getJobsConfigPath(projectId);
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
+            minioClient.putObject(fessConfig.getStorageBucket(), objectName, bais, null, null, null, "application/json");
+        } catch (final Exception e) {
+            throw new StorageException("Failed to create " + objectName, e);
+        }
     }
 
     private String getDataPath(final String projectId, final String fileName) {
@@ -316,7 +450,11 @@ public class ProjectHelper {
     }
 
     private String getProjectConfigPath(final String projectId) {
-        return projectFolderName + "/" + projectId + "/" + projectJsonName;
+        return projectFolderName + "/" + projectId + "/project.json";
+    }
+
+    private String getJobsConfigPath(final String projectId) {
+        return projectFolderName + "/" + projectId + "/jobs.json";
     }
 
     private String getDataSetConfigPath(final String projectId, final String dataSetId) {
