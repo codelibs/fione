@@ -38,7 +38,11 @@ public class JobKeyV3 extends KeyV3 {
      * Public constructor
      */
     public JobKeyV3() {
-        name = "";
+        this("");
+    }
+
+    public JobKeyV3(final String name) {
+        this.name = name;
         type = "";
         url = "";
     }

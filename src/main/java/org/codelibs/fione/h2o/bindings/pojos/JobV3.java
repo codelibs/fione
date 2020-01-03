@@ -125,14 +125,18 @@ public class JobV3 extends SchemaV3 {
     public Kind getKind() {
         if (StringUtil.isBlank(description)) {
             return Kind.UNKNOWN;
-        } else if (description.indexOf("AutoML build") >= 0) {
+        } else if (description.contains("AutoML build")) {
             return Kind.AUTO_ML;
-        } else if (description.indexOf("Parse") >= 0) {
+        } else if (description.contains("Parse") || description.contains("Export dataset")) {
             return Kind.FRAME;
-        } else if (description.indexOf("Grid Search") >= 0) {
+        } else if (description.contains("Grid Search")) {
             return Kind.GRID;
         }
         return Kind.MODEL;
+    }
+
+    public int getProgressInt() {
+        return (int) (progress * 100f);
     }
 
     public enum Kind {

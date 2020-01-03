@@ -38,7 +38,11 @@ public class ModelKeyV3 extends KeyV3 {
      * Public constructor
      */
     public ModelKeyV3() {
-        name = "";
+        this("");
+    }
+
+    public ModelKeyV3(final String name) {
+        this.name = name;
         type = "";
         url = "";
     }

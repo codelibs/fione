@@ -14,60 +14,80 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>
-					<la:message key="labels.automl_title_details" />
-				</h1>
-				<jsp:include page="/WEB-INF/view/common/admin/crud/breadcrumb.jsp"></jsp:include>
+				<h1>Prediction</h1>
+				<ol class="breadcrumb">
+					<li><la:link href="/admin/automl">
+							<la:message key="labels.crud_link_list" />
+						</la:link></li>
+					<li><la:link href="/admin/automl/details/${f:u(projectId)}">
+							Project
+						</la:link></li>
+					<li class="active">Prediction</li>
+				</ol>
 			</section>
 			<section class="content">
-				<div class="row">
-					<div class="col-md-12">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<jsp:include page="/WEB-INF/view/common/admin/crud/header.jsp"></jsp:include>
-							</div>
-							<!-- /.box-header -->
-							<div class="box-body">
-								<%-- Message --%>
-								<div>
-									<la:info id="msg" message="true">
-										<div class="alert alert-info">${msg}</div>
-									</la:info>
-									<la:errors />
+				<la:form action="/admin/automl" styleClass="form-horizontal">
+					<la:hidden property="projectId" />
+					<la:hidden property="frameId" />
+					<la:hidden property="leaderboardId" />
+					<div class="row">
+						<div class="col-md-12">
+							<div class="box box-success">
+								<div class="box-header with-border">
+									<h3 class="box-title">
+										Prediction for ${f:h(frameId)}
+									</h3>
+									<div class="btn-group pull-right">
+										<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
+											<em class="fas fa-project-diagram"></em>
+											Project
+										</la:link>
+									</div>
 								</div>
-								<%-- List --%>
-								<c:if test="${fn:length(projects) == 0}">
-									<div class="row top10">
-										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
-											<la:message key="labels.list_could_not_find_crud_table" />
+								<div class="box-body">
+									<div>
+										<la:info id="msg" message="true">
+											<div class="alert alert-info">${msg}</div>
+										</la:info>
+										<la:errors property="_global" />
+									</div>
+									<div class="form-group">
+										<label for="name" class="col-sm-3 control-label">Name</label>
+										<div class="col-sm-9">
+											<la:errors property="name" />
+											<la:text styleId="name" property="name" styleClass="form-control" />
 										</div>
 									</div>
-								</c:if>
-								<c:if test="${fn:length(projects) gt 0}">
-									<div class="row">
-										<div class="col-sm-12">
-											<table class="table table-bordered table-striped">
-												<thead>
-													<tr>
-														<th><la:message key="labels.automl_name" /></th>
-													</tr>
-												</thead>
-												<tbody>
-													<c:forEach var="data" varStatus="s" items="${projects}">
-														<tr data-href="${contextPath}/admin/user/details/4/${f:u(data.id)}">
-															<td>${f:h(data.id)}</td>
-														</tr>
-													</c:forEach>
-												</tbody>
-											</table>
+									<div class="form-group">
+										<label for="modelId" class="col-sm-3 control-label">Model</label>
+										<div class="col-sm-9">
+											<la:errors property="modelId" />
+											<la:select property="modelId" styleId="modelId" styleClass="form-control">
+												<c:forEach var="item" items="${modelIdItems}">
+													<la:option value="${f:u(item)}">${f:h(item)}</la:option>
+												</c:forEach>
+											</la:select>
 										</div>
 									</div>
-								</c:if>
+								</div>
+								<div class="box-footer">
+									<la:link href="/admin/automl/details/${f:u(projectId)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}" styleClass="btn btn-default">
+										<em class="fa fa-arrow-circle-left"></em>
+										<la:message key="labels.crud_button_back" />
+									</la:link>
+									<c:if test="${editable}">
+										<button type="submit" class="btn btn-success" name="predictframe"
+											value="<la:message key="labels.crud_button_create" />"
+										>
+											<i class="fas fa-file-signature"></i>
+											Predict
+										</button>
+									</c:if>
+								</div>
 							</div>
 						</div>
 					</div>
-				</div>
+				</la:form>
 			</section>
 		</div>
 		<jsp:include page="/WEB-INF/view/common/admin/footer.jsp"></jsp:include>

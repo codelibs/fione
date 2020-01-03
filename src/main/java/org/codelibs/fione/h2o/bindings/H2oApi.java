@@ -2291,16 +2291,16 @@ public class H2oApi {
     /**
      * Export a Frame to the given path with optional overwrite.
      */
-    public FramesV3 exportFrame(final FrameKeyV3 frameId) throws IOException {
+    public Call<FramesV3> exportFrame(final FrameKeyV3 frameId) {
         final Frames s = getService(Frames.class);
-        return s.export(keyToString(frameId)).execute().body();
+        return s.export(keyToString(frameId));
     }
 
-    public FramesV3 exportFrame(final FramesV3 params) throws IOException {
+    public Call<FramesV3> exportFrame(final FramesV3 params) {
         final Frames s = getService(Frames.class);
         return s.export(keyToString(params.frameId), params.column, params.rowOffset, params.rowCount, params.columnOffset,
                 params.fullColumnCount, params.columnCount, params.findCompatibleModels, params.path, params.force, params.numParts,
-                params.compression, params.separator, params._excludeFields).execute().body();
+                params.compression, params.separator, params._excludeFields);
     }
 
     /**
@@ -2982,14 +2982,14 @@ public class H2oApi {
     /**
      * Execute an Rapids AstRoot.
      */
-    public RapidsSchemaV3 rapidsExec(final String ast) throws IOException {
+    public Call<RapidsSchemaV3> rapidsExec(final String ast) {
         final Rapids s = getService(Rapids.class);
-        return s.rapidsExec(ast).execute().body();
+        return s.rapidsExec(ast);
     }
 
-    public RapidsSchemaV3 rapidsExec(final RapidsSchemaV3 params) throws IOException {
+    public Call<RapidsSchemaV3> rapidsExec(final RapidsSchemaV3 params) {
         final Rapids s = getService(Rapids.class);
-        return s.rapidsExec(params.ast, params.sessionId, params.id, params._excludeFields).execute().body();
+        return s.rapidsExec(params.ast, params.sessionId, params.id, params._excludeFields);
     }
 
     /**

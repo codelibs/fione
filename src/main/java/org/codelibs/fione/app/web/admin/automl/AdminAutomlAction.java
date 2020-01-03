@@ -16,8 +16,10 @@
 package org.codelibs.fione.app.web.admin.automl;
 
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -50,8 +52,10 @@ import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.helper.ProjectHelper;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.web.Execute;
+import org.lastaflute.web.response.ActionResponse;
 import org.lastaflute.web.response.HtmlResponse;
 import org.lastaflute.web.ruts.process.ActionRuntime;
+import org.lastaflute.web.token.DoubleSubmitManager;
 import org.lastaflute.web.util.LaRequestUtil;
 
 /**
@@ -69,6 +73,9 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     @Resource
     private ProjectHelper projectHelper;
+
+    @Resource
+    private DoubleSubmitManager doubleSubmitManager;
 
     // ===================================================================================
     //                                                                               Hook
@@ -128,7 +135,7 @@ public class AdminAutomlAction extends FioneAdminAction {
     @Execute
     @Secured({ ROLE, ROLE + VIEW })
     public HtmlResponse details(final String projectId) {
-        saveToken();
+        final String token = doubleSubmitManager.saveToken(myTokenGroupType());
         try {
             final Project project = projectHelper.getProject(projectId);
             final String frameId = LaRequestUtil.getOptionalRequest().map(req -> {
@@ -145,8 +152,8 @@ public class AdminAutomlAction extends FioneAdminAction {
                 }
                 return null;
             }).orElse(null);
-            final String modelId = LaRequestUtil.getOptionalRequest().map(req -> {
-                final String mid = req.getParameter("modelId");
+            final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> {
+                final String mid = req.getParameter("leaderboardId");
                 String lastId = null;
                 if (mid != null) {
                     for (final JobV3 id : project.getJobs()) {
@@ -165,12 +172,13 @@ public class AdminAutomlAction extends FioneAdminAction {
             }).orElse(StringUtil.EMPTY);
 
             final FrameV3 columnSummaries = frameId != null ? projectHelper.getColumnSummaries(frameId) : null;
-            final LeaderboardV99 leaderboard = modelId != null ? projectHelper.getLeaderboard(projectId, modelId) : null;
+            final LeaderboardV99 leaderboard = leaderboardId != null ? projectHelper.getLeaderboard(projectId, leaderboardId) : null;
 
             return asHtml(path_AdminAutoml_AdminAutomlDetailsJsp).renderWith(data -> {
+                RenderDataUtil.register(data, "token", token);
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, "frameId", frameId);
-                RenderDataUtil.register(data, "modelId", modelId);
+                RenderDataUtil.register(data, "leaderboardId", leaderboardId);
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
                 }
@@ -212,18 +220,32 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     @Execute
     @Secured({ ROLE })
-    public HtmlResponse deletedataset(final String projectId, final String dataSetId) {
-        // TODO validate(form, messages -> {}, () -> as...());
-        // TODO verifyToken(() -> as...());
+    public HtmlResponse deletedataset(final DataSetForm form) {
+        validate(form, messages -> {}, () -> redirectWith(getClass(), moreUrl("details", form.projectId)));
+        verifyTokenKeep(() -> redirectWith(getClass(), moreUrl("details", form.projectId)));
         try {
-            projectHelper.deleteDataSet(projectId, dataSetId);
+            projectHelper.deleteDataSet(form.projectId, form.dataSetId);
             saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL));// TODO deleting data {0}
         } catch (final Exception e) {
-            logger.error("Failed to delete data: {}", dataSetId, e);
+            logger.error("Failed to delete data: {}", form.dataSetId, e);
             throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
                     () -> asListHtml()); // TODO failed to delete data {0}
         }
-        return redirectWith(getClass(), moreUrl("details", projectId));
+        return redirectWith(getClass(), moreUrl("details", form.projectId));
+    }
+
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public ActionResponse downloaddataset(final DataSetForm form) {
+        validate(form, messages -> {}, () -> redirectWith(getClass(), moreUrl("details", form.projectId)));
+        verifyTokenKeep(() -> redirectWith(getClass(), moreUrl("details", form.projectId)));
+
+        final DataSet dataSet = projectHelper.getDataSet(form.projectId, form.dataSetId);
+        // TODO dataSet is null
+
+        return asStream(dataSet.getName()).contentTypeOctetStream().stream(out -> {
+            projectHelper.writeContent(form.projectId, dataSet, out);
+        });
     }
 
     @Execute
@@ -271,7 +293,7 @@ public class AdminAutomlAction extends FioneAdminAction {
             throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
                     () -> asListHtml()); // TODO failed to delete frame {0}
         }
-        return redirectWith(getClass(), moreUrl("details", projectId));
+        return redirectWith(getClass(), moreUrl("details", projectId).params("frameId", frameId));
     }
 
     @Execute
@@ -292,20 +314,20 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     @Execute
     @Secured({ ROLE })
-    public HtmlResponse loaddataset(final String projectId, final String dataSetId) {
-        // TODO validate(form, messages -> {}, () -> as...());
-        // TODO verifyToken(() -> as...());
+    public HtmlResponse loaddataset(final DataSetForm form) {
+        validate(form, messages -> {}, () -> redirectWith(getClass(), moreUrl("details", form.projectId)));
+        verifyTokenKeep(() -> redirectWith(getClass(), moreUrl("details", form.projectId)));
         try {
-            final DataSet dataSet = projectHelper.getDataSet(projectId, dataSetId);
+            final DataSet dataSet = projectHelper.getDataSet(form.projectId, form.dataSetId);
             // TODO check if dataSet exists
-            projectHelper.loadDataSetSchema(projectId, dataSet);
+            projectHelper.loadDataSetSchema(form.projectId, dataSet);
             saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL));// TODO load data {0}
         } catch (final Exception e) {
-            logger.error("Failed to load {} in {}.", dataSetId, projectId, e);
+            logger.error("Failed to load {} in {}.", form.dataSetId, form.projectId, e);
             throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
                     () -> asListHtml()); // TODO failed to load data {0}
         }
-        return redirectWith(getClass(), moreUrl("details", projectId));
+        return redirectWith(getClass(), moreUrl("details", form.projectId));
     }
 
     @Execute
@@ -353,7 +375,32 @@ public class AdminAutomlAction extends FioneAdminAction {
             throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
                     () -> asSetupMlHtml(form.projectId, form.frameId));// TODO fix a message
         }
-        return redirectWith(getClass(), moreUrl("details", form.projectId));
+        return redirectWith(getClass(), moreUrl("details", form.projectId).params("frameId", form.frameId));
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse prediction(final String projectId, final String frameId, final String leaderboardId) {
+        saveToken();
+        return asPredictionMlHtml(projectId, frameId, leaderboardId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse predictframe(final PredictSettingForm form) {
+        validate(form, messages -> {}, () -> asPredictionMlHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyToken(this::asNewProjectHtml);
+
+        try {
+            projectHelper.predict(form.projectId, form.frameId, form.modelId, form.name);
+            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL)); // TODO exporting {0} to {1}
+        } catch (final Exception e) {
+            logger.error("Failed to run AutoML.", e);
+            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
+                    () -> asSetupMlHtml(form.projectId, form.frameId));// TODO Failed to export {0}
+        }
+        return redirectWith(getClass(),
+                moreUrl("details", form.projectId).params("frameId", form.frameId, "leaderboardId", form.leaderboardId));
     }
 
     // ===================================================================================
@@ -428,5 +475,22 @@ public class AdminAutomlAction extends FioneAdminAction {
                                     .toArray(n -> new String[n]));
 
                 });
+    }
+
+    private HtmlResponse asPredictionMlHtml(final String projectId, final String frameId, final String leaderboardId) {
+        final LeaderboardV99 leaderboard = leaderboardId != null ? projectHelper.getLeaderboard(projectId, leaderboardId) : null;
+        // TODO check if leaderboard is null
+        final String[] modelIdItems = Arrays.stream(leaderboard.models).map(m -> m.name).toArray(n -> new String[n]);
+
+        return asHtml(path_AdminAutoml_AdminAutomlPredictJsp).useForm(PredictSettingForm.class, setup -> {
+            setup.setup(form -> {
+                form.projectId = projectId;
+                form.frameId = frameId;
+                form.leaderboardId = leaderboardId;
+                form.name = frameId.split("\\.")[0] + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
+            });
+        }).renderWith(data -> {
+            RenderDataUtil.register(data, "modelIdItems", modelIdItems);
+        });
     }
 }

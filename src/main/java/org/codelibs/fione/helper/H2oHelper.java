@@ -17,14 +17,13 @@ package org.codelibs.fione.helper;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import javax.annotation.PostConstruct;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.codelibs.core.exception.IORuntimeException;
 import org.codelibs.fione.h2o.bindings.H2oApi;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
@@ -43,6 +42,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseSetupV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
+import org.codelibs.fione.h2o.bindings.pojos.RapidsSchemaV3;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.AutoMLBuilder;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.Frames;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.Jobs;
@@ -53,7 +53,6 @@ import retrofit2.Callback;
 import retrofit2.Response;
 
 public class H2oHelper {
-    private static final Logger logger = LogManager.getLogger(H2oHelper.class);
 
     protected String endpoint;
 
@@ -75,17 +74,17 @@ public class H2oHelper {
     public void init() {
         h2o = new H2oApi(endpoint).connectTimeout(connectTimeout).readTimeout(readTimeout).writeTimeout(writeTimeout);
         httpInterceptorList.stream().forEach(h2o::addInterceptor);
-        //        if (StringUtil.isNotBlank(secretKeyId) && StringUtil.isNotBlank(secretAccessKey)) {
-        //            new Callable<>(h2o.setS3Credentials(secretKeyId, secretAccessKey)).execute((call, res) -> {
-        //                if (res.code() == 200) {
-        //                    logger.info("Use S3 credentials.");
-        //                } else {
-        //                    logger.warn("Failed to set S3 credentials: {}", res);
-        //                }
-        //            }, (call, t) -> {
-        //                logger.warn("Failed to set S3 credentials.", t);
-        //            });
-        //        }
+        //  if (StringUtil.isNotBlank(secretKeyId) && StringUtil.isNotBlank(secretAccessKey)) {
+        //      new Callable<>(h2o.setS3Credentials(secretKeyId, secretAccessKey)).execute((call, res) -> {
+        //          if (res.code() == 200) {
+        //              logger.info("Use S3 credentials.");
+        //          } else {
+        //              logger.warn("Failed to set S3 credentials: {}", res);
+        //          }
+        //      }, (call, t) -> {
+        //          logger.warn("Failed to set S3 credentials.", t);
+        //      });
+        //  }
     }
 
     public void setEndpoint(final String endpoint) {
@@ -101,9 +100,7 @@ public class H2oHelper {
     }
 
     public Callable<FramesListV3> getFrames(final String frameId) {
-        final FrameKeyV3 key = new FrameKeyV3();
-        key.name = frameId;
-        return getFrames(key);
+        return getFrames(new FrameKeyV3(frameId));
     }
 
     public Callable<FramesV3> deleteFrame(final FrameKeyV3 frameId) {
@@ -111,9 +108,7 @@ public class H2oHelper {
     }
 
     public Callable<FramesV3> deleteFrame(final String frameId) {
-        final FrameKeyV3 key = new FrameKeyV3();
-        key.name = frameId;
-        return deleteFrame(key);
+        return deleteFrame(new FrameKeyV3(frameId));
     }
 
     public Callable<ParseSetupV3> setupParse(final String[] sourceFrames) {
@@ -159,14 +154,38 @@ public class H2oHelper {
         return new Callable<>(h2o.predict(model, frame));
     }
 
+    public Callable<ModelMetricsListSchemaV3> predict(final String modelId, final String frameId) {
+        return predict(new ModelKeyV3(modelId), new FrameKeyV3(frameId));
+    }
+
     public Callable<JobsV3> getJobs(final JobKeyV3 jobId) {
         return new Callable<>(h2o.jobs(jobId));
     }
 
     public Callable<JobsV3> getJobs(final String jobId) {
-        final JobKeyV3 key = new JobKeyV3();
-        key.name = jobId;
-        return getJobs(key);
+        return getJobs(new JobKeyV3(jobId));
+    }
+
+    public Callable<RapidsSchemaV3> bindFrames(final FrameKeyV3 destinationFrame, final FrameKeyV3[] sourceFrames) {
+        final StringBuilder buf = new StringBuilder(100);
+        buf.append("(assign ").append(H2oApi.keyToString(destinationFrame)).append(" (cbind");
+        Arrays.stream(sourceFrames).map(H2oApi::keyToString).forEach(s -> buf.append(' ').append(s));
+        buf.append("))");
+        return new Callable<>(h2o.rapidsExec(buf.toString()));
+    }
+
+    public Callable<RapidsSchemaV3> bindFrames(final String destinationFrame, final String[] sourceFrames) {
+        return bindFrames(new FrameKeyV3(destinationFrame), Arrays.stream(sourceFrames).map(FrameKeyV3::new)
+                .toArray(n -> new FrameKeyV3[n]));
+    }
+
+    public Callable<FramesV3> exportFrame(final FrameKeyV3 frame, final String path, final boolean overwrite) {
+        final FramesV3 params = new FramesV3();
+        params.frameId = frame;
+        params.path = path;
+        params.force = overwrite;
+        params.compression = null;
+        return new Callable<>(h2o.exportFrame(params));
     }
 
     public ParseV3 convert(final ParseSetupV3 params) {

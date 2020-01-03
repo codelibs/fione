@@ -16,8 +16,11 @@
 			<section class="content-header">
 				<h1>Create New Frame</h1>
 				<ol class="breadcrumb">
-					<li><la:link href="../list">
+					<li><la:link href="/admin/automl">
 							<la:message key="labels.crud_link_list" />
+						</la:link></li>
+					<li><la:link href="/admin/automl/details/${f:u(projectId)}">
+							Project
 						</la:link></li>
 					<li class="active">New Frame</li>
 				</ol>

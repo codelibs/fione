@@ -38,7 +38,11 @@ public class FrameKeyV3 extends KeyV3 {
      * Public constructor
      */
     public FrameKeyV3() {
-        name = "";
+        this("");
+    }
+
+    public FrameKeyV3(final String name) {
+        this.name = name;
         type = "";
         url = "";
     }
