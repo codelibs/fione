@@ -14,7 +14,11 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Project: ${f:h(project.name)}</i></h1>
+				<h1>
+					Project: ${f:h(project.name)} <small><la:link
+							href="/admin/automl/details/${f:u(project.id)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}"
+						><i class="fas fa-redo-alt"></i></la:link></small>
+				</h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../list">
 							<la:message key="labels.crud_link_list" />
@@ -36,7 +40,7 @@
 								<h3 class="box-title">Data</h3>
 								<div class="btn-group pull-right">
 									<la:link href="/admin/automl/newdataset/${f:u(project.id)}"
-										styleClass="btn btn-success btn-xs ${f:h(editableClass)}"
+										styleClass="btn btn-box-tool ${f:h(editableClass)}"
 									><em class="fa fa-plus"></em></la:link>
 								</div>
 							</div>
@@ -65,6 +69,8 @@
 														<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
 														<input type="hidden" name="projectId" value="${f:u(project.id)}">
 														<input type="hidden" name="dataSetId" value="${f:u(data.id)}">
+														<input type="hidden" name="frameId" value="${f:u(frameId)}">
+														<input type="hidden" name="leaderboardId" value="${f:u(leaderboardId)}">
 															<td>${f:h(data.name)}</td>
 															<td class="text-center">
 															<c:if test="${data.schema != null}">
@@ -110,15 +116,19 @@
 													</tr>
 												</thead>
 												<tbody>
-													<c:forEach var="frameId" varStatus="s" items="${project.frameIds}">
-														<tr
-															data-href="${contextPath}/admin/automl/details/${f:u(project.id)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}"
-														>
-															<td>${f:h(frameId)}</td>
-															<td class="text-center"><la:link href="/admin/automl/deleteframe/${f:u(project.id)}/${f:u(frameId)}">
-																	<i class="fas fa-trash-alt"></i>
-																</la:link></td>
-														</tr>
+													<c:forEach var="data" varStatus="s" items="${project.frameIds}">
+														<tr><form method="post" action="${contextPath}/admin/automl/">
+														<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
+														<input type="hidden" name="projectId" value="${f:u(project.id)}">
+														<input type="hidden" name="frameId" value="${f:u(frameId)}">
+														<input type="hidden" name="leaderboardId" value="${f:u(leaderboardId)}">
+															<td>${f:h(data)}</td>
+															<td class="text-center">
+															<c:if test="${frameId == data}"><i class="far fa-check-square" style="color:#3c8dbc;"></i></c:if>
+															<c:if test="${frameId != data}"><la:link href="/admin/automl/details/${f:u(project.id)}?frameId=${f:u(data)}&leaderboardId=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
+															<button type="submit" name="deleteframe" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt"></i></button>
+															</td>
+														</form></tr>
 													</c:forEach>
 												</tbody>
 											</table>
@@ -169,7 +179,7 @@
 										<c:if test="${not empty frameId}">
 											<li><la:link href="/admin/automl/setupml/${f:u(project.id)}/${f:u(frameId)}">Run AutoML</la:link></li>
 										</c:if>
-										<c:if test="${not empty frameId and not empty leaderboardId}">
+										<c:if test="${not empty frameId and leaderboard != null}">
 											<li><la:link href="/admin/automl/prediction/${f:u(project.id)}/${f:u(frameId)}/${f:u(leaderboardId)}">Prediction</la:link></li>
 										</c:if>
 										<li><a href="#">Delete All</a></li>
@@ -202,7 +212,12 @@
 												</thead>
 												<tbody>
 													<c:forEach var="data" varStatus="s" items="${project.jobs}">
-														<tr>
+														<tr><form method="post" action="${contextPath}/admin/automl/">
+														<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
+														<input type="hidden" name="projectId" value="${f:u(project.id)}">
+														<input type="hidden" name="jobId" value="${f:u(data.key.name)}">
+														<input type="hidden" name="frameId" value="${f:u(frameId)}">
+														<input type="hidden" name="leaderboardId" value="${f:u(leaderboardId)}">
 															<td><i class="fas fa-${f:u(data.iconType)}"></i> <c:choose>
 																	<c:when test="${data.iconType == 'hammer'}">
 																		<la:link
@@ -240,12 +255,10 @@
 																		<i class="fas fa-question"></i>
 																	</c:otherwise>
 																</c:choose></td>
-															<td class="text-center"><la:link
-																	href="/admin/automl/deletejob/${f:u(project.id)}/${f:u(data.key.name)}"
-																>
-																	<i class="fas fa-trash-alt"></i>
-																</la:link></td>
-														</tr>
+															<td class="text-center">
+																<button type="submit" name="deletejob" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt"></i></button>
+															</td>
+														</form></tr>
 													</c:forEach>
 												</tbody>
 											</table>

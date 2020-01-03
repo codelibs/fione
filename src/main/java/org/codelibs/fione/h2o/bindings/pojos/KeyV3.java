@@ -40,7 +40,11 @@ public class KeyV3 extends SchemaV3 {
      * Public constructor
      */
     public KeyV3() {
-        name = "";
+        this("");
+    }
+
+    public KeyV3(final String name) {
+        this.name = name;
         type = "";
         url = "";
     }

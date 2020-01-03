@@ -117,6 +117,8 @@ public class JobV3 extends SchemaV3 {
             return "table";
         case GRID:
             return "th";
+        case EXPORT:
+            return "download";
         default:
             return "question";
         }
@@ -131,6 +133,8 @@ public class JobV3 extends SchemaV3 {
             return Kind.FRAME;
         } else if (description.contains("Grid Search")) {
             return Kind.GRID;
+        } else if (description.contains("Export Prediction")) {
+            return Kind.EXPORT;
         }
         return Kind.MODEL;
     }
@@ -140,6 +144,6 @@ public class JobV3 extends SchemaV3 {
     }
 
     public enum Kind {
-        FRAME, MODEL, AUTO_ML, GRID, UNKNOWN;
+        FRAME, MODEL, AUTO_ML, GRID, EXPORT, UNKNOWN;
     }
 }

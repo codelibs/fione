@@ -18,9 +18,12 @@ package org.codelibs.fione.helper;
 import static org.codelibs.fione.h2o.bindings.H2oApi.keyToString;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.io.Reader;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -29,6 +32,7 @@ import javax.annotation.Resource;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.codelibs.core.net.UuidUtil;
 import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fess.exception.StorageException;
 import org.codelibs.fess.mylasta.direction.FessConfig;
@@ -45,8 +49,10 @@ import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesListV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
+import org.codelibs.fione.h2o.bindings.pojos.JobKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
+import org.codelibs.fione.h2o.bindings.pojos.KeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
 import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
@@ -65,7 +71,14 @@ import io.minio.messages.Item;
 import retrofit2.Response;
 
 public class ProjectHelper {
+
     private static final Logger logger = LogManager.getLogger(ProjectHelper.class);
+
+    private static final String FAILED = "FAILED";
+
+    private static final String DONE = "DONE";
+
+    private static final String RUNNING = "RUNNING";
 
     @Resource
     private H2oHelper h2oHelper;
@@ -268,6 +281,8 @@ public class ProjectHelper {
     }
 
     public void loadDataSetSchema(final String projectId, final DataSet dataSet) {
+        final JobV3 workingJob = createWorkingJob(dataSet.getName(), "Parse Schema", 0.2f);
+        store(projectId, workingJob);
         h2oHelper.importFiles(dataSet.getPath()).execute(importResponse -> {
             if (logger.isDebugEnabled()) {
                 logger.debug("importFiles: {}", importResponse);
@@ -287,14 +302,23 @@ public class ProjectHelper {
                                 logger.debug("deleteFrame: {}", deleteResponse);
                             }
                         }, t3 -> logger.warn("Failed to delete frame: {}", frames[0], t3));
+                        finish(projectId, workingJob, null);
                     } else {
                         logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet);
+                        finish(projectId, workingJob, new H2oAccessException("Failed to access " + setupResponse));
                     }
-                }, t2 -> logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t2));
+                }, t2 -> {
+                    logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t2);
+                    finish(projectId, workingJob, t2);
+                });
             } else {
                 logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet);
+                finish(projectId, workingJob, new H2oAccessException("Failed to access " + importResponse));
             }
-        }, t1 -> logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t1));
+        }, t1 -> {
+            logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t1);
+            finish(projectId, workingJob, t1);
+        });
     }
 
     public void store(final String projectId, final DataSet dataSet) {
@@ -330,6 +354,8 @@ public class ProjectHelper {
     }
 
     public void createFrame(final String projectId, final DataSet dataSet) {
+        final JobV3 workingJob = createWorkingJob(dataSet.getName(), "Parse Frame", 0.2f);
+        store(projectId, workingJob);
         h2oHelper.importFiles(dataSet.getPath()).execute(importResponse -> {
             if (logger.isDebugEnabled()) {
                 logger.debug("importFiles: {}", importResponse);
@@ -341,15 +367,24 @@ public class ProjectHelper {
                     }
                     if (parseResponse.code() == 200) {
                         logger.info("Create frame: {}", keyToString(parseResponse.body().destinationFrame));
-                        insert(projectId, parseResponse.body().job);
+                        deleteJob(projectId, workingJob.key.name);
+                        store(projectId, parseResponse.body().job);
                     } else {
                         logger.warn("Failed to parse data: dataSet:{}", dataSet);
+                        finish(projectId, workingJob, new H2oAccessException("Failed to access " + parseResponse));
                     }
-                }, t2 -> logger.warn("Failed to parse data: dataSet:{}", dataSet, t2));
+                }, t2 -> {
+                    logger.warn("Failed to parse data: dataSet:{}", dataSet, t2);
+                    finish(projectId, workingJob, t2);
+                });
             } else {
                 logger.warn("Failed to import data: dataSet:{}", dataSet);
+                finish(projectId, workingJob, new H2oAccessException("Failed to access " + importResponse));
             }
-        }, t1 -> logger.warn("Failed to import data: dataSet:{}", dataSet, t1));
+        }, t1 -> {
+            logger.warn("Failed to import data: dataSet:{}", dataSet, t1);
+            finish(projectId, workingJob, t1);
+        });
 
     }
 
@@ -372,17 +407,24 @@ public class ProjectHelper {
 
     public void runAutoML(final String projectId, final AutoMLBuildControlV99 buildControl, final AutoMLInputV99 inputSpec,
             final AutoMLBuildModelsV99 buildModels) {
+        final JobV3 workingJob = createWorkingJob(buildControl.projectName, "AutoML build", 0.2f);
+        store(projectId, workingJob);
         h2oHelper.runAutoML(buildControl, inputSpec, buildModels).execute(autoMLResponse -> {
             if (logger.isDebugEnabled()) {
                 logger.debug("runAutoML: {}", autoMLResponse);
             }
             if (autoMLResponse.code() == 200) {
                 logger.info("AutoML process started: {}", keyToString(autoMLResponse.body().job.dest));
-                insert(projectId, autoMLResponse.body().job);
+                deleteJob(projectId, workingJob.key.name);
+                store(projectId, autoMLResponse.body().job);
             } else {
                 logger.warn("Failed to run AutoML: {}", autoMLResponse);
+                finish(projectId, workingJob, new H2oAccessException("Failed to access " + autoMLResponse));
             }
-        }, t -> logger.warn("Failed to run AutoML.", t));
+        }, t -> {
+            logger.warn("Failed to run AutoML.", t);
+            finish(projectId, workingJob, t);
+        });
     }
 
     protected JobV3[] getJobs(final String projectId) {
@@ -399,7 +441,7 @@ public class ProjectHelper {
             if (update) {
                 final List<JobV3> list = new ArrayList<>();
                 for (final JobV3 job : jobs) {
-                    if ("RUNNING".equals(job.status)) {
+                    if (RUNNING.equals(job.status)) {
                         final Response<JobsV3> response = h2oHelper.getJobs(keyToString(job.key)).execute();
                         if (logger.isDebugEnabled()) {
                             logger.debug("getJobs: {}", response);
@@ -434,14 +476,23 @@ public class ProjectHelper {
 
     }
 
-    public void insert(final String projectId, final JobV3 job) {
+    public void store(final String projectId, final JobV3 job) {
         if (logger.isDebugEnabled()) {
             logger.debug("Insert job:{}", job);
         }
         if (job == null) {
             return;
         }
+
         final JobV3[] oldJobs = getJobs(projectId, false);
+        for (int i = 0; i < oldJobs.length; i++) {
+            if (oldJobs[i].key.name.equals(job.key.name)) {
+                oldJobs[i] = job;
+                store(projectId, oldJobs);
+                return;
+            }
+        }
+
         final JobV3[] jobs = Arrays.copyOf(oldJobs, oldJobs.length + 1);
         jobs[jobs.length - 1] = job;
         store(projectId, jobs);
@@ -480,12 +531,16 @@ public class ProjectHelper {
     }
 
     public void predict(final String projectId, final String frameId, final String modelId, final String name) {
+        final JobV3 workingJob = createWorkingJob(name, "Export Prediction", 0.25f);
+        store(projectId, workingJob);
         h2oHelper.predict(modelId, frameId).execute(
                 predictResponse -> {
                     if (logger.isDebugEnabled()) {
                         logger.debug("predict: {}", predictResponse);
                     }
                     if (predictResponse.code() == 200) {
+                        workingJob.progress = 0.5f;
+                        store(projectId, workingJob);
                         final ModelMetricsListSchemaV3 modelMetricsListSchema = predictResponse.body();
                         final String predictionsFrameId = keyToString(modelMetricsListSchema.predictionsFrame);
                         final String destinationFrameId = "combind-" + predictionsFrameId;
@@ -495,38 +550,46 @@ public class ProjectHelper {
                                         logger.debug("bindFrames: {}", bindFramesResponse);
                                     }
                                     if (bindFramesResponse.code() == 200) {
+                                        workingJob.progress = 0.75f;
+                                        store(projectId, workingJob);
                                         h2oHelper.exportFrame(new FrameKeyV3(destinationFrameId), getPredictCsvPath(projectId, name), true)
-                                                .execute(exportFrameResponse -> {
-                                                    if (logger.isDebugEnabled()) {
-                                                        logger.debug("exportFrame: {}", exportFrameResponse);
-                                                    }
-                                                    if (bindFramesResponse.code() == 200) {
-                                                        insert(projectId, exportFrameResponse.body().job);
-                                                        // DONE
-                                                    } else {
-                                                        logger.warn("Failed to export frame: {}", exportFrameResponse);
-                                                    }
-                                                    deleteFrameQuietly(destinationFrameId);
-                                                    deleteFrameQuietly(predictionsFrameId);
-                                                }, t -> {
-                                                    logger.warn("Failed to export frame: {}", name, t);
-                                                    deleteFrameQuietly(destinationFrameId);
-                                                    deleteFrameQuietly(predictionsFrameId);
-                                                });
+                                                .execute(
+                                                        exportFrameResponse -> {
+                                                            if (logger.isDebugEnabled()) {
+                                                                logger.debug("exportFrame: {}", exportFrameResponse);
+                                                            }
+                                                            if (bindFramesResponse.code() == 200) {
+                                                                finish(projectId, workingJob, null);
+                                                            } else {
+                                                                logger.warn("Failed to export frame: {}", exportFrameResponse);
+                                                                finish(projectId, workingJob, new H2oAccessException("Failed to access "
+                                                                        + exportFrameResponse));
+                                                            }
+                                                            deleteFrameQuietly(destinationFrameId);
+                                                            deleteFrameQuietly(predictionsFrameId);
+                                                        }, t -> {
+                                                            logger.warn("Failed to export frame: {}", name, t);
+                                                            finish(projectId, workingJob, t);
+                                                            deleteFrameQuietly(destinationFrameId);
+                                                            deleteFrameQuietly(predictionsFrameId);
+                                                        });
                                     } else {
                                         logger.warn("Failed to export frame: {}", bindFramesResponse);
+                                        finish(projectId, workingJob, new H2oAccessException("Failed to access " + bindFramesResponse));
                                         deleteFrameQuietly(predictionsFrameId);
                                     }
                                 }, t -> {
                                     logger.warn("Failed to export frame: {}", name, t);
+                                    finish(projectId, workingJob, t);
                                     deleteFrameQuietly(predictionsFrameId);
                                 });
-
                     } else {
                         logger.warn("Failed to export frame: {}", predictResponse);
+                        finish(projectId, workingJob, new H2oAccessException("Failed to access " + predictResponse));
                     }
                 }, t -> {
                     logger.warn("Failed to export frame: {}", name, t);
+                    finish(projectId, workingJob, t);
                 });
     }
 
@@ -541,28 +604,63 @@ public class ProjectHelper {
         }
     }
 
-    private String getPredictCsvPath(final String projectId, final String name) {
+    protected JobV3 createWorkingJob(final String target, final String description, final float progress) {
+        final JobV3 job = new JobV3();
+        job.key = new JobKeyV3(UuidUtil.create());
+        job.key.type = "Key<Job>";
+        job.description = description;
+        job.status = RUNNING;
+        job.progress = progress;
+        job.startTime = System.currentTimeMillis();
+        job.msec = 0L;
+        job.dest = new KeyV3(target);
+        job.exception = null;
+        job.stacktrace = null;
+        job.readyForView = true;
+        return job;
+    }
+
+    protected void finish(final String projectId, final JobV3 job, final Throwable t) {
+        job.progress = 1.0f;
+        job.msec = System.currentTimeMillis() - job.startTime;
+        if (t == null) {
+            job.status = DONE;
+        } else {
+            job.status = FAILED;
+            job.exception = t.getMessage();
+            try (StringWriter writer = new StringWriter()) {
+                t.printStackTrace(new PrintWriter(writer, true));
+                writer.flush();
+                job.stacktrace = writer.toString();
+            } catch (final IOException e) {
+                // ignore
+            }
+        }
+        store(projectId, job);
+    }
+
+    protected String getPredictCsvPath(final String projectId, final String name) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         return "s3a://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/data/" + name + ".csv";
     }
 
-    private String getDataPath(final String projectId, final String fileName) {
+    protected String getDataPath(final String projectId, final String fileName) {
         return projectFolderName + "/" + projectId + "/data/" + fileName;
     }
 
-    private String getProjectConfigPath(final String projectId) {
+    protected String getProjectConfigPath(final String projectId) {
         return projectFolderName + "/" + projectId + "/project.json";
     }
 
-    private String getJobsConfigPath(final String projectId) {
+    protected String getJobsConfigPath(final String projectId) {
         return projectFolderName + "/" + projectId + "/jobs.json";
     }
 
-    private String getDataSetConfigPath(final String projectId, final String dataSetId) {
+    protected String getDataSetConfigPath(final String projectId, final String dataSetId) {
         return projectFolderName + "/" + projectId + "/config/" + dataSetId + "_dataset.json";
     }
 
-    private String getS3Path(final String projectId, final String fileName) {
+    protected String getS3Path(final String projectId, final String fileName) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         return "s3://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/data/" + fileName;
     }

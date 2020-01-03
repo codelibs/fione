@@ -17,13 +17,12 @@ package org.codelibs.fione.app.web.admin.automl;
 
 import org.lastaflute.web.validation.Required;
 
-public class DataSetForm {
-
+public class JobForm {
     @Required
     public String projectId;
 
     @Required
-    public String dataSetId;
+    public String jobId;
 
     public String frameId;
 

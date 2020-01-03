@@ -52,6 +52,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.helper.ProjectHelper;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.web.Execute;
+import org.lastaflute.web.UrlChain;
 import org.lastaflute.web.response.ActionResponse;
 import org.lastaflute.web.response.HtmlResponse;
 import org.lastaflute.web.ruts.process.ActionRuntime;
@@ -62,6 +63,12 @@ import org.lastaflute.web.util.LaRequestUtil;
  * @author shinsuke
  */
 public class AdminAutomlAction extends FioneAdminAction {
+
+    private static final String LEADERBOARD_ID = "leaderboardId";
+
+    private static final String FRAME_ID = "frameId";
+
+    private static final String DETAILS = "details";
 
     public static final String ROLE = "admin-automl";
 
@@ -123,13 +130,12 @@ public class AdminAutomlAction extends FioneAdminAction {
         project.setName(form.name);
         try {
             projectHelper.store(project);
-            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL));// TODO create project
+            saveMessage(messages -> messages.addSuccessCreatedProject(GLOBAL, form.name));
         } catch (final Exception e) {
-            logger.error("Failed to add " + project.getId(), e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asNewProjectHtml()); // TODO failed to create a new project
+            logger.warn("Failed to add " + project.getId(), e);
+            throw validationError(messages -> messages.addErrorsFailedToCreateProject(GLOBAL, form.name), () -> asNewProjectHtml());
         }
-        return redirectWith(getClass(), moreUrl("details", project.getId()));
+        return redirectDetailsHtml(project.getId(), null, null);
     }
 
     @Execute
@@ -139,7 +145,7 @@ public class AdminAutomlAction extends FioneAdminAction {
         try {
             final Project project = projectHelper.getProject(projectId);
             final String frameId = LaRequestUtil.getOptionalRequest().map(req -> {
-                final String fid = req.getParameter("frameId");
+                final String fid = req.getParameter(FRAME_ID);
                 if (fid != null) {
                     for (final String id : project.getFrameIds()) {
                         if (fid.equals(id)) {
@@ -153,7 +159,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 return null;
             }).orElse(null);
             final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> {
-                final String mid = req.getParameter("leaderboardId");
+                final String mid = req.getParameter(LEADERBOARD_ID);
                 String lastId = null;
                 if (mid != null) {
                     for (final JobV3 id : project.getJobs()) {
@@ -177,8 +183,8 @@ public class AdminAutomlAction extends FioneAdminAction {
             return asHtml(path_AdminAutoml_AdminAutomlDetailsJsp).renderWith(data -> {
                 RenderDataUtil.register(data, "token", token);
                 RenderDataUtil.register(data, "project", project);
-                RenderDataUtil.register(data, "frameId", frameId);
-                RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+                RenderDataUtil.register(data, FRAME_ID, frameId);
+                RenderDataUtil.register(data, LEADERBOARD_ID, leaderboardId);
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
                 }
@@ -187,11 +193,10 @@ public class AdminAutomlAction extends FioneAdminAction {
                 }
             });
         } catch (final Exception e) {
-            logger.error("Failed to read " + projectId, e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asListHtml()); // TODO Failed to load project {0}
+            logger.warn("Failed to read " + projectId, e);
+            throw validationError(messages -> messages.addErrorsFailedToLoadProject(GLOBAL, StringCodecUtil.decode(projectId)),
+                    this::asListHtml);
         }
-        return redirect(getClass()); // not invoked
     }
 
     @Execute
@@ -209,39 +214,40 @@ public class AdminAutomlAction extends FioneAdminAction {
         final String fileName = StringCodecUtil.normalize(form.dataFile.getFileName());
         try (InputStream in = form.dataFile.getInputStream()) {
             projectHelper.addDataSet(form.projectId, fileName, in);
-            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL)); // TODO uploaded {0}
+            saveMessage(messages -> messages.addSuccessUploadedDataset(GLOBAL, fileName));
         } catch (final Exception e) {
-            logger.error("Failed to add " + form.dataFile.getFileName(), e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asNewDataHtml(form.projectId));// TODO failed to upload {0}
+            logger.warn("Failed to add " + form.dataFile.getFileName(), e);
+            throw validationError(messages -> messages.addErrorsFailedToUploadDataset(GLOBAL, fileName),
+                    () -> asNewDataHtml(form.projectId));
         }
-        return redirectWith(getClass(), moreUrl("details", form.projectId));
+        return redirectDetailsHtml(form.projectId, null, null);
     }
 
     @Execute
     @Secured({ ROLE })
     public HtmlResponse deletedataset(final DataSetForm form) {
-        validate(form, messages -> {}, () -> redirectWith(getClass(), moreUrl("details", form.projectId)));
-        verifyTokenKeep(() -> redirectWith(getClass(), moreUrl("details", form.projectId)));
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         try {
             projectHelper.deleteDataSet(form.projectId, form.dataSetId);
-            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL));// TODO deleting data {0}
+            saveMessage(messages -> messages.addSuccessDeletingDataset(GLOBAL, form.dataSetId));
         } catch (final Exception e) {
-            logger.error("Failed to delete data: {}", form.dataSetId, e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asListHtml()); // TODO failed to delete data {0}
+            logger.warn("Failed to delete data: {}", form.dataSetId, e);
+            throw validationError(messages -> messages.addErrorsFailedToDeleteDataset(GLOBAL, form.dataSetId), this::asListHtml);
         }
-        return redirectWith(getClass(), moreUrl("details", form.projectId));
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
 
     @Execute
     @Secured({ ROLE, ROLE + VIEW })
     public ActionResponse downloaddataset(final DataSetForm form) {
-        validate(form, messages -> {}, () -> redirectWith(getClass(), moreUrl("details", form.projectId)));
-        verifyTokenKeep(() -> redirectWith(getClass(), moreUrl("details", form.projectId)));
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
 
         final DataSet dataSet = projectHelper.getDataSet(form.projectId, form.dataSetId);
-        // TODO dataSet is null
+        if (dataSet == null) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
+        }
 
         return asStream(dataSet.getName()).contentTypeOctetStream().stream(out -> {
             projectHelper.writeContent(form.projectId, dataSet, out);
@@ -261,8 +267,14 @@ public class AdminAutomlAction extends FioneAdminAction {
         validate(form, messages -> {}, () -> asNewFrameaHtml(form.projectId, form.dataSetId));
         verifyToken(() -> asNewFrameaHtml(form.projectId, form.dataSetId));
         final DataSet dataSet = projectHelper.getDataSet(form.projectId, form.dataSetId);
-        // TODO check if dataSet exists
+        if (dataSet == null) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
+        }
+
         final ParseV3 schema = dataSet.getSchema();
+        if (schema == null) {
+            throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
+        }
         for (int i = 0; i < schema.columnNames.length; i++) {
             final String value = form.columns.get(StringCodecUtil.encodeUrlSafe(schema.columnNames[i]));
             if (StringUtil.isNotBlank(value)) {
@@ -271,63 +283,63 @@ public class AdminAutomlAction extends FioneAdminAction {
         }
         try {
             projectHelper.createFrame(form.projectId, dataSet);
-            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL));// TODO loading a new frame
+            saveMessage(messages -> messages.addSuccessLoadDataset(GLOBAL, dataSet.getName()));
         } catch (final Exception e) {
-            logger.error("Failed to create frame: {}", dataSet, e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asNewFrameaHtml(form.projectId, form.dataSetId)); // TODO failed to create a new frame
+            logger.warn("Failed to create frame: {}", dataSet, e);
+            throw validationError(messages -> messages.addErrorsFailedToCreateFrame(GLOBAL, dataSet.getName()),
+                    () -> asNewFrameaHtml(form.projectId, form.dataSetId));
         }
-        return redirectWith(getClass(), moreUrl("details", form.projectId));
+        return redirectDetailsHtml(form.projectId, null, null);
     }
 
     @Execute
     @Secured({ ROLE })
-    public HtmlResponse deleteframe(final String projectId, final String frameId) {
-        // TODO validate(form, messages -> {}, () -> as...());
-        // TODO verifyToken(() -> as...());
+    public HtmlResponse deleteframe(final FrameForm form) {
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         try {
-            projectHelper.deleteFrame(frameId);
-            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL));// TODO Deleted frame {0}
+            projectHelper.deleteFrame(form.frameId);
+            saveMessage(messages -> messages.addSuccessDeletedFrame(GLOBAL, form.frameId));
         } catch (final Exception e) {
-            logger.error("Failed to delete frame: {}", frameId, e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asListHtml()); // TODO failed to delete frame {0}
+            logger.warn("Failed to delete frame: {}", form.frameId, e);
+            throw validationError(messages -> messages.addErrorsFailedToDeleteFrame(GLOBAL, form.frameId), this::asListHtml);
         }
-        return redirectWith(getClass(), moreUrl("details", projectId).params("frameId", frameId));
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
 
     @Execute
     @Secured({ ROLE })
-    public HtmlResponse deletejob(final String projectId, final String jobId) {
-        // TODO validate(form, messages -> {}, () -> as...());
-        // TODO verifyToken(() -> as...());
+    public HtmlResponse deletejob(final JobForm form) {
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         try {
-            projectHelper.deleteJob(projectId, jobId);
-            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL));// TODO Deleted job {0}
+            projectHelper.deleteJob(form.projectId, form.jobId);
+            saveMessage(messages -> messages.addSuccessDeletedJob(GLOBAL, form.jobId));
         } catch (final Exception e) {
-            logger.error("Failed to delete frame: {}", jobId, e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asListHtml()); // TODO failed to delete job {0}
+            logger.warn("Failed to delete frame: {}", form.jobId, e);
+            throw validationError(messages -> messages.addErrorsFailedToDeleteJob(GLOBAL, form.jobId), this::asListHtml);
         }
-        return redirectWith(getClass(), moreUrl("details", projectId));
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
 
     @Execute
     @Secured({ ROLE })
     public HtmlResponse loaddataset(final DataSetForm form) {
-        validate(form, messages -> {}, () -> redirectWith(getClass(), moreUrl("details", form.projectId)));
-        verifyTokenKeep(() -> redirectWith(getClass(), moreUrl("details", form.projectId)));
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         try {
             final DataSet dataSet = projectHelper.getDataSet(form.projectId, form.dataSetId);
-            // TODO check if dataSet exists
+            if (dataSet == null) {
+                throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
+            }
             projectHelper.loadDataSetSchema(form.projectId, dataSet);
-            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL));// TODO load data {0}
+            saveMessage(messages -> messages.addSuccessLoadDataset(GLOBAL, StringCodecUtil.decode(form.dataSetId)));
         } catch (final Exception e) {
-            logger.error("Failed to load {} in {}.", form.dataSetId, form.projectId, e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asListHtml()); // TODO failed to load data {0}
+            logger.warn("Failed to load {} in {}.", form.dataSetId, form.projectId, e);
+            throw validationError(messages -> messages.addErrorsFailedToLoadDataset(GLOBAL, StringCodecUtil.decode(form.dataSetId)),
+                    this::asListHtml);
         }
-        return redirectWith(getClass(), moreUrl("details", form.projectId));
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
 
     @Execute
@@ -344,38 +356,39 @@ public class AdminAutomlAction extends FioneAdminAction {
         verifyToken(this::asNewProjectHtml);
 
         final Project project = projectHelper.getProject(form.projectId);
-        // TODO null check
-
-        final String projectName = StringCodecUtil.normalize(project.getName());
-        final AutoMLBuildControlV99 buildControl =
-                AutoMLBuildControlBuilder
-                        .create()
-                        .projectName(projectName)
-                        .nfolds(5)
-                        .balanceClasses(Boolean.valueOf(form.balanceClasses))
-                        .stoppingCriteria(
-                                AutoMLStoppingCriteriaBuilder.create().seed(form.seed).maxModels(form.maxModels)
-                                        .maxRuntimeSecs(form.maxRuntimeSecs).maxRuntimeSecsPerModel(form.maxRuntimeSecsPerModel)
-                                        .stoppingRounds(form.stoppingRounds)
-                                        .stoppingMetric(ScoreKeeperStoppingMetric.valueOf(form.stoppingMetric))
-                                        .stoppingTolerance(Double.valueOf(form.stoppingTolerance)).build())
-                        .keepCrossValidationPredictions(Boolean.valueOf(form.keepCrossValidationPredictions))
-                        .keepCrossValidationModels(Boolean.valueOf(form.keepCrossValidationModels))
-                        .keepCrossValidationFoldAssignment(Boolean.valueOf(form.keepCrossValidationFoldAssignment)).build();
-        final AutoMLInputV99 input =
-                AutoMLInputBuilder.create().trainingFrame(form.frameId).responseColumn(form.responseColumn, null)
-                        .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
-        final AutoMLBuildModelsV99 buildModels = AutoMLBuildModelsBuilder.create().build();
-
-        try {
-            projectHelper.runAutoML(form.projectId, buildControl, input, buildModels);
-            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL));
-        } catch (final Exception e) {
-            logger.error("Failed to run AutoML.", e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asSetupMlHtml(form.projectId, form.frameId));// TODO fix a message
+        if (project == null) {
+            throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, form.projectId), this::asListHtml);
         }
-        return redirectWith(getClass(), moreUrl("details", form.projectId).params("frameId", form.frameId));
+        final String projectName = StringCodecUtil.normalize(project.getName());
+        try {
+            final AutoMLBuildControlV99 buildControl =
+                    AutoMLBuildControlBuilder
+                            .create()
+                            .projectName(projectName)
+                            .nfolds(5)
+                            .balanceClasses(Boolean.valueOf(form.balanceClasses))
+                            .stoppingCriteria(
+                                    AutoMLStoppingCriteriaBuilder.create().seed(form.seed).maxModels(form.maxModels)
+                                            .maxRuntimeSecs(form.maxRuntimeSecs).maxRuntimeSecsPerModel(form.maxRuntimeSecsPerModel)
+                                            .stoppingRounds(form.stoppingRounds)
+                                            .stoppingMetric(ScoreKeeperStoppingMetric.valueOf(form.stoppingMetric))
+                                            .stoppingTolerance(form.stoppingTolerance).build())
+                            .keepCrossValidationPredictions(Boolean.valueOf(form.keepCrossValidationPredictions))
+                            .keepCrossValidationModels(Boolean.valueOf(form.keepCrossValidationModels))
+                            .keepCrossValidationFoldAssignment(Boolean.valueOf(form.keepCrossValidationFoldAssignment)).build();
+            final AutoMLInputV99 input =
+                    AutoMLInputBuilder.create().trainingFrame(form.frameId).responseColumn(form.responseColumn, null)
+                            .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
+            final AutoMLBuildModelsV99 buildModels = AutoMLBuildModelsBuilder.create().build();
+
+            projectHelper.runAutoML(form.projectId, buildControl, input, buildModels);
+            saveMessage(messages -> messages.addSuccessBuildingModels(GLOBAL));
+        } catch (final Exception e) {
+            logger.warn("Failed to run AutoML.", e);
+            throw validationError(messages -> messages.addErrorsFailedToStartBuild(GLOBAL),
+                    () -> asSetupMlHtml(form.projectId, form.frameId));
+        }
+        return redirectDetailsHtml(form.projectId, form.frameId, null);
     }
 
     @Execute
@@ -393,15 +406,18 @@ public class AdminAutomlAction extends FioneAdminAction {
 
         try {
             projectHelper.predict(form.projectId, form.frameId, form.modelId, form.name);
-            saveInfo(messages -> messages.addSuccessCrudCreateCrudTable(GLOBAL)); // TODO exporting {0} to {1}
+            saveMessage(messages -> messages.addSuccessExportingFrame(GLOBAL, form.frameId, form.name));
         } catch (final Exception e) {
-            logger.error("Failed to run AutoML.", e);
-            throwValidationError(messages -> messages.addErrorsCrudFailedToCreateCrudTable(GLOBAL, buildThrowableMessage(e)),
-                    () -> asSetupMlHtml(form.projectId, form.frameId));// TODO Failed to export {0}
+            logger.warn("Failed to run AutoML.", e);
+            throw validationError(messages -> messages.addErrorsFailedToExportFrame(GLOBAL, form.frameId),
+                    () -> asSetupMlHtml(form.projectId, form.frameId));
         }
-        return redirectWith(getClass(),
-                moreUrl("details", form.projectId).params("frameId", form.frameId, "leaderboardId", form.leaderboardId));
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
+
+    // TODO delete all jobs
+    // TODO delete project
+    // TODO reset session
 
     // ===================================================================================
     //                                                                              JSP
@@ -427,9 +443,15 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     private HtmlResponse asNewFrameaHtml(final String projectId, final String dataSetId) {
         final DataSet dataSet = projectHelper.getDataSet(projectId, dataSetId);
-        // TODO check if dataSet is null
+        if (dataSet == null) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
+                    this::asListHtml);
+        }
         final ParseV3 schema = dataSet.getSchema();
-        // TODO check if schema is null
+        if (schema == null) {
+            throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
+                    this::asListHtml);
+        }
         return asHtml(path_AdminAutoml_AdminAutomlNewframeJsp).useForm(CreateFrameForm.class, setup -> {
             setup.setup(form -> {
                 form.projectId = projectId;
@@ -466,20 +488,25 @@ public class AdminAutomlAction extends FioneAdminAction {
                 data -> {
                     final String[] columnItems = Arrays.stream(columnSummaries.columns).map(c -> c.label).toArray(n -> new String[n]);
                     RenderDataUtil.register(data, "columnItems", columnItems);
-                    RenderDataUtil.register(data, "stoppingMetricItems",
-                            Arrays.stream(ScoreKeeperStoppingMetric.values()).map(v -> v.toString()).toArray(n -> new String[n]));
+                    RenderDataUtil.register(
+                            data,
+                            "stoppingMetricItems",
+                            Arrays.stream(ScoreKeeperStoppingMetric.values()).map(ScoreKeeperStoppingMetric::toString)
+                                    .toArray(n -> new String[n]));
                     RenderDataUtil.register(
                             data,
                             "sortMetricItems",
-                            Arrays.stream(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.values()).map(v -> v.toString())
-                                    .toArray(n -> new String[n]));
+                            Arrays.stream(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.values())
+                                    .map(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider::toString).toArray(n -> new String[n]));
 
                 });
     }
 
     private HtmlResponse asPredictionMlHtml(final String projectId, final String frameId, final String leaderboardId) {
         final LeaderboardV99 leaderboard = leaderboardId != null ? projectHelper.getLeaderboard(projectId, leaderboardId) : null;
-        // TODO check if leaderboard is null
+        if (leaderboard == null) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
+        }
         final String[] modelIdItems = Arrays.stream(leaderboard.models).map(m -> m.name).toArray(n -> new String[n]);
 
         return asHtml(path_AdminAutoml_AdminAutomlPredictJsp).useForm(PredictSettingForm.class, setup -> {
@@ -492,5 +519,22 @@ public class AdminAutomlAction extends FioneAdminAction {
         }).renderWith(data -> {
             RenderDataUtil.register(data, "modelIdItems", modelIdItems);
         });
+    }
+
+    private HtmlResponse redirectDetailsHtml(final String projectId, final String frameId, final String leaderboardId) {
+        final UrlChain moreUrl = moreUrl(DETAILS, projectId);
+        final List<String> params = new ArrayList<>();
+        if (StringUtil.isNotBlank(frameId)) {
+            params.add(FRAME_ID);
+            params.add(frameId);
+        }
+        if (StringUtil.isNotBlank(leaderboardId)) {
+            params.add(LEADERBOARD_ID);
+            params.add(leaderboardId);
+        }
+        if (!params.isEmpty()) {
+            moreUrl.params(params.toArray(n -> new String[n]));
+        }
+        return redirectWith(getClass(), moreUrl);
     }
 }

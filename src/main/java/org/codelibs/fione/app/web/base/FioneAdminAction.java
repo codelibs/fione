@@ -16,11 +16,35 @@
 package org.codelibs.fione.app.web.base;
 
 import org.codelibs.fess.app.web.base.FessAdminAction;
+import org.codelibs.fione.exception.FioneSystemException;
 import org.codelibs.fione.mylasta.action.FioneHtmlPath;
+import org.codelibs.fione.mylasta.action.FioneMessages;
+import org.lastaflute.web.validation.VaErrorHook;
+import org.lastaflute.web.validation.VaMessenger;
 
 /**
  * @author shinsuke
  */
 public abstract class FioneAdminAction extends FessAdminAction implements FioneHtmlPath {
 
+    protected void saveMessage(final VaMessenger<FioneMessages> validationMessagesLambda) {
+        final FioneMessages messages = createMessages();
+        validationMessagesLambda.message(messages);
+        sessionManager.info().saveMessages(messages);
+    }
+
+    protected FioneSystemException validationError(final VaMessenger<FioneMessages> validationMessagesLambda,
+            final VaErrorHook validationErrorLambda) {
+        createValidator().throwValidationError(() -> {
+            final FioneMessages messages = createMessages();
+            validationMessagesLambda.message(messages);
+            return messages;
+        }, validationErrorLambda);
+        return new FioneSystemException("validation error"); // no-op
+    }
+
+    @Override
+    public FioneMessages createMessages() { // application may call
+        return new FioneMessages(); // overriding to change return type to concrete-class
+    }
 }
