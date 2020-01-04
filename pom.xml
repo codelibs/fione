@@ -6,7 +6,7 @@
 	<groupId>org.codelibs.fess</groupId>
 	<artifactId>fione</artifactId>
 	<packaging>war</packaging>
-	<name>Fione: Find Out kNowlege Extension</name>
+	<name>Fione</name>
 	<version>13.6.0-SNAPSHOT</version>
 	<url>https://fess.codelibs.org/</url>
 	<inceptionYear>2009</inceptionYear>
