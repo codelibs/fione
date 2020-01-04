@@ -32,7 +32,7 @@ public class NodeV3 extends SchemaV3 {
     public String ipPort;
 
     /**
-     * (now-last_ping)<HeartbeatThread.TIMEOUT
+     * (now-last_ping)&lt;HeartbeatThread.TIMEOUT
      */
     public boolean healthy;
 

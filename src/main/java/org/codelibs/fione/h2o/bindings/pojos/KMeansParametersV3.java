@@ -50,7 +50,7 @@ public class KMeansParametersV3 extends ClusteringModelParametersSchemaV3 {
     public KMeansInitialization init;
 
     /**
-     * Whether to estimate the number of clusters (<=k) iteratively and deterministically.
+     * Whether to estimate the number of clusters (&lt;=k) iteratively and deterministically.
      */
     @SerializedName("estimate_k")
     public boolean estimateK;

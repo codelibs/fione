@@ -103,7 +103,7 @@ public class DeepLearningParametersV3 extends ModelParametersSchemaV3 {
     public double epsilon;
 
     /**
-     * Learning rate (higher => less stable, lower => slower convergence).
+     * Learning rate (higher =&gt; less stable, lower =&gt; slower convergence).
      */
     public double rate;
 

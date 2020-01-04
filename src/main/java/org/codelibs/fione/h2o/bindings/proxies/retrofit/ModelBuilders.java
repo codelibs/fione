@@ -160,7 +160,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -301,7 +301,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -404,7 +404,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -488,7 +488,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -583,7 +583,7 @@ public interface ModelBuilders {
      *   @param adaptive_rate Adaptive learning rate.
      *   @param rho Adaptive learning rate time decay factor (similarity to prior updates).
      *   @param epsilon Adaptive learning rate smoothing factor (to avoid divisions by zero and allow progress).
-     *   @param rate Learning rate (higher => less stable, lower => slower convergence).
+     *   @param rate Learning rate (higher =&gt; less stable, lower =&gt; slower convergence).
      *   @param rate_annealing Learning rate annealing: rate / (1 + rate_annealing * samples).
      *   @param rate_decay Learning rate decay factor between layers (N-th layer: rate * rate_decay ^ (n - 1).
      *   @param momentum_start Initial momentum at the beginning of training (try 0.5).
@@ -647,7 +647,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -774,7 +774,7 @@ public interface ModelBuilders {
      *   @param adaptive_rate Adaptive learning rate.
      *   @param rho Adaptive learning rate time decay factor (similarity to prior updates).
      *   @param epsilon Adaptive learning rate smoothing factor (to avoid divisions by zero and allow progress).
-     *   @param rate Learning rate (higher => less stable, lower => slower convergence).
+     *   @param rate Learning rate (higher =&gt; less stable, lower =&gt; slower convergence).
      *   @param rate_annealing Learning rate annealing: rate / (1 + rate_annealing * samples).
      *   @param rate_decay Learning rate decay factor between layers (N-th layer: rate * rate_decay ^ (n - 1).
      *   @param momentum_start Initial momentum at the beginning of training (try 0.5).
@@ -838,7 +838,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1019,7 +1019,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1184,7 +1184,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1301,7 +1301,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1410,7 +1410,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1499,13 +1499,13 @@ public interface ModelBuilders {
      *   @param standardize Standardize columns before computing distances
      *   @param seed RNG Seed
      *   @param init Initialization mode
-     *   @param estimate_k Whether to estimate the number of clusters (<=k) iteratively and deterministically.
+     *   @param estimate_k Whether to estimate the number of clusters (&lt;=k) iteratively and deterministically.
      *   @param k The max. number of clusters. If estimate_k is disabled, the model will find k centroids, otherwise it
      *            will find up to k centroids.
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1586,13 +1586,13 @@ public interface ModelBuilders {
      *   @param standardize Standardize columns before computing distances
      *   @param seed RNG Seed
      *   @param init Initialization mode
-     *   @param estimate_k Whether to estimate the number of clusters (<=k) iteratively and deterministically.
+     *   @param estimate_k Whether to estimate the number of clusters (&lt;=k) iteratively and deterministically.
      *   @param k The max. number of clusters. If estimate_k is disabled, the model will find k centroids, otherwise it
      *            will find up to k centroids.
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1686,7 +1686,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1783,7 +1783,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1880,7 +1880,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -1976,7 +1976,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -2062,7 +2062,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -2147,7 +2147,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -2254,8 +2254,8 @@ public interface ModelBuilders {
      *   @param sample_rate_per_class A list of row sample rates per class (relative fraction for each class, from 0.0 to
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
-     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be &gt;
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -2268,7 +2268,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -2385,8 +2385,8 @@ public interface ModelBuilders {
      *   @param sample_rate_per_class A list of row sample rates per class (relative fraction for each class, from 0.0 to
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
-     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be &gt;
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -2399,7 +2399,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -2520,8 +2520,8 @@ public interface ModelBuilders {
      *   @param sample_rate_per_class A list of row sample rates per class (relative fraction for each class, from 0.0 to
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
-     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be &gt;
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -2534,7 +2534,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -2657,8 +2657,8 @@ public interface ModelBuilders {
      *   @param sample_rate_per_class A list of row sample rates per class (relative fraction for each class, from 0.0 to
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
-     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be &gt;
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -2671,7 +2671,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -2793,8 +2793,8 @@ public interface ModelBuilders {
      *   @param sample_rate_per_class A list of row sample rates per class (relative fraction for each class, from 0.0 to
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
-     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be &gt;
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -2807,7 +2807,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -2927,8 +2927,8 @@ public interface ModelBuilders {
      *   @param sample_rate_per_class A list of row sample rates per class (relative fraction for each class, from 0.0 to
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
-     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be &gt;
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -2941,7 +2941,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -3039,7 +3039,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -3128,7 +3128,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -3228,7 +3228,7 @@ public interface ModelBuilders {
      *   @param target_ratio_comm_to_comp Target ratio of communication overhead to computation. Only for multi-node
      *                                    operation and train_samples_per_iteration = -2 (auto-tuning).
      *   @param seed Seed for random numbers (affects sampling) - Note: only reproducible when running single threaded.
-     *   @param learning_rate Learning rate (higher => less stable, lower => slower convergence).
+     *   @param learning_rate Learning rate (higher =&gt; less stable, lower =&gt; slower convergence).
      *   @param learning_rate_annealing Learning rate annealing: rate / (1 + rate_annealing * samples).
      *   @param momentum_start Initial momentum at the beginning of training (try 0.5).
      *   @param momentum_ramp Number of training samples for which momentum increases.
@@ -3274,7 +3274,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -3393,7 +3393,7 @@ public interface ModelBuilders {
      *   @param target_ratio_comm_to_comp Target ratio of communication overhead to computation. Only for multi-node
      *                                    operation and train_samples_per_iteration = -2 (auto-tuning).
      *   @param seed Seed for random numbers (affects sampling) - Note: only reproducible when running single threaded.
-     *   @param learning_rate Learning rate (higher => less stable, lower => slower convergence).
+     *   @param learning_rate Learning rate (higher =&gt; less stable, lower =&gt; slower convergence).
      *   @param learning_rate_annealing Learning rate annealing: rate / (1 + rate_annealing * samples).
      *   @param momentum_start Initial momentum at the beginning of training (try 0.5).
      *   @param momentum_ramp Number of training samples for which momentum increases.
@@ -3439,7 +3439,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -3540,14 +3540,14 @@ public interface ModelBuilders {
      *                           training data                 will be randomly down-sampled; useful range is (0, 1e-5)
      *   @param norm_model Use Hierarchical Softmax
      *   @param epochs Number of training iterations to run
-     *   @param min_word_freq This will discard words that appear less than <int> times
+     *   @param min_word_freq This will discard words that appear less than &lt;int&gt; times
      *   @param init_learning_rate Set the starting learning rate
      *   @param word_model Use the Skip-Gram model
      *   @param pre_trained Id of a data frame that contains a pre-trained (external) word2vec model
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -3628,14 +3628,14 @@ public interface ModelBuilders {
      *                           training data                 will be randomly down-sampled; useful range is (0, 1e-5)
      *   @param norm_model Use Hierarchical Softmax
      *   @param epochs Number of training iterations to run
-     *   @param min_word_freq This will discard words that appear less than <int> times
+     *   @param min_word_freq This will discard words that appear less than &lt;int&gt; times
      *   @param init_learning_rate Set the starting learning rate
      *   @param word_model Use the Skip-Gram model
      *   @param pre_trained Id of a data frame that contains a pre-trained (external) word2vec model
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -3711,7 +3711,7 @@ public interface ModelBuilders {
     /**
      * Train a StackedEnsemble model.
      *   @param base_models List of models (or model ids) to ensemble/stack together. If not using blending frame, then
-     *                      models must have been cross-validated using nfolds > 1, and folds must be identical across
+     *                      models must have been cross-validated using nfolds &gt; 1, and folds must be identical across
      *                      models.
      *   @param metalearner_algorithm Type of algorithm to use as the metalearner. Options include 'AUTO' (GLM with non
      *                                negative weights; if validation_frame is present, a lambda search is performed),
@@ -3719,7 +3719,7 @@ public interface ModelBuilders {
      *                                (Random Forest with default parameters), or 'deeplearning' (Deep Learning with
      *                                default parameters).
      *   @param metalearner_nfolds Number of folds for K-fold cross-validation of the metalearner algorithm (0 to disable
-     *                             or >= 2).
+     *                             or &gt;= 2).
      *   @param metalearner_fold_assignment Cross-validation fold assignment scheme for metalearner cross-validation.
      *                                      Defaults to AUTO (which is currently set to Random). The 'Stratified' option
      *                                      will stratify the folds based on the response variable, for classification
@@ -3735,7 +3735,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -3813,7 +3813,7 @@ public interface ModelBuilders {
     /**
      * Validate a set of StackedEnsemble model builder parameters.
      *   @param base_models List of models (or model ids) to ensemble/stack together. If not using blending frame, then
-     *                      models must have been cross-validated using nfolds > 1, and folds must be identical across
+     *                      models must have been cross-validated using nfolds &gt; 1, and folds must be identical across
      *                      models.
      *   @param metalearner_algorithm Type of algorithm to use as the metalearner. Options include 'AUTO' (GLM with non
      *                                negative weights; if validation_frame is present, a lambda search is performed),
@@ -3821,7 +3821,7 @@ public interface ModelBuilders {
      *                                (Random Forest with default parameters), or 'deeplearning' (Deep Learning with
      *                                default parameters).
      *   @param metalearner_nfolds Number of folds for K-fold cross-validation of the metalearner algorithm (0 to disable
-     *                             or >= 2).
+     *                             or &gt;= 2).
      *   @param metalearner_fold_assignment Cross-validation fold assignment scheme for metalearner cross-validation.
      *                                      Defaults to AUTO (which is currently set to Random). The 'Stratified' option
      *                                      will stratify the folds based on the response variable, for classification
@@ -3837,7 +3837,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -3930,7 +3930,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -4022,7 +4022,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -4103,7 +4103,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -4179,7 +4179,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -4269,7 +4269,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.
@@ -4364,7 +4364,7 @@ public interface ModelBuilders {
      *   @param model_id Destination id for this model; auto-generated if not specified.
      *   @param training_frame Id of the training data frame.
      *   @param validation_frame Id of the validation data frame.
-     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     *   @param nfolds Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      *   @param keep_cross_validation_models Whether to keep the cross-validation models.
      *   @param keep_cross_validation_predictions Whether to keep the predictions of the cross-validation models.
      *   @param keep_cross_validation_fold_assignment Whether to keep the cross-validation fold assignment.

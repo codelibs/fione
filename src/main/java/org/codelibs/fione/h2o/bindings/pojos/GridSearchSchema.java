@@ -48,7 +48,7 @@ public class GridSearchSchema extends SchemaV3 {
 
     /**
      * Level of parallelism during grid model building. 1 = sequential building (default). 0 for adaptive
-     * parallelism.Any number > 1 sets the exact number of models built in parallel.
+     * parallelism.Any number &gt; 1 sets the exact number of models built in parallel.
      */
     public int parallelism;
 

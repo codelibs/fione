@@ -95,7 +95,7 @@ public class DeepWaterParametersV3 extends ModelParametersSchemaV3 {
     public long seed;
 
     /**
-     * Learning rate (higher => less stable, lower => slower convergence).
+     * Learning rate (higher =&gt; less stable, lower =&gt; slower convergence).
      */
     @SerializedName("learning_rate")
     public double learningRate;

@@ -39,7 +39,7 @@ public class ModelParametersSchemaV3 extends SchemaV3 {
     public FrameKeyV3 validationFrame;
 
     /**
-     * Number of folds for K-fold cross-validation (0 to disable or >= 2).
+     * Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
      */
     public int nfolds;
 

@@ -22,7 +22,7 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
 
     /**
      * List of models (or model ids) to ensemble/stack together. If not using blending frame, then models must have been
-     * cross-validated using nfolds > 1, and folds must be identical across models.
+     * cross-validated using nfolds &gt; 1, and folds must be identical across models.
      */
     @SerializedName("base_models")
     public ModelKeyV3[] baseModels;
@@ -37,7 +37,7 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
     public EnsembleMetalearnerAlgorithm metalearnerAlgorithm;
 
     /**
-     * Number of folds for K-fold cross-validation of the metalearner algorithm (0 to disable or >= 2).
+     * Number of folds for K-fold cross-validation of the metalearner algorithm (0 to disable or &gt;= 2).
      */
     @SerializedName("metalearner_nfolds")
     public int metalearnerNfolds;
@@ -93,7 +93,7 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
     // Id of the validation data frame.
     public FrameKeyV3 validationFrame;
 
-    // Number of folds for K-fold cross-validation (0 to disable or >= 2).
+    // Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
     public int nfolds;
 
     // Whether to keep the cross-validation models.

@@ -31,12 +31,6 @@ import retrofit2.http.POST;
 
 public interface AutoMLBuilder {
 
-    /**
-     * Start an AutoML build process.
-     *   @param build_control Specification of overall controls for the AutoML build process.
-     *   @param input_spec Specification of the input data for the AutoML build process.
-     *   @param build_models If present, specifies details of how to train models.
-     */
     //    @FormUrlEncoded
     //    @POST("/99/AutoMLBuilder")
     //    Call<AutoMLBuildSpecV99> build(@Field("build_control") AutoMLBuildControlV99 build_control,
@@ -45,6 +39,12 @@ public interface AutoMLBuilder {
     @POST("/99/AutoMLBuilder")
     Call<AutoMLBuildSpecV99> build(@Body Map<String, Object> body);
 
+    /**
+     * Start an AutoML build process.
+     *   @param buildControl Specification of overall controls for the AutoML build process.
+     *   @param inputSpec Specification of the input data for the AutoML build process.
+     *   @param buildModels If present, specifies details of how to train models.
+     */
     default Call<AutoMLBuildSpecV99> build(final AutoMLBuildControlV99 buildControl, final AutoMLInputV99 inputSpec,
             final AutoMLBuildModelsV99 buildModels) {
         final Map<String, Object> body = new HashMap<>();

@@ -34,7 +34,7 @@ public class AutoMLBuildControlV99 extends SchemaV3 {
     public AutoMLStoppingCriteriaV99 stoppingCriteria;
 
     /**
-     * Number of folds for k-fold cross-validation (defaults to 5, must be >=2 or use 0 to disable). Disabling prevents
+     * Number of folds for k-fold cross-validation (defaults to 5, must be &gt;=2 or use 0 to disable). Disabling prevents
      * Stacked Ensembles from being built.
      */
     public int nfolds;
