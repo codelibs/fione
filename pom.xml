@@ -350,7 +350,9 @@
 								**/WEB-INF/env/**,
 								**/images/**,
 								**/WEB-INF/view/**,
-								**/WEB-INF/fi.tld
+								**/WEB-INF/fi.tld,
+								**/WEB-INF/lib/retrofit*,
+								**/WEB-INF/lib/converter-gson*,
 							</includes>
 							<mapper>
 								<type>perm</type>
@@ -412,6 +414,8 @@
 										<include>**/images/**</include>
 										<include>**/WEB-INF/view/**</include>
 										<include>**/WEB-INF/fi.tld</include>
+										<include>**/WEB-INF/lib/retrofit*</include>
+										<include>**/WEB-INF/lib/converter-gson*</include>
 									</includes>
 								</source>
 							</sources>
