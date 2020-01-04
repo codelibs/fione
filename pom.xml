@@ -361,7 +361,7 @@
 							</mapper>
 						</data>
 						<!-- Add extensions -->
-						<data>
+						<!-- <data>
 							<type>directory</type>
 							<src>${project.basedir}/src/main/assemblies/extension</src>
 							<mapper>
@@ -370,7 +370,7 @@
 								<user>${packaging.fess.user}</user>
 								<group>${packaging.fess.group}</group>
 							</mapper>
-						</data>
+						</data> -->
 					</dataSet>
 				</configuration>
 			</plugin>
@@ -416,18 +416,14 @@
 								</source>
 							</sources>
 						</mapping>
-						<mapping>
+						<!-- <mapping>
 							<directory>${packaging.fess.extension.dir}</directory>
 							<sources>
 								<source>
 									<location>${project.basedir}/src/main/assemblies/extension</location>
 								</source>
 							</sources>
-						</mapping>
-						<mapping>
-							<directory>${packaging.fess.app.dir}/WEB-INF/commands</directory>
-							<filemode>755</filemode>
-						</mapping>
+						</mapping> -->
 					</mappings>
 					<postinstallScriptlet>
 						<scriptFile>${project.build.directory}/generated-packaging/rpm/scripts/postinst</scriptFile>
