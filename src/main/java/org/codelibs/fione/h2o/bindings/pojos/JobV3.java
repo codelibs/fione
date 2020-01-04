@@ -85,6 +85,12 @@ public class JobV3 extends SchemaV3 {
     @SerializedName("ready_for_view")
     public boolean readyForView;
 
+    public static final String RUNNING = "RUNNING";
+
+    public static final String DONE = "DONE";
+
+    public static final String FAILED = "FAILED";
+
     /**
      * Public constructor
      */

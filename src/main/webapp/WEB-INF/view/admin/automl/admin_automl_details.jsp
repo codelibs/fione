@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title><la:message key="labels.admin_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
+<c:if test="${autoReload}"><meta http-equiv="refresh" content="10;URL=${contextPath}/admin/automl/details/${f:u(project.id)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}"/></c:if>
 </head>
 <body class="skin-blue sidebar-mini">
 	<div class="wrapper">
@@ -37,11 +38,55 @@
 					<div class="col-md-3">
 						<div class="box box-primary">
 							<div class="box-header with-border">
+								<h3 class="box-title">Actions</h3>
+								<div class="btn-group pull-right">
+									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+								</div>
+							</div>
+							<div class="box-body">
+								<div class="row">
+									<form method="post" action="${contextPath}/admin/automl/">
+									<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
+									<input type="hidden" name="projectId" value="${f:u(project.id)}">
+									<div class="btn-group-vertical col-sm-12" role="group" aria-label="Actions">
+										<c:if test="${not empty frameId}">
+										<div class="input-group">
+											<span class="input-group-addon" id="basic-addon1"><i class="fas fa-table"></i></span>
+											<span class="form-control">${f:h(frameId)}</span>
+										</div>
+										</c:if>
+										<c:if test="${not empty frameId and leaderboard != null}">
+										<div class="input-group">
+											<span class="input-group-addon" id="basic-addon1"><i class="fas fa-hammer"></i></span>
+											<span class="form-control">${f:h(leaderboardId)}</span>
+										</div>
+										</c:if>
+										<la:link href="/admin/automl/newdataset/${f:u(project.id)}" styleClass="btn btn-default">Upload DataSet</la:link>
+										<c:if test="${not empty frameId}">
+											<la:link href="/admin/automl/setupml/${f:u(project.id)}/${f:u(frameId)}" styleClass="btn btn-default">Run AutoML</la:link>
+										</c:if>
+										<c:if test="${not empty frameId and leaderboard != null}">
+											<la:link href="/admin/automl/prediction/${f:u(project.id)}/${f:u(frameId)}/${f:u(leaderboardId)}" styleClass="btn btn-default">Predict DataSet</la:link>
+										</c:if>
+
+										<div class="btn-group" role="group">
+											<button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true"
+												aria-expanded="false">Options <i class="fas fa-caret-down"></i></button>
+											<ul class="dropdown-menu">
+												<li><button type="submit" name="newsession" value="New Session" class="btn btn-link">New Session</button></li>
+												<li><button type="submit" name="deleteproject" value="Delete Project" class="btn btn-link">Delete Project</button></li>
+											</ul>
+										</div>
+									</div>
+									</form>
+								</div>
+							</div>
+						</div>
+						<div class="box box-primary">
+							<div class="box-header with-border">
 								<h3 class="box-title">Data</h3>
 								<div class="btn-group pull-right">
-									<la:link href="/admin/automl/newdataset/${f:u(project.id)}"
-										styleClass="btn btn-box-tool ${f:h(editableClass)}"
-									><em class="fa fa-plus"></em></la:link>
+									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
 							<div class="box-body">
@@ -94,7 +139,9 @@
 						<div class="box box-primary">
 							<div class="box-header with-border">
 								<h3 class="box-title">Frames</h3>
-								<div class="btn-group pull-right"></div>
+								<div class="btn-group pull-right">
+									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+								</div>
 							</div>
 							<div class="box-body">
 								<c:if test="${fn:length(project.frameIds) == 0}">
@@ -141,7 +188,9 @@
 							<div class="box box-primary">
 								<div class="box-header with-border">
 									<h3 class="box-title">Columns</h3>
-									<div class="btn-group pull-right"></div>
+									<div class="btn-group pull-right">
+										<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+									</div>
 								</div>
 								<div class="box-body">
 									<table class="table table-bordered table-striped">
@@ -176,13 +225,14 @@
 										<i class="fas fa-th-list"></i>
 									</button>
 									<ul class="dropdown-menu" role="menu">
-										<c:if test="${not empty frameId}">
-											<li><la:link href="/admin/automl/setupml/${f:u(project.id)}/${f:u(frameId)}">Run AutoML</la:link></li>
-										</c:if>
-										<c:if test="${not empty frameId and leaderboard != null}">
-											<li><la:link href="/admin/automl/prediction/${f:u(project.id)}/${f:u(frameId)}/${f:u(leaderboardId)}">Prediction</la:link></li>
-										</c:if>
-										<li><a href="#">Delete All</a></li>
+										<li><form method="post" action="${contextPath}/admin/automl/">
+										<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
+										<input type="hidden" name="projectId" value="${f:u(project.id)}">
+										<input type="hidden" name="frameId" value="${f:u(frameId)}">
+										<input type="hidden" name="leaderboardId" value="${f:u(leaderboardId)}"> 
+										<input type="hidden" name="jobId" value="_all_">
+										<button type="submit" name="deletealljobs" value="Delete All" class="btn btn-link">Delete All</button>
+										</form></li>
 									</ul>
 								</div>
 							</div>

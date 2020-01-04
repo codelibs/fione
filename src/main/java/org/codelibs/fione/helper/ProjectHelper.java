@@ -74,12 +74,6 @@ public class ProjectHelper {
 
     private static final Logger logger = LogManager.getLogger(ProjectHelper.class);
 
-    private static final String FAILED = "FAILED";
-
-    private static final String DONE = "DONE";
-
-    private static final String RUNNING = "RUNNING";
-
     @Resource
     private H2oHelper h2oHelper;
 
@@ -407,7 +401,8 @@ public class ProjectHelper {
 
     public void runAutoML(final String projectId, final AutoMLBuildControlV99 buildControl, final AutoMLInputV99 inputSpec,
             final AutoMLBuildModelsV99 buildModels) {
-        final JobV3 workingJob = createWorkingJob(buildControl.projectName, "AutoML build", 0.2f);
+        final JobV3 workingJob =
+                createWorkingJob(buildControl.projectName + "@@" + inputSpec.responseColumn.columnName, "AutoML build", 0.2f);
         store(projectId, workingJob);
         h2oHelper.runAutoML(buildControl, inputSpec, buildModels).execute(autoMLResponse -> {
             if (logger.isDebugEnabled()) {
@@ -441,7 +436,7 @@ public class ProjectHelper {
             if (update) {
                 final List<JobV3> list = new ArrayList<>();
                 for (final JobV3 job : jobs) {
-                    if (RUNNING.equals(job.status)) {
+                    if (JobV3.RUNNING.equals(job.status)) {
                         final Response<JobsV3> response = h2oHelper.getJobs(keyToString(job.key)).execute();
                         if (logger.isDebugEnabled()) {
                             logger.debug("getJobs: {}", response);
@@ -500,6 +495,10 @@ public class ProjectHelper {
 
     public void deleteJob(final String projectId, final String jobId) {
         store(projectId, Arrays.stream(getJobs(projectId, false)).filter(j -> !jobId.equals(keyToString(j.key))).toArray(n -> new JobV3[n]));
+    }
+
+    public void deleteAllJobs(@Required final String projectId) {
+        store(projectId, new JobV3[0]);
     }
 
     protected synchronized void store(final String projectId, final JobV3[] jobs) {
@@ -604,12 +603,36 @@ public class ProjectHelper {
         }
     }
 
+    public void renewSession() {
+        h2oHelper.closeSession();
+    }
+
+    public void deleteProject(final String projectId) {
+        h2oHelper.closeSession();
+
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+        final String path = projectFolderName + "/" + projectId + "/";
+        for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), path, true)) {
+            try {
+                final Item item = result.get();
+                final String objectName = item.objectName();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("objectName: {}", objectName);
+                }
+                minioClient.removeObject(fessConfig.getStorageBucket(), objectName);
+            } catch (final Exception e) {
+                logger.warn("Failed to remove an object from {}.", path, e);
+            }
+        }
+    }
+
     protected JobV3 createWorkingJob(final String target, final String description, final float progress) {
         final JobV3 job = new JobV3();
         job.key = new JobKeyV3(UuidUtil.create());
         job.key.type = "Key<Job>";
         job.description = description;
-        job.status = RUNNING;
+        job.status = JobV3.RUNNING;
         job.progress = progress;
         job.startTime = System.currentTimeMillis();
         job.msec = 0L;
@@ -624,9 +647,9 @@ public class ProjectHelper {
         job.progress = 1.0f;
         job.msec = System.currentTimeMillis() - job.startTime;
         if (t == null) {
-            job.status = DONE;
+            job.status = JobV3.DONE;
         } else {
-            job.status = FAILED;
+            job.status = JobV3.FAILED;
             job.exception = t.getMessage();
             try (StringWriter writer = new StringWriter()) {
                 t.printStackTrace(new PrintWriter(writer, true));

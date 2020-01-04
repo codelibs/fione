@@ -98,4 +98,15 @@ public class Project {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
+    public boolean hasRunningJobs() {
+        if (jobs != null) {
+            for (final JobV3 job : jobs) {
+                if (JobV3.RUNNING.equals(job.status)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
 }

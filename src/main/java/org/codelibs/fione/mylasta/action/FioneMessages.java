@@ -53,6 +53,15 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Exporting Frame {0} to {1}. */
     public static final String SUCCESS_exporting_frame = "{success.exporting_frame}";
 
+    /** The key of the message: Deleted all jobs. */
+    public static final String SUCCESS_deleted_all_jobs = "{success.deleted_all_jobs}";
+
+    /** The key of the message: Renew a session. */
+    public static final String SUCCESS_renew_session = "{success.renew_session}";
+
+    /** The key of the message: Deleted Project {0}. */
+    public static final String SUCCESS_deleted_project = "{success.deleted_project}";
+
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
 
@@ -94,6 +103,15 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Model information is not found. */
     public static final String ERRORS_leaderboard_is_not_found = "{errors.leaderboard_is_not_found}";
+
+    /** The key of the message: Failed to delete jobs. */
+    public static final String ERRORS_failed_to_delete_jobs = "{errors.failed_to_delete_jobs}";
+
+    /** The key of the message: Failed to renew the current session. */
+    public static final String ERRORS_failed_to_renew_session = "{errors.failed_to_renew_session}";
+
+    /** The key of the message: Failed to delete Project {0}. */
+    public static final String ERRORS_failed_to_delete_project = "{errors.failed_to_delete_project}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -227,6 +245,49 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessExportingFrame(String property, String arg0, String arg1) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_exporting_frame, arg0, arg1));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.deleted_all_jobs' with parameters.
+     * <pre>
+     * message: Deleted all jobs.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessDeletedAllJobs(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_deleted_all_jobs));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.renew_session' with parameters.
+     * <pre>
+     * message: Renew a session.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessRenewSession(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_renew_session));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.deleted_project' with parameters.
+     * <pre>
+     * message: Deleted Project {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessDeletedProject(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_deleted_project, arg0));
         return this;
     }
 
@@ -435,6 +496,49 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addErrorsLeaderboardIsNotFound(String property) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(ERRORS_leaderboard_is_not_found));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_delete_jobs' with parameters.
+     * <pre>
+     * message: Failed to delete jobs.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToDeleteJobs(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_delete_jobs));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_renew_session' with parameters.
+     * <pre>
+     * message: Failed to renew the current session.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToRenewSession(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_renew_session));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_delete_project' with parameters.
+     * <pre>
+     * message: Failed to delete Project {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToDeleteProject(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_delete_project, arg0));
         return this;
     }
 }

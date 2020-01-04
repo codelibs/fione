@@ -3114,37 +3114,37 @@ public class H2oApi {
     /**
      * Issue a new session ID.
      */
-    public InitIDV3 newSession() throws IOException {
+    public Call<InitIDV3> newSession() {
         final InitID s = getService(InitID.class);
-        return s.startSession().execute().body();
+        return s.startSession();
     }
 
-    public InitIDV3 newSession(final String sessionKey) throws IOException {
+    public Call<InitIDV3> newSession(final String sessionKey) {
         final InitID s = getService(InitID.class);
-        return s.startSession(sessionKey, "").execute().body();
+        return s.startSession(sessionKey, "");
     }
 
-    public InitIDV3 newSession(final String sessionKey, final String _excludeFields) throws IOException {
+    public Call<InitIDV3> newSession(final String sessionKey, final String _excludeFields) {
         final InitID s = getService(InitID.class);
-        return s.startSession(sessionKey, _excludeFields).execute().body();
+        return s.startSession(sessionKey, _excludeFields);
     }
 
     /**
      * End a session.
      */
-    public InitIDV3 endSession() throws IOException {
+    public Call<InitIDV3> endSession() {
         final InitID s = getService(InitID.class);
-        return s.endSession().execute().body();
+        return s.endSession();
     }
 
-    public InitIDV3 endSession(final String sessionKey) throws IOException {
+    public Call<InitIDV3> endSession(final String sessionKey) {
         final InitID s = getService(InitID.class);
-        return s.endSession(sessionKey, "").execute().body();
+        return s.endSession(sessionKey, "");
     }
 
-    public InitIDV3 endSession(final String sessionKey, final String _excludeFields) throws IOException {
+    public Call<InitIDV3> endSession(final String sessionKey, final String _excludeFields) {
         final InitID s = getService(InitID.class);
-        return s.endSession(sessionKey, _excludeFields).execute().body();
+        return s.endSession(sessionKey, _excludeFields);
     }
 
     /**

@@ -15,6 +15,9 @@
  */
 package org.codelibs.fione.app.web.admin.automl;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
 
@@ -27,6 +30,11 @@ public class RunSettingForm {
 
     @Required
     public String frameId;
+
+    @Required
+    public String projectName;
+
+    public Map<String, String> ignoredColumns = new HashMap<>();
 
     @Min(value = 0)
     @Max(value = 2147483647)

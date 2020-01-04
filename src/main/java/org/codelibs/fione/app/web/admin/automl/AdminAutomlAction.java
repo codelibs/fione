@@ -191,6 +191,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 if (leaderboard != null) {
                     RenderDataUtil.register(data, "leaderboard", leaderboard);
                 }
+                RenderDataUtil.register(data, "autoReload", project.hasRunningJobs());
             });
         } catch (final Exception e) {
             logger.warn("Failed to read " + projectId, e);
@@ -359,12 +360,14 @@ public class AdminAutomlAction extends FioneAdminAction {
         if (project == null) {
             throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, form.projectId), this::asListHtml);
         }
-        final String projectName = StringCodecUtil.normalize(project.getName());
+        final String[] ignoredColumns =
+                form.ignoredColumns.entrySet().stream().filter(e -> StringUtil.isNotBlank(e.getValue())).map(e -> e.getKey())
+                        .toArray(n -> new String[n]);
         try {
             final AutoMLBuildControlV99 buildControl =
                     AutoMLBuildControlBuilder
                             .create()
-                            .projectName(projectName)
+                            .projectName(form.projectName)
                             .nfolds(5)
                             .balanceClasses(Boolean.valueOf(form.balanceClasses))
                             .stoppingCriteria(
@@ -378,6 +381,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                             .keepCrossValidationFoldAssignment(Boolean.valueOf(form.keepCrossValidationFoldAssignment)).build();
             final AutoMLInputV99 input =
                     AutoMLInputBuilder.create().trainingFrame(form.frameId).responseColumn(form.responseColumn, null)
+                            .ignoredColumns(ignoredColumns)
                             .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
             final AutoMLBuildModelsV99 buildModels = AutoMLBuildModelsBuilder.create().build();
 
@@ -415,9 +419,51 @@ public class AdminAutomlAction extends FioneAdminAction {
         return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
 
-    // TODO delete all jobs
-    // TODO delete project
-    // TODO reset session
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse deletealljobs(final JobForm form) {
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        try {
+            projectHelper.deleteAllJobs(form.projectId);
+            saveMessage(messages -> messages.addSuccessDeletedAllJobs(GLOBAL));
+        } catch (final Exception e) {
+            logger.warn("Failed to delete frame: {}", form.jobId, e);
+            throw validationError(messages -> messages.addErrorsFailedToDeleteJobs(GLOBAL), this::asListHtml);
+        }
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse newsession(final ProjectForm form) {
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        try {
+            projectHelper.renewSession();
+            saveMessage(messages -> messages.addSuccessRenewSession(GLOBAL));
+        } catch (final Exception e) {
+            logger.warn("Failed to renew session: {}", form.projectId, e);
+            throw validationError(messages -> messages.addErrorsFailedToRenewSession(GLOBAL), this::asListHtml);
+        }
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse deleteproject(final ProjectForm form) {
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        try {
+            projectHelper.deleteProject(form.projectId);
+            saveMessage(messages -> messages.addSuccessDeletedProject(GLOBAL, StringCodecUtil.decode(form.projectId)));
+        } catch (final Exception e) {
+            logger.warn("Failed to delete project: {}", form.projectId, e);
+            throw validationError(messages -> messages.addErrorsFailedToDeleteProject(GLOBAL, StringCodecUtil.decode(form.projectId)),
+                    this::asListHtml);
+        }
+        return redirect(getClass());
+    }
 
     // ===================================================================================
     //                                                                              JSP
@@ -483,6 +529,7 @@ public class AdminAutomlAction extends FioneAdminAction {
             setup.setup(form -> {
                 form.projectId = projectId;
                 form.frameId = frameId;
+                form.projectName = StringCodecUtil.normalize(StringCodecUtil.decode(projectId));
             });
         }).renderWith(
                 data -> {

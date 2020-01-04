@@ -48,6 +48,7 @@
 										</la:info>
 										<la:errors property="_global" />
 									</div>
+									<h4>Basic</h4>
 									<div class="form-group">
 										<label for="responseColumn" class="col-sm-3 control-label">Predicted Column</label>
 										<div class="col-sm-9">
@@ -68,7 +69,26 @@
 											>
 										</div>
 									</div>
+									<h4>Advance
+									<a class="btn btn-link" role="button" data-toggle="collapse" href="#advanceSettings" aria-expanded="false"
+										aria-controls="collapseSettings"
+									><i class="fas fa-caret-down"></i></a></h4>
 									<div class="collapse" id="advanceSettings">
+										<div class="form-group">
+											<label for="projectName" class="col-sm-3 control-label">Project Name</label>
+											<div class="col-sm-9">
+												<la:errors property="projectName" />
+												<la:text property="projectName" styleClass="form-control"/>
+											</div>
+										</div>
+										<div class="form-group">
+											<label class="col-sm-3 control-label">Ignored Columns</label>
+											<div class="col-sm-9 checkbox">
+											<c:forEach var="item" varStatus="s" items="${columnItems}">
+												<label><input type="checkbox" name="ignoredColumns.${f:u(item)}">${f:h(item)}</label>
+											</c:forEach>
+											</div>
+										</div>
 										<div class="form-group">
 											<label for="nfolds" class="col-sm-3 control-label">n Folds</label>
 											<div class="col-sm-9">
@@ -192,10 +212,6 @@
 										<em class="fa fa-arrow-circle-left"></em>
 										<la:message key="labels.crud_button_back" />
 									</la:link>
-									<a class="btn btn-info" role="button" data-toggle="collapse" href="#advanceSettings" aria-expanded="false"
-										aria-controls="collapseExample"
-									> <i class="far fa-plus-square"></i> Advance
-									</a>
 									<c:if test="${editable}">
 										<button type="submit" class="btn btn-success" name="runautoml" value="Run">
 											<em class="fas fa-hammer"></em> Run

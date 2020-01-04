@@ -50,6 +50,6 @@ public class CustomSystemHelper extends SystemHelper {
         h2oHelper.setEndpoint(fessConfig.getSystemProperty("h2o.endpoint", "http://localhost:54321"));
         h2oHelper.setSecretAccessKey(fessConfig.getStorageAccessKey());
         h2oHelper.setSecretKeyId(fessConfig.getStorageSecretKey());
-        h2oHelper.init();
+        h2oHelper.invalidate();
     }
 }
