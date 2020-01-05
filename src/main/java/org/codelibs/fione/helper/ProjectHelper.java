@@ -334,6 +334,7 @@ public class ProjectHelper {
     }
 
     public FrameV3 getColumnSummaries(final String frameId) {
+        // TODO cache?
         final Response<FramesV3> response = h2oHelper.getFrameSummary(frameId).execute();
         if (logger.isDebugEnabled()) {
             logger.debug("getFrameSummary: {}", response);
@@ -524,6 +525,8 @@ public class ProjectHelper {
         }
         if (response.code() == 200) {
             return response.body();
+        } else if (response.code() == 404) {
+            return null;
         }
         logger.warn("Failed to read leaderboard: {}", response);
         return null;
@@ -625,6 +628,25 @@ public class ProjectHelper {
                 logger.warn("Failed to remove an object from {}.", path, e);
             }
         }
+    }
+
+    public FrameV3 getFrameData(FramesV3 params) {
+        // TODO cache?
+        Response<FramesV3> response = h2oHelper.getFrameData(params).execute();
+        if (logger.isDebugEnabled()) {
+            logger.debug("getFrameData: {}", response);
+        }
+        if (response.code() == 200) {
+            FramesV3 frames = response.body();
+            for (FrameV3 frame : frames.frames)
+                if (params.frameId.name.equals(frame.frameId.name)) {
+                    return frame;
+                }
+        } else if (response.code() == 404) {
+            return null;
+        }
+        logger.warn("Failed to read leaderboard: {}", response);
+        return null;
     }
 
     protected JobV3 createWorkingJob(final String target, final String description, final float progress) {

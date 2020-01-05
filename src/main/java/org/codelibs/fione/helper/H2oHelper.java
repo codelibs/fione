@@ -221,6 +221,11 @@ public class H2oHelper {
         return new Callable<>(getH2oApi().exportFrame(params));
     }
 
+    public Callable<FramesV3> getFrameData(FramesV3 params) {
+        return new Callable<>(getH2oApi().frame(params));
+
+    }
+
     public Callable<InitIDV3> newSession() {
         return new Callable<>(getH2oApi().newSession(getSessionKey()));
     }

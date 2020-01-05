@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -43,7 +44,9 @@ import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
+import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
+import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
@@ -158,6 +161,8 @@ public class AdminAutomlAction extends FioneAdminAction {
                 }
                 return null;
             }).orElse(null);
+            final FrameV3 columnSummaries = frameId != null ? projectHelper.getColumnSummaries(frameId) : null;
+
             final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> {
                 final String mid = req.getParameter(LEADERBOARD_ID);
                 String lastId = null;
@@ -175,28 +180,81 @@ public class AdminAutomlAction extends FioneAdminAction {
                     return lastId;
                 }
                 return null;
-            }).orElse(StringUtil.EMPTY);
-
-            final FrameV3 columnSummaries = frameId != null ? projectHelper.getColumnSummaries(frameId) : null;
+            }).orElse(null);
             final LeaderboardV99 leaderboard = leaderboardId != null ? projectHelper.getLeaderboard(projectId, leaderboardId) : null;
+
+            final FramesV3 dataQuery = LaRequestUtil.getOptionalRequest().map(req -> {
+                if (frameId == null) {
+                    return null;
+                }
+                FramesV3 params = new FramesV3();
+                params.frameId = new FrameKeyV3(frameId);
+                params.column = null;
+                params.rowOffset = getParamAsLong(req, "data.row_offset", 0L);
+                params.rowCount = 20;
+                params.columnOffset = getParamAsInt(req, "data.column_offset", 0);
+                params.columnCount = 10;
+                params.fullColumnCount = -1;
+                params.findCompatibleModels = false;
+                params.path = null;
+                params.force = false;
+                params.numParts = -1;
+                params.compression = null;
+                params.separator = 44;
+                params._excludeFields = null;
+                if (params.columnOffset + params.columnCount > columnSummaries.totalColumnCount) {
+                    params.columnCount = columnSummaries.totalColumnCount - params.columnOffset;
+                }
+                return params;
+            }).orElse(null);
+            final FrameV3 frameData = dataQuery != null ? projectHelper.getFrameData(dataQuery) : null;
 
             return asHtml(path_AdminAutoml_AdminAutomlDetailsJsp).renderWith(data -> {
                 RenderDataUtil.register(data, "token", token);
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, FRAME_ID, frameId);
                 RenderDataUtil.register(data, LEADERBOARD_ID, leaderboardId);
+                RenderDataUtil.register(data, "autoReload", project.hasRunningJobs());
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
                 }
                 if (leaderboard != null) {
                     RenderDataUtil.register(data, "leaderboard", leaderboard);
                 }
-                RenderDataUtil.register(data, "autoReload", project.hasRunningJobs());
+                if (frameData != null) {
+                    RenderDataUtil.register(data, "frameData", frameData);
+                }
             });
         } catch (final Exception e) {
             logger.warn("Failed to read " + projectId, e);
             throw validationError(messages -> messages.addErrorsFailedToLoadProject(GLOBAL, StringCodecUtil.decode(projectId)),
                     this::asListHtml);
+        }
+    }
+
+    private int getParamAsInt(HttpServletRequest req, String key, int defautValue) {
+        String s = req.getParameter(key);
+        if (StringUtil.isBlank(s)) {
+            return defautValue;
+        } else {
+            try {
+                return Integer.parseInt(s);
+            } catch (NumberFormatException e) {
+                return defautValue;
+            }
+        }
+    }
+
+    private long getParamAsLong(HttpServletRequest req, String key, long defautValue) {
+        String s = req.getParameter(key);
+        if (StringUtil.isBlank(s)) {
+            return defautValue;
+        } else {
+            try {
+                return Long.parseLong(s);
+            } catch (NumberFormatException e) {
+                return defautValue;
+            }
         }
     }
 

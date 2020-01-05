@@ -2001,37 +2001,37 @@ public class H2oApi {
     /**
      * Determine the status of the nodes in the H2O cloud.
      */
-    public CloudV3 cloudStatus() throws IOException {
+    public Call<CloudV3> cloudStatus() {
         final Cloud s = getService(Cloud.class);
-        return s.status().execute().body();
+        return s.status();
     }
 
-    public CloudV3 cloudStatus(final boolean skipTicks) throws IOException {
+    public Call<CloudV3> cloudStatus(final boolean skipTicks) {
         final Cloud s = getService(Cloud.class);
-        return s.status(skipTicks, "").execute().body();
+        return s.status(skipTicks, "");
     }
 
-    public CloudV3 cloudStatus(final boolean skipTicks, final String _excludeFields) throws IOException {
+    public Call<CloudV3> cloudStatus(final boolean skipTicks, final String _excludeFields) {
         final Cloud s = getService(Cloud.class);
-        return s.status(skipTicks, _excludeFields).execute().body();
+        return s.status(skipTicks, _excludeFields);
     }
 
     /**
      * Determine the status of the nodes in the H2O cloud.
      */
-    public CloudV3 cloudStatusMinimal() throws IOException {
+    public Call<CloudV3> cloudStatusMinimal() {
         final Cloud s = getService(Cloud.class);
-        return s.head().execute().body();
+        return s.head();
     }
 
-    public CloudV3 cloudStatusMinimal(final boolean skipTicks) throws IOException {
+    public Call<CloudV3> cloudStatusMinimal(final boolean skipTicks) {
         final Cloud s = getService(Cloud.class);
-        return s.head(skipTicks, "").execute().body();
+        return s.head(skipTicks, "");
     }
 
-    public CloudV3 cloudStatusMinimal(final boolean skipTicks, final String _excludeFields) throws IOException {
+    public Call<CloudV3> cloudStatusMinimal(final boolean skipTicks, final String _excludeFields) {
         final Cloud s = getService(Cloud.class);
-        return s.head(skipTicks, _excludeFields).execute().body();
+        return s.head(skipTicks, _excludeFields);
     }
 
     /**
@@ -2400,16 +2400,16 @@ public class H2oApi {
     /**
      * Return the specified Frame.
      */
-    public FramesV3 frame(final FrameKeyV3 frameId) throws IOException {
+    public Call<FramesV3> frame(final FrameKeyV3 frameId) {
         final Frames s = getService(Frames.class);
-        return s.fetch(keyToString(frameId)).execute().body();
+        return s.fetch(keyToString(frameId));
     }
 
-    public FramesV3 frame(final FramesV3 params) throws IOException {
+    public Call<FramesV3> frame(final FramesV3 params) {
         final Frames s = getService(Frames.class);
         return s.fetch(keyToString(params.frameId), params.column, params.rowOffset, params.rowCount, params.columnOffset,
                 params.fullColumnCount, params.columnCount, params.findCompatibleModels, params.path, params.force, params.numParts,
-                params.compression, params.separator, params._excludeFields).execute().body();
+                params.compression, params.separator, params._excludeFields);
     }
 
     /**

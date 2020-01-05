@@ -15,6 +15,13 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.codelibs.core.lang.StringUtil;
+
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
@@ -105,20 +112,20 @@ public class FrameV3 extends FrameBaseV3 {
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
-
+    
     // Frame ID
     public FrameKeyV3 frameId;
-
+    
     // Total data size in bytes
     public long byteSize;
-
+    
     // Is this Frame raw unparsed data?
     public boolean isText;
-
+    
     // Comma-separated list of JSON field paths to exclude from the result, used like:
     // "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
     public String _excludeFields;
-
+    
     */
 
     /**
@@ -147,4 +154,40 @@ public class FrameV3 extends FrameBaseV3 {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
+    public String[] getColumnNames() {
+        return Arrays.stream(columns).map(c -> c.label).toArray(n -> new String[n]);
+    }
+
+    private transient AtomicInteger counter = new AtomicInteger(0);
+
+    public int getRowSize() {
+        if (columns != null && columns.length > 0) {
+            if (columns[0].data != null) {
+                return columns[0].data.length;
+            }
+            if (columns[0].stringData != null) {
+                return columns[0].stringData.length;
+            }
+        }
+        return 0;
+    }
+
+    public String[] getRow() {
+        final int index = counter.getAndAdd(1);
+        if (index >= getRowSize()) {
+            return StringUtil.EMPTY_STRINGS;
+        }
+        final List<String> list = new ArrayList<>();
+        for (int i = 0; i < columns.length; i++) {
+            final ColV3 column = columns[i];
+            if (columns[0].data != null) {
+                list.add(Double.toString(column.data[index]));
+            } else if (columns[0].stringData != null) {
+                list.add(column.stringData[index]);
+            } else {
+                list.add(StringUtil.EMPTY);
+            }
+        }
+        return list.toArray(n -> new String[n]);
+    }
 }

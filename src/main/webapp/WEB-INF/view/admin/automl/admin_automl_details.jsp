@@ -82,9 +82,37 @@
 								</div>
 							</div>
 						</div>
+						<c:if test="${columnSummaries != null}">
+							<div class="box box-primary">
+								<div class="box-header with-border">
+									<h3 class="box-title">${f:h(frameId)}</h3>
+									<div class="btn-group pull-right">
+										<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+									</div>
+								</div>
+								<div class="box-body">
+									<table class="table table-bordered table-striped">
+										<tbody>
+											<tr>
+												<th>Rows</th>
+												<td style="text-align:right;">${f:h(columnSummaries.rows)}</td>
+											</tr>
+											<tr>
+												<th>Columns</th>
+												<td style="text-align:right;">${f:h(columnSummaries.totalColumnCount)}</td>
+											</tr>
+											<tr>
+												<th>Compressed Size</th>
+												<td style="text-align:right;">${fe:formatFileSize(columnSummaries.byteSize)}</td>
+											</tr>
+										</tbody>
+									</table>
+								</div>
+							</div>
+						</c:if>
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Data</h3>
+								<h3 class="box-title">DataSets</h3>
 								<div class="btn-group pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
@@ -184,34 +212,6 @@
 								</c:if>
 							</div>
 						</div>
-						<c:if test="${columnSummaries != null}">
-							<div class="box box-primary">
-								<div class="box-header with-border">
-									<h3 class="box-title">Columns</h3>
-									<div class="btn-group pull-right">
-										<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
-									</div>
-								</div>
-								<div class="box-body">
-									<table class="table table-bordered table-striped">
-										<thead>
-											<tr>
-												<th>Label</th>
-												<th>Type</th>
-											</tr>
-										</thead>
-										<tbody>
-											<c:forEach var="data" varStatus="s" items="${columnSummaries.columns}">
-												<tr>
-													<td>${f:h(data.label)}</td>
-													<td>${f:h(data.type)}</td>
-												</tr>
-											</c:forEach>
-										</tbody>
-									</table>
-								</div>
-							</div>
-						</c:if>
 					</div>
 					<div class="col-md-9">
 						<div class="box box-primary">
@@ -335,6 +335,7 @@
 												<thead>
 													<tr>
 														<th>Label</th>
+														<th>Type</th>
 														<th>Missing</th>
 														<th>Zeros</th>
 														<th>+Inf.</th>
@@ -350,6 +351,7 @@
 													<c:forEach var="data" varStatus="s" items="${columnSummaries.columns}">
 														<tr>
 															<td>${f:h(data.label)}</td>
+															<td>${f:h(data.type)}</td>
 															<td>${f:h(data.missingCount)}</td>
 															<td>${f:h(data.zeroCount)}</td>
 															<td>${f:h(data.positiveInfinityCount)}</td>
@@ -365,6 +367,53 @@
 											</table>
 										</div>
 									</div>
+								</div>
+							</div>
+						</c:if>
+						<c:if test="${frameData != null}">
+							<div class="box box-primary">
+								<div class="box-header with-border">
+									<h3 class="box-title">Data in ${f:h(frameId)}</h3>
+									<div class="btn-group pull-right">
+										<button type="button" class="btn btn-box-tool" data-widget="collapse">
+											<i class="fa fa-minus"></i>
+										</button>
+									</div>
+								</div>
+								<div class="box-body">
+									<%-- List --%>
+									<c:if test="${frameData.rows == 0}">
+										<div class="row top10">
+											<div class="col-sm-12">
+												<em class="fa fa-info-circle text-light-blue"></em>
+												<la:message key="labels.list_could_not_find_crud_table" />
+											</div>
+										</div>
+									</c:if>
+									<c:if test="${frameData.rows gt 0}">
+										<div class="row">
+											<div class="col-sm-12">
+												<table class="table table-bordered table-striped small">
+													<thead>
+														<tr>
+															<c:forEach var="data" varStatus="s" items="${frameData.columnNames}">
+																<th>${f:h(data)}</th>
+															</c:forEach>
+														</tr>
+													</thead>
+													<tbody>
+														<c:forEach var="data" varStatus="s" begin="0" end="${frameData.rowSize}">
+															<tr>
+																<c:forEach var="data" varStatus="x" items="${frameData.row}">
+																	<td>${f:h(data)}</td>
+																</c:forEach>
+															</tr>
+														</c:forEach>
+													</tbody>
+												</table>
+											</div>
+										</div>
+									</c:if>
 								</div>
 							</div>
 						</c:if>
