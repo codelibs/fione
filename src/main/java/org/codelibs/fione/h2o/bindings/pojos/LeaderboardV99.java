@@ -109,8 +109,16 @@ public class LeaderboardV99 extends SchemaV3 {
                 continue;
             }
             final Object value = table.data[i][index];
-            final String formattedValue = String.format(column.format, value);
-            list.add(formattedValue);
+            try {
+                final String formattedValue = String.format(column.format, value);
+                list.add(formattedValue);
+            } catch (Exception e) {
+                if (value != null) {
+                    list.add(value.toString());
+                } else {
+                    list.add(StringUtil.EMPTY);
+                }
+            }
         }
         return list.toArray(n -> new String[n]);
     }

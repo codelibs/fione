@@ -638,7 +638,8 @@ public class AdminAutomlAction extends FioneAdminAction {
             params.add(leaderboardId);
         }
         if (!params.isEmpty()) {
-            moreUrl.params(params.toArray(n -> new String[n]));
+            final Object[] args = params.toArray(n -> new String[n]);
+            moreUrl.params(args);
         }
         return redirectWith(getClass(), moreUrl);
     }

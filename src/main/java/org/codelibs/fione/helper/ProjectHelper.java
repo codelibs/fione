@@ -27,6 +27,8 @@ import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import javax.annotation.Resource;
 
@@ -80,6 +82,8 @@ public class ProjectHelper {
     protected String projectFolderName = "fione";
 
     protected final Gson gson = H2oApi.createGson();
+
+    private ReadWriteLock jobLock = new ReentrantReadWriteLock();
 
     public Project[] getProjects() {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
@@ -435,29 +439,34 @@ public class ProjectHelper {
                 new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
             final JobV3[] jobs = gson.fromJson(reader, JobV3[].class);
             if (update) {
-                final List<JobV3> list = new ArrayList<>();
-                for (final JobV3 job : jobs) {
-                    if (JobV3.RUNNING.equals(job.status)) {
-                        final Response<JobsV3> response = h2oHelper.getJobs(keyToString(job.key)).execute();
-                        if (logger.isDebugEnabled()) {
-                            logger.debug("getJobs: {}", response);
-                        }
-                        if (response.code() == 200) {
-                            JobV3 target = null;
-                            for (final JobV3 j : response.body().jobs) {
-                                if (keyToString(job.key).equals(keyToString(j.key))) {
-                                    target = j;
-                                }
+                jobLock.writeLock().lock();
+                try {
+                    final List<JobV3> list = new ArrayList<>();
+                    for (final JobV3 job : jobs) {
+                        if (JobV3.RUNNING.equals(job.status)) {
+                            final Response<JobsV3> response = h2oHelper.getJobs(keyToString(job.key)).execute();
+                            if (logger.isDebugEnabled()) {
+                                logger.debug("getJobs: {}", response);
                             }
-                            list.add(target != null ? target : job);
+                            if (response.code() == 200) {
+                                JobV3 target = null;
+                                for (final JobV3 j : response.body().jobs) {
+                                    if (keyToString(job.key).equals(keyToString(j.key))) {
+                                        target = j;
+                                    }
+                                }
+                                list.add(target != null ? target : job);
+                            } else {
+                                list.add(job);
+                            }
                         } else {
                             list.add(job);
                         }
-                    } else {
-                        list.add(job);
                     }
+                    store(projectId, list.toArray(n -> new JobV3[n]));
+                } finally {
+                    jobLock.writeLock().unlock();
                 }
-                new Thread(() -> store(projectId, list.toArray(n -> new JobV3[n])), "UpdateJobs").start();
             }
             return jobs;
         } catch (final ErrorResponseException e) {
@@ -480,29 +489,45 @@ public class ProjectHelper {
             return;
         }
 
-        final JobV3[] oldJobs = getJobs(projectId, false);
-        for (int i = 0; i < oldJobs.length; i++) {
-            if (oldJobs[i].key.name.equals(job.key.name)) {
-                oldJobs[i] = job;
-                store(projectId, oldJobs);
-                return;
+        jobLock.writeLock().lock();
+        try {
+            final JobV3[] oldJobs = getJobs(projectId, false);
+            for (int i = 0; i < oldJobs.length; i++) {
+                if (oldJobs[i].key.name.equals(job.key.name)) {
+                    oldJobs[i] = job;
+                    store(projectId, oldJobs);
+                    return;
+                }
             }
-        }
 
-        final JobV3[] jobs = Arrays.copyOf(oldJobs, oldJobs.length + 1);
-        jobs[jobs.length - 1] = job;
-        store(projectId, jobs);
+            final JobV3[] jobs = Arrays.copyOf(oldJobs, oldJobs.length + 1);
+            jobs[jobs.length - 1] = job;
+            store(projectId, jobs);
+        } finally {
+            jobLock.writeLock().unlock();
+        }
     }
 
     public void deleteJob(final String projectId, final String jobId) {
-        store(projectId, Arrays.stream(getJobs(projectId, false)).filter(j -> !jobId.equals(keyToString(j.key))).toArray(n -> new JobV3[n]));
+        jobLock.writeLock().lock();
+        try {
+            store(projectId,
+                    Arrays.stream(getJobs(projectId, false)).filter(j -> !jobId.equals(keyToString(j.key))).toArray(n -> new JobV3[n]));
+        } finally {
+            jobLock.writeLock().unlock();
+        }
     }
 
-    public void deleteAllJobs(@Required final String projectId) {
-        store(projectId, new JobV3[0]);
+    public synchronized void deleteAllJobs(@Required final String projectId) {
+        jobLock.writeLock().lock();
+        try {
+            store(projectId, new JobV3[0]);
+        } finally {
+            jobLock.writeLock().unlock();
+        }
     }
 
-    protected synchronized void store(final String projectId, final JobV3[] jobs) {
+    protected void store(final String projectId, final JobV3[] jobs) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final MinioClient minioClient = createClient(fessConfig);
         final String json = gson.toJson(jobs);

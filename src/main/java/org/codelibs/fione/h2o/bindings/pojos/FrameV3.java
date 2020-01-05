@@ -180,9 +180,9 @@ public class FrameV3 extends FrameBaseV3 {
         final List<String> list = new ArrayList<>();
         for (int i = 0; i < columns.length; i++) {
             final ColV3 column = columns[i];
-            if (columns[0].data != null) {
+            if (column.data != null) {
                 list.add(Double.toString(column.data[index]));
-            } else if (columns[0].stringData != null) {
+            } else if (column.stringData != null) {
                 list.add(column.stringData[index]);
             } else {
                 list.add(StringUtil.EMPTY);
