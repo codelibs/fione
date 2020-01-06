@@ -19,8 +19,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -32,6 +34,7 @@ import org.codelibs.core.exception.IORuntimeException;
 import org.codelibs.fess.app.web.base.login.FessLoginAssist;
 import org.codelibs.fess.util.ComponentUtil;
 import org.codelibs.fione.exception.FioneSystemException;
+import org.codelibs.fione.exception.H2oAccessException;
 import org.codelibs.fione.h2o.bindings.H2oApi;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
@@ -223,7 +226,6 @@ public class H2oHelper {
 
     public Callable<FramesV3> getFrameData(FramesV3 params) {
         return new Callable<>(getH2oApi().frame(params));
-
     }
 
     public Callable<InitIDV3> newSession() {
@@ -307,6 +309,33 @@ public class H2oHelper {
             }
         }
 
+        public Response<T> execute(long timeout) {
+            final CountDownLatch latch = new CountDownLatch(1);
+            final AtomicReference<Response<T>> result = new AtomicReference<>();
+            final AtomicReference<Throwable> failure = new AtomicReference<>();
+            execute(res -> {
+                result.set(res);
+                latch.countDown();
+            }, t -> {
+                failure.set(t);
+                latch.countDown();
+            });
+            try {
+                latch.await(timeout, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                throw new H2oAccessException("Interrupted.", e);
+            }
+            final Response<T> response = result.get();
+            if (response != null) {
+                return response;
+            }
+            final Throwable t = failure.get();
+            if (t != null) {
+                throw new H2oAccessException("Execution exception.", t);
+            }
+            call.cancel();
+            throw new H2oAccessException("Request timeout.");
+        }
     }
 
     public void setConnectTimeout(final int connectTimeout) {

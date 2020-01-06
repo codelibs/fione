@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import java.util.Arrays;
 import java.util.Map;
 
 import com.google.gson.GsonBuilder;
@@ -149,6 +150,23 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
     @Override
     public String toString() {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+    }
+
+    private boolean isOutputClass(Class<?> clazz) {
+        if (clazz.isPrimitive() || clazz.isEnum() || String.class.isAssignableFrom(clazz) || KeyV3.class.isAssignableFrom(clazz)
+                || String[].class.isAssignableFrom(clazz) || String[][].class.isAssignableFrom(clazz)) {
+            return true;
+        }
+        return false;
+    }
+
+    public String[] getFieldNames() {
+        if (fieldNames == null) {
+            fieldNames =
+                    Arrays.stream(getClass().getFields()).filter(f -> isOutputClass(f.getType())).map(f -> f.getName())
+                            .toArray(n -> new String[n]);
+        }
+        return fieldNames;
     }
 
 }

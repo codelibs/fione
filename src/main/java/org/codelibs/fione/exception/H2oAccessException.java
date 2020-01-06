@@ -22,4 +22,8 @@ public class H2oAccessException extends FioneSystemException {
         super(message);
     }
 
+    public H2oAccessException(final String message, final Throwable cause) {
+        super(message, cause);
+    }
+
 }

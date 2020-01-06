@@ -34,6 +34,7 @@ import javax.annotation.Resource;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.codelibs.core.lang.StringUtil;
 import org.codelibs.core.net.UuidUtil;
 import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fess.exception.StorageException;
@@ -56,7 +57,10 @@ import org.codelibs.fione.h2o.bindings.pojos.JobV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.KeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
+import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.web.servlet.request.stream.WrittenStreamOut;
@@ -80,6 +84,8 @@ public class ProjectHelper {
     private H2oHelper h2oHelper;
 
     protected String projectFolderName = "fione";
+
+    protected long requestTimeout = 5000L;
 
     protected final Gson gson = H2oApi.createGson();
 
@@ -160,19 +166,23 @@ public class ProjectHelper {
     protected String[] getFrames(final Project project) {
         final List<String> frameIdList = new ArrayList<>();
         for (final String baseName : Arrays.stream(project.getDataSets()).map(d -> d.getName().split("\\.")[0]).toArray(n -> new String[n])) {
-            final Response<FramesListV3> response = h2oHelper.getFrames(baseName).execute();
-            if (logger.isDebugEnabled()) {
-                logger.debug("getFrames: {}", response);
-            }
-            if (response.code() == 200) {
-                for (final FrameBaseV3 frame : response.body().frames) {
-                    final String frameId = keyToString(frame.frameId);
-                    if (frameId != null && frameId.startsWith(baseName)) {
-                        frameIdList.add(frameId);
-                    }
+            try {
+                final Response<FramesListV3> response = h2oHelper.getFrames(baseName).execute(requestTimeout);
+                if (logger.isDebugEnabled()) {
+                    logger.debug("getFrames: {}", response);
                 }
-            } else {
-                logger.warn("Failed to get frames: {}", response);
+                if (response.code() == 200) {
+                    for (final FrameBaseV3 frame : response.body().frames) {
+                        final String frameId = keyToString(frame.frameId);
+                        if (frameId != null && frameId.startsWith(baseName)) {
+                            frameIdList.add(frameId);
+                        }
+                    }
+                } else {
+                    logger.warn("Failed to get frames: {}", response);
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to get frames.", e);
             }
         }
         return frameIdList.stream().distinct().toArray(n -> new String[n]);
@@ -444,19 +454,24 @@ public class ProjectHelper {
                     final List<JobV3> list = new ArrayList<>();
                     for (final JobV3 job : jobs) {
                         if (JobV3.RUNNING.equals(job.status)) {
-                            final Response<JobsV3> response = h2oHelper.getJobs(keyToString(job.key)).execute();
-                            if (logger.isDebugEnabled()) {
-                                logger.debug("getJobs: {}", response);
-                            }
-                            if (response.code() == 200) {
-                                JobV3 target = null;
-                                for (final JobV3 j : response.body().jobs) {
-                                    if (keyToString(job.key).equals(keyToString(j.key))) {
-                                        target = j;
-                                    }
+                            try {
+                                final Response<JobsV3> response = h2oHelper.getJobs(keyToString(job.key)).execute(requestTimeout);
+                                if (logger.isDebugEnabled()) {
+                                    logger.debug("getJobs: {}", response);
                                 }
-                                list.add(target != null ? target : job);
-                            } else {
+                                if (response.code() == 200) {
+                                    JobV3 target = null;
+                                    for (final JobV3 j : response.body().jobs) {
+                                        if (keyToString(job.key).equals(keyToString(j.key))) {
+                                            target = j;
+                                        }
+                                    }
+                                    list.add(target != null ? target : job);
+                                } else {
+                                    list.add(job);
+                                }
+                            } catch (Exception e) {
+                                logger.warn("Failed to access job: {}", job.key, e);
                                 list.add(job);
                             }
                         } else {
@@ -666,6 +681,28 @@ public class ProjectHelper {
             for (FrameV3 frame : frames.frames)
                 if (params.frameId.name.equals(frame.frameId.name)) {
                     return frame;
+                }
+        } else if (response.code() == 404) {
+            return null;
+        }
+        logger.warn("Failed to read leaderboard: {}", response);
+        return null;
+    }
+
+    public ModelSchemaBaseV3 getModel(String projectId, String modelId) {
+        if (StringUtil.isBlank(modelId)) {
+            return null;
+        }
+        // TODO cache?
+        Response<ModelsV3> response = h2oHelper.getModel(new ModelKeyV3(modelId)).execute();
+        if (logger.isDebugEnabled()) {
+            logger.debug("getModel: {}", response);
+        }
+        if (response.code() == 200) {
+            ModelsV3 models = response.body();
+            for (ModelSchemaBaseV3 model : models.models)
+                if (modelId.equals(model.modelId.name)) {
+                    return model;
                 }
         } else if (response.code() == 404) {
             return null;

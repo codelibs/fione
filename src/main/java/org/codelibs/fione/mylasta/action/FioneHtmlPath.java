@@ -29,6 +29,9 @@ public interface FioneHtmlPath {
     /** The path of the HTML: /admin/automl/admin_automl_details.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlDetailsJsp = new HtmlNext("/admin/automl/admin_automl_details.jsp");
 
+    /** The path of the HTML: /admin/automl/admin_automl_model.jsp */
+    HtmlNext path_AdminAutoml_AdminAutomlModelJsp = new HtmlNext("/admin/automl/admin_automl_model.jsp");
+
     /** The path of the HTML: /admin/automl/admin_automl_newdata.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlNewdataJsp = new HtmlNext("/admin/automl/admin_automl_newdata.jsp");
 

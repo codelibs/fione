@@ -50,6 +50,7 @@ import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
+import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.helper.ProjectHelper;
@@ -521,6 +522,24 @@ public class AdminAutomlAction extends FioneAdminAction {
                     this::asListHtml);
         }
         return redirect(getClass());
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse model(final String projectId, final String modelId) {
+        saveToken();
+
+        ModelSchemaBaseV3 model = projectHelper.getModel(projectId, modelId);
+
+        return asHtml(path_AdminAutoml_AdminAutomlModelJsp).renderWith(
+                data -> {
+                    RenderDataUtil.register(data, "projectId", projectId);
+                    RenderDataUtil.register(data, FRAME_ID, LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID))
+                            .orElse(null));
+                    RenderDataUtil.register(data, LEADERBOARD_ID,
+                            LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null));
+                    RenderDataUtil.register(data, "model", model);
+                });
     }
 
     // ===================================================================================
