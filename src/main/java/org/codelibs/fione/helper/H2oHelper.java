@@ -16,6 +16,7 @@
 package org.codelibs.fione.helper;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -31,6 +32,8 @@ import javax.annotation.PostConstruct;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.codelibs.core.exception.IORuntimeException;
+import org.codelibs.curl.Curl;
+import org.codelibs.curl.CurlResponse;
 import org.codelibs.fess.app.web.base.login.FessLoginAssist;
 import org.codelibs.fess.util.ComponentUtil;
 import org.codelibs.fione.exception.FioneSystemException;
@@ -186,6 +189,10 @@ public class H2oHelper {
         return new Callable<>(getH2oApi().model(model));
     }
 
+    public Callable<ModelsV3> deleteModel(final ModelKeyV3 model) {
+        return new Callable<>(getH2oApi().deleteModel(model));
+    }
+
     public Callable<ModelMetricsListSchemaV3> predict(final ModelKeyV3 model, final FrameKeyV3 frame) {
         return new Callable<>(getH2oApi().predict(model, frame));
     }
@@ -247,6 +254,30 @@ public class H2oHelper {
             sessionKey = "guest";
         }
         return StringCodecUtil.encodeUrlSafe(sessionKey);
+    }
+
+    public void writeMojo(String modelId, Consumer<InputStream> in, Consumer<Exception> e) {
+        String url = getH2oApi().getUrl();
+        if (!url.endsWith("/")) {
+            url = url + "/";
+        }
+        try (CurlResponse response = Curl.get(url + "3/Models/" + modelId + "/mojo").execute()) {
+            in.accept(response.getContentAsStream());
+        } catch (Exception e1) {
+            e.accept(e1);
+        }
+    }
+
+    public void writeGenModel(String modelId, Consumer<InputStream> in, Consumer<Exception> e) {
+        String url = getH2oApi().getUrl();
+        if (!url.endsWith("/")) {
+            url = url + "/";
+        }
+        try (CurlResponse response = Curl.get(url + "3/h2o-genmodel.jar").execute()) {
+            in.accept(response.getContentAsStream());
+        } catch (Exception e1) {
+            e.accept(e1);
+        }
     }
 
     public ParseV3 convert(final ParseSetupV3 params) {

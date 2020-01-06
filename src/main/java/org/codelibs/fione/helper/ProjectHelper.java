@@ -63,6 +63,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.util.StringCodecUtil;
+import org.lastaflute.di.exception.IORuntimeException;
 import org.lastaflute.web.servlet.request.stream.WrittenStreamOut;
 import org.lastaflute.web.validation.Required;
 
@@ -711,6 +712,38 @@ public class ProjectHelper {
         return null;
     }
 
+    public void writeMojo(String projectId, String modelId, WrittenStreamOut out) {
+        h2oHelper.writeMojo(modelId, in -> {
+            try {
+                out.write(in);
+            } catch (IOException e) {
+                throw new IORuntimeException(e);
+            }
+        }, e -> logger.warn("Failed to write {} in {}", modelId, projectId, e));
+    }
+
+    public void writeGenModel(String projectId, String modelId, WrittenStreamOut out) {
+        h2oHelper.writeGenModel(modelId, in -> {
+            try {
+                out.write(in);
+            } catch (IOException e) {
+                throw new IORuntimeException(e);
+            }
+        }, e -> logger.warn("Failed to write {} in {}", modelId, projectId, e));
+    }
+
+    public void deleteModel(String projectId, String modelId) {
+        final Response<ModelsV3> response = h2oHelper.deleteModel(new ModelKeyV3(modelId)).execute();
+        if (logger.isDebugEnabled()) {
+            logger.debug("deleteFrame: {}", response);
+        }
+        if (response.code() == 200) {
+            logger.info("Deleted frame: {}", modelId);
+        } else {
+            throw new H2oAccessException("Failed to delete model " + modelId + " : " + response);
+        }
+    }
+
     protected JobV3 createWorkingJob(final String target, final String description, final float progress) {
         final JobV3 job = new JobV3();
         job.key = new JobKeyV3(UuidUtil.create());
@@ -771,5 +804,4 @@ public class ProjectHelper {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         return "s3://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/data/" + fileName;
     }
-
 }

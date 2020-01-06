@@ -62,6 +62,9 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Deleted Project {0}. */
     public static final String SUCCESS_deleted_project = "{success.deleted_project}";
 
+    /** The key of the message: Deleted Model {0}. */
+    public static final String SUCCESS_deleted_model = "{success.deleted_model}";
+
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
 
@@ -112,6 +115,9 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Failed to delete Project {0}. */
     public static final String ERRORS_failed_to_delete_project = "{errors.failed_to_delete_project}";
+
+    /** The key of the message: Failed to delete Model {0}. */
+    public static final String ERRORS_failed_to_delete_model = "{errors.failed_to_delete_model}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -288,6 +294,21 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessDeletedProject(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_deleted_project, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.deleted_model' with parameters.
+     * <pre>
+     * message: Deleted Model {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessDeletedModel(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_deleted_model, arg0));
         return this;
     }
 
@@ -539,6 +560,21 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addErrorsFailedToDeleteProject(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(ERRORS_failed_to_delete_project, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_delete_model' with parameters.
+     * <pre>
+     * message: Failed to delete Model {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToDeleteModel(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_delete_model, arg0));
         return this;
     }
 }

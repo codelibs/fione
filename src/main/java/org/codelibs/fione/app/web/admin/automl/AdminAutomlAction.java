@@ -167,14 +167,12 @@ public class AdminAutomlAction extends FioneAdminAction {
             final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> {
                 final String mid = req.getParameter(LEADERBOARD_ID);
                 String lastId = null;
-                if (mid != null) {
-                    for (final JobV3 id : project.getJobs()) {
-                        if (id.getKind() == Kind.AUTO_ML && "DONE".equals(id.status)) {
-                            if (mid.equals(id.dest.name)) {
-                                return id.dest.name;
-                            }
-                            lastId = id.dest.name;
+                for (final JobV3 id : project.getJobs()) {
+                    if (id.getKind() == Kind.AUTO_ML && "DONE".equals(id.status)) {
+                        if (mid != null && mid.equals(id.dest.name)) {
+                            return id.dest.name;
                         }
+                        lastId = id.dest.name;
                     }
                 }
                 if (lastId != null) {
@@ -527,12 +525,13 @@ public class AdminAutomlAction extends FioneAdminAction {
     @Execute
     @Secured({ ROLE })
     public HtmlResponse model(final String projectId, final String modelId) {
-        saveToken();
+        final String token = doubleSubmitManager.saveToken(myTokenGroupType());
 
         ModelSchemaBaseV3 model = projectHelper.getModel(projectId, modelId);
 
         return asHtml(path_AdminAutoml_AdminAutomlModelJsp).renderWith(
                 data -> {
+                    RenderDataUtil.register(data, "token", token);
                     RenderDataUtil.register(data, "projectId", projectId);
                     RenderDataUtil.register(data, FRAME_ID, LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID))
                             .orElse(null));
@@ -540,6 +539,43 @@ public class AdminAutomlAction extends FioneAdminAction {
                             LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null));
                     RenderDataUtil.register(data, "model", model);
                 });
+    }
+
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public ActionResponse downloadmojo(final ModelForm form) {
+        validate(form, messages -> {}, () -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+
+        return asStream(form.modelId + ".zip").contentTypeOctetStream().stream(out -> {
+            projectHelper.writeMojo(form.projectId, form.modelId, out);
+        });
+    }
+
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public ActionResponse downloadgenmodel(final ModelForm form) {
+        validate(form, messages -> {}, () -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+
+        return asStream("h2o-genmodel.jar").contentTypeOctetStream().stream(out -> {
+            projectHelper.writeGenModel(form.projectId, form.modelId, out);
+        });
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse deletemodel(final ModelForm form) {
+        validate(form, messages -> {}, () -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+        try {
+            projectHelper.deleteModel(form.projectId, form.modelId);
+            saveMessage(messages -> messages.addSuccessDeletedModel(GLOBAL, form.modelId));
+        } catch (final Exception e) {
+            logger.warn("Failed to delete model: {}", form.modelId, e);
+            throw validationError(messages -> messages.addErrorsFailedToDeleteModel(GLOBAL, form.modelId), this::asListHtml);
+        }
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
 
     // ===================================================================================
@@ -638,6 +674,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 form.projectId = projectId;
                 form.frameId = frameId;
                 form.leaderboardId = leaderboardId;
+                form.modelId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter("modelId")).orElse(null);
                 form.name = frameId.split("\\.")[0] + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
             });
         }).renderWith(data -> {
@@ -647,6 +684,24 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     private HtmlResponse redirectDetailsHtml(final String projectId, final String frameId, final String leaderboardId) {
         final UrlChain moreUrl = moreUrl(DETAILS, projectId);
+        final List<String> params = new ArrayList<>();
+        if (StringUtil.isNotBlank(frameId)) {
+            params.add(FRAME_ID);
+            params.add(frameId);
+        }
+        if (StringUtil.isNotBlank(leaderboardId)) {
+            params.add(LEADERBOARD_ID);
+            params.add(leaderboardId);
+        }
+        if (!params.isEmpty()) {
+            final Object[] args = params.toArray(n -> new String[n]);
+            moreUrl.params(args);
+        }
+        return redirectWith(getClass(), moreUrl);
+    }
+
+    private HtmlResponse redirectModelHtml(final String projectId, final String modelId, final String frameId, final String leaderboardId) {
+        final UrlChain moreUrl = moreUrl("model", projectId, modelId);
         final List<String> params = new ArrayList<>();
         if (StringUtil.isNotBlank(frameId)) {
             params.add(FRAME_ID);

@@ -2497,14 +2497,14 @@ public class H2oApi {
     /**
      * Delete the specified Model from the H2O distributed K/V store.
      */
-    public ModelsV3 deleteModel(final ModelKeyV3 modelId) throws IOException {
+    public Call<ModelsV3> deleteModel(final ModelKeyV3 modelId) {
         final Models s = getService(Models.class);
-        return s.delete(keyToString(modelId)).execute().body();
+        return s.delete(keyToString(modelId));
     }
 
-    public ModelsV3 deleteModel(final ModelsV3 params) throws IOException {
+    public Call<ModelsV3> deleteModel(final ModelsV3 params) {
         final Models s = getService(Models.class);
-        return s.delete(keyToString(params.modelId), params.preview, params.findCompatibleFrames, params._excludeFields).execute().body();
+        return s.delete(keyToString(params.modelId), params.preview, params.findCompatibleFrames, params._excludeFields);
     }
 
     /**
@@ -2553,15 +2553,14 @@ public class H2oApi {
      * Return the model in the MOJO format. This format can then be interpreted by gen_model.jar in order to perform
      * prediction / scoring. Currently works for GBM and DRF algos only.
      */
-    public StreamingSchema modelMojo(final ModelKeyV3 modelId) throws IOException {
+    public Call<StreamingSchema> modelMojo(final ModelKeyV3 modelId) {
         final Models s = getService(Models.class);
-        return s.fetchMojo(keyToString(modelId)).execute().body();
+        return s.fetchMojo(keyToString(modelId));
     }
 
-    public StreamingSchema modelMojo(final ModelsV3 params) throws IOException {
+    public Call<StreamingSchema> modelMojo(final ModelsV3 params) {
         final Models s = getService(Models.class);
-        return s.fetchMojo(keyToString(params.modelId), params.preview, params.findCompatibleFrames, params._excludeFields).execute()
-                .body();
+        return s.fetchMojo(keyToString(params.modelId), params.preview, params.findCompatibleFrames, params._excludeFields);
     }
 
     /**
@@ -3331,6 +3330,10 @@ public class H2oApi {
     public JobV4 getJob4(final String jobId, final String _fields) throws IOException {
         final Jobs s = getService(Jobs.class);
         return s.getJob4(jobId, _fields).execute().body();
+    }
+
+    public String getUrl() {
+        return url;
     }
 
     //--------- PRIVATE --------------------------------------------------------------------------------------------------
