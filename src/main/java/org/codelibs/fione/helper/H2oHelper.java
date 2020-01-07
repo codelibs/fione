@@ -80,9 +80,9 @@ public class H2oHelper {
 
     protected int connectTimeout = 15;
 
-    protected int writeTimeout = 60;
+    protected int writeTimeout = 60 * 15;
 
-    protected int readTimeout = 60;
+    protected int readTimeout = 60 * 15;
 
     protected String secretKeyId;
 

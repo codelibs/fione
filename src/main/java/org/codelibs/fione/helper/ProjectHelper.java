@@ -27,6 +27,8 @@ import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -62,11 +64,13 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
+import org.codelibs.fione.h2o.bindings.pojos.SchemaV3;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.di.exception.IORuntimeException;
 import org.lastaflute.web.servlet.request.stream.WrittenStreamOut;
-import org.lastaflute.web.validation.Required;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.Lists;
 import com.google.gson.Gson;
 
@@ -90,7 +94,9 @@ public class ProjectHelper {
 
     protected final Gson gson = H2oApi.createGson();
 
-    private ReadWriteLock jobLock = new ReentrantReadWriteLock();
+    protected ReadWriteLock jobLock = new ReentrantReadWriteLock();
+
+    protected Cache<Object, SchemaV3> responseCache = CacheBuilder.newBuilder().expireAfterWrite(10, TimeUnit.MINUTES).build();
 
     public Project[] getProjects() {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
@@ -348,19 +354,27 @@ public class ProjectHelper {
         }
     }
 
-    public FrameV3 getColumnSummaries(final String frameId) {
-        // TODO cache?
-        final Response<FramesV3> response = h2oHelper.getFrameSummary(frameId).execute();
-        if (logger.isDebugEnabled()) {
-            logger.debug("getFrameSummary: {}", response);
-        }
-        if (response.code() == 200) {
-            final FramesV3 data = response.body();
-            if (data.frames.length == 1) {
-                return data.frames[0];
+    public FrameV3 getColumnSummaries(final String projectId, final String frameId) {
+        try {
+            return (FrameV3) responseCache.get("frameSummary@" + projectId + "," + frameId, () -> {
+                final Response<FramesV3> response = h2oHelper.getFrameSummary(frameId).execute();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("getFrameSummary: {}", response);
+                }
+                if (response.code() == 200) {
+                    final FramesV3 data = response.body();
+                    if (data.frames.length == 1) {
+                        return data.frames[0];
+                    }
+                }
+                return null;
+            });
+        } catch (ExecutionException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to get data from cache.", e);
             }
+            return null;
         }
-        return null;
     }
 
     public void createFrame(final String projectId, final DataSet dataSet) {
@@ -383,17 +397,17 @@ public class ProjectHelper {
                         logger.warn("Failed to parse data: dataSet:{}", dataSet);
                         finish(projectId, workingJob, new H2oAccessException("Failed to access " + parseResponse));
                     }
-                }, t2 -> {
-                    logger.warn("Failed to parse data: dataSet:{}", dataSet, t2);
-                    finish(projectId, workingJob, t2);
+                }, t -> {
+                    logger.warn("Failed to parse data: dataSet:{}", dataSet, t);
+                    finish(projectId, workingJob, t);
                 });
             } else {
                 logger.warn("Failed to import data: dataSet:{}", dataSet);
                 finish(projectId, workingJob, new H2oAccessException("Failed to access " + importResponse));
             }
-        }, t1 -> {
-            logger.warn("Failed to import data: dataSet:{}", dataSet, t1);
-            finish(projectId, workingJob, t1);
+        }, t -> {
+            logger.warn("Failed to import data: dataSet:{}", dataSet, t);
+            finish(projectId, workingJob, new H2oAccessException("Failed to access ", t));
         });
 
     }
@@ -534,7 +548,7 @@ public class ProjectHelper {
         }
     }
 
-    public synchronized void deleteAllJobs(@Required final String projectId) {
+    public synchronized void deleteAllJobs(final String projectId) {
         jobLock.writeLock().lock();
         try {
             store(projectId, new JobV3[0]);
@@ -559,18 +573,26 @@ public class ProjectHelper {
     }
 
     public LeaderboardV99 getLeaderboard(final String projectId, final String leaderboardId) {
-        // TODO cache?
-        final Response<LeaderboardV99> response = h2oHelper.getLeaderboard(leaderboardId).execute();
-        if (logger.isDebugEnabled()) {
-            logger.debug("getLeaderboard: {}", response);
-        }
-        if (response.code() == 200) {
-            return response.body();
-        } else if (response.code() == 404) {
+        try {
+            return (LeaderboardV99) responseCache.get("leaderboard@" + projectId + "," + leaderboardId, () -> {
+                final Response<LeaderboardV99> response = h2oHelper.getLeaderboard(leaderboardId).execute();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("getLeaderboard: {}", response);
+                }
+                if (response.code() == 200) {
+                    return response.body();
+                } else if (response.code() == 404) {
+                    return null;
+                }
+                logger.warn("Failed to read leaderboard: {}", response);
+                return null;
+            });
+        } catch (ExecutionException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to get data from cache.", e);
+            }
             return null;
         }
-        logger.warn("Failed to read leaderboard: {}", response);
-        return null;
     }
 
     public void predict(final String projectId, final String frameId, final String modelId, final String name) {
@@ -636,7 +658,7 @@ public class ProjectHelper {
                 });
     }
 
-    public void writeContent(@Required final String projectId, final DataSet dataSet, final WrittenStreamOut out) {
+    public void writeDataSet(final String projectId, final DataSet dataSet, final WrittenStreamOut out) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final MinioClient minioClient = createClient(fessConfig);
         final String objectName = getDataPath(projectId, dataSet.getName());
@@ -672,22 +694,31 @@ public class ProjectHelper {
     }
 
     public FrameV3 getFrameData(FramesV3 params) {
-        // TODO cache?
-        Response<FramesV3> response = h2oHelper.getFrameData(params).execute();
-        if (logger.isDebugEnabled()) {
-            logger.debug("getFrameData: {}", response);
-        }
-        if (response.code() == 200) {
-            FramesV3 frames = response.body();
-            for (FrameV3 frame : frames.frames)
-                if (params.frameId.name.equals(frame.frameId.name)) {
-                    return frame;
+        try {
+            return (FrameV3) responseCache.get(params, () -> {
+                Response<FramesV3> response = h2oHelper.getFrameData(params).execute();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("getFrameData: {}", response);
                 }
-        } else if (response.code() == 404) {
+                if (response.code() == 200) {
+                    FramesV3 frames = response.body();
+                    for (FrameV3 frame : frames.frames)
+                        if (params.frameId.name.equals(frame.frameId.name)) {
+                            return frame;
+                        }
+                } else if (response.code() == 404) {
+                    return null;
+                }
+                logger.warn("Failed to read leaderboard: {}", response);
+                return null;
+            });
+        } catch (ExecutionException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to get data from cache.", e);
+            }
             return null;
+
         }
-        logger.warn("Failed to read leaderboard: {}", response);
-        return null;
     }
 
     public ModelSchemaBaseV3 getModel(String projectId, String modelId) {

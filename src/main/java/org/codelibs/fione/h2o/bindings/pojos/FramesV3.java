@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import java.util.Arrays;
+
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
@@ -150,6 +152,91 @@ public class FramesV3 extends RequestSchemaV3 {
     @Override
     public String toString() {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+    }
+
+    @Override
+    public int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + ((column == null) ? 0 : column.hashCode());
+        result = prime * result + columnCount;
+        result = prime * result + columnOffset;
+        result = prime * result + Arrays.hashCode(compatibleModels);
+        result = prime * result + ((compression == null) ? 0 : compression.hashCode());
+        result = prime * result + Arrays.deepHashCode(domain);
+        result = prime * result + (findCompatibleModels ? 1231 : 1237);
+        result = prime * result + (force ? 1231 : 1237);
+        result = prime * result + ((frameId == null) ? 0 : frameId.hashCode());
+        result = prime * result + Arrays.hashCode(frames);
+        result = prime * result + fullColumnCount;
+        result = prime * result + ((job == null) ? 0 : job.hashCode());
+        result = prime * result + numParts;
+        result = prime * result + ((path == null) ? 0 : path.hashCode());
+        result = prime * result + rowCount;
+        result = prime * result + (int) (rowOffset ^ (rowOffset >>> 32));
+        result = prime * result + separator;
+        return result;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj)
+            return true;
+        if (obj == null)
+            return false;
+        if (getClass() != obj.getClass())
+            return false;
+        FramesV3 other = (FramesV3) obj;
+        if (column == null) {
+            if (other.column != null)
+                return false;
+        } else if (!column.equals(other.column))
+            return false;
+        if (columnCount != other.columnCount)
+            return false;
+        if (columnOffset != other.columnOffset)
+            return false;
+        if (!Arrays.equals(compatibleModels, other.compatibleModels))
+            return false;
+        if (compression == null) {
+            if (other.compression != null)
+                return false;
+        } else if (!compression.equals(other.compression))
+            return false;
+        if (!Arrays.deepEquals(domain, other.domain))
+            return false;
+        if (findCompatibleModels != other.findCompatibleModels)
+            return false;
+        if (force != other.force)
+            return false;
+        if (frameId == null) {
+            if (other.frameId != null)
+                return false;
+        } else if (!frameId.equals(other.frameId))
+            return false;
+        if (!Arrays.equals(frames, other.frames))
+            return false;
+        if (fullColumnCount != other.fullColumnCount)
+            return false;
+        if (job == null) {
+            if (other.job != null)
+                return false;
+        } else if (!job.equals(other.job))
+            return false;
+        if (numParts != other.numParts)
+            return false;
+        if (path == null) {
+            if (other.path != null)
+                return false;
+        } else if (!path.equals(other.path))
+            return false;
+        if (rowCount != other.rowCount)
+            return false;
+        if (rowOffset != other.rowOffset)
+            return false;
+        if (separator != other.separator)
+            return false;
+        return true;
     }
 
 }

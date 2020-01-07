@@ -162,7 +162,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 }
                 return null;
             }).orElse(null);
-            final FrameV3 columnSummaries = frameId != null ? projectHelper.getColumnSummaries(frameId) : null;
+            final FrameV3 columnSummaries = frameId != null ? projectHelper.getColumnSummaries(projectId, frameId) : null;
 
             final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> {
                 final String mid = req.getParameter(LEADERBOARD_ID);
@@ -308,7 +308,7 @@ public class AdminAutomlAction extends FioneAdminAction {
         }
 
         return asStream(dataSet.getName()).contentTypeOctetStream().stream(out -> {
-            projectHelper.writeContent(form.projectId, dataSet, out);
+            projectHelper.writeDataSet(form.projectId, dataSet, out);
         });
     }
 
@@ -636,7 +636,7 @@ public class AdminAutomlAction extends FioneAdminAction {
     }
 
     private HtmlResponse asSetupMlHtml(final String projectId, final String frameId) {
-        final FrameV3 columnSummaries = projectHelper.getColumnSummaries(frameId);
+        final FrameV3 columnSummaries = projectHelper.getColumnSummaries(projectId, frameId);
 
         return asHtml(path_AdminAutoml_AdminAutomlRunmlJsp).useForm(RunSettingForm.class, setup -> {
             setup.setup(form -> {
