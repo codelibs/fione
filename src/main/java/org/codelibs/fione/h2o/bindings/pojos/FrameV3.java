@@ -112,20 +112,20 @@ public class FrameV3 extends FrameBaseV3 {
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
-    
+
     // Frame ID
     public FrameKeyV3 frameId;
-    
+
     // Total data size in bytes
     public long byteSize;
-    
+
     // Is this Frame raw unparsed data?
     public boolean isText;
-    
+
     // Comma-separated list of JSON field paths to exclude from the result, used like:
     // "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
     public String _excludeFields;
-    
+
     */
 
     /**
@@ -160,6 +160,10 @@ public class FrameV3 extends FrameBaseV3 {
 
     private transient AtomicInteger counter = new AtomicInteger(0);
 
+    public void refresh() {
+        counter.set(0);
+    }
+
     public int getRowSize() {
         if (columns != null && columns.length > 0) {
             if (columns[0].data != null) {
@@ -178,8 +182,7 @@ public class FrameV3 extends FrameBaseV3 {
             return StringUtil.EMPTY_STRINGS;
         }
         final List<String> list = new ArrayList<>();
-        for (int i = 0; i < columns.length; i++) {
-            final ColV3 column = columns[i];
+        for (final ColV3 column : columns) {
             if (column.data != null) {
                 list.add(Double.toString(column.data[index]));
             } else if (column.stringData != null) {

@@ -186,7 +186,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 if (frameId == null) {
                     return null;
                 }
-                FramesV3 params = new FramesV3();
+                final FramesV3 params = new FramesV3();
                 params.frameId = new FrameKeyV3(frameId);
                 params.column = null;
                 params.rowOffset = getParamAsLong(req, "data.row_offset", 0L);
@@ -231,27 +231,27 @@ public class AdminAutomlAction extends FioneAdminAction {
         }
     }
 
-    private int getParamAsInt(HttpServletRequest req, String key, int defautValue) {
-        String s = req.getParameter(key);
+    private int getParamAsInt(final HttpServletRequest req, final String key, final int defautValue) {
+        final String s = req.getParameter(key);
         if (StringUtil.isBlank(s)) {
             return defautValue;
         } else {
             try {
                 return Integer.parseInt(s);
-            } catch (NumberFormatException e) {
+            } catch (final NumberFormatException e) {
                 return defautValue;
             }
         }
     }
 
-    private long getParamAsLong(HttpServletRequest req, String key, long defautValue) {
-        String s = req.getParameter(key);
+    private long getParamAsLong(final HttpServletRequest req, final String key, final long defautValue) {
+        final String s = req.getParameter(key);
         if (StringUtil.isBlank(s)) {
             return defautValue;
         } else {
             try {
                 return Long.parseLong(s);
-            } catch (NumberFormatException e) {
+            } catch (final NumberFormatException e) {
                 return defautValue;
             }
         }
@@ -527,7 +527,7 @@ public class AdminAutomlAction extends FioneAdminAction {
     public HtmlResponse model(final String projectId, final String modelId) {
         final String token = doubleSubmitManager.saveToken(myTokenGroupType());
 
-        ModelSchemaBaseV3 model = projectHelper.getModel(projectId, modelId);
+        final ModelSchemaBaseV3 model = projectHelper.getModel(projectId, modelId);
 
         return asHtml(path_AdminAutoml_AdminAutomlModelJsp).renderWith(
                 data -> {

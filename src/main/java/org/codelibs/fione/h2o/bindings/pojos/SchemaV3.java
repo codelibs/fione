@@ -60,7 +60,7 @@ public class SchemaV3 {
                     Arrays.stream(getFieldNames())
                             .map(s -> {
                                 try {
-                                    Object value = getClass().getField(s).get(this);
+                                    final Object value = getClass().getField(s).get(this);
                                     if (value instanceof Number) {
                                         if (s.equals("runTime")) {
                                             return FessFunctions.formatDuration(((Number) value).longValue());
@@ -72,7 +72,7 @@ public class SchemaV3 {
                                         return Arrays.stream((String[]) value).collect(Collectors.joining(", "));
                                     } else if (value instanceof String[][]) {
                                         return Arrays.stream((String[][]) value)
-                                                .map(v -> "[" + Arrays.stream((String[]) v).collect(Collectors.joining(", ")) + "]")
+                                                .map(v -> "[" + Arrays.stream(v).collect(Collectors.joining(", ")) + "]")
                                                 .collect(Collectors.joining(", "));
                                     } else if (value instanceof KeyV3) {
                                         return ((KeyV3) value).name;
@@ -80,7 +80,7 @@ public class SchemaV3 {
                                         return Arrays.stream((KeyV3[]) value).map(k -> k.name).collect(Collectors.joining(", "));
                                     }
                                     return value;
-                                } catch (Exception e) {
+                                } catch (final Exception e) {
                                     return StringUtil.EMPTY;
                                 }
                             }).toArray(n -> new Object[n]);

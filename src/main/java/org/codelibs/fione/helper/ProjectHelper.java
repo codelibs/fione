@@ -27,7 +27,6 @@ import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -44,6 +43,7 @@ import org.codelibs.fess.mylasta.direction.FessConfig;
 import org.codelibs.fess.util.ComponentUtil;
 import org.codelibs.fione.entity.DataSet;
 import org.codelibs.fione.entity.Project;
+import org.codelibs.fione.exception.CacheNotFoundException;
 import org.codelibs.fione.exception.H2oAccessException;
 import org.codelibs.fione.h2o.bindings.H2oApi;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
@@ -188,7 +188,7 @@ public class ProjectHelper {
                 } else {
                     logger.warn("Failed to get frames: {}", response);
                 }
-            } catch (Exception e) {
+            } catch (final Exception e) {
                 logger.warn("Failed to get frames.", e);
             }
         }
@@ -356,7 +356,8 @@ public class ProjectHelper {
 
     public FrameV3 getColumnSummaries(final String projectId, final String frameId) {
         try {
-            return (FrameV3) responseCache.get("frameSummary@" + projectId + "," + frameId, () -> {
+            final String cacheKey = "frameSummary@" + projectId + "," + frameId;
+            final FrameV3 columnSummaries = (FrameV3) responseCache.get(cacheKey, () -> {
                 final Response<FramesV3> response = h2oHelper.getFrameSummary(frameId).execute();
                 if (logger.isDebugEnabled()) {
                     logger.debug("getFrameSummary: {}", response);
@@ -364,12 +365,20 @@ public class ProjectHelper {
                 if (response.code() == 200) {
                     final FramesV3 data = response.body();
                     if (data.frames.length == 1) {
+                        if (data.frames[0] == null) {
+                            throw new CacheNotFoundException();
+                        }
                         return data.frames[0];
                     }
                 }
-                return null;
+                throw new CacheNotFoundException();
             });
-        } catch (ExecutionException e) {
+            columnSummaries.refresh();
+            return columnSummaries;
+        } catch (final Exception e) {
+            if (e.getCause() instanceof CacheNotFoundException) {
+                return null;
+            }
             if (logger.isDebugEnabled()) {
                 logger.debug("Failed to get data from cache.", e);
             }
@@ -485,7 +494,7 @@ public class ProjectHelper {
                                 } else {
                                     list.add(job);
                                 }
-                            } catch (Exception e) {
+                            } catch (final Exception e) {
                                 logger.warn("Failed to access job: {}", job.key, e);
                                 list.add(job);
                             }
@@ -574,7 +583,8 @@ public class ProjectHelper {
 
     public LeaderboardV99 getLeaderboard(final String projectId, final String leaderboardId) {
         try {
-            return (LeaderboardV99) responseCache.get("leaderboard@" + projectId + "," + leaderboardId, () -> {
+            final String cacheKey = "leaderboard@" + projectId + "," + leaderboardId;
+            final LeaderboardV99 leaderboard = (LeaderboardV99) responseCache.get(cacheKey, () -> {
                 final Response<LeaderboardV99> response = h2oHelper.getLeaderboard(leaderboardId).execute();
                 if (logger.isDebugEnabled()) {
                     logger.debug("getLeaderboard: {}", response);
@@ -582,12 +592,17 @@ public class ProjectHelper {
                 if (response.code() == 200) {
                     return response.body();
                 } else if (response.code() == 404) {
-                    return null;
+                    throw new CacheNotFoundException();
                 }
                 logger.warn("Failed to read leaderboard: {}", response);
-                return null;
+                throw new CacheNotFoundException();
             });
-        } catch (ExecutionException e) {
+            leaderboard.refresh();
+            return leaderboard;
+        } catch (final Exception e) {
+            if (e.getCause() instanceof CacheNotFoundException) {
+                return null;
+            }
             if (logger.isDebugEnabled()) {
                 logger.debug("Failed to get data from cache.", e);
             }
@@ -670,6 +685,7 @@ public class ProjectHelper {
     }
 
     public void renewSession() {
+        responseCache.invalidateAll();
         h2oHelper.closeSession();
     }
 
@@ -693,26 +709,33 @@ public class ProjectHelper {
         }
     }
 
-    public FrameV3 getFrameData(FramesV3 params) {
+    public FrameV3 getFrameData(final FramesV3 params) {
         try {
-            return (FrameV3) responseCache.get(params, () -> {
-                Response<FramesV3> response = h2oHelper.getFrameData(params).execute();
+            final String cacheKey = params.toString();
+            final FrameV3 frameData = (FrameV3) responseCache.get(cacheKey, () -> {
+                final Response<FramesV3> response = h2oHelper.getFrameData(params).execute();
                 if (logger.isDebugEnabled()) {
                     logger.debug("getFrameData: {}", response);
                 }
                 if (response.code() == 200) {
-                    FramesV3 frames = response.body();
-                    for (FrameV3 frame : frames.frames)
+                    final FramesV3 frames = response.body();
+                    for (final FrameV3 frame : frames.frames) {
                         if (params.frameId.name.equals(frame.frameId.name)) {
                             return frame;
                         }
+                    }
                 } else if (response.code() == 404) {
-                    return null;
+                    throw new CacheNotFoundException();
                 }
                 logger.warn("Failed to read leaderboard: {}", response);
-                return null;
+                throw new CacheNotFoundException();
             });
-        } catch (ExecutionException e) {
+            frameData.refresh();
+            return frameData;
+        } catch (final Exception e) {
+            if (e.getCause() instanceof CacheNotFoundException) {
+                return null;
+            }
             if (logger.isDebugEnabled()) {
                 logger.debug("Failed to get data from cache.", e);
             }
@@ -721,21 +744,22 @@ public class ProjectHelper {
         }
     }
 
-    public ModelSchemaBaseV3 getModel(String projectId, String modelId) {
+    public ModelSchemaBaseV3 getModel(final String projectId, final String modelId) {
         if (StringUtil.isBlank(modelId)) {
             return null;
         }
         // TODO cache?
-        Response<ModelsV3> response = h2oHelper.getModel(new ModelKeyV3(modelId)).execute();
+        final Response<ModelsV3> response = h2oHelper.getModel(new ModelKeyV3(modelId)).execute();
         if (logger.isDebugEnabled()) {
             logger.debug("getModel: {}", response);
         }
         if (response.code() == 200) {
-            ModelsV3 models = response.body();
-            for (ModelSchemaBaseV3 model : models.models)
+            final ModelsV3 models = response.body();
+            for (final ModelSchemaBaseV3 model : models.models) {
                 if (modelId.equals(model.modelId.name)) {
                     return model;
                 }
+            }
         } else if (response.code() == 404) {
             return null;
         }
@@ -743,27 +767,27 @@ public class ProjectHelper {
         return null;
     }
 
-    public void writeMojo(String projectId, String modelId, WrittenStreamOut out) {
+    public void writeMojo(final String projectId, final String modelId, final WrittenStreamOut out) {
         h2oHelper.writeMojo(modelId, in -> {
             try {
                 out.write(in);
-            } catch (IOException e) {
+            } catch (final IOException e) {
                 throw new IORuntimeException(e);
             }
         }, e -> logger.warn("Failed to write {} in {}", modelId, projectId, e));
     }
 
-    public void writeGenModel(String projectId, String modelId, WrittenStreamOut out) {
+    public void writeGenModel(final String projectId, final String modelId, final WrittenStreamOut out) {
         h2oHelper.writeGenModel(modelId, in -> {
             try {
                 out.write(in);
-            } catch (IOException e) {
+            } catch (final IOException e) {
                 throw new IORuntimeException(e);
             }
         }, e -> logger.warn("Failed to write {} in {}", modelId, projectId, e));
     }
 
-    public void deleteModel(String projectId, String modelId) {
+    public void deleteModel(final String projectId, final String modelId) {
         final Response<ModelsV3> response = h2oHelper.deleteModel(new ModelKeyV3(modelId)).execute();
         if (logger.isDebugEnabled()) {
             logger.debug("deleteFrame: {}", response);

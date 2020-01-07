@@ -29,11 +29,11 @@
 				<div class="row">
 					<div class="col-md-12">
 					<form method="post" action="${contextPath}/admin/automl/">
-						<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
-						<input type="hidden" name="projectId" value="${f:u(projectId)}">
-						<input type="hidden" name="modelId" value="${f:u(model.modelId.name)}">
-						<input type="hidden" name="frameId" value="${f:u(frameId)}">
-						<input type="hidden" name="leaderboardId" value="${f:u(leaderboardId)}">
+						<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
+						<input type="hidden" name="projectId" value="${f:h(projectId)}">
+						<input type="hidden" name="modelId" value="${f:h(model.modelId.name)}">
+						<input type="hidden" name="frameId" value="${f:h(frameId)}">
+						<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 						<div class="btn-group" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
 							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?modelId=${f:u(model.modelId.name)}" class="btn btn-default"><i class="fas fa-file-signature"></i>Predict</a>
 							<button type="submit" name="downloadmojo" value="load" class="btn btn-default"><i class="fas fa-download"></i>MOJO</button>

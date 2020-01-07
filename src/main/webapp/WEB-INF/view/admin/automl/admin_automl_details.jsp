@@ -46,8 +46,8 @@
 							<div class="box-body">
 								<div class="row">
 									<form method="post" action="${contextPath}/admin/automl/">
-									<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
-									<input type="hidden" name="projectId" value="${f:u(project.id)}">
+									<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
+									<input type="hidden" name="projectId" value="${f:h(project.id)}">
 									<div class="btn-group-vertical col-sm-12" role="group" aria-label="Actions">
 										<c:if test="${not empty frameId}">
 										<div class="input-group">
@@ -139,11 +139,11 @@
 												<tbody>
 													<c:forEach var="data" varStatus="s" items="${project.dataSets}">
 														<tr><form method="post" action="${contextPath}/admin/automl/">
-														<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
-														<input type="hidden" name="projectId" value="${f:u(project.id)}">
-														<input type="hidden" name="dataSetId" value="${f:u(data.id)}">
-														<input type="hidden" name="frameId" value="${f:u(frameId)}">
-														<input type="hidden" name="leaderboardId" value="${f:u(leaderboardId)}">
+														<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
+														<input type="hidden" name="projectId" value="${f:h(project.id)}">
+														<input type="hidden" name="dataSetId" value="${f:h(data.id)}">
+														<input type="hidden" name="frameId" value="${f:h(frameId)}">
+														<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 															<td>${f:h(data.name)}</td>
 															<td class="text-center">
 															<c:if test="${data.schema != null}">
@@ -193,10 +193,10 @@
 												<tbody>
 													<c:forEach var="data" varStatus="s" items="${project.frameIds}">
 														<tr><form method="post" action="${contextPath}/admin/automl/">
-														<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
-														<input type="hidden" name="projectId" value="${f:u(project.id)}">
-														<input type="hidden" name="frameId" value="${f:u(frameId)}">
-														<input type="hidden" name="leaderboardId" value="${f:u(leaderboardId)}">
+														<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
+														<input type="hidden" name="projectId" value="${f:h(project.id)}">
+														<input type="hidden" name="frameId" value="${f:h(frameId)}">
+														<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 															<td>${f:h(data)}</td>
 															<td class="text-center">
 															<c:if test="${frameId == data}"><i class="far fa-check-square" style="color:#3c8dbc;"></i></c:if>
@@ -226,10 +226,10 @@
 									</button>
 									<ul class="dropdown-menu" role="menu">
 										<li><form method="post" action="${contextPath}/admin/automl/">
-										<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
-										<input type="hidden" name="projectId" value="${f:u(project.id)}">
-										<input type="hidden" name="frameId" value="${f:u(frameId)}">
-										<input type="hidden" name="leaderboardId" value="${f:u(leaderboardId)}"> 
+										<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
+										<input type="hidden" name="projectId" value="${f:h(project.id)}">
+										<input type="hidden" name="frameId" value="${f:h(frameId)}">
+										<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 										<input type="hidden" name="jobId" value="_all_">
 										<button type="submit" name="deletealljobs" value="Delete All" class="btn btn-link">Delete All</button>
 										</form></li>
@@ -263,11 +263,11 @@
 												<tbody>
 													<c:forEach var="data" varStatus="s" items="${project.jobs}">
 														<tr><form method="post" action="${contextPath}/admin/automl/">
-														<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:u(token)}">
-														<input type="hidden" name="projectId" value="${f:u(project.id)}">
-														<input type="hidden" name="jobId" value="${f:u(data.key.name)}">
-														<input type="hidden" name="frameId" value="${f:u(frameId)}">
-														<input type="hidden" name="leaderboardId" value="${f:u(leaderboardId)}">
+														<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
+														<input type="hidden" name="projectId" value="${f:h(project.id)}">
+														<input type="hidden" name="jobId" value="${f:h(data.key.name)}">
+														<input type="hidden" name="frameId" value="${f:h(frameId)}">
+														<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 															<td><i class="fas fa-${f:u(data.iconType)}"></i> <c:choose>
 																	<c:when test="${data.iconType == 'hammer'}">
 																		<la:link

@@ -152,7 +152,7 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
-    private boolean isOutputClass(Class<?> clazz) {
+    private boolean isOutputClass(final Class<?> clazz) {
         if (clazz.isPrimitive() || clazz.isEnum() || String.class.isAssignableFrom(clazz) || KeyV3.class.isAssignableFrom(clazz)
                 || String[].class.isAssignableFrom(clazz) || String[][].class.isAssignableFrom(clazz)) {
             return true;
@@ -160,6 +160,7 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
         return false;
     }
 
+    @Override
     public String[] getFieldNames() {
         if (fieldNames == null) {
             fieldNames =

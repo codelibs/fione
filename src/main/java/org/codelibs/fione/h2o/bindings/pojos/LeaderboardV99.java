@@ -97,6 +97,10 @@ public class LeaderboardV99 extends SchemaV3 {
 
     private transient AtomicInteger counter = new AtomicInteger(0);
 
+    public void refresh() {
+        counter.set(0);
+    }
+
     public String[] getRow() {
         final int index = counter.getAndAdd(1);
         if (index >= models.length) {
@@ -112,7 +116,7 @@ public class LeaderboardV99 extends SchemaV3 {
             try {
                 final String formattedValue = String.format(column.format, value);
                 list.add(formattedValue);
-            } catch (Exception e) {
+            } catch (final Exception e) {
                 if (value != null) {
                     list.add(value.toString());
                 } else {

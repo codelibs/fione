@@ -231,7 +231,7 @@ public class H2oHelper {
         return new Callable<>(getH2oApi().exportFrame(params));
     }
 
-    public Callable<FramesV3> getFrameData(FramesV3 params) {
+    public Callable<FramesV3> getFrameData(final FramesV3 params) {
         return new Callable<>(getH2oApi().frame(params));
     }
 
@@ -256,26 +256,26 @@ public class H2oHelper {
         return StringCodecUtil.encodeUrlSafe(sessionKey);
     }
 
-    public void writeMojo(String modelId, Consumer<InputStream> in, Consumer<Exception> e) {
+    public void writeMojo(final String modelId, final Consumer<InputStream> in, final Consumer<Exception> e) {
         String url = getH2oApi().getUrl();
         if (!url.endsWith("/")) {
             url = url + "/";
         }
         try (CurlResponse response = Curl.get(url + "3/Models/" + modelId + "/mojo").execute()) {
             in.accept(response.getContentAsStream());
-        } catch (Exception e1) {
+        } catch (final Exception e1) {
             e.accept(e1);
         }
     }
 
-    public void writeGenModel(String modelId, Consumer<InputStream> in, Consumer<Exception> e) {
+    public void writeGenModel(final String modelId, final Consumer<InputStream> in, final Consumer<Exception> e) {
         String url = getH2oApi().getUrl();
         if (!url.endsWith("/")) {
             url = url + "/";
         }
         try (CurlResponse response = Curl.get(url + "3/h2o-genmodel.jar").execute()) {
             in.accept(response.getContentAsStream());
-        } catch (Exception e1) {
+        } catch (final Exception e1) {
             e.accept(e1);
         }
     }
@@ -340,7 +340,7 @@ public class H2oHelper {
             }
         }
 
-        public Response<T> execute(long timeout) {
+        public Response<T> execute(final long timeout) {
             final CountDownLatch latch = new CountDownLatch(1);
             final AtomicReference<Response<T>> result = new AtomicReference<>();
             final AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -353,7 +353,7 @@ public class H2oHelper {
             });
             try {
                 latch.await(timeout, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
+            } catch (final InterruptedException e) {
                 throw new H2oAccessException("Interrupted.", e);
             }
             final Response<T> response = result.get();

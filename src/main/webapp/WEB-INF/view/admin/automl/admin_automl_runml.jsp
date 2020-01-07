@@ -85,7 +85,7 @@
 											<label class="col-sm-3 control-label">Ignored Columns</label>
 											<div class="col-sm-9 checkbox">
 											<c:forEach var="item" varStatus="s" items="${columnItems}">
-												<label><input type="checkbox" name="ignoredColumns.${f:u(item)}">${f:h(item)}</label>
+												<label><input type="checkbox" name="ignoredColumns.${f:h(item)}">${f:h(item)}</label>
 											</c:forEach>
 											</div>
 										</div>
