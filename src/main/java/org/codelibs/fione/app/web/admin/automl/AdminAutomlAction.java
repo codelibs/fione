@@ -497,7 +497,7 @@ public class AdminAutomlAction extends FioneAdminAction {
         validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         try {
-            projectHelper.renewSession();
+            projectHelper.renewSession(form.projectId);
             saveMessage(messages -> messages.addSuccessRenewSession(GLOBAL));
         } catch (final Exception e) {
             logger.warn("Failed to renew session: {}", form.projectId, e);

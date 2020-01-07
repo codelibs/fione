@@ -566,6 +566,34 @@ public class ProjectHelper {
         }
     }
 
+    protected void refreshJobs(final String projectId) {
+        jobLock.writeLock().lock();
+        try {
+            store(projectId, Arrays.stream(getJobs(projectId, false)).filter(job -> {
+                try {
+                    String jobKey = keyToString(job.key);
+                    final Response<JobsV3> response = h2oHelper.getJobs(jobKey).execute(requestTimeout);
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("getJobs: {}", response);
+                    }
+                    if (response.code() == 200) {
+                        for (final JobV3 j : response.body().jobs) {
+                            if (jobKey.equals(keyToString(j.key))) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                } catch (final Exception e) {
+                    logger.warn("Failed to access job: {}", job.key, e);
+                    return true;
+                }
+            }).toArray(n -> new JobV3[n]));
+        } finally {
+            jobLock.writeLock().unlock();
+        }
+    }
+
     protected void store(final String projectId, final JobV3[] jobs) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final MinioClient minioClient = createClient(fessConfig);
@@ -684,8 +712,9 @@ public class ProjectHelper {
         }
     }
 
-    public void renewSession() {
+    public void renewSession(String projectId) {
         responseCache.invalidateAll();
+        refreshJobs(projectId);
         h2oHelper.closeSession();
     }
 
