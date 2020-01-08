@@ -578,6 +578,22 @@ public class AdminAutomlAction extends FioneAdminAction {
         return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
 
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public ActionResponse exportmodel(final ModelForm form) {
+        validate(form, messages -> {}, () -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+
+        try {
+            projectHelper.exportModel(form.projectId, form.leaderboardId, form.modelId);
+            saveMessage(messages -> messages.addSuccessExportingModel(GLOBAL, form.modelId));
+        } catch (final Exception e) {
+            logger.warn("Failed to export model: {}", form.modelId, e);
+            throw validationError(messages -> messages.addErrorsFailedToExportModel(GLOBAL, form.modelId), this::asListHtml);
+        }
+        return redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId);
+    }
+
     // ===================================================================================
     //                                                                              JSP
     //                                                                           =========

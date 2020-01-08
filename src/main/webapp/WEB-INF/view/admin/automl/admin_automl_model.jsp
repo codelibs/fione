@@ -28,6 +28,12 @@
 			<section class="content">
 				<div class="row">
 					<div class="col-md-12">
+						<la:info id="msg" message="true">
+							<div class="alert alert-info">${msg}</div>
+						</la:info>
+						<la:errors />
+					</div>
+					<div class="col-md-12">
 					<form method="post" action="${contextPath}/admin/automl/">
 						<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
 						<input type="hidden" name="projectId" value="${f:h(projectId)}">
@@ -38,7 +44,7 @@
 							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?modelId=${f:u(model.modelId.name)}" class="btn btn-default"><i class="fas fa-file-signature"></i>Predict</a>
 							<button type="submit" name="downloadmojo" value="load" class="btn btn-default"><i class="fas fa-download"></i>MOJO</button>
 							<button type="submit" name="downloadgenmodel" value="load" class="btn btn-default"><i class="fas fa-download"></i>Gen Model</button>
-							<!-- <button type="submit" name="exportmodel" value="load" class="btn btn-default"><i class="fas fa-file-export"></i>Export</button> -->
+							<button type="submit" name="exportmodel" value="load" class="btn btn-default"><i class="fas fa-file-export"></i>Export</button>
 							<la:link href="/admin/automl/details/${f:u(projectId)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i>Project</la:link>
 						</div>
 						<div class="btn-group pull-right" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">

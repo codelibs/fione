@@ -2607,14 +2607,14 @@ public class H2oApi {
     /**
      * Export given model.
      */
-    public ModelExportV3 exportModel(final ModelKeyV3 modelId) throws IOException {
+    public Call<ModelExportV3> exportModel(final ModelKeyV3 modelId) {
         final Models s = getService(Models.class);
-        return s.exportModel(keyToString(modelId)).execute().body();
+        return s.exportModel(keyToString(modelId));
     }
 
-    public ModelExportV3 exportModel(final ModelExportV3 params) throws IOException {
+    public Call<ModelExportV3> exportModel(final ModelExportV3 params) {
         final Models s = getService(Models.class);
-        return s.exportModel(keyToString(params.modelId), params.dir, params.force, params._excludeFields).execute().body();
+        return s.exportModel(keyToString(params.modelId), params.dir, params.force, params._excludeFields);
     }
 
     /**

@@ -51,6 +51,7 @@ import org.codelibs.fione.h2o.bindings.pojos.InitIDV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
+import org.codelibs.fione.h2o.bindings.pojos.ModelExportV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
@@ -278,6 +279,14 @@ public class H2oHelper {
         } catch (final Exception e1) {
             e.accept(e1);
         }
+    }
+
+    public Callable<ModelExportV3> exportModel(String modelId, String path) {
+        ModelExportV3 params = new ModelExportV3();
+        params.modelId = new ModelKeyV3(modelId);
+        params.dir = path;
+        params.force = true;
+        return new Callable<>(getH2oApi().exportModel(params));
     }
 
     public ParseV3 convert(final ParseSetupV3 params) {

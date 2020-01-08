@@ -571,7 +571,7 @@ public class ProjectHelper {
         try {
             store(projectId, Arrays.stream(getJobs(projectId, false)).filter(job -> {
                 try {
-                    String jobKey = keyToString(job.key);
+                    final String jobKey = keyToString(job.key);
                     final Response<JobsV3> response = h2oHelper.getJobs(jobKey).execute(requestTimeout);
                     if (logger.isDebugEnabled()) {
                         logger.debug("getJobs: {}", response);
@@ -712,7 +712,7 @@ public class ProjectHelper {
         }
     }
 
-    public void renewSession(String projectId) {
+    public void renewSession(final String projectId) {
         responseCache.invalidateAll();
         refreshJobs(projectId);
         h2oHelper.closeSession();
@@ -777,23 +777,35 @@ public class ProjectHelper {
         if (StringUtil.isBlank(modelId)) {
             return null;
         }
-        // TODO cache?
-        final Response<ModelsV3> response = h2oHelper.getModel(new ModelKeyV3(modelId)).execute();
-        if (logger.isDebugEnabled()) {
-            logger.debug("getModel: {}", response);
-        }
-        if (response.code() == 200) {
-            final ModelsV3 models = response.body();
-            for (final ModelSchemaBaseV3 model : models.models) {
-                if (modelId.equals(model.modelId.name)) {
-                    return model;
+        try {
+            final String cacheKey = "model@" + projectId + "," + modelId;
+            return (ModelSchemaBaseV3) responseCache.get(cacheKey, () -> {
+                final Response<ModelsV3> response = h2oHelper.getModel(new ModelKeyV3(modelId)).execute();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("getModel: {}", response);
                 }
+                if (response.code() == 200) {
+                    final ModelsV3 models = response.body();
+                    for (final ModelSchemaBaseV3 model : models.models) {
+                        if (modelId.equals(model.modelId.name)) {
+                            return model;
+                        }
+                    }
+                } else if (response.code() == 404) {
+                    throw new CacheNotFoundException();
+                }
+                logger.warn("Failed to read leaderboard: {}", response);
+                throw new CacheNotFoundException();
+            });
+        } catch (final Exception e) {
+            if (e.getCause() instanceof CacheNotFoundException) {
+                return null;
             }
-        } else if (response.code() == 404) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to get data from cache.", e);
+            }
             return null;
         }
-        logger.warn("Failed to read leaderboard: {}", response);
-        return null;
     }
 
     public void writeMojo(final String projectId, final String modelId, final WrittenStreamOut out) {
@@ -826,6 +838,44 @@ public class ProjectHelper {
         } else {
             throw new H2oAccessException("Failed to delete model " + modelId + " : " + response);
         }
+    }
+
+    public void exportModel(final String projectId, final String leaderboardId, final String modelId) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+
+        final ModelSchemaBaseV3 model = getModel(projectId, modelId);
+        if (model == null) {
+            throw new H2oAccessException(modelId + " is not found in " + projectId);
+        }
+        final String json = gson.toJson(model);
+        if (logger.isDebugEnabled()) {
+            logger.debug("model: {}", json);
+        }
+        final String objectName = getModelConfigPath(projectId, leaderboardId, modelId);
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
+            final String bucketName = fessConfig.getStorageBucket();
+            minioClient.putObject(bucketName, objectName, bais, null, null, null, "application/json");
+        } catch (final Exception e) {
+            throw new StorageException("Failed to create " + objectName, e);
+        }
+
+        final JobV3 workingJob = createWorkingJob(modelId, "Export Model", 0.5f);
+        store(projectId, workingJob);
+        h2oHelper.exportModel(modelId, getS3ModelPath(projectId, leaderboardId, modelId)).execute(exportModelResponse -> {
+            if (logger.isDebugEnabled()) {
+                logger.debug("exportModel: {}", exportModelResponse);
+            }
+            if (exportModelResponse.code() == 200) {
+                finish(projectId, workingJob, null);
+            } else {
+                logger.warn("Failed to export frame: {}", exportModelResponse);
+                finish(projectId, workingJob, new H2oAccessException("Failed to access " + exportModelResponse));
+            }
+        }, t -> {
+            logger.warn("Failed to export model: {}", modelId, t);
+            finish(projectId, workingJob, t);
+        });
     }
 
     protected JobV3 createWorkingJob(final String target, final String description, final float progress) {
@@ -887,5 +937,15 @@ public class ProjectHelper {
     protected String getS3Path(final String projectId, final String fileName) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         return "s3://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/data/" + fileName;
+    }
+
+    protected String getModelConfigPath(final String projectId, final String leaderboardId, final String modelId) {
+        return projectFolderName + "/" + projectId + "/model/" + StringCodecUtil.encodeUrlSafe(leaderboardId) + "/" + modelId + ".json";
+    }
+
+    protected String getS3ModelPath(final String projectId, final String leaderboardId, final String modelId) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        return "s3a://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/model/"
+                + StringCodecUtil.encodeUrlSafe(leaderboardId) + "/" + modelId;
     }
 }

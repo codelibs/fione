@@ -26,5 +26,6 @@ public class ModelForm {
 
     public String frameId;
 
+    @Required
     public String leaderboardId;
 }
