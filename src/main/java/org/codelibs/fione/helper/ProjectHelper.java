@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -59,6 +60,7 @@ import org.codelibs.fione.h2o.bindings.pojos.JobV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.KeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
+import org.codelibs.fione.h2o.bindings.pojos.ModelExportV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
@@ -841,17 +843,18 @@ public class ProjectHelper {
     }
 
     public void exportModel(final String projectId, final String leaderboardId, final String modelId) {
-        final FessConfig fessConfig = ComponentUtil.getFessConfig();
-        final MinioClient minioClient = createClient(fessConfig);
-
         final ModelSchemaBaseV3 model = getModel(projectId, modelId);
         if (model == null) {
             throw new H2oAccessException(modelId + " is not found in " + projectId);
         }
+
         final String json = gson.toJson(model);
         if (logger.isDebugEnabled()) {
             logger.debug("model: {}", json);
         }
+
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
         final String objectName = getModelConfigPath(projectId, leaderboardId, modelId);
         try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
             final String bucketName = fessConfig.getStorageBucket();
@@ -876,6 +879,48 @@ public class ProjectHelper {
             logger.warn("Failed to export model: {}", modelId, t);
             finish(projectId, workingJob, t);
         });
+    }
+
+    public void exportAllModels(String projectId, String leaderboardId) {
+        LeaderboardV99 leaderboard = getLeaderboard(projectId, leaderboardId);
+        if (leaderboard == null) {
+            throw new H2oAccessException(leaderboardId + " is not found in " + projectId);
+        }
+
+        new Thread(() -> {
+            final int size = leaderboard.models.length;
+            AtomicInteger counter = new AtomicInteger(0);
+            final JobV3 workingJob = createWorkingJob(leaderboardId, "Export All Models", 0.0f);
+            store(projectId, workingJob);
+            Arrays.stream(leaderboard.models)
+                    .map(m -> m.name)
+                    .forEach(
+                            modelId -> {
+                                try {
+                                    Response<ModelExportV3> exportModelResponse =
+                                            h2oHelper.exportModel(modelId, getS3ModelPath(projectId, leaderboardId, modelId)).execute();
+                                    if (logger.isDebugEnabled()) {
+                                        logger.debug("exportModel: {}", exportModelResponse);
+                                    }
+                                    if (exportModelResponse.code() == 200) {
+                                        int current = counter.addAndGet(1);
+                                        if (current == size) {
+                                            workingJob.progress = 1.0f;
+                                        } else {
+                                            workingJob.progress = (float) current / (float) size;
+                                        }
+                                        finish(projectId, workingJob, null);
+                                    } else {
+                                        logger.warn("Failed to export frame: {}", exportModelResponse);
+                                    }
+                                } catch (Exception e) {
+                                    logger.warn("Failed to export model: {}", modelId, e);
+                                }
+                            });
+            if (counter.get() != size) {
+                finish(projectId, workingJob, new H2oAccessException("Failed to export " + (size - counter.get()) + " models."));
+            }
+        }, "ExportAllModels").start();
     }
 
     protected JobV3 createWorkingJob(final String target, final String description, final float progress) {
@@ -948,4 +993,5 @@ public class ProjectHelper {
         return "s3a://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/model/"
                 + StringCodecUtil.encodeUrlSafe(leaderboardId) + "/" + modelId;
     }
+
 }

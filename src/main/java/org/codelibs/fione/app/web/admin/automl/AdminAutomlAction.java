@@ -231,32 +231,6 @@ public class AdminAutomlAction extends FioneAdminAction {
         }
     }
 
-    private int getParamAsInt(final HttpServletRequest req, final String key, final int defautValue) {
-        final String s = req.getParameter(key);
-        if (StringUtil.isBlank(s)) {
-            return defautValue;
-        } else {
-            try {
-                return Integer.parseInt(s);
-            } catch (final NumberFormatException e) {
-                return defautValue;
-            }
-        }
-    }
-
-    private long getParamAsLong(final HttpServletRequest req, final String key, final long defautValue) {
-        final String s = req.getParameter(key);
-        if (StringUtil.isBlank(s)) {
-            return defautValue;
-        } else {
-            try {
-                return Long.parseLong(s);
-            } catch (final NumberFormatException e) {
-                return defautValue;
-            }
-        }
-    }
-
     @Execute
     @Secured({ ROLE })
     public HtmlResponse newdataset(final String projectId) {
@@ -579,7 +553,7 @@ public class AdminAutomlAction extends FioneAdminAction {
     }
 
     @Execute
-    @Secured({ ROLE, ROLE + VIEW })
+    @Secured({ ROLE })
     public ActionResponse exportmodel(final ModelForm form) {
         validate(form, messages -> {}, () -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
         verifyTokenKeep(() -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
@@ -592,6 +566,22 @@ public class AdminAutomlAction extends FioneAdminAction {
             throw validationError(messages -> messages.addErrorsFailedToExportModel(GLOBAL, form.modelId), this::asListHtml);
         }
         return redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public ActionResponse exportallmodels(final LeaderboardForm form) {
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+
+        try {
+            projectHelper.exportAllModels(form.projectId, form.leaderboardId);
+            saveMessage(messages -> messages.addSuccessExportingAllModels(GLOBAL));
+        } catch (final Exception e) {
+            logger.warn("Failed to export models", e);
+            throw validationError(messages -> messages.addErrorsFailedToExportModels(GLOBAL), this::asListHtml);
+        }
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
 
     // ===================================================================================
@@ -732,5 +722,31 @@ public class AdminAutomlAction extends FioneAdminAction {
             moreUrl.params(args);
         }
         return redirectWith(getClass(), moreUrl);
+    }
+
+    private int getParamAsInt(final HttpServletRequest req, final String key, final int defautValue) {
+        final String s = req.getParameter(key);
+        if (StringUtil.isBlank(s)) {
+            return defautValue;
+        } else {
+            try {
+                return Integer.parseInt(s);
+            } catch (final NumberFormatException e) {
+                return defautValue;
+            }
+        }
+    }
+
+    private long getParamAsLong(final HttpServletRequest req, final String key, final long defautValue) {
+        final String s = req.getParameter(key);
+        if (StringUtil.isBlank(s)) {
+            return defautValue;
+        } else {
+            try {
+                return Long.parseLong(s);
+            } catch (final NumberFormatException e) {
+                return defautValue;
+            }
+        }
     }
 }

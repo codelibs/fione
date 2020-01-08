@@ -68,6 +68,9 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Exporting Model {0}. */
     public static final String SUCCESS_exporting_model = "{success.exporting_model}";
 
+    /** The key of the message: Exporting all Models. */
+    public static final String SUCCESS_exporting_all_models = "{success.exporting_all_models}";
+
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
 
@@ -124,6 +127,9 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Failed to export Model {0}. */
     public static final String ERRORS_failed_to_export_model = "{errors.failed_to_export_model}";
+
+    /** The key of the message: Failed to export Models. */
+    public static final String ERRORS_failed_to_export_models = "{errors.failed_to_export_models}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -330,6 +336,20 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessExportingModel(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_exporting_model, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.exporting_all_models' with parameters.
+     * <pre>
+     * message: Exporting all Models.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessExportingAllModels(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_exporting_all_models));
         return this;
     }
 
@@ -611,6 +631,20 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addErrorsFailedToExportModel(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(ERRORS_failed_to_export_model, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_export_models' with parameters.
+     * <pre>
+     * message: Failed to export Models.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToExportModels(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_export_models));
         return this;
     }
 }

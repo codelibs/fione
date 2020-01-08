@@ -425,6 +425,18 @@
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
+										<button type="button" class="btn btn-box-tool dropdown-toggle" data-toggle="dropdown" aria-expanded="true">
+											<i class="fas fa-th-list"></i>
+										</button>
+										<ul class="dropdown-menu" role="menu">
+											<li><form method="post" action="${contextPath}/admin/automl/">
+											<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
+											<input type="hidden" name="projectId" value="${f:h(project.id)}">
+											<input type="hidden" name="frameId" value="${f:h(frameId)}">
+											<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
+											<button type="submit" name="exportallmodels" value="Export All" class="btn btn-link">Export All</button>
+											</form></li>
+										</ul>
 									</div>
 								</div>
 								<div class="box-body">

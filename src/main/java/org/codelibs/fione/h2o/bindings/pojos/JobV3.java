@@ -139,7 +139,7 @@ public class JobV3 extends SchemaV3 {
             return Kind.FRAME;
         } else if (description.contains("Grid Search")) {
             return Kind.GRID;
-        } else if (description.contains("Export Prediction")) {
+        } else if (description.contains("Export ")) {
             return Kind.EXPORT;
         }
         return Kind.MODEL;
