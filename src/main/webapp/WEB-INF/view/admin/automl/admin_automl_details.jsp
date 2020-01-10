@@ -39,7 +39,7 @@
 						<div class="box box-primary">
 							<div class="box-header with-border">
 								<h3 class="box-title">Actions</h3>
-								<div class="btn-group pull-right">
+								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
@@ -86,7 +86,7 @@
 							<div class="box box-primary">
 								<div class="box-header with-border">
 									<h3 class="box-title">${f:h(frameId)}</h3>
-									<div class="btn-group pull-right">
+									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 									</div>
 								</div>
@@ -113,7 +113,7 @@
 						<div class="box box-primary">
 							<div class="box-header with-border">
 								<h3 class="box-title">DataSets</h3>
-								<div class="btn-group pull-right">
+								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
@@ -167,7 +167,7 @@
 						<div class="box box-primary">
 							<div class="box-header with-border">
 								<h3 class="box-title">Frames</h3>
-								<div class="btn-group pull-right">
+								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
@@ -217,7 +217,7 @@
 						<div class="box box-primary">
 							<div class="box-header with-border">
 								<h3 class="box-title">Jobs</h3>
-								<div class="btn-group pull-right">
+								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
@@ -321,7 +321,7 @@
 							<div class="box box-primary">
 								<div class="box-header with-border">
 									<h3 class="box-title">Column Summaries in ${f:h(frameId)}</h3>
-									<div class="btn-group pull-right">
+									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
@@ -374,7 +374,12 @@
 							<div class="box box-primary">
 								<div class="box-header with-border">
 									<h3 class="box-title">Data in ${f:h(frameId)}</h3>
-									<div class="btn-group pull-right">
+									<div class="box-tools pull-right">
+										<span class="label label-info">${f:h(frameData.rows)} Data, ${f:h(frameData.numColumns)} Columns</span>
+										<c:if test="${frameData.columnOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset-10)}" class="btn btn-box-tool"><i class="fas fa-arrow-left"></i></a></c:if>
+										<c:if test="${frameData.columnOffset + 10 < frameData.numColumns}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset+10)}" class="btn btn-box-tool"><i class="fas fa-arrow-right"></i></a></c:if>
+										<c:if test="${frameData.rowOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset-10)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-up"></i></a></c:if>
+										<c:if test="${frameData.rowOffset + 10 < frameData.rows}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset+10)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-down"></i></a></c:if>
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
@@ -421,7 +426,7 @@
 							<div class="box box-primary">
 								<div class="box-header with-border">
 									<h3 class="box-title">Models in ${f:h(leaderboard.projectName)}</h3>
-									<div class="btn-group pull-right">
+									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>

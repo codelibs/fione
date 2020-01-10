@@ -68,6 +68,10 @@ import org.lastaflute.web.util.LaRequestUtil;
  */
 public class AdminAutomlAction extends FioneAdminAction {
 
+    private static final String DATA_COLUMN_OFFSET = "data.column_offset";
+
+    private static final String DATA_ROW_OFFSET = "data.row_offset";
+
     private static final String LEADERBOARD_ID = "leaderboardId";
 
     private static final String FRAME_ID = "frameId";
@@ -189,9 +193,15 @@ public class AdminAutomlAction extends FioneAdminAction {
                 final FramesV3 params = new FramesV3();
                 params.frameId = new FrameKeyV3(frameId);
                 params.column = null;
-                params.rowOffset = getParamAsLong(req, "data.row_offset", 0L);
-                params.rowCount = 20;
-                params.columnOffset = getParamAsInt(req, "data.column_offset", 0);
+                params.rowOffset = getParamAsLong(req, DATA_ROW_OFFSET, 0L);
+                if (params.rowOffset < 0) {
+                    params.rowOffset = 0L;
+                }
+                params.rowCount = 10;
+                params.columnOffset = getParamAsInt(req, DATA_COLUMN_OFFSET, 0);
+                if (params.columnOffset < 0) {
+                    params.columnOffset = 0;
+                }
                 params.columnCount = 10;
                 params.fullColumnCount = -1;
                 params.findCompatibleModels = false;
