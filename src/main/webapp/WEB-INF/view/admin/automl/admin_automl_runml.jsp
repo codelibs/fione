@@ -205,6 +205,15 @@
 												</la:select>
 											</div>
 										</div>
+										<div class="form-group">
+											<label for="maxCategoricalFeatures" class="col-sm-3 control-label">Max Categorical Features</label>
+											<div class="col-sm-9">
+												<la:errors property="maxCategoricalFeatures" />
+												<input type="number" name="maxCategoricalFeatures" id="maxCategoricalFeatures"
+													value="${f:h(maxCategoricalFeatures)}" class="form-control" min="0"
+												>
+											</div>
+										</div>
 									</div>
 								</div>
 								<div class="box-footer">

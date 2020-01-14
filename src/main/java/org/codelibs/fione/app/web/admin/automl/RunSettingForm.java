@@ -81,4 +81,9 @@ public class RunSettingForm {
     public String responseColumn;
 
     public String sortMetric = "AUTO";
+
+    @Min(value = 1)
+    @Max(value = 2147483647)
+    @ValidateTypeFailure
+    public Integer maxCategoricalFeatures = 10000;
 }

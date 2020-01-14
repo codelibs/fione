@@ -42,8 +42,10 @@ import org.codelibs.fione.h2o.bindings.builder.AutoMLInputBuilder;
 import org.codelibs.fione.h2o.bindings.builder.AutoMLStoppingCriteriaBuilder;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
+import org.codelibs.fione.h2o.bindings.pojos.AutoMLCustomParameterV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
+import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecScopeProvider;
 import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
@@ -424,7 +426,11 @@ public class AdminAutomlAction extends FioneAdminAction {
                     AutoMLInputBuilder.create().trainingFrame(form.frameId).responseColumn(form.responseColumn, null)
                             .ignoredColumns(ignoredColumns)
                             .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
-            final AutoMLBuildModelsV99 buildModels = AutoMLBuildModelsBuilder.create().build();
+            final List<AutoMLCustomParameterV99> argParamList = new ArrayList<>();
+            argParamList.add(new AutoMLCustomParameterV99(Automlapischemas3AutoMLBuildSpecScopeProvider.DeepLearning,
+                    "max_categorical_features", form.maxCategoricalFeatures));
+            final AutoMLBuildModelsV99 buildModels =
+                    AutoMLBuildModelsBuilder.create().algoParameters(argParamList.toArray(n -> new AutoMLCustomParameterV99[n])).build();
 
             projectHelper.runAutoML(form.projectId, buildControl, input, buildModels);
             saveMessage(messages -> messages.addSuccessBuildingModels(GLOBAL));
