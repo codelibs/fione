@@ -15,10 +15,23 @@
  */
 package org.codelibs.fione.app.web.base;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.function.BiFunction;
+
+import org.codelibs.core.collection.Maps;
 import org.codelibs.fess.app.web.base.FessAdminAction;
+import org.codelibs.fess.util.RenderDataUtil;
 import org.codelibs.fione.exception.FioneSystemException;
+import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
+import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
+import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.mylasta.action.FioneHtmlPath;
 import org.codelibs.fione.mylasta.action.FioneMessages;
+import org.codelibs.fione.util.StringCodecUtil;
+import org.lastaflute.web.response.render.RenderData;
 import org.lastaflute.web.validation.VaErrorHook;
 import org.lastaflute.web.validation.VaMessenger;
 
@@ -46,5 +59,40 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
     @Override
     public FioneMessages createMessages() { // application may call
         return new FioneMessages(); // overriding to change return type to concrete-class
+    }
+
+    protected void registerColumnTypeItems(final RenderData data) {
+        final List<Map<String, String>> columnTypeItems = new ArrayList<>();
+        columnTypeItems.add(Maps.map("label", "BAD").$("value", "BAD").$());
+        columnTypeItems.add(Maps.map("label", "UUID").$("value", "UUID").$());
+        columnTypeItems.add(Maps.map("label", "String").$("value", "String").$());
+        columnTypeItems.add(Maps.map("label", "Numeric").$("value", "Numeric").$());
+        columnTypeItems.add(Maps.map("label", "Enum").$("value", "Enum").$());
+        columnTypeItems.add(Maps.map("label", "Time").$("value", "Time").$());
+        RenderDataUtil.register(data, "columnTypeItems", columnTypeItems);
+    }
+
+    protected void registerColumnItems(final ParseV3 schema, final RenderData data,
+            final BiFunction<Maps<String, String>, Integer, Maps<String, String>> maps) {
+        final List<Map<String, String>> columnItems = new ArrayList<>();
+        for (int i = 0; i < schema.columnNames.length; i++) {
+            columnItems.add(maps.apply(
+                    Maps.map("id", StringCodecUtil.encodeUrlSafe(schema.columnNames[i])).$("name", schema.columnNames[i])
+                            .$("value", schema.columnTypes[i]), i).$());
+        }
+        RenderDataUtil.register(data, "columnItems", columnItems);
+    }
+
+    protected void registerSortMetricItems(final RenderData data) {
+        RenderDataUtil.register(
+                data,
+                "sortMetricItems",
+                Arrays.stream(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.values())
+                        .map(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider::toString).toArray(n -> new String[n]));
+    }
+
+    protected void registerStoppingMetricItems(final RenderData data) {
+        RenderDataUtil.register(data, "stoppingMetricItems",
+                Arrays.stream(ScoreKeeperStoppingMetric.values()).map(ScoreKeeperStoppingMetric::toString).toArray(n -> new String[n]));
     }
 }

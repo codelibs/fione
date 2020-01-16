@@ -281,8 +281,8 @@ public class H2oHelper {
         }
     }
 
-    public Callable<ModelExportV3> exportModel(String modelId, String path) {
-        ModelExportV3 params = new ModelExportV3();
+    public Callable<ModelExportV3> exportModel(final String modelId, final String path) {
+        final ModelExportV3 params = new ModelExportV3();
         params.modelId = new ModelKeyV3(modelId);
         params.dir = path;
         params.force = true;

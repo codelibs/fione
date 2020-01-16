@@ -41,7 +41,7 @@ public class AutoMLCustomParameterV99 {
         this(null, "", null);
     }
 
-    public AutoMLCustomParameterV99(Automlapischemas3AutoMLBuildSpecScopeProvider scope, String name, Object value) {
+    public AutoMLCustomParameterV99(final Automlapischemas3AutoMLBuildSpecScopeProvider scope, final String name, final Object value) {
         this.scope = scope;
         this.name = name;
         this.value = value;

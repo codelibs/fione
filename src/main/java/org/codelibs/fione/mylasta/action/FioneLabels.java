@@ -29,6 +29,9 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Fione */
     public static final String LABELS_menu_fione = "{labels.menu_fione}";
 
+    /** The key of the message: EasyML */
+    public static final String LABELS_menu_easyml = "{labels.menu_easyml}";
+
     /** The key of the message: AutoML */
     public static final String LABELS_menu_automl = "{labels.menu_automl}";
 
@@ -40,6 +43,9 @@ public class FioneLabels extends FessMessages {
 
     /** The key of the message: Name */
     public static final String LABELS_automl_name = "{labels.automl_name}";
+
+    /** The key of the message: EasyML */
+    public static final String LABELS_EASYML = "{labels.easyml}";
 
     /**
      * Assert the property is not null.

@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
 
 import javax.annotation.Resource;
 
@@ -172,9 +173,13 @@ public class ProjectHelper {
         }
     }
 
+    public String getFrameName(final String projectId, final String dataSetId) {
+        return projectId + "_" + dataSetId;
+    }
+
     protected String[] getFrames(final Project project) {
         final List<String> frameIdList = new ArrayList<>();
-        for (final String baseName : Arrays.stream(project.getDataSets()).map(d -> d.getName().split("\\.")[0]).toArray(n -> new String[n])) {
+        Arrays.stream(project.getDataSets()).map(d -> getFrameName(project.getId(), d.getId())).forEach(baseName -> {
             try {
                 final Response<FramesListV3> response = h2oHelper.getFrames(baseName).execute(requestTimeout);
                 if (logger.isDebugEnabled()) {
@@ -193,7 +198,7 @@ public class ProjectHelper {
             } catch (final Exception e) {
                 logger.warn("Failed to get frames.", e);
             }
-        }
+        });
         return frameIdList.stream().distinct().toArray(n -> new String[n]);
     }
 
@@ -312,6 +317,7 @@ public class ProjectHelper {
                     }
                     if (setupResponse.code() == 200) {
                         final ParseV3 meta = h2oHelper.convert(setupResponse.body());
+                        meta.destinationFrame = new FrameKeyV3(getFrameName(projectId, dataSet.getId()) + ".hex");
                         dataSet.setSchema(meta);
                         store(projectId, dataSet);
                         h2oHelper.deleteFrame(frames[0]).execute(deleteResponse -> {
@@ -388,7 +394,7 @@ public class ProjectHelper {
         }
     }
 
-    public void createFrame(final String projectId, final DataSet dataSet) {
+    public void createFrame(final String projectId, final DataSet dataSet, final Consumer<Response<ParseV3>> result) {
         final JobV3 workingJob = createWorkingJob(dataSet.getName(), "Parse Frame", 0.2f);
         store(projectId, workingJob);
         h2oHelper.importFiles(dataSet.getPath()).execute(importResponse -> {
@@ -404,6 +410,7 @@ public class ProjectHelper {
                         logger.info("Create frame: {}", keyToString(parseResponse.body().destinationFrame));
                         deleteJob(projectId, workingJob.key.name);
                         store(projectId, parseResponse.body().job);
+                        result.accept(parseResponse);
                     } else {
                         logger.warn("Failed to parse data: dataSet:{}", dataSet);
                         finish(projectId, workingJob, new H2oAccessException("Failed to access " + parseResponse));
@@ -420,7 +427,6 @@ public class ProjectHelper {
             logger.warn("Failed to import data: dataSet:{}", dataSet, t);
             finish(projectId, workingJob, new H2oAccessException("Failed to access ", t));
         });
-
     }
 
     public void deleteFrame(final String frameId) {
@@ -881,15 +887,15 @@ public class ProjectHelper {
         });
     }
 
-    public void exportAllModels(String projectId, String leaderboardId) {
-        LeaderboardV99 leaderboard = getLeaderboard(projectId, leaderboardId);
+    public void exportAllModels(final String projectId, final String leaderboardId) {
+        final LeaderboardV99 leaderboard = getLeaderboard(projectId, leaderboardId);
         if (leaderboard == null) {
             throw new H2oAccessException(leaderboardId + " is not found in " + projectId);
         }
 
         new Thread(() -> {
             final int size = leaderboard.models.length;
-            AtomicInteger counter = new AtomicInteger(0);
+            final AtomicInteger counter = new AtomicInteger(0);
             final JobV3 workingJob = createWorkingJob(leaderboardId, "Export All Models", 0.0f);
             store(projectId, workingJob);
             Arrays.stream(leaderboard.models)
@@ -897,13 +903,13 @@ public class ProjectHelper {
                     .forEach(
                             modelId -> {
                                 try {
-                                    Response<ModelExportV3> exportModelResponse =
+                                    final Response<ModelExportV3> exportModelResponse =
                                             h2oHelper.exportModel(modelId, getS3ModelPath(projectId, leaderboardId, modelId)).execute();
                                     if (logger.isDebugEnabled()) {
                                         logger.debug("exportModel: {}", exportModelResponse);
                                     }
                                     if (exportModelResponse.code() == 200) {
-                                        int current = counter.addAndGet(1);
+                                        final int current = counter.addAndGet(1);
                                         if (current == size) {
                                             workingJob.progress = 1.0f;
                                         } else {
@@ -913,7 +919,7 @@ public class ProjectHelper {
                                     } else {
                                         logger.warn("Failed to export frame: {}", exportModelResponse);
                                     }
-                                } catch (Exception e) {
+                                } catch (final Exception e) {
                                     logger.warn("Failed to export model: {}", modelId, e);
                                 }
                             });

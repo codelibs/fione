@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title><la:message key="labels.admin_brand_title" /> | <la:message key="labels.automl" /></title>
+<title><la:message key="labels.admin_brand_title" /> | <la:message key="labels.easyml" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 </head>
 <body class="skin-blue sidebar-mini">
@@ -10,39 +10,26 @@
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
 			<jsp:param name="menuCategoryType" value="fione" />
-			<jsp:param name="menuType" value="automl" />
+			<jsp:param name="menuType" value="easyml" />
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>
-					<la:message key="labels.automl_title_details" />
-				</h1>
-				<jsp:include page="/WEB-INF/view/common/admin/crud/breadcrumb.jsp"></jsp:include>
+				<h1>Project Dashboard</h1>
+				<ol class="breadcrumb">
+				</ol>
 			</section>
 			<section class="content">
 				<div class="row">
-					<div class="col-md-12">
+					<div class="col-md-3">
 						<div class="box box-primary">
 							<div class="box-header with-border">
 								<h3 class="box-title">
-									<la:message key="labels.crud_title_list" />
+									Projects
 								</h3>
-								<div class="btn-group pull-right">
-									<la:link href="newproject" styleClass="btn btn-success btn-xs ${f:h(editableClass)}">
-										<em class="fa fa-plus"></em>
-										<la:message key="labels.crud_link_create" />
-									</la:link>
+								<div class="btn-tools pull-right">
 								</div>
 							</div>
 							<div class="box-body">
-								<%-- Message --%>
-								<div>
-									<la:info id="msg" message="true">
-										<div class="alert alert-info">${msg}</div>
-									</la:info>
-									<la:errors />
-								</div>
-								<%-- List --%>
 								<c:if test="${fn:length(projects) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
@@ -62,7 +49,7 @@
 												</thead>
 												<tbody>
 													<c:forEach var="data" varStatus="s" items="${projects}">
-														<tr data-href="${contextPath}/admin/automl/details/${f:u(data.id)}">
+														<tr data-href="${contextPath}/admin/easyml/job/${f:u(data.id)}">
 															<td>${f:h(data.name)}</td>
 														</tr>
 													</c:forEach>
@@ -73,6 +60,47 @@
 								</c:if>
 							</div>
 						</div>
+					</div>
+					<div class="col-md-9">
+						<la:form action="/admin/easyml/uploaddataset" styleClass="form-horizontal" enctype="multipart/form-data">
+							<div class="box box-primary">
+								<div class="box-header with-border">
+									<h3 class="box-title">New Project</h3>
+									<div class="btn-tools pull-right">
+									</div>
+								</div>
+								<div class="box-body">
+									<div>
+										<la:info id="msg" message="true">
+											<div class="alert alert-info">${msg}</div>
+										</la:info>
+										<la:errors property="_global" />
+									</div>
+									<div class="form-group">
+										<label for="name" class="col-sm-3 control-label">Project Name</label>
+										<div class="col-sm-9">
+											<la:errors property="name" />
+											<la:text styleId="name" property="name" styleClass="form-control" />
+										</div>
+									</div>
+									<div class="form-group">
+										<label for="file" class="col-sm-3 control-label">Training Data</label>
+										<div class="col-sm-9">
+											<la:errors property="file" />
+											<input type="file" name="file" />
+										</div>
+									</div>
+								</div>
+								<div class="box-footer">
+									<c:if test="${editable}">
+										<button type="submit" class="btn btn-success">
+											<em class="fa fa-plus"></em>
+											<la:message key="labels.crud_button_create" />
+										</button>
+									</c:if>
+								</div>
+							</div>
+						</la:form>
 					</div>
 				</div>
 			</section>

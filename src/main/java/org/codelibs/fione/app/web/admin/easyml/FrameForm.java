@@ -13,21 +13,19 @@
  * either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-package org.codelibs.fione.mylasta.direction;
+package org.codelibs.fione.app.web.admin.easyml;
 
-import java.util.List;
-import java.util.function.Consumer;
+import java.util.HashMap;
+import java.util.Map;
 
-import org.codelibs.fess.mylasta.direction.FessFwAssistantDirector;
+import org.lastaflute.web.validation.Required;
 
-public class CustomFwAssistantDirector extends FessFwAssistantDirector {
-    @Override
-    protected Consumer<List<String>> createMessageNameList() {
-        return nameList -> {
-            // order is important
-            nameList.add("fione_message");
-            nameList.add("fione_label");
-            nameList.add("fess_message");
-        };
-    }
+public class FrameForm {
+    @Required
+    public String projectId;
+
+    @Required
+    public String dataSetId;
+
+    public Map<String, String> columns = new HashMap<>();
 }

@@ -21,14 +21,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.codelibs.core.collection.Maps;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fess.annotation.Secured;
 import org.codelibs.fess.app.web.admin.user.SearchForm;
@@ -109,7 +107,7 @@ public class AdminAutomlAction extends FioneAdminAction {
     }
 
     // ===================================================================================
-    //                                                                      Search Execute
+    //                                                                             Execute
     //                                                                      ==============
     @Execute
     @Secured({ ROLE, ROLE + VIEW })
@@ -302,14 +300,14 @@ public class AdminAutomlAction extends FioneAdminAction {
     @Secured({ ROLE })
     public HtmlResponse newframe(final String projectId, final String dataSetId) {
         saveToken();
-        return asNewFrameaHtml(projectId, dataSetId);
+        return asNewFrameHtml(projectId, dataSetId);
     }
 
     @Execute
     @Secured({ ROLE })
     public HtmlResponse createframe(final CreateFrameForm form) {
-        validate(form, messages -> {}, () -> asNewFrameaHtml(form.projectId, form.dataSetId));
-        verifyToken(() -> asNewFrameaHtml(form.projectId, form.dataSetId));
+        validate(form, messages -> {}, () -> asNewFrameHtml(form.projectId, form.dataSetId));
+        verifyToken(() -> asNewFrameHtml(form.projectId, form.dataSetId));
         final DataSet dataSet = projectHelper.getDataSet(form.projectId, form.dataSetId);
         if (dataSet == null) {
             throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
@@ -326,12 +324,12 @@ public class AdminAutomlAction extends FioneAdminAction {
             }
         }
         try {
-            projectHelper.createFrame(form.projectId, dataSet);
+            projectHelper.createFrame(form.projectId, dataSet, result -> {});
             saveMessage(messages -> messages.addSuccessLoadDataset(GLOBAL, dataSet.getName()));
         } catch (final Exception e) {
             logger.warn("Failed to create frame: {}", dataSet, e);
             throw validationError(messages -> messages.addErrorsFailedToCreateFrame(GLOBAL, dataSet.getName()),
-                    () -> asNewFrameaHtml(form.projectId, form.dataSetId));
+                    () -> asNewFrameHtml(form.projectId, form.dataSetId));
         }
         return redirectDetailsHtml(form.projectId, null, null);
     }
@@ -395,7 +393,7 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     @Execute
     @Secured({ ROLE })
-    public HtmlResponse runautoml(final RunSettingForm form) {
+    public HtmlResponse runautoml(final TrainForm form) {
         validate(form, messages -> {}, this::asNewProjectHtml);
         verifyToken(this::asNewProjectHtml);
 
@@ -411,7 +409,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                     AutoMLBuildControlBuilder
                             .create()
                             .projectName(form.projectName)
-                            .nfolds(5)
+                            .nfolds(form.nfolds)
                             .balanceClasses(Boolean.valueOf(form.balanceClasses))
                             .stoppingCriteria(
                                     AutoMLStoppingCriteriaBuilder.create().seed(form.seed).maxModels(form.maxModels)
@@ -622,7 +620,7 @@ public class AdminAutomlAction extends FioneAdminAction {
         });
     }
 
-    private HtmlResponse asNewFrameaHtml(final String projectId, final String dataSetId) {
+    private HtmlResponse asNewFrameHtml(final String projectId, final String dataSetId) {
         final DataSet dataSet = projectHelper.getDataSet(projectId, dataSetId);
         if (dataSet == null) {
             throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
@@ -638,50 +636,27 @@ public class AdminAutomlAction extends FioneAdminAction {
                 form.projectId = projectId;
                 form.dataSetId = dataSetId;
             });
-        }).renderWith(
-                data -> {
-                    final List<Map<String, String>> columnItems = new ArrayList<>();
-                    for (int i = 0; i < schema.columnNames.length; i++) {
-                        columnItems.add(Maps.map("id", StringCodecUtil.encodeUrlSafe(schema.columnNames[i]))
-                                .$("name", schema.columnNames[i]).$("value", schema.columnTypes[i]).$());
-                    }
-                    RenderDataUtil.register(data, "columnItems", columnItems);
-                    final List<Map<String, String>> columnTypeItems = new ArrayList<>();
-                    columnTypeItems.add(Maps.map("label", "BAD").$("value", "BAD").$());
-                    columnTypeItems.add(Maps.map("label", "UUID").$("value", "UUID").$());
-                    columnTypeItems.add(Maps.map("label", "String").$("value", "String").$());
-                    columnTypeItems.add(Maps.map("label", "Numeric").$("value", "Numeric").$());
-                    columnTypeItems.add(Maps.map("label", "Enum").$("value", "Enum").$());
-                    columnTypeItems.add(Maps.map("label", "Time").$("value", "Time").$());
-                    RenderDataUtil.register(data, "columnTypeItems", columnTypeItems);
-                });
+        }).renderWith(data -> {
+            registerColumnItems(schema, data, (maps, i) -> maps);
+            registerColumnTypeItems(data);
+        });
     }
 
     private HtmlResponse asSetupMlHtml(final String projectId, final String frameId) {
         final FrameV3 columnSummaries = projectHelper.getColumnSummaries(projectId, frameId);
 
-        return asHtml(path_AdminAutoml_AdminAutomlRunmlJsp).useForm(RunSettingForm.class, setup -> {
+        return asHtml(path_AdminAutoml_AdminAutomlRunmlJsp).useForm(TrainForm.class, setup -> {
             setup.setup(form -> {
                 form.projectId = projectId;
                 form.frameId = frameId;
                 form.projectName = StringCodecUtil.normalize(StringCodecUtil.decode(projectId));
             });
-        }).renderWith(
-                data -> {
-                    final String[] columnItems = Arrays.stream(columnSummaries.columns).map(c -> c.label).toArray(n -> new String[n]);
-                    RenderDataUtil.register(data, "columnItems", columnItems);
-                    RenderDataUtil.register(
-                            data,
-                            "stoppingMetricItems",
-                            Arrays.stream(ScoreKeeperStoppingMetric.values()).map(ScoreKeeperStoppingMetric::toString)
-                                    .toArray(n -> new String[n]));
-                    RenderDataUtil.register(
-                            data,
-                            "sortMetricItems",
-                            Arrays.stream(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.values())
-                                    .map(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider::toString).toArray(n -> new String[n]));
-
-                });
+        }).renderWith(data -> {
+            final String[] columnItems = Arrays.stream(columnSummaries.columns).map(c -> c.label).toArray(n -> new String[n]);
+            RenderDataUtil.register(data, "columnItems", columnItems);
+            registerStoppingMetricItems(data);
+            registerSortMetricItems(data);
+        });
     }
 
     private HtmlResponse asPredictionMlHtml(final String projectId, final String frameId, final String leaderboardId) {

@@ -46,4 +46,19 @@ public interface FioneHtmlPath {
 
     /** The path of the HTML: /admin/automl/admin_automl_runml.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlRunmlJsp = new HtmlNext("/admin/automl/admin_automl_runml.jsp");
+
+    /** The path of the HTML: /admin/easyml/admin_easyml_dataset.jsp */
+    HtmlNext path_AdminEasyml_AdminEasymlDatasetJsp = new HtmlNext("/admin/easyml/admin_easyml_dataset.jsp");
+
+    /** The path of the HTML: /admin/easyml/admin_easyml_job.jsp */
+    HtmlNext path_AdminEasyml_AdminEasymlJobJsp = new HtmlNext("/admin/easyml/admin_easyml_job.jsp");
+
+    /** The path of the HTML: /admin/easyml/admin_easyml_predict.jsp */
+    HtmlNext path_AdminEasyml_AdminEasymlPredictJsp = new HtmlNext("/admin/easyml/admin_easyml_predict.jsp");
+
+    /** The path of the HTML: /admin/easyml/admin_easyml_summary.jsp */
+    HtmlNext path_AdminEasyml_AdminEasymlSummaryJsp = new HtmlNext("/admin/easyml/admin_easyml_summary.jsp");
+
+    /** The path of the HTML: /admin/easyml/admin_easyml_train.jsp */
+    HtmlNext path_AdminEasyml_AdminEasymlTrainJsp = new HtmlNext("/admin/easyml/admin_easyml_train.jsp");
 }

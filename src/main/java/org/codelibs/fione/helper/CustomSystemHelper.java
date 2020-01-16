@@ -52,4 +52,10 @@ public class CustomSystemHelper extends SystemHelper {
         h2oHelper.setSecretKeyId(fessConfig.getStorageSecretKey());
         h2oHelper.invalidate();
     }
+
+    @Override
+    public String getHelpLink(final String name) {
+        // TODO fione help
+        return super.getHelpLink(name);
+    }
 }

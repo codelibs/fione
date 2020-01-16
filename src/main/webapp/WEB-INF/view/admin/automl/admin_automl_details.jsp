@@ -1,4 +1,4 @@
-<%@page pageEncoding="UTF-8" contentType="text/html; charset=UTF-8"%><!DOCTYPE html>
+<%@page pageEncoding="UTF-8" contentType="text/html; charset=UTF-8"%><%@taglib prefix="fi" uri="http://fione.codelibs.org/functions" %><!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
@@ -52,7 +52,7 @@
 										<c:if test="${not empty frameId}">
 										<div class="input-group">
 											<span class="input-group-addon" id="basic-addon1"><i class="fas fa-table"></i></span>
-											<span class="form-control">${f:h(frameId)}</span>
+											<span class="form-control">${f:h(fi:frameName(frameId))}</span>
 										</div>
 										</c:if>
 										<c:if test="${not empty frameId and leaderboard != null}">
@@ -85,7 +85,7 @@
 						<c:if test="${columnSummaries != null}">
 							<div class="box box-primary">
 								<div class="box-header with-border">
-									<h3 class="box-title">${f:h(frameId)}</h3>
+									<h3 class="box-title">${f:h(fi:frameName(frameId))}</h3>
 									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 									</div>
@@ -197,7 +197,7 @@
 														<input type="hidden" name="projectId" value="${f:h(project.id)}">
 														<input type="hidden" name="frameId" value="${f:h(frameId)}">
 														<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-															<td>${f:h(data)}</td>
+															<td>${f:h(fi:frameName(data))}</td>
 															<td class="text-center">
 															<c:if test="${frameId == data}"><i class="far fa-check-square" style="color:#3c8dbc;"></i></c:if>
 															<c:if test="${frameId != data}"><la:link href="/admin/automl/details/${f:u(project.id)}?frameId=${f:u(data)}&leaderboardId=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
@@ -320,7 +320,7 @@
 						<c:if test="${columnSummaries != null}">
 							<div class="box box-primary">
 								<div class="box-header with-border">
-									<h3 class="box-title">Column Summaries in ${f:h(frameId)}</h3>
+									<h3 class="box-title">Column Summaries in ${f:h(fi:frameName(frameId))}</h3>
 									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
@@ -340,10 +340,10 @@
 														<th>Zeros</th>
 														<th>+Inf.</th>
 														<th>-Inf.</th>
-														<th>min</th>
-														<th>max</th>
-														<th>mean</th>
-														<th>sigma</th>
+														<th>Min</th>
+														<th>Max</th>
+														<th>Mean</th>
+														<th>Sigma</th>
 														<th>Card.</th>
 													</tr>
 												</thead>
@@ -373,7 +373,7 @@
 						<c:if test="${frameData != null}">
 							<div class="box box-primary">
 								<div class="box-header with-border">
-									<h3 class="box-title">Data in ${f:h(frameId)}</h3>
+									<h3 class="box-title">Data in ${f:h(fi:frameName(frameId))}</h3>
 									<div class="box-tools pull-right">
 										<span class="label label-info">${f:h(frameData.rows)} Data, ${f:h(frameData.numColumns)} Columns</span>
 										<c:if test="${frameData.columnOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset-10)}" class="btn btn-box-tool"><i class="fas fa-arrow-left"></i></a></c:if>

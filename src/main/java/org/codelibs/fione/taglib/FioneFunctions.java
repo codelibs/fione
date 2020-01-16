@@ -15,10 +15,27 @@
  */
 package org.codelibs.fione.taglib;
 
+import org.codelibs.fione.util.StringCodecUtil;
+
 public class FioneFunctions {
 
     protected FioneFunctions() {
         // nothing
     }
 
+    public static String frameName(final String frameId) {
+        if (frameId == null) {
+            return null;
+        }
+        String name = frameId;
+        final int pos = frameId.lastIndexOf('.');
+        if (pos != -1) {
+            name = frameId.substring(0, pos);
+        }
+        final String[] values = name.split("_");
+        if (values.length == 2) {
+            return StringCodecUtil.decode(values[1]);
+        }
+        return frameId;
+    }
 }

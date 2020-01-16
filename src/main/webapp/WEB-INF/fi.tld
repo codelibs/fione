@@ -11,17 +11,16 @@
   <short-name>fi</short-name>
   <uri>http://fione.codelibs.org/functions</uri>
   
-  <!-- 
   <function>
     <description>
-      Return if TODO.
+      Return frame name
     </description>
-    <name>todo</name>
+    <name>frameName</name>
     <function-class>org.codelibs.fione.taglib.FioneFunctions</function-class>
-    <function-signature>boolean todo()</function-signature>
+    <function-signature>java.lang.String frameName(java.lang.String)</function-signature>
     <example>
-      ${fi:todo()}
+      ${fi:frameName(frameId)}
     </example>
   </function>
-   -->
+
 </taglib>
