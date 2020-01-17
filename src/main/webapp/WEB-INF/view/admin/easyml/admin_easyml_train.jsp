@@ -111,9 +111,9 @@
 														</select>
 													</td>
 													<td>${f:h(data.missing)}</td>
-													<td>${f:h(data.min)}</td>
-													<td>${f:h(data.max)}</td>
-													<td>${f:h(data.mean)}</td>
+													<td><fmt:formatNumber type="number" groupingUsed="false" maxFractionDigits="6" value="${data.min}"/></td>
+													<td><fmt:formatNumber type="number" groupingUsed="false" maxFractionDigits="6" value="${data.max}"/></td>
+													<td><fmt:formatNumber type="number" groupingUsed="false" maxFractionDigits="6" value="${data.mean}"/></td>
 													<td>${f:h(data.cardinality)}</td>
 												</tr>
 											</c:forEach>

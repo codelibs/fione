@@ -158,19 +158,29 @@ public class ProjectHelper {
     }
 
     public Project getProject(final String projectId) {
+        return getProject(projectId, true);
+    }
+
+    protected Project getProject(final String projectId, final boolean loadParams) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final MinioClient minioClient = createClient(fessConfig);
         final String objectName = getProjectConfigPath(projectId);
         try (Reader reader =
                 new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
             final Project project = gson.fromJson(reader, Project.class);
-            project.setDataSets(getDataSets(fessConfig, minioClient, projectId));
-            project.setFrameIds(getFrames(project));
-            project.setJobs(getJobs(projectId));
+            if (loadParams) {
+                project.setDataSets(getDataSets(fessConfig, minioClient, projectId));
+                project.setFrameIds(getFrames(project));
+                project.setJobs(getJobs(projectId));
+            }
             return project;
         } catch (final Exception e) {
             throw new StorageException("Failed to read " + objectName, e);
         }
+    }
+
+    public boolean projectExists(String projectId) {
+        return getProject(projectId, false) != null;
     }
 
     public String getFrameName(final String projectId, final String dataSetId) {

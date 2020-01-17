@@ -71,6 +71,9 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Exporting all Models. */
     public static final String SUCCESS_exporting_all_models = "{success.exporting_all_models}";
 
+    /** The key of the message: Update DataSet {0}. */
+    public static final String SUCCESS_update_dataset = "{success.update_dataset}";
+
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
 
@@ -130,6 +133,12 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Failed to export Models. */
     public static final String ERRORS_failed_to_export_models = "{errors.failed_to_export_models}";
+
+    /** The key of the message: Project {0} exists. */
+    public static final String ERRORS_project_exists = "{errors.project_exists}";
+
+    /** The key of the message: Failed to update DataSet {0}. */
+    public static final String ERRORS_failed_to_update_dataset = "{errors.failed_to_update_dataset}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -350,6 +359,21 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessExportingAllModels(String property) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_exporting_all_models));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.update_dataset' with parameters.
+     * <pre>
+     * message: Update DataSet {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessUpdateDataset(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_update_dataset, arg0));
         return this;
     }
 
@@ -645,6 +669,36 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addErrorsFailedToExportModels(String property) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(ERRORS_failed_to_export_models));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.project_exists' with parameters.
+     * <pre>
+     * message: Project {0} exists.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsProjectExists(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_project_exists, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_update_dataset' with parameters.
+     * <pre>
+     * message: Failed to update DataSet {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToUpdateDataset(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_update_dataset, arg0));
         return this;
     }
 }

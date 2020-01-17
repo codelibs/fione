@@ -22,11 +22,18 @@ import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import com.google.gson.GsonBuilder;
 
 public class DataSet {
+
+    public static final String TRAIN = "train";
+
+    public static final String TEST = "test";
+
     private String id;
 
     private String name;
 
     private String path;
+
+    private String type = TRAIN;
 
     private ParseV3 schema;
 
@@ -69,6 +76,14 @@ public class DataSet {
 
     public void setPath(final String path) {
         this.path = path;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(final String type) {
+        this.type = type;
     }
 
     @Override

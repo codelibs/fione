@@ -144,16 +144,23 @@
 														<input type="hidden" name="dataSetId" value="${f:h(data.id)}">
 														<input type="hidden" name="frameId" value="${f:h(frameId)}">
 														<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-															<td>${f:h(data.name)}</td>
+															<td>
+															<c:if test="${data.type == 'train'}">
+															<button type="submit" name="datasettype" value="test" class="btn btn-link" style="padding:0;"><i class="fas fa-brain" title="Training Data"></i></button>
+															</c:if>
+															<c:if test="${data.type == 'test'}">
+															<button type="submit" name="datasettype" value="train" class="btn btn-link" style="padding:0;"><i class="fas fa-vial" title="Test Data"></i></button>
+															</c:if>
+															${f:h(data.name)}</td>
 															<td class="text-center">
 															<c:if test="${data.schema != null}">
-															<la:link href="/admin/automl/newframe/${f:u(project.id)}/${f:u(data.id)}"><i class="fas fa-table"></i></la:link>
+															<la:link href="/admin/automl/newframe/${f:u(project.id)}/${f:u(data.id)}"><i class="fas fa-table" title="Create Frame"></i></la:link>
 															</c:if>
 															<c:if test="${data.schema == null}">
-															<button type="submit" name="loaddataset" value="load" class="btn btn-link" style="padding:0;"><i class="fas fa-sync"></i></button>
+															<button type="submit" name="loaddataset" value="load" class="btn btn-link" style="padding:0;"><i class="fas fa-sync" title="Load Schema"></i></button>
 															</c:if>
-															<button type="submit" name="downloaddataset" value="download" class="btn btn-link" style="padding:0;"><i class="fas fa-download"></i></button>
-															<button type="submit" name="deletedataset" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt"></i></button>
+															<button type="submit" name="downloaddataset" value="download" class="btn btn-link" style="padding:0;"><i class="fas fa-download" title="Download"></i></button>
+															<button type="submit" name="deletedataset" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="Delete"></i></button>
 															</td>
 														</form></tr>
 													</c:forEach>
@@ -201,7 +208,7 @@
 															<td class="text-center">
 															<c:if test="${frameId == data}"><i class="far fa-check-square" style="color:#3c8dbc;"></i></c:if>
 															<c:if test="${frameId != data}"><la:link href="/admin/automl/details/${f:u(project.id)}?frameId=${f:u(data)}&leaderboardId=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
-															<button type="submit" name="deleteframe" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt"></i></button>
+															<button type="submit" name="deleteframe" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="Delete"></i></button>
 															</td>
 														</form></tr>
 													</c:forEach>
@@ -295,7 +302,7 @@
 																	<c:when test="${data.status == 'RUNNING' }">
 																		<div class="progress">
 																			<div class="progress-bar" role="progressbar" aria-valuenow="${f:h(data.progressInt)}" aria-valuemin="0" aria-valuemax="100"
-																				style="width:${f:h(data.progressInt)}%;"><i class="fas fa-running"></i></div>
+																				style="width:${f:h(data.progressInt)}%;"><i class="fas fa-running" title="${f:h(data.progressInt)}%"></i></div>
 																		</div>
 																	</c:when>
 																	<c:when test="${data.status == 'DONE' }">
@@ -306,7 +313,7 @@
 																	</c:otherwise>
 																</c:choose></td>
 															<td class="text-center">
-																<button type="submit" name="deletejob" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt"></i></button>
+																<button type="submit" name="deletejob" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="Delete"></i></button>
 															</td>
 														</form></tr>
 													</c:forEach>

@@ -104,14 +104,17 @@ public class AdminEasymlAction extends FioneAdminAction {
     public HtmlResponse uploaddataset(final DataSetForm form) {
         validate(form, messages -> {}, this::asListHtml);
         verifyToken(this::asListHtml);
-        // TODO check if project exists projectHelper.projectExists(form.projectId)
-        final Project project = new Project(StringCodecUtil.encodeUrlSafe(form.name));
+        final String projectId = StringCodecUtil.encodeUrlSafe(form.name);
+        if (projectHelper.projectExists(projectId)) {
+            throw validationError(messages -> messages.addErrorsProjectExists(GLOBAL, form.name), this::asListHtml);
+        }
+        final Project project = new Project(projectId);
         project.setName(form.name);
         try (InputStream in = form.file.getInputStream()) {
             projectHelper.store(project);
             final String fileName = StringCodecUtil.normalize(form.file.getFileName());
             projectHelper.addDataSet(project.getId(), fileName, in);
-            saveMessage(messages -> messages.addSuccessCreatedProject(GLOBAL, form.name)); // TODO Creating Project with {0}.
+            saveMessage(messages -> messages.addSuccessCreatedProject(GLOBAL, form.name));
         } catch (final Exception e) {
             logger.warn("Failed to create " + project.getId(), e);
             throw validationError(messages -> messages.addErrorsFailedToCreateProject(GLOBAL, form.name), this::asListHtml);
@@ -132,11 +135,11 @@ public class AdminEasymlAction extends FioneAdminAction {
             }
         }
         final DataSet[] dataSets = project.getDataSets();
-        if (dataSets == null || dataSets.length == 0) {
+        final DataSet dataSet = findDataSet(dataSets);
+        if (dataSet == null) {
             // TODO no dataset
             return redirectWith(getClass(), moreUrl("dataset"));
         }
-        final DataSet dataSet = dataSets[0];
         if (dataSet.getSchema() == null) {
             projectHelper.loadDataSetSchema(projectId, dataSet);
             return asJobHtml(project);
@@ -147,6 +150,18 @@ public class AdminEasymlAction extends FioneAdminAction {
             return asJobHtml(project);
         }
         return redirectTrainHtml(projectId, dataSet.getId());
+    }
+
+    protected DataSet findDataSet(final DataSet[] dataSets) {
+        if (dataSets == null || dataSets.length == 0) {
+            return null;
+        }
+        for (final DataSet dataSet : dataSets) {
+            if ("train".equals(dataSet.getType())) {
+                return dataSet;
+            }
+        }
+        return dataSets[0];
     }
 
     @Execute
