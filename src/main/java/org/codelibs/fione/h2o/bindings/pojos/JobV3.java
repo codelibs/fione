@@ -91,6 +91,8 @@ public class JobV3 extends SchemaV3 {
 
     public static final String FAILED = "FAILED";
 
+    public static final String CANCELLED = "CANCELLED";
+
     /**
      * Public constructor
      */
@@ -133,7 +135,7 @@ public class JobV3 extends SchemaV3 {
     public Kind getKind() {
         if (StringUtil.isBlank(description)) {
             return Kind.UNKNOWN;
-        } else if (description.contains("AutoML build")) {
+        } else if (description.contains("AutoML build") || description.contains("AutoML starting")) {
             return Kind.AUTO_ML;
         } else if (description.contains("Parse") || description.contains("Export dataset")) {
             return Kind.FRAME;
@@ -145,6 +147,13 @@ public class JobV3 extends SchemaV3 {
         return Kind.MODEL;
     }
 
+    public boolean ready() {
+        if (getKind() == Kind.AUTO_ML) {
+            return !description.contains("starting");
+        }
+        return true;
+    }
+
     public int getProgressInt() {
         return (int) (progress * 100f);
     }
@@ -152,4 +161,5 @@ public class JobV3 extends SchemaV3 {
     public enum Kind {
         FRAME, MODEL, AUTO_ML, GRID, EXPORT, UNKNOWN;
     }
+
 }

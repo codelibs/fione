@@ -68,6 +68,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.SchemaV3;
+import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.di.exception.IORuntimeException;
 import org.lastaflute.web.servlet.request.stream.WrittenStreamOut;
@@ -459,7 +460,7 @@ public class ProjectHelper {
     public void runAutoML(final String projectId, final AutoMLBuildControlV99 buildControl, final AutoMLInputV99 inputSpec,
             final AutoMLBuildModelsV99 buildModels) {
         final JobV3 workingJob =
-                createWorkingJob(buildControl.projectName + "@@" + inputSpec.responseColumn.columnName, "AutoML build", 0.2f);
+                createWorkingJob(buildControl.projectName + "@@" + inputSpec.responseColumn.columnName, "AutoML starting", 0.2f);
         store(projectId, workingJob);
         h2oHelper.runAutoML(buildControl, inputSpec, buildModels).execute(autoMLResponse -> {
             if (logger.isDebugEnabled()) {
@@ -507,6 +508,9 @@ public class ProjectHelper {
                                         if (keyToString(job.key).equals(keyToString(j.key))) {
                                             target = j;
                                         }
+                                    }
+                                    if (target == null && job.getKind() == Kind.AUTO_ML && job.ready()) {
+                                        job.status = JobV3.CANCELLED;
                                     }
                                     list.add(target != null ? target : job);
                                 } else {
