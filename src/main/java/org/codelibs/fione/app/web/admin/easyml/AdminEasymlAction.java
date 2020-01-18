@@ -15,13 +15,13 @@
  */
 package org.codelibs.fione.app.web.admin.easyml;
 
+import static org.codelibs.fione.h2o.bindings.H2oApi.keyToString;
+
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 import javax.annotation.Resource;
 
@@ -44,9 +44,10 @@ import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecScopeProvider;
 import org.codelibs.fione.h2o.bindings.pojos.ColV3;
-import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3;
+import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
+import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.helper.ProjectHelper;
@@ -55,6 +56,7 @@ import org.lastaflute.web.Execute;
 import org.lastaflute.web.UrlChain;
 import org.lastaflute.web.response.HtmlResponse;
 import org.lastaflute.web.ruts.process.ActionRuntime;
+import org.lastaflute.web.util.LaRequestUtil;
 
 public class AdminEasymlAction extends FioneAdminAction {
 
@@ -129,7 +131,8 @@ public class AdminEasymlAction extends FioneAdminAction {
         if (project == null) {
             return redirectWith(getClass(), moreUrl("dataset"));
         }
-        for (final JobV3 job : project.getJobs()) {
+        final JobV3[] jobs = project.getJobs();
+        for (final JobV3 job : jobs) {
             if ("RUNNING".equals(job.status)) {
                 return asJobHtml(project);
             }
@@ -149,6 +152,16 @@ public class AdminEasymlAction extends FioneAdminAction {
             projectHelper.createFrame(projectId, dataSet, result -> {});
             return asJobHtml(project);
         }
+        for (int i = jobs.length - 1; i >= 0; i--) {
+            final JobV3 job = jobs[i];
+            if (job.getKind() == Kind.AUTO_ML) {
+                final String leaderboardId = keyToString(job.dest);
+                final LeaderboardV99 leaderboard = projectHelper.getLeaderboard(projectId, leaderboardId);
+                if (leaderboard != null) {
+                    return redirectSummaryHtml(projectId, dataSet.getId(), leaderboardId);
+                }
+            }
+        }
         return redirectTrainHtml(projectId, dataSet.getId());
     }
 
@@ -157,7 +170,12 @@ public class AdminEasymlAction extends FioneAdminAction {
             return null;
         }
         for (final DataSet dataSet : dataSets) {
-            if ("train".equals(dataSet.getType())) {
+            if (dataSet.getSchema() != null && DataSet.TRAIN.equals(dataSet.getType())) {
+                return dataSet;
+            }
+        }
+        for (final DataSet dataSet : dataSets) {
+            if (DataSet.TRAIN.equals(dataSet.getType())) {
                 return dataSet;
             }
         }
@@ -166,8 +184,11 @@ public class AdminEasymlAction extends FioneAdminAction {
 
     @Execute
     @Secured({ ROLE, ROLE + VIEW })
-    public HtmlResponse train(final String projectId, final String dataSetId) {
-        saveToken();
+    public HtmlResponse train(final String projectId) {
+        final String dataSetId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(DATASET_ID)).orElse(null);
+        if (StringUtil.isBlank(dataSetId)) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, "?"), this::asListHtml);
+        }
         return asTrainHtml(projectId, dataSetId);
     }
 
@@ -181,67 +202,76 @@ public class AdminEasymlAction extends FioneAdminAction {
         if (project == null) {
             throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, form.projectId), this::asListHtml);
         }
-        final DataSet dataSet = projectHelper.getDataSet(form.projectId, form.dataSetId);
-        if (dataSet == null) {
-            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
-        }
-        final ParseV3 schema = dataSet.getSchema();
-        if (schema == null) {
-            throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
-        }
-        final Map<String, String> columnMap = new HashMap<>();
-        for (int i = 0; i < schema.columnNames.length; i++) {
-            columnMap.put(schema.columnNames[i], schema.columnTypes[i]);
-        }
-        form.columnTypes.entrySet().forEach(e -> columnMap.put(StringCodecUtil.decode(e.getKey()), e.getValue()));
-        schema.columnNames =
-                form.columns.entrySet().stream().filter(e -> StringUtil.isNotBlank(e.getValue()))
-                        .map(e -> StringCodecUtil.decode(e.getKey())).toArray(n -> new String[n]);
-        schema.columnTypes =
-                Arrays.stream(schema.columnNames).map(s -> columnMap.containsKey(s) ? columnMap.get(s) : "String")
-                        .toArray(n -> new String[n]);
-        schema.numberColumns = schema.columnNames.length;
-        final String trainFrameId = "easyml_" + form.frameId;
-        schema.destinationFrame = new FrameKeyV3(trainFrameId);
+        form.columns.put(StringCodecUtil.encodeUrlSafe(form.responseColumn), "on");
+        try {
+            final FrameV3 columnSummaries = projectHelper.getColumnSummaries(form.projectId, form.frameId);
+            final String[] ignoredColumns =
+                    Arrays.stream(columnSummaries.columns)
+                            .filter(col -> !form.columns.containsKey(StringCodecUtil.encodeUrlSafe(col.label))).map(col -> col.label)
+                            .toArray(n -> new String[n]);
+            for (int i = 0; i < columnSummaries.columns.length; i++) {
+                final ColV3 col = columnSummaries.columns[i];
+                final String columnId = StringCodecUtil.encodeUrlSafe(col.label);
+                if (!form.columns.containsKey(columnId)) {
+                    continue;
+                }
+                final String columnType = form.columnTypes.get(columnId);
+                if (columnType != null && !columnType.equals(convertSchemaColumnType(col.type))) {
+                    projectHelper.changeColumnType(form.projectId, form.frameId, i, columnType, 0, columnSummaries.rows);
+                }
+            }
 
-        projectHelper.createFrame(
-                form.projectId,
-                dataSet,
-                result -> {
-                    final String projectName = StringCodecUtil.normalize(StringCodecUtil.decode(form.projectId));
-                    final String responseColumn = StringCodecUtil.decode(form.responseColumn);
+            final String projectName = StringCodecUtil.normalize(StringCodecUtil.decode(form.projectId));
+            final String responseColumn = StringCodecUtil.decode(form.responseColumn);
 
-                    final AutoMLBuildControlV99 buildControl =
-                            AutoMLBuildControlBuilder
-                                    .create()
-                                    .projectName(projectName)
-                                    .nfolds(form.nfolds)
-                                    .balanceClasses(Boolean.valueOf(form.balanceClasses))
-                                    .stoppingCriteria(
-                                            AutoMLStoppingCriteriaBuilder.create().seed(form.seed).maxModels(form.maxModels)
-                                                    .maxRuntimeSecs(form.maxRuntimeSecs)
-                                                    .maxRuntimeSecsPerModel(form.maxRuntimeSecsPerModel)
-                                                    .stoppingRounds(form.stoppingRounds)
-                                                    .stoppingMetric(ScoreKeeperStoppingMetric.valueOf(form.stoppingMetric))
-                                                    .stoppingTolerance(form.stoppingTolerance).build())
-                                    .keepCrossValidationPredictions(Boolean.valueOf(form.keepCrossValidationPredictions))
-                                    .keepCrossValidationModels(Boolean.valueOf(form.keepCrossValidationModels))
-                                    .keepCrossValidationFoldAssignment(Boolean.valueOf(form.keepCrossValidationFoldAssignment)).build();
-                    final AutoMLInputV99 input =
-                            AutoMLInputBuilder.create().trainingFrame(trainFrameId).responseColumn(responseColumn, null)
-                                    .ignoredColumns(null)
-                                    .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
-                    final List<AutoMLCustomParameterV99> argParamList = new ArrayList<>();
-                    argParamList.add(new AutoMLCustomParameterV99(Automlapischemas3AutoMLBuildSpecScopeProvider.DeepLearning,
-                            "max_categorical_features", form.maxCategoricalFeatures));
-                    final AutoMLBuildModelsV99 buildModels =
-                            AutoMLBuildModelsBuilder.create().algoParameters(argParamList.toArray(n -> new AutoMLCustomParameterV99[n]))
-                                    .build();
+            final AutoMLBuildControlV99 buildControl =
+                    AutoMLBuildControlBuilder
+                            .create()
+                            .projectName(projectName)
+                            .nfolds(form.nfolds)
+                            .balanceClasses(Boolean.valueOf(form.balanceClasses))
+                            .stoppingCriteria(
+                                    AutoMLStoppingCriteriaBuilder.create().seed(form.seed).maxModels(form.maxModels)
+                                            .maxRuntimeSecs(form.maxRuntimeSecs).maxRuntimeSecsPerModel(form.maxRuntimeSecsPerModel)
+                                            .stoppingRounds(form.stoppingRounds)
+                                            .stoppingMetric(ScoreKeeperStoppingMetric.valueOf(form.stoppingMetric))
+                                            .stoppingTolerance(form.stoppingTolerance).build())
+                            .keepCrossValidationPredictions(Boolean.valueOf(form.keepCrossValidationPredictions))
+                            .keepCrossValidationModels(Boolean.valueOf(form.keepCrossValidationModels))
+                            .keepCrossValidationFoldAssignment(Boolean.valueOf(form.keepCrossValidationFoldAssignment)).build();
+            final AutoMLInputV99 input =
+                    AutoMLInputBuilder.create().trainingFrame(form.frameId).responseColumn(responseColumn, null)
+                            .ignoredColumns(ignoredColumns)
+                            .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
+            final List<AutoMLCustomParameterV99> argParamList = new ArrayList<>();
+            argParamList.add(new AutoMLCustomParameterV99(Automlapischemas3AutoMLBuildSpecScopeProvider.DeepLearning,
+                    "max_categorical_features", form.maxCategoricalFeatures));
+            final AutoMLBuildModelsV99 buildModels =
+                    AutoMLBuildModelsBuilder.create().algoParameters(argParamList.toArray(n -> new AutoMLCustomParameterV99[n])).build();
 
-                    projectHelper.runAutoML(form.projectId, buildControl, input, buildModels);
-                });
+            projectHelper.runAutoML(form.projectId, buildControl, input, buildModels);
+        } catch (final Exception e) {
+            logger.warn("Failed to run AutoML.", e);
+            throw validationError(messages -> messages.addErrorsFailedToStartBuild(GLOBAL),
+                    () -> asTrainHtml(form.projectId, form.dataSetId));
+        }
 
         return asJobHtml(project);
+    }
+
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public HtmlResponse summary(final String projectId) {
+        saveToken();
+        final String dataSetId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(DATASET_ID)).orElse(null);
+        if (StringUtil.isBlank(dataSetId)) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, "?"), this::asListHtml);
+        }
+        final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null);
+        if (StringUtil.isBlank(leaderboardId)) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
+        }
+        return asSummaryHtml(projectId, dataSetId, leaderboardId);
     }
 
     private FrameV3 getColumnSummaries(final String projectId, final Project project) {
@@ -271,6 +301,7 @@ public class AdminEasymlAction extends FioneAdminAction {
     }
 
     private HtmlResponse asTrainHtml(final String projectId, final String dataSetId) {
+        saveToken();
         final DataSet dataSet = projectHelper.getDataSet(projectId, dataSetId);
         if (dataSet == null) {
             throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
@@ -323,13 +354,63 @@ public class AdminEasymlAction extends FioneAdminAction {
         });
     }
 
+    private HtmlResponse asSummaryHtml(final String projectId, final String dataSetId, final String leaderboardId) {
+        final DataSet dataSet = projectHelper.getDataSet(projectId, dataSetId);
+        if (dataSet == null) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
+                    this::asListHtml);
+        }
+        final ParseV3 schema = dataSet.getSchema();
+        if (schema == null) {
+            throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
+                    this::asListHtml);
+        }
+        final String frameId = projectHelper.getFrameName(projectId, dataSetId) + ".hex";
+        final FrameV3 columnSummaries = projectHelper.getColumnSummaries(projectId, frameId);
+        final LeaderboardV99 leaderboard = projectHelper.getLeaderboard(projectId, leaderboardId);
+        if (leaderboard == null) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
+        }
+        return asHtml(path_AdminEasyml_AdminEasymlSummaryJsp).useForm(SummaryForm.class, setup -> {
+            setup.setup(form -> {
+                form.projectId = projectId;
+                form.dataSetId = dataSetId;
+                form.frameId = frameId;
+            });
+        }).renderWith(data -> {
+            RenderDataUtil.register(data, "projectId", projectId);
+            RenderDataUtil.register(data, "frameId", frameId);
+            RenderDataUtil.register(data, "dataSetId", dataSetId);
+            RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+            RenderDataUtil.register(data, "columnSummaries", columnSummaries);
+            RenderDataUtil.register(data, "leaderboard", leaderboard);
+            RenderDataUtil.register(data, "responseColumn", getResponseColumn(leaderboard.projectName));
+        });
+    }
+
+    private String getResponseColumn(final String projectName) {
+        if (projectName == null) {
+            return StringUtil.EMPTY;
+        }
+        final int pos = projectName.indexOf("@@");
+        if (pos == -1) {
+            return projectName;
+        }
+        return projectName.split("@@", 2)[1];
+    }
+
     private HtmlResponse redirectJobHtml(final String projectId) {
         final UrlChain moreUrl = moreUrl("job", projectId);
         return redirectWith(getClass(), moreUrl);
     }
 
-    private HtmlResponse redirectTrainHtml(final String projectId, final String datasetId) {
-        final UrlChain moreUrl = moreUrl("train", projectId, datasetId);
+    private HtmlResponse redirectTrainHtml(final String projectId, final String dataSetId) {
+        final UrlChain moreUrl = moreUrl("train", projectId).params(DATASET_ID, dataSetId);
+        return redirectWith(getClass(), moreUrl);
+    }
+
+    private HtmlResponse redirectSummaryHtml(final String projectId, final String dataSetId, final String leaderboardId) {
+        final UrlChain moreUrl = moreUrl("summary", projectId).params(DATASET_ID, dataSetId, LEADERBOARD_ID, leaderboardId);
         return redirectWith(getClass(), moreUrl);
     }
 }

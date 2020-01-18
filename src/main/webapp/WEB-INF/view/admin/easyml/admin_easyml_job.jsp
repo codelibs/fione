@@ -72,7 +72,7 @@
 															<td><i class="fas fa-${f:u(data.iconType)}"></i> <c:choose>
 																	<c:when test="${data.iconType == 'hammer'}">
 																		<la:link
-																			href="/admin/automl/details/${f:u(project.id)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(data.dest.name)}"
+																			href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
 																		>${f:h(data.dest.name)}</la:link>
 																	</c:when>
 																	<c:otherwise>${f:h(data.dest.name)}</c:otherwise>
@@ -98,7 +98,7 @@
 																			<div class="progress-bar" role="progressbar" aria-valuenow="${f:h(data.progressInt)}"
 																				aria-valuemin="0" aria-valuemax="100" style="width:${f:h(data.progressInt)}%;"
 																			>
-																				<i class="fas fa-running"></i>
+																				<i class="fas fa-running" title="${f:h(data.progressInt)}%"></i>
 																			</div>
 																		</div>
 																	</c:when>

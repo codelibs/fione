@@ -19,7 +19,7 @@
 					<li><la:link href="/admin/automl">
 							<la:message key="labels.crud_link_list" />
 						</la:link></li>
-					<li><la:link href="/admin/automl/details/${f:u(projectId)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}">
+					<li><la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">
 							Project
 						</la:link></li>
 					<li class="active">Model</li>
@@ -41,11 +41,11 @@
 						<input type="hidden" name="frameId" value="${f:h(frameId)}">
 						<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 						<div class="btn-group" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
-							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?modelId=${f:u(model.modelId.name)}" class="btn btn-default"><i class="fas fa-file-signature"></i>Predict</a>
+							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?mid=${f:u(model.modelId.name)}" class="btn btn-default"><i class="fas fa-file-signature"></i>Predict</a>
 							<button type="submit" name="downloadmojo" value="load" class="btn btn-default"><i class="fas fa-download"></i>MOJO</button>
 							<button type="submit" name="downloadgenmodel" value="load" class="btn btn-default"><i class="fas fa-download"></i>Gen Model</button>
 							<button type="submit" name="exportmodel" value="load" class="btn btn-default"><i class="fas fa-file-export"></i>Export</button>
-							<la:link href="/admin/automl/details/${f:u(projectId)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i>Project</la:link>
+							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i>Project</la:link>
 						</div>
 						<div class="btn-group pull-right" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
 							<button type="submit" name="deletemodel" value="load" class="btn btn-default"><i class="fas fa-trash-alt"></i>Delete</button>
@@ -173,7 +173,7 @@
 												<tbody>
 													<c:forEach var="i" varStatus="s" begin="0" end="${fn:length(model.output.crossValidationModels)-1}">
 														<tr>
-															<td><a href="${contextPath}/admin/automl/model/${f:u(projectId)}/${f:u(model.output.crossValidationModels[i].name)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}">${f:h(model.output.crossValidationModels[i].name)}</a></td>
+															<td><a href="${contextPath}/admin/automl/model/${f:u(projectId)}/${f:u(model.output.crossValidationModels[i].name)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(model.output.crossValidationModels[i].name)}</a></td>
 															<td>${f:h(model.output.crossValidationPredictions[i].name)}</td>
 														</tr>
 													</c:forEach>
@@ -288,7 +288,7 @@
 					</div>
 					<div class="col-md-6">
 						<c:catch var="vie"><c:if test="${model.output.variableImportances==null}"></c:if></c:catch>
-						<c:if test="${empty vie}">
+						<c:if test="${empty vie and model.output.variableImportances!=null}">
 						<div class="box box-primary">
 							<div class="box-header with-border">
 								<h3 class="box-title">${f:h(model.output.variableImportances.name)}</h3>

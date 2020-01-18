@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.app.web.admin.automl;
 
+import static org.codelibs.fione.h2o.bindings.H2oApi.keyToString;
+
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -55,6 +57,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.helper.ProjectHelper;
+import org.codelibs.fione.taglib.FioneFunctions;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.web.Execute;
 import org.lastaflute.web.UrlChain;
@@ -72,10 +75,6 @@ public class AdminAutomlAction extends FioneAdminAction {
     private static final String DATA_COLUMN_OFFSET = "data.column_offset";
 
     private static final String DATA_ROW_OFFSET = "data.row_offset";
-
-    private static final String LEADERBOARD_ID = "leaderboardId";
-
-    private static final String FRAME_ID = "frameId";
 
     private static final String DETAILS = "details";
 
@@ -177,10 +176,11 @@ public class AdminAutomlAction extends FioneAdminAction {
                 String lastId = null;
                 for (final JobV3 id : project.getJobs()) {
                     if (id.getKind() == Kind.AUTO_ML && "DONE".equals(id.status)) {
-                        if (mid != null && mid.equals(id.dest.name)) {
-                            return id.dest.name;
+                        final String destId = keyToString(id.dest);
+                        if (mid != null && mid.equals(destId)) {
+                            return destId;
                         }
-                        lastId = id.dest.name;
+                        lastId = destId;
                     }
                 }
                 if (lastId != null) {
@@ -225,8 +225,8 @@ public class AdminAutomlAction extends FioneAdminAction {
             return asHtml(path_AdminAutoml_AdminAutomlDetailsJsp).renderWith(data -> {
                 RenderDataUtil.register(data, "token", token);
                 RenderDataUtil.register(data, "project", project);
-                RenderDataUtil.register(data, FRAME_ID, frameId);
-                RenderDataUtil.register(data, LEADERBOARD_ID, leaderboardId);
+                RenderDataUtil.register(data, "frameId", frameId);
+                RenderDataUtil.register(data, "leaderboardId", leaderboardId);
                 RenderDataUtil.register(data, "autoReload", project.hasRunningJobs());
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
@@ -375,6 +375,12 @@ public class AdminAutomlAction extends FioneAdminAction {
             final DataSet dataSet = projectHelper.getDataSet(form.projectId, form.dataSetId);
             if (dataSet == null) {
                 throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
+            }
+            if (dataSet.getSchema() == null) {
+                final DataSet[] dataSets = projectHelper.getDataSets(form.projectId);
+                if (dataSets.length > 1) {
+                    dataSet.setType(DataSet.TEST);
+                }
             }
             projectHelper.loadDataSetSchema(form.projectId, dataSet);
             saveMessage(messages -> messages.addSuccessLoadDataset(GLOBAL, StringCodecUtil.decode(form.dataSetId)));
@@ -544,9 +550,9 @@ public class AdminAutomlAction extends FioneAdminAction {
                 data -> {
                     RenderDataUtil.register(data, "token", token);
                     RenderDataUtil.register(data, "projectId", projectId);
-                    RenderDataUtil.register(data, FRAME_ID, LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID))
+                    RenderDataUtil.register(data, "frameId", LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID))
                             .orElse(null));
-                    RenderDataUtil.register(data, LEADERBOARD_ID,
+                    RenderDataUtil.register(data, "leaderboardId",
                             LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null));
                     RenderDataUtil.register(data, "model", model);
                 });
@@ -683,8 +689,13 @@ public class AdminAutomlAction extends FioneAdminAction {
             form.projectId = projectId;
             form.frameId = frameId;
             form.leaderboardId = leaderboardId;
-            form.modelId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter("modelId")).orElse(null);
-            form.name = frameId.split("\\.")[0] + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
+            form.modelId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(MODEL_ID)).orElse(null);
+            String frameName = FioneFunctions.frameName(frameId);
+            final int pos = frameName.lastIndexOf('.');
+            if (pos != -1) {
+                frameName = frameName.substring(0, pos);
+            }
+            form.name = frameName + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
         })).renderWith(data -> RenderDataUtil.register(data, "modelIdItems", modelIdItems));
     }
 

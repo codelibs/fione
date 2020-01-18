@@ -15,6 +15,9 @@
  */
 package org.codelibs.fione.taglib;
 
+import java.util.Locale;
+
+import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fione.util.StringCodecUtil;
 
 public class FioneFunctions {
@@ -37,5 +40,30 @@ public class FioneFunctions {
             return StringCodecUtil.decode(values[1]);
         }
         return frameId;
+    }
+
+    public static String formatNumber(final Object value, final String format) {
+        if (value == null) {
+            return StringUtil.EMPTY;
+        }
+        if (StringUtil.isBlank(format)) {
+            return value.toString();
+        }
+        final String lf = format.toLowerCase(Locale.ROOT);
+        final Object arg;
+        try {
+            if (lf.endsWith("e") || lf.endsWith("f") || lf.endsWith("g") || lf.endsWith("a")) {
+                arg = Double.valueOf(value.toString());
+            } else if (lf.endsWith("d") || lf.endsWith("o") || lf.endsWith("d")) {
+                arg = Long.valueOf(value.toString());
+            } else if (lf.endsWith("b")) {
+                arg = Boolean.valueOf(value.toString());
+            } else {
+                arg = value;
+            }
+            return String.format(format, arg).replaceFirst("0+$", "0");
+        } catch (final Exception e) {
+            return value.toString();
+        }
     }
 }

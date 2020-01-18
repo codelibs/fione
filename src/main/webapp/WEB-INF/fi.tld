@@ -23,4 +23,16 @@
     </example>
   </function>
 
+  <function>
+    <description>
+      Return formatted value
+    </description>
+    <name>formatNumber</name>
+    <function-class>org.codelibs.fione.taglib.FioneFunctions</function-class>
+    <function-signature>java.lang.String formatNumber(java.lang.Object, java.lang.String)</function-signature>
+    <example>
+      ${fi:formatNumber(value, "%.6f")}
+    </example>
+  </function>
+
 </taglib>

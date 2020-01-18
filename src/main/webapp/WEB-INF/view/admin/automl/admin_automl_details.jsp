@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <title><la:message key="labels.admin_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
-<c:if test="${autoReload}"><meta http-equiv="refresh" content="10;URL=${contextPath}/admin/automl/details/${f:u(project.id)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}"/></c:if>
+<c:if test="${autoReload}"><meta http-equiv="refresh" content="10;URL=${contextPath}/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"/></c:if>
 </head>
 <body class="skin-blue sidebar-mini">
 	<div class="wrapper">
@@ -17,7 +17,7 @@
 			<section class="content-header">
 				<h1>
 					Project: ${f:h(project.name)} <small><la:link
-							href="/admin/automl/details/${f:u(project.id)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}"
+							href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"
 						><i class="fas fa-redo-alt"></i></la:link></small>
 				</h1>
 				<ol class="breadcrumb">
@@ -145,12 +145,15 @@
 														<input type="hidden" name="frameId" value="${f:h(frameId)}">
 														<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 															<td>
-															<c:if test="${data.type == 'train'}">
+															<c:choose>
+															<c:when test="${data.type == 'train' and data.schema != null}">
 															<button type="submit" name="datasettype" value="test" class="btn btn-link" style="padding:0;"><i class="fas fa-brain" title="Training Data"></i></button>
-															</c:if>
-															<c:if test="${data.type == 'test'}">
+															</c:when>
+															<c:when test="${data.type == 'test'}">
 															<button type="submit" name="datasettype" value="train" class="btn btn-link" style="padding:0;"><i class="fas fa-vial" title="Test Data"></i></button>
-															</c:if>
+															</c:when>
+															<c:otherwise><em class="fas fa-question" style="color:#337ab7;" title="Unknown"></em></c:otherwise>
+															</c:choose>
 															${f:h(data.name)}</td>
 															<td class="text-center">
 															<c:if test="${data.schema != null}">
@@ -207,7 +210,7 @@
 															<td>${f:h(fi:frameName(data))}</td>
 															<td class="text-center">
 															<c:if test="${frameId == data}"><i class="far fa-check-square" style="color:#3c8dbc;"></i></c:if>
-															<c:if test="${frameId != data}"><la:link href="/admin/automl/details/${f:u(project.id)}?frameId=${f:u(data)}&leaderboardId=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
+															<c:if test="${frameId != data}"><la:link href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(data)}&lid=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
 															<button type="submit" name="deleteframe" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="Delete"></i></button>
 															</td>
 														</form></tr>
@@ -278,7 +281,7 @@
 															<td><i class="fas fa-${f:u(data.iconType)}"></i> <c:choose>
 																	<c:when test="${data.iconType == 'hammer'}">
 																		<la:link
-																			href="/admin/automl/details/${f:u(project.id)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(data.dest.name)}"
+																			href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
 																		>${f:h(data.dest.name)}</la:link>
 																	</c:when>
 																	<c:otherwise>${f:h(data.dest.name)}</c:otherwise>
@@ -383,10 +386,10 @@
 									<h3 class="box-title">Data in ${f:h(fi:frameName(frameId))}</h3>
 									<div class="box-tools pull-right">
 										<span class="label label-info">${f:h(frameData.rows)} Data, ${f:h(frameData.numColumns)} Columns</span>
-										<c:if test="${frameData.columnOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset-10)}" class="btn btn-box-tool"><i class="fas fa-arrow-left"></i></a></c:if>
-										<c:if test="${frameData.columnOffset + 10 < frameData.numColumns}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset+10)}" class="btn btn-box-tool"><i class="fas fa-arrow-right"></i></a></c:if>
-										<c:if test="${frameData.rowOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset-10)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-up"></i></a></c:if>
-										<c:if test="${frameData.rowOffset + 10 < frameData.rows}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset+10)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-down"></i></a></c:if>
+										<c:if test="${frameData.columnOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset-10)}" class="btn btn-box-tool"><i class="fas fa-arrow-left"></i></a></c:if>
+										<c:if test="${frameData.columnOffset + 10 < frameData.numColumns}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset+10)}" class="btn btn-box-tool"><i class="fas fa-arrow-right"></i></a></c:if>
+										<c:if test="${frameData.rowOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset-10)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-up"></i></a></c:if>
+										<c:if test="${frameData.rowOffset + 10 < frameData.rows}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset+10)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-down"></i></a></c:if>
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
@@ -476,7 +479,7 @@
 														<c:forEach var="data" varStatus="s" items="${leaderboard.models}">
 															<tr>
 																<c:forEach var="data" varStatus="x" items="${leaderboard.row}">
-																	<c:if test="${fn:contains(data, 'AutoML')}"><td><a href="${contextPath}/admin/automl/model/${f:u(project.id)}/${f:u(data)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}">${f:h(data)}</a></td></c:if>
+																	<c:if test="${fn:contains(data, 'AutoML')}"><td><a href="${contextPath}/admin/automl/model/${f:u(project.id)}/${f:u(data)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(data)}</a></td></c:if>
 																	<c:if test="${not fn:contains(data, 'AutoML')}"><td>${f:h(data)}</td></c:if>
 																</c:forEach>
 															</tr>

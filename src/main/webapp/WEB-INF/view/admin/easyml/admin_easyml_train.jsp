@@ -59,6 +59,7 @@
 										<la:select property="maxRuntimeSecs" styleId="maxRuntimeSecs" styleClass="form-control">
 											<la:option value="0">Unlimited</la:option>
 											<la:option value="60">1 min</la:option>
+											<la:option value="300">5 min</la:option>
 											<la:option value="600">10 min</la:option>
 											<la:option value="1800">30 min</la:option>
 											<la:option value="3600">1 hour</la:option>
@@ -111,9 +112,9 @@
 														</select>
 													</td>
 													<td>${f:h(data.missing)}</td>
-													<td>${f:h(data.min)}</td>
-													<td>${f:h(data.max)}</td>
-													<td>${f:h(data.mean)}</td>
+													<td>${fi:formatNumber(data.min,"%.4f")}</td>
+													<td>${fi:formatNumber(data.max,"%.4f")}</td>
+													<td>${fi:formatNumber(data.mean,"%.4f")}</td>
 													<td>${f:h(data.cardinality)}</td>
 												</tr>
 											</c:forEach>

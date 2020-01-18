@@ -35,7 +35,7 @@
 							<div class="box box-success">
 								<div class="box-header with-border">
 									<h3 class="box-title">
-										Prediction for ${f:h(frameId)}
+										Prediction for ${f:h(fi:frameName(frameId))}
 									</h3>
 									<div class="btn-group pull-right">
 										<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
@@ -71,7 +71,7 @@
 									</div>
 								</div>
 								<div class="box-footer">
-									<la:link href="/admin/automl/details/${f:u(projectId)}?frameId=${f:u(frameId)}&leaderboardId=${f:u(leaderboardId)}" styleClass="btn btn-default">
+									<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
 										<em class="fa fa-arrow-circle-left"></em>
 										<la:message key="labels.crud_button_back" />
 									</la:link>

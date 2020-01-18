@@ -27,6 +27,7 @@ import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -58,6 +59,7 @@ import org.codelibs.fione.h2o.bindings.pojos.FramesListV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3;
+import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.KeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
@@ -67,8 +69,8 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
+import org.codelibs.fione.h2o.bindings.pojos.RapidsSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.SchemaV3;
-import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.di.exception.IORuntimeException;
 import org.lastaflute.web.servlet.request.stream.WrittenStreamOut;
@@ -180,7 +182,7 @@ public class ProjectHelper {
         }
     }
 
-    public boolean projectExists(String projectId) {
+    public boolean projectExists(final String projectId) {
         return getProject(projectId, false) != null;
     }
 
@@ -211,6 +213,12 @@ public class ProjectHelper {
             }
         });
         return frameIdList.stream().distinct().toArray(n -> new String[n]);
+    }
+
+    public DataSet[] getDataSets(final String projectId) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+        return getDataSets(fessConfig, minioClient, projectId);
     }
 
     protected DataSet[] getDataSets(final FessConfig fessConfig, final MinioClient minioClient, final String projectId) {
@@ -263,6 +271,9 @@ public class ProjectHelper {
         }
 
         final DataSet dataSet = createDataSet(projectId, StringCodecUtil.encodeUrlSafe(fileName));
+        if (fileName.toLowerCase(Locale.ROOT).contains("test")) {
+            dataSet.setType(DataSet.TEST);
+        }
         store(projectId, dataSet);
 
         loadDataSetSchema(projectId, dataSet);
@@ -758,6 +769,44 @@ public class ProjectHelper {
                 logger.warn("Failed to remove an object from {}.", path, e);
             }
         }
+    }
+
+    public void changeColumnType(final String projectId, final String frameId, final int index, final String columnType, final long from,
+            final long to) {
+        final String type = convertColumnType(columnType);
+        if (type == null) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Unknown column type: {}/{}/{}/{}", projectId, frameId, index, columnType);
+            }
+            return;
+        }
+        final Response<RapidsSchemaV3> response = h2oHelper.changeColumnType(new FrameKeyV3(frameId), type, index, from, to).execute();
+        if (logger.isDebugEnabled()) {
+            logger.debug("changeColumnType: {}", response);
+        }
+        if (response.code() != 200) {
+            throw new H2oAccessException("Failed to change Column " + index + " in " + frameId);
+        }
+    }
+
+    protected String convertColumnType(final String columnType) {
+        switch (columnType) {
+        case "String":
+        case "string":
+        case "character":
+            return "character";
+        case "Enum":
+        case "enum":
+        case "factor":
+            return "factor";
+        case "Numeric":
+        case "real":
+        case "numeric":
+            return "numeric";
+        default:
+            break;
+        }
+        return null;
     }
 
     public FrameV3 getFrameData(final FramesV3 params) {

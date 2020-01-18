@@ -40,6 +40,14 @@ import org.lastaflute.web.validation.VaMessenger;
  */
 public abstract class FioneAdminAction extends FessAdminAction implements FioneHtmlPath {
 
+    protected static final String DATASET_ID = "did";
+
+    protected static final String FRAME_ID = "fid";
+
+    protected static final String LEADERBOARD_ID = "lid";
+
+    protected static final String MODEL_ID = "mid";
+
     protected void saveMessage(final VaMessenger<FioneMessages> validationMessagesLambda) {
         final FioneMessages messages = createMessages();
         validationMessagesLambda.message(messages);
@@ -70,6 +78,35 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
         columnTypeItems.add(Maps.map("label", "Enum").$("value", "Enum").$());
         columnTypeItems.add(Maps.map("label", "Time").$("value", "Time").$());
         RenderDataUtil.register(data, "columnTypeItems", columnTypeItems);
+    }
+
+    protected String convertSchemaColumnType(final String type) {
+        switch (type) {
+        case "BAD":
+            return "BAD";
+        case "UUID":
+            return "UUID";
+        case "String":
+        case "string":
+        case "str":
+        case "character":
+            return "String";
+        case "Numeric":
+        case "numeric":
+        case "int":
+        case "real":
+            return "Numeric";
+        case "Enum":
+        case "enum":
+        case "factor":
+        case "categorical":
+            return "Enum";
+        case "Time":
+        case "time":
+            return "Time";
+        default:
+            return "String";
+        }
     }
 
     protected void registerColumnItems(final ParseV3 schema, final RenderData data,

@@ -289,6 +289,15 @@ public class H2oHelper {
         return new Callable<>(getH2oApi().exportModel(params));
     }
 
+    public Callable<RapidsSchemaV3> changeColumnType(final FrameKeyV3 targetFrame, final String columnType, final int index,
+            final long from, final long to) {
+        final StringBuilder buf = new StringBuilder(100);
+        buf.append("(assign ").append(H2oApi.keyToString(targetFrame)).append(" (:= ").append(H2oApi.keyToString(targetFrame))
+                .append(" (as.").append(columnType).append(" (cols ").append(H2oApi.keyToString(targetFrame)).append(' ').append(index)
+                .append(")) ").append(index).append(" [").append(from).append(':').append(to).append("]))");
+        return new Callable<>(getH2oApi().rapidsExec(buf.toString()));
+    }
+
     public ParseV3 convert(final ParseSetupV3 params) {
         final ParseV3 newParams = new ParseV3();
         newParams._excludeFields = params._excludeFields;
