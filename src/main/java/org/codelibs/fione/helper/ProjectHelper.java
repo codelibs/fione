@@ -183,7 +183,14 @@ public class ProjectHelper {
     }
 
     public boolean projectExists(final String projectId) {
-        return getProject(projectId, false) != null;
+        try {
+            return getProject(projectId, false) != null;
+        } catch (final StorageException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Project {} does not exist.", projectId, e);
+            }
+        }
+        return false;
     }
 
     public String getFrameName(final String projectId, final String dataSetId) {

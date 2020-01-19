@@ -20,8 +20,10 @@ import static org.codelibs.fione.h2o.bindings.H2oApi.keyToString;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import javax.annotation.Resource;
 
@@ -384,8 +386,74 @@ public class AdminEasymlAction extends FioneAdminAction {
             RenderDataUtil.register(data, "leaderboardId", leaderboardId);
             RenderDataUtil.register(data, "columnSummaries", columnSummaries);
             RenderDataUtil.register(data, "leaderboard", leaderboard);
-            RenderDataUtil.register(data, "responseColumn", getResponseColumn(leaderboard.projectName));
+            final String responseColumn = getResponseColumn(leaderboard.projectName);
+            RenderDataUtil.register(data, "responseColumn", responseColumn);
+            RenderDataUtil.register(data, "predictionMetric", getPredictionMetric(responseColumn, columnSummaries, leaderboard));
         });
+    }
+
+    private Map<String, Object> getPredictionMetric(final String responseColumn, final FrameV3 columnSummaries,
+            final LeaderboardV99 leaderboard) {
+        final Map<String, Object> params = new HashMap<>();
+        if (leaderboard.models == null || leaderboard.models.length == 0) {
+            params.put("name", "Unknown");
+            params.put("value", Double.NaN);
+            params.put("accuracy", 0.0f);
+            return params;
+        }
+        switch (leaderboard.sortMetric) {
+        case "auc":
+            params.put("name", "AUC");
+            if (leaderboard.sortMetrics.length > 0) {
+                params.put("value", leaderboard.sortMetrics[0]);
+                final double accuracy = leaderboard.sortMetrics[0] * 2.0f - 1.0f;
+                params.put("accuracy", Math.max(accuracy, 0.0f));
+            } else {
+                params.put("value", Double.NaN);
+                params.put("accuracy", 0.0f);
+            }
+            return params;
+        case "mean_residual_deviance":
+            final Map<String, Object> modelMetric = getTopModelMetric(leaderboard);
+            if (modelMetric.containsKey("rmse") && modelMetric.containsKey("mae")) {
+                params.put("name", "RMSE");
+                params.put("value", modelMetric.get("rmse"));
+                final Double mean = getResponseColumnMean(responseColumn, columnSummaries);
+                if (mean != null) {
+                    final Number mae = (Number) modelMetric.get("mae");
+                    // TODO improve the following value...
+                    params.put("accuracy", ((mean.doubleValue() - mae.doubleValue()) / mean.doubleValue() - 0.5f) * 2);
+                } else {
+                    params.put("accuracy", 0.0f);
+                }
+                return params;
+            }
+        default:
+            params.put("name", leaderboard.sortMetric);
+            if (leaderboard.sortMetrics.length > 0) {
+                params.put("value", leaderboard.sortMetrics[0]);
+            } else {
+                params.put("value", Double.NaN);
+            }
+            return params;
+        }
+    }
+
+    private Map<String, Object> getTopModelMetric(final LeaderboardV99 leaderboard) {
+        final Map<String, Object> params = new HashMap<>();
+        for (int i = 0; i < leaderboard.table.columns.length; i++) {
+            params.put(leaderboard.table.columns[i].name, leaderboard.table.data[i][0]);
+        }
+        return params;
+    }
+
+    private Double getResponseColumnMean(final String responseColumn, final FrameV3 columnSummaries) {
+        for (final ColV3 col : columnSummaries.columns) {
+            if (responseColumn.equals(col.label)) {
+                return col.mean;
+            }
+        }
+        return null;
     }
 
     private String getResponseColumn(final String projectName) {

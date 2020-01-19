@@ -48,22 +48,30 @@
 							<span class="info-box-icon bg-green"><i class="fas fa-hammer"></i></span>
 							<div class="info-box-content">
 								<span class="info-box-number">${fn:length(leaderboard.models)} Models</span>
-								<span>Best Model</span>
-								<div style="overflow: hidden;text-overflow: ellipsis;">${leaderboard.models[0].name}</div>
+								<div style="overflow: hidden; text-overflow: ellipsis;">
+									<span class="label label-success">Best</span> ${leaderboard.models[0].name}
+								</div>
 							</div>
 						</div>
 						<div class="info-box">
 							<span class="info-box-icon bg-yellow"><i class="fas fa-chart-line"></i></span>
 							<div class="info-box-content">
-								<span class="info-box-number">${f:h(leaderboard.sortMetric)} ${fi:formatNumber(leaderboard.sortMetrics[0],"%.8f")}</span>
-								<div style="overflow: hidden;text-overflow: ellipsis;">${f:h(responseColumn)}</div>
+								<span class="info-box-number">${f:h(predictionMetric.name)} ${fi:formatNumber(predictionMetric.value,"%.8f")}</span>
+								<span class="label label-warning">Accuracy</span>
+								<span style="color:#ffbb00;"><c:choose>
+									<c:when test="${predictionMetric.accuracy<=0.2}"><i                             class="fas fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i></c:when>
+									<c:when test="${predictionMetric.accuracy>0.2 and predictionMetric.accuracy<=0.4}"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i></c:when>
+									<c:when test="${predictionMetric.accuracy>0.4 and predictionMetric.accuracy<=0.6}"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i></c:when>
+									<c:when test="${predictionMetric.accuracy>0.6 and predictionMetric.accuracy<=0.8}"><i  class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="far fa-star"></i></c:when>
+									<c:when test="${predictionMetric.accuracy>0.8}"><i                              class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></c:when>
+								</c:choose></span>
 							</div>
 						</div>
 					</div>
 					<div class="col-md-9">
 						<div class="box box-info">
 							<div class="box-header with-border">
-								<h3 class="box-title">Evaluation</h3>
+								<h3 class="box-title">Fione Reports</h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -71,7 +79,7 @@
 								</div>
 							</div>
 							<div class="box-body">
-
+								<jsp:include page="/WEB-INF/view/admin/easyml/admin_easyml_summary_report.jsp"></jsp:include>
 							</div>
 						</div>
 					</div>
