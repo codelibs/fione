@@ -27,6 +27,8 @@ public class DataSet {
 
     public static final String TEST = "test";
 
+    public static final String PREDICT = "predict";
+
     private String id;
 
     private String name;

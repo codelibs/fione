@@ -18,6 +18,7 @@ package org.codelibs.fione.app.web.admin.easyml;
 import static org.codelibs.fione.h2o.bindings.H2oApi.keyToString;
 
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -117,7 +118,8 @@ public class AdminEasymlAction extends FioneAdminAction {
         try (InputStream in = form.file.getInputStream()) {
             projectHelper.store(project);
             final String fileName = StringCodecUtil.normalize(form.file.getFileName());
-            projectHelper.addDataSet(project.getId(), fileName, in);
+            final DataSet dataSet = projectHelper.addDataSet(project.getId(), fileName, in);
+            projectHelper.loadDataSetSchema(projectId, dataSet);
             saveMessage(messages -> messages.addSuccessCreatedProject(GLOBAL, form.name));
         } catch (final Exception e) {
             logger.warn("Failed to create " + project.getId(), e);
@@ -204,6 +206,16 @@ public class AdminEasymlAction extends FioneAdminAction {
         if (project == null) {
             throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, form.projectId), this::asListHtml);
         }
+        final DataSet dataSet = project.getDataSet(form.dataSetId);
+        if (dataSet == null) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, StringCodecUtil.decode(form.dataSetId)),
+                    this::asListHtml);
+        }
+        final ParseV3 schema = dataSet.getSchema();
+        if (schema == null) {
+            throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, StringCodecUtil.decode(form.dataSetId)),
+                    this::asListHtml);
+        }
         form.columns.put(StringCodecUtil.encodeUrlSafe(form.responseColumn), "on");
         try {
             final FrameV3 columnSummaries = projectHelper.getColumnSummaries(form.projectId, form.frameId);
@@ -211,6 +223,7 @@ public class AdminEasymlAction extends FioneAdminAction {
                     Arrays.stream(columnSummaries.columns)
                             .filter(col -> !form.columns.containsKey(StringCodecUtil.encodeUrlSafe(col.label))).map(col -> col.label)
                             .toArray(n -> new String[n]);
+            boolean updateColumnType = false;
             for (int i = 0; i < columnSummaries.columns.length; i++) {
                 final ColV3 col = columnSummaries.columns[i];
                 final String columnId = StringCodecUtil.encodeUrlSafe(col.label);
@@ -220,7 +233,12 @@ public class AdminEasymlAction extends FioneAdminAction {
                 final String columnType = form.columnTypes.get(columnId);
                 if (columnType != null && !columnType.equals(convertSchemaColumnType(col.type))) {
                     projectHelper.changeColumnType(form.projectId, form.frameId, i, columnType, 0, columnSummaries.rows);
+                    schema.columnTypes[i] = columnType;
+                    updateColumnType = true;
                 }
+            }
+            if (updateColumnType) {
+                projectHelper.store(form.projectId, dataSet);
             }
 
             final String projectName = StringCodecUtil.normalize(StringCodecUtil.decode(form.projectId));
@@ -284,6 +302,85 @@ public class AdminEasymlAction extends FioneAdminAction {
             }
         }
         return null;
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse prediction(final String projectId) {
+        saveToken();
+        final String dataSetId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(DATASET_ID)).orElse(null);
+        if (StringUtil.isBlank(dataSetId)) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, "?"), this::asListHtml);
+        }
+        final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null);
+        if (StringUtil.isBlank(leaderboardId)) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
+        }
+        return asPredictionHtml(projectId, dataSetId, leaderboardId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse uploadprediction(final UploadPredictionForm form) {
+        validate(form, messages -> {}, () -> asPredictionHtml(form.projectId, form.dataSetId, form.leaderboardId));
+        verifyToken(() -> asPredictionHtml(form.projectId, form.dataSetId, form.leaderboardId));
+        final Project project = projectHelper.getProject(form.projectId);
+        if (project == null) {
+            throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, form.projectId), this::asListHtml);
+        }
+        final DataSet dataSet = project.getDataSet(form.dataSetId);
+        if (dataSet == null) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, StringCodecUtil.decode(form.dataSetId)),
+                    this::asListHtml);
+        }
+        final ParseV3 schema = dataSet.getSchema();
+        if (schema == null) {
+            throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, StringCodecUtil.decode(form.dataSetId)),
+                    this::asListHtml);
+        }
+        final LeaderboardV99 leaderboard = projectHelper.getLeaderboard(form.projectId, form.leaderboardId);
+        if (leaderboard == null) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
+        }
+        final Map<String, String> columnTypeMap = new HashMap<>();
+        for (int i = 0; i < schema.columnNames.length; i++) {
+            columnTypeMap.put(schema.columnNames[i], schema.columnTypes[i]);
+        }
+        final String fileName = StringCodecUtil.normalize(form.file.getFileName());
+        try (InputStream in = form.file.getInputStream()) {
+            final DataSet predictDataSet = projectHelper.addDataSet(form.projectId, fileName, in);
+            projectHelper.loadDataSetSchema(form.projectId, predictDataSet, () -> {
+                final ParseV3 predictSchema = predictDataSet.getSchema();
+                for (int i = 0; i < predictSchema.columnNames.length; i++) {
+                    if (columnTypeMap.containsKey(predictSchema.columnNames[i])) {
+                        final String columnType = columnTypeMap.get(predictSchema.columnNames[i]);
+                        if (!predictSchema.columnTypes[i].equals(columnType)) {
+                            predictSchema.columnTypes[i] = columnType;
+                        }
+                    }
+                }
+                predictDataSet.setType(DataSet.TEST);
+                projectHelper.store(form.projectId, predictDataSet);
+                projectHelper.createFrame(form.projectId, predictDataSet, response -> {
+                    String name = fileName;
+                    final int pos = name.lastIndexOf('.');
+                    if (pos != -1) {
+                        name = name.substring(0, pos);
+                    }
+                    projectHelper.predict(form.projectId, keyToString(response.body().destinationFrame),
+                            keyToString(leaderboard.models[0]),
+                            name + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(systemHelper.getCurrentTime()));
+                });
+            });
+            saveMessage(messages -> messages.addSuccessUploadedDataset(GLOBAL, fileName));
+        } catch (final Exception e) {
+            logger.warn("Failed to add " + form.file.getFileName(), e);
+            throw validationError(messages -> messages.addErrorsFailedToUploadDataset(GLOBAL, fileName), () -> {
+                saveToken();
+                return asPredictionHtml(form.projectId, form.dataSetId, form.leaderboardId);
+            });
+        }
+        return asJobHtml(project);
     }
 
     // ===================================================================================
@@ -465,6 +562,14 @@ public class AdminEasymlAction extends FioneAdminAction {
             return projectName;
         }
         return projectName.split("@@", 2)[1];
+    }
+
+    private HtmlResponse asPredictionHtml(final String projectId, final String dataSetId, final String leaderboardId) {
+        return asHtml(path_AdminEasyml_AdminEasymlPredictJsp).useForm(UploadPredictionForm.class, setup -> setup.setup(form -> {
+            form.projectId = projectId;
+            form.dataSetId = dataSetId;
+            form.leaderboardId = leaderboardId;
+        }));
     }
 
     private HtmlResponse redirectJobHtml(final String projectId) {

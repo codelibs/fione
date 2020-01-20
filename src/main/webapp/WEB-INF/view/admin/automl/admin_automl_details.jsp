@@ -147,10 +147,13 @@
 															<td>
 															<c:choose>
 															<c:when test="${data.type == 'train' and data.schema != null}">
-															<button type="submit" name="datasettype" value="test" class="btn btn-link" style="padding:0;"><i class="fas fa-brain" title="Training Data"></i></button>
+															<button type="submit" name="datasettype" value="test" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-area" title="Training Data"></i></button>
 															</c:when>
 															<c:when test="${data.type == 'test'}">
-															<button type="submit" name="datasettype" value="train" class="btn btn-link" style="padding:0;"><i class="fas fa-vial" title="Test Data"></i></button>
+															<button type="submit" name="datasettype" value="train" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-bar" title="Test Data"></i></button>
+															</c:when>
+															<c:when test="${data.type == 'predict'}">
+															<button type="submit" name="datasettype" value="train" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-line" title="Test Data"></i></button>
 															</c:when>
 															<c:otherwise><em class="fas fa-question" style="color:#337ab7;" title="Unknown"></em></c:otherwise>
 															</c:choose>

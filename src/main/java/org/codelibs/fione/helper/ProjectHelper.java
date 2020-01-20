@@ -267,7 +267,7 @@ public class ProjectHelper {
         return createDataSet(projectId, dataSetId);
     }
 
-    public void addDataSet(final String projectId, final String fileName, final InputStream in) {
+    public DataSet addDataSet(final String projectId, final String fileName, final InputStream in) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final MinioClient minioClient = createClient(fessConfig);
         final String objectName = getDataPath(projectId, fileName);
@@ -283,7 +283,7 @@ public class ProjectHelper {
         }
         store(projectId, dataSet);
 
-        loadDataSetSchema(projectId, dataSet);
+        return dataSet;
     }
 
     protected DataSet createDataSet(final String projectId, final String dataSetId) {
@@ -332,6 +332,10 @@ public class ProjectHelper {
     }
 
     public void loadDataSetSchema(final String projectId, final DataSet dataSet) {
+        loadDataSetSchema(projectId, dataSet, () -> {});
+    }
+
+    public void loadDataSetSchema(final String projectId, final DataSet dataSet, final Runnable chain) {
         final JobV3 workingJob = createWorkingJob(dataSet.getName(), "Parse Schema", 0.2f);
         store(projectId, workingJob);
         h2oHelper.importFiles(dataSet.getPath()).execute(importResponse -> {
@@ -353,23 +357,27 @@ public class ProjectHelper {
                             if (logger.isDebugEnabled()) {
                                 logger.debug("deleteFrame: {}", deleteResponse);
                             }
-                        }, t3 -> logger.warn("Failed to delete frame: {}", frames[0], t3));
-                        finish(projectId, workingJob, null);
+                            chain.run();
+                            finish(projectId, workingJob, null);
+                        }, t -> {
+                            logger.warn("Failed to delete frame: {}", frames[0], t);
+                            finish(projectId, workingJob, t);
+                        });
                     } else {
                         logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet);
                         finish(projectId, workingJob, new H2oAccessException("Failed to access " + setupResponse));
                     }
-                }, t2 -> {
-                    logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t2);
-                    finish(projectId, workingJob, t2);
+                }, t -> {
+                    logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t);
+                    finish(projectId, workingJob, t);
                 });
             } else {
                 logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet);
                 finish(projectId, workingJob, new H2oAccessException("Failed to access " + importResponse));
             }
-        }, t1 -> {
-            logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t1);
-            finish(projectId, workingJob, t1);
+        }, t -> {
+            logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t);
+            finish(projectId, workingJob, t);
         });
     }
 
@@ -707,6 +715,11 @@ public class ProjectHelper {
                                                                 logger.debug("exportFrame: {}", exportFrameResponse);
                                                             }
                                                             if (bindFramesResponse.code() == 200) {
+                                                                final DataSet dataSet =
+                                                                        createDataSet(projectId,
+                                                                                StringCodecUtil.encodeUrlSafe(name + ".csv"));
+                                                                dataSet.setType(DataSet.PREDICT);
+                                                                store(projectId, dataSet);
                                                                 finish(projectId, workingJob, null);
                                                             } else {
                                                                 logger.warn("Failed to export frame: {}", exportFrameResponse);

@@ -21,7 +21,6 @@ import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Date;
 import java.util.List;
 import java.util.Map.Entry;
 
@@ -259,7 +258,8 @@ public class AdminAutomlAction extends FioneAdminAction {
         verifyToken(() -> asNewDataHtml(form.projectId));
         final String fileName = StringCodecUtil.normalize(form.dataFile.getFileName());
         try (InputStream in = form.dataFile.getInputStream()) {
-            projectHelper.addDataSet(form.projectId, fileName, in);
+            final DataSet dataSet = projectHelper.addDataSet(form.projectId, fileName, in);
+            projectHelper.loadDataSetSchema(form.projectId, dataSet);
             saveMessage(messages -> messages.addSuccessUploadedDataset(GLOBAL, fileName));
         } catch (final Exception e) {
             logger.warn("Failed to add " + form.dataFile.getFileName(), e);
@@ -695,7 +695,7 @@ public class AdminAutomlAction extends FioneAdminAction {
             if (pos != -1) {
                 frameName = frameName.substring(0, pos);
             }
-            form.name = frameName + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
+            form.name = frameName + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(systemHelper.getCurrentTime());
         })).renderWith(data -> RenderDataUtil.register(data, "modelIdItems", modelIdItems));
     }
 
