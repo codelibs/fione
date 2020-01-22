@@ -14,7 +14,7 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Data Analysis</h1>
+				<h1>Data Analysis: ${f:h(project.name)}</h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../dataset">
 							Data Set

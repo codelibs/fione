@@ -16,7 +16,7 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Create New Prediction</h1>
+				<h1>New Prediction: ${f:h(project.name)}</h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../dataset">
 							Data Set
@@ -69,8 +69,8 @@
 										<button type="submit" class="btn btn-success" name="createproject"
 											value="<la:message key="labels.crud_button_create" />"
 										>
-											<em class="fa fa-plus"></em>
-											<la:message key="labels.crud_button_create" />
+											<em class="fa fa-file-upload"></em>
+											Upload
 										</button>
 									</c:if>
 								</div>

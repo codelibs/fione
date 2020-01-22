@@ -24,7 +24,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map.Entry;
 
-import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 
 import org.apache.logging.log4j.LogManager;
@@ -55,7 +54,6 @@ import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
-import org.codelibs.fione.helper.ProjectHelper;
 import org.codelibs.fione.taglib.FioneFunctions;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.web.Execute;
@@ -63,7 +61,6 @@ import org.lastaflute.web.UrlChain;
 import org.lastaflute.web.response.ActionResponse;
 import org.lastaflute.web.response.HtmlResponse;
 import org.lastaflute.web.ruts.process.ActionRuntime;
-import org.lastaflute.web.token.DoubleSubmitManager;
 import org.lastaflute.web.util.LaRequestUtil;
 
 /**
@@ -80,16 +77,6 @@ public class AdminAutomlAction extends FioneAdminAction {
     public static final String ROLE = "admin-automl";
 
     private static final Logger logger = LogManager.getLogger(AdminAutomlAction.class);
-
-    // ===================================================================================
-    //                                                                           Attribute
-    //                                                                           =========
-
-    @Resource
-    private ProjectHelper projectHelper;
-
-    @Resource
-    private DoubleSubmitManager doubleSubmitManager;
 
     // ===================================================================================
     //                                                                               Hook

@@ -26,8 +26,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import javax.annotation.Resource;
-
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.codelibs.core.lang.StringUtil;
@@ -53,10 +51,10 @@ import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
-import org.codelibs.fione.helper.ProjectHelper;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.web.Execute;
 import org.lastaflute.web.UrlChain;
+import org.lastaflute.web.response.ActionResponse;
 import org.lastaflute.web.response.HtmlResponse;
 import org.lastaflute.web.ruts.process.ActionRuntime;
 import org.lastaflute.web.util.LaRequestUtil;
@@ -66,13 +64,6 @@ public class AdminEasymlAction extends FioneAdminAction {
     public static final String ROLE = "admin-easyml";
 
     private static final Logger logger = LogManager.getLogger(AdminEasymlAction.class);
-
-    // ===================================================================================
-    //                                                                           Attribute
-    //                                                                           =========
-
-    @Resource
-    private ProjectHelper projectHelper;
 
     // ===================================================================================
     //                                                                               Hook
@@ -282,7 +273,6 @@ public class AdminEasymlAction extends FioneAdminAction {
     @Execute
     @Secured({ ROLE, ROLE + VIEW })
     public HtmlResponse summary(final String projectId) {
-        saveToken();
         final String dataSetId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(DATASET_ID)).orElse(null);
         if (StringUtil.isBlank(dataSetId)) {
             throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, "?"), this::asListHtml);
@@ -383,6 +373,35 @@ public class AdminEasymlAction extends FioneAdminAction {
         return asJobHtml(project);
     }
 
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public ActionResponse downloaddataset(final PredictDataSetForm form) { // TODO form
+        validate(form, messages -> {}, () -> redirectSummaryHtml(form.projectId, form.dataSetId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectSummaryHtml(form.projectId, form.dataSetId, form.leaderboardId));
+
+        final DataSet dataSet = projectHelper.getDataSet(form.projectId, form.dataSetId);
+        if (dataSet == null) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
+        }
+
+        return asStream(dataSet.getName()).contentTypeOctetStream().stream(out -> projectHelper.writeDataSet(form.projectId, dataSet, out));
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse deletedataset(final PredictDataSetForm form) {
+        validate(form, messages -> {}, () -> redirectSummaryHtml(form.projectId, form.dataSetId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectSummaryHtml(form.projectId, form.dataSetId, form.leaderboardId));
+        try {
+            projectHelper.deleteDataSet(form.projectId, form.dataSetId);
+            saveMessage(messages -> messages.addSuccessDeletingDataset(GLOBAL, form.dataSetId));
+        } catch (final Exception e) {
+            logger.warn("Failed to delete data: {}", form.dataSetId, e);
+            throw validationError(messages -> messages.addErrorsFailedToDeleteDataset(GLOBAL, form.dataSetId), this::asListHtml);
+        }
+        return redirectSummaryHtml(form.projectId, form.dataSetId, form.leaderboardId);
+    }
+
     // ===================================================================================
     //                                                                              JSP
     //                                                                           =========
@@ -401,6 +420,10 @@ public class AdminEasymlAction extends FioneAdminAction {
 
     private HtmlResponse asTrainHtml(final String projectId, final String dataSetId) {
         saveToken();
+        final Project project = projectHelper.getProject(projectId);
+        if (project == null) {
+            throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, projectId), this::asListHtml);
+        }
         final DataSet dataSet = projectHelper.getDataSet(projectId, dataSetId);
         if (dataSet == null) {
             throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
@@ -438,6 +461,7 @@ public class AdminEasymlAction extends FioneAdminAction {
                 }
             });
         }).renderWith(data -> {
+            RenderDataUtil.register(data, "project", project);
             registerColumnItems(schema, data, (maps, i) -> {
                 if (i.intValue() < columnSummaries.columns.length) {
                     final ColV3 column = columnSummaries.columns[i.intValue()];
@@ -450,42 +474,6 @@ public class AdminEasymlAction extends FioneAdminAction {
                 return maps;
             });
             registerColumnTypeItems(data);
-        });
-    }
-
-    private HtmlResponse asSummaryHtml(final String projectId, final String dataSetId, final String leaderboardId) {
-        final DataSet dataSet = projectHelper.getDataSet(projectId, dataSetId);
-        if (dataSet == null) {
-            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
-                    this::asListHtml);
-        }
-        final ParseV3 schema = dataSet.getSchema();
-        if (schema == null) {
-            throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
-                    this::asListHtml);
-        }
-        final String frameId = projectHelper.getFrameName(projectId, dataSetId) + ".hex";
-        final FrameV3 columnSummaries = projectHelper.getColumnSummaries(projectId, frameId);
-        final LeaderboardV99 leaderboard = projectHelper.getLeaderboard(projectId, leaderboardId);
-        if (leaderboard == null) {
-            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
-        }
-        return asHtml(path_AdminEasyml_AdminEasymlSummaryJsp).useForm(SummaryForm.class, setup -> {
-            setup.setup(form -> {
-                form.projectId = projectId;
-                form.dataSetId = dataSetId;
-                form.frameId = frameId;
-            });
-        }).renderWith(data -> {
-            RenderDataUtil.register(data, "projectId", projectId);
-            RenderDataUtil.register(data, "frameId", frameId);
-            RenderDataUtil.register(data, "dataSetId", dataSetId);
-            RenderDataUtil.register(data, "leaderboardId", leaderboardId);
-            RenderDataUtil.register(data, "columnSummaries", columnSummaries);
-            RenderDataUtil.register(data, "leaderboard", leaderboard);
-            final String responseColumn = getResponseColumn(leaderboard.projectName);
-            RenderDataUtil.register(data, "responseColumn", responseColumn);
-            RenderDataUtil.register(data, "predictionMetric", getPredictionMetric(responseColumn, columnSummaries, leaderboard));
         });
     }
 
@@ -564,12 +552,67 @@ public class AdminEasymlAction extends FioneAdminAction {
         return projectName.split("@@", 2)[1];
     }
 
+    private HtmlResponse asSummaryHtml(final String projectId, final String dataSetId, final String leaderboardId) {
+        final String token = doubleSubmitManager.saveToken(myTokenGroupType());
+        final Project project = projectHelper.getProject(projectId);
+        if (project == null) {
+            throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, projectId), this::asListHtml);
+        }
+        final DataSet dataSet = projectHelper.getDataSet(projectId, dataSetId);
+        if (dataSet == null) {
+            throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
+                    this::asListHtml);
+        }
+        final ParseV3 schema = dataSet.getSchema();
+        if (schema == null) {
+            throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, StringCodecUtil.decode(dataSetId)),
+                    this::asListHtml);
+        }
+        final String frameId = projectHelper.getFrameName(projectId, dataSetId) + ".hex";
+        final FrameV3 columnSummaries = projectHelper.getColumnSummaries(projectId, frameId);
+        final LeaderboardV99 leaderboard = projectHelper.getLeaderboard(projectId, leaderboardId);
+        if (leaderboard == null) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
+        }
+        return asHtml(path_AdminEasyml_AdminEasymlSummaryJsp).useForm(SummaryForm.class, setup -> {
+            setup.setup(form -> {
+                form.projectId = projectId;
+                form.dataSetId = dataSetId;
+                form.frameId = frameId;
+            });
+        }).renderWith(
+                data -> {
+                    RenderDataUtil.register(data, "token", token);
+                    RenderDataUtil.register(data, "project", project);
+                    RenderDataUtil.register(data, "projectId", projectId);
+                    RenderDataUtil.register(data, "frameId", frameId);
+                    RenderDataUtil.register(data, "dataSetId", dataSetId);
+                    RenderDataUtil.register(
+                            data,
+                            "dataSets",
+                            Arrays.stream(project.getDataSets()).filter(d -> DataSet.PREDICT.equals(d.getType()))
+                                    .toArray(n -> new DataSet[n]));
+                    RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+                    RenderDataUtil.register(data, "columnSummaries", columnSummaries);
+                    RenderDataUtil.register(data, "leaderboard", leaderboard);
+                    final String responseColumn = getResponseColumn(leaderboard.projectName);
+                    RenderDataUtil.register(data, "responseColumn", responseColumn);
+                    RenderDataUtil.register(data, "predictionMetric", getPredictionMetric(responseColumn, columnSummaries, leaderboard));
+                });
+    }
+
     private HtmlResponse asPredictionHtml(final String projectId, final String dataSetId, final String leaderboardId) {
+        final Project project = projectHelper.getProject(projectId);
+        if (project == null) {
+            throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, projectId), this::asListHtml);
+        }
         return asHtml(path_AdminEasyml_AdminEasymlPredictJsp).useForm(UploadPredictionForm.class, setup -> setup.setup(form -> {
             form.projectId = projectId;
             form.dataSetId = dataSetId;
             form.leaderboardId = leaderboardId;
-        }));
+        })).renderWith(data -> {
+            RenderDataUtil.register(data, "project", project);
+        });
     }
 
     private HtmlResponse redirectJobHtml(final String projectId) {
@@ -586,4 +629,5 @@ public class AdminEasymlAction extends FioneAdminAction {
         final UrlChain moreUrl = moreUrl("summary", projectId).params(DATASET_ID, dataSetId, LEADERBOARD_ID, leaderboardId);
         return redirectWith(getClass(), moreUrl);
     }
+
 }

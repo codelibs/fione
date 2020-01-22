@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 
+import javax.annotation.Resource;
+
 import org.codelibs.core.collection.Maps;
 import org.codelibs.fess.app.web.base.FessAdminAction;
 import org.codelibs.fess.util.RenderDataUtil;
@@ -28,10 +30,12 @@ import org.codelibs.fione.exception.FioneSystemException;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
+import org.codelibs.fione.helper.ProjectHelper;
 import org.codelibs.fione.mylasta.action.FioneHtmlPath;
 import org.codelibs.fione.mylasta.action.FioneMessages;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.web.response.render.RenderData;
+import org.lastaflute.web.token.DoubleSubmitManager;
 import org.lastaflute.web.validation.VaErrorHook;
 import org.lastaflute.web.validation.VaMessenger;
 
@@ -47,6 +51,12 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
     protected static final String LEADERBOARD_ID = "lid";
 
     protected static final String MODEL_ID = "mid";
+
+    @Resource
+    protected ProjectHelper projectHelper;
+
+    @Resource
+    protected DoubleSubmitManager doubleSubmitManager;
 
     protected void saveMessage(final VaMessenger<FioneMessages> validationMessagesLambda) {
         final FioneMessages messages = createMessages();

@@ -16,7 +16,7 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Prediction Summary</h1>
+				<h1>Prediction Summary: ${f:h(project.name)}</h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../dataset">
 							Data Set
@@ -67,6 +67,54 @@
 								</c:choose></span>
 							</div>
 						</div>
+						<c:if test="${fn:length(dataSets) gt 0}">
+							<div class="box box-primary">
+								<div class="box-header with-border">
+									<h3 class="box-title">DataSets</h3>
+									<div class="box-tools pull-right">
+										<button type="button" class="btn btn-box-tool" data-widget="collapse">
+											<i class="fa fa-minus"></i>
+										</button>
+									</div>
+								</div>
+								<div class="box-body">
+									<div class="row">
+										<div class="col-sm-12">
+											<table class="table table-bordered table-striped">
+												<thead>
+													<tr>
+														<th><la:message key="labels.automl_name" /></th>
+														<th class="col-sm-4 text-center">Action</th>
+													</tr>
+												</thead>
+												<tbody>
+													<c:forEach var="data" varStatus="s" items="${dataSets}">
+														<tr>
+															<form method="post" action="${contextPath}/admin/easyml/">
+																<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}"> <input
+																	type="hidden" name="projectId" value="${f:h(project.id)}"
+																> <input type="hidden" name="dataSetId" value="${f:h(data.id)}"> <input type="hidden"
+																	name="frameId" value="${f:h(frameId)}"
+																> <input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
+																<td><i class="fas fa-chart-line" title="Test Data"></i> ${f:h(data.name)}</td>
+																<td class="text-center">
+																	<button type="submit" name="downloaddataset" value="download" class="btn btn-link" style="padding: 0;">
+																		<i class="fas fa-download" title="Download"></i>
+																	</button>
+																	<%-- <button type="submit" name="deletedataset" value="Delete" class="btn btn-link" style="padding: 0;">
+																		<i class="fas fa-trash-alt" title="Delete"></i>
+																	</button> --%>
+																</td>
+															</form>
+														</tr>
+													</c:forEach>
+												</tbody>
+											</table>
+										</div>
+									</div>
+								</div>
+							</div>
+						</c:if>
 					</div>
 					<div class="col-md-9">
 						<div class="box box-info">

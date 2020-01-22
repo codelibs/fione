@@ -15,7 +15,7 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Processing</h1>
+				<h1>Processing Jobs: ${f:h(project.name)}</h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../dataset">
 							<la:message key="labels.crud_link_list" />

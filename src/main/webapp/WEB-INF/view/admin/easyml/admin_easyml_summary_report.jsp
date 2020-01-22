@@ -55,7 +55,7 @@
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
 			<div><a href="${contextPath}/admin/automl/model/${f:u(projectId)}/${f:u(leaderboard.models[0].name)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(leaderboard.models[0].name)}</a> is a best model in generated ones.</div>
-			<div>Please upload <a href="${contextPath}/admin/easyml/prediction/${f:u(projectId)}?did=${f:u(dataSetId)}&lid=${f:u(leaderboardId)}">DATA File</a> if you would like to append the prediction to it.</div>
+			<div>Please upload <a href="${contextPath}/admin/easyml/prediction/${f:u(projectId)}?did=${f:u(dataSetId)}&lid=${f:u(leaderboardId)}">DATA File</a> if you would like to append the prediction result.</div>
 		</div>
 	</div>
 	</c:if>
