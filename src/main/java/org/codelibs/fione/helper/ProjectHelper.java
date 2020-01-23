@@ -294,30 +294,24 @@ public class ProjectHelper {
 
     public void deleteDataSet(final String projectId, final String dataSetId) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+
+        final DataSet dataSet = getDataSet(fessConfig, minioClient, projectId, dataSetId);
+        if (dataSet.getSchema() != null) {
+            final FrameKeyV3 destinationFrame = dataSet.getSchema().destinationFrame;
+            h2oHelper.deleteFrame(destinationFrame).execute(deleteFrameResponse -> {
+                if (logger.isDebugEnabled()) {
+                    logger.debug("deleteFrameResponse: {}", deleteFrameResponse);
+                }
+                if (deleteFrameResponse.code() == 200) {
+                    logger.info("Delete frame: {}", keyToString(destinationFrame));
+                } else {
+                    logger.warn("Failed to delete {}", deleteFrameResponse);
+                }
+            }, t -> logger.warn("Failed to delete frame {}", keyToString(destinationFrame), t));
+        }
 
         final String name = StringCodecUtil.decode(dataSetId);
-        h2oHelper.getFrames(name.split("\\.")[0]).execute(frameResponse -> {
-            if (logger.isDebugEnabled()) {
-                logger.debug("getFrames: {}", frameResponse);
-            }
-            if (frameResponse.code() == 200) {
-                for (final FrameBaseV3 frame : frameResponse.body().frames) {
-                    final Response<FramesV3> response = h2oHelper.deleteFrame(frame.frameId).execute();
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("deleteFrame: {}", response);
-                    }
-                    if (frameResponse.code() == 200) {
-                        logger.info("Delete frame: {}", frame.frameId);
-                    } else {
-                        logger.warn("Failed to delete {}", response);
-                    }
-                }
-            } else {
-                logger.warn("Failed to get frames: {}", frameResponse);
-            }
-        }, t -> logger.warn("Failed to get frames.", t));
-
-        final MinioClient minioClient = createClient(fessConfig);
         final String dataPath = getDataPath(projectId, name);
         final String configPath = getDataSetConfigPath(projectId, dataSetId);
         try {

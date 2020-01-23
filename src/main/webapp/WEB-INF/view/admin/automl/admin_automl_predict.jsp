@@ -14,15 +14,15 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Prediction</h1>
+				<h1><la:message key="labels.automl_prediction" /></h1>
 				<ol class="breadcrumb">
 					<li><la:link href="/admin/automl">
 							<la:message key="labels.crud_link_list" />
 						</la:link></li>
 					<li><la:link href="/admin/automl/details/${f:u(projectId)}">
-							Project
+							<la:message key="labels.automl_project" />
 						</la:link></li>
-					<li class="active">Prediction</li>
+					<li class="active"><la:message key="labels.automl_prediction" /></li>
 				</ol>
 			</section>
 			<section class="content">
@@ -35,12 +35,12 @@
 							<div class="box box-success">
 								<div class="box-header with-border">
 									<h3 class="box-title">
-										Prediction for ${f:h(fi:frameName(frameId))}
+										<la:message key="labels.automl_prediction_for" arg0="${f:h(fi:frameName(frameId))}" />
 									</h3>
 									<div class="btn-group pull-right">
 										<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
 											<em class="fas fa-project-diagram"></em>
-											Project
+											<la:message key="labels.automl_project" />
 										</la:link>
 									</div>
 								</div>
@@ -52,14 +52,14 @@
 										<la:errors property="_global" />
 									</div>
 									<div class="form-group">
-										<label for="name" class="col-sm-3 control-label">Name</label>
+										<label for="name" class="col-sm-3 control-label"><la:message key="labels.automl_prediction_name" /></label>
 										<div class="col-sm-9">
 											<la:errors property="name" />
 											<la:text styleId="name" property="name" styleClass="form-control" />
 										</div>
 									</div>
 									<div class="form-group">
-										<label for="modelId" class="col-sm-3 control-label">Model</label>
+										<label for="modelId" class="col-sm-3 control-label"><la:message key="labels.automl_use_model" /></label>
 										<div class="col-sm-9">
 											<la:errors property="modelId" />
 											<la:select property="modelId" styleId="modelId" styleClass="form-control">
@@ -80,7 +80,7 @@
 											value="<la:message key="labels.crud_button_create" />"
 										>
 											<i class="fas fa-file-signature"></i>
-											Predict
+											<la:message key="labels.automl_predict" />
 										</button>
 									</c:if>
 								</div>

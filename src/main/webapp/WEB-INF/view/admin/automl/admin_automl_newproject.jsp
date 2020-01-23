@@ -14,12 +14,12 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Create New Project</h1>
+				<h1><la:message key="labels.automl_new_project" /></h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../list">
 							<la:message key="labels.crud_link_list" />
 						</la:link></li>
-					<li class="active">New Project</li>
+					<li class="active"><la:message key="labels.automl_new_project" /></li>
 				</ol>
 			</section>
 			<section class="content">
@@ -46,7 +46,7 @@
 										<la:errors property="_global" />
 									</div>
 									<div class="form-group">
-										<label for="name" class="col-sm-3 control-label">Name</label>
+										<label for="name" class="col-sm-3 control-label"><la:message key="labels.automl_project_name" /></label>
 										<div class="col-sm-9">
 											<la:errors property="name" />
 											<la:text styleId="name" property="name" styleClass="form-control" />

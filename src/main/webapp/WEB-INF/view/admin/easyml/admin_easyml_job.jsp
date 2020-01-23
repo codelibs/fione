@@ -15,12 +15,12 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Processing Jobs: ${f:h(project.name)}</h1>
+				<h1><la:message key="labels.easyml_jobs_in" arg0="${f:h(project.name)}" /></h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../dataset">
 							<la:message key="labels.crud_link_list" />
 						</la:link></li>
-					<li class="active">Jobs</li>
+					<li class="active"><la:message key="labels.easyml_jobs" /></li>
 				</ol>
 			</section>
 			<section class="content">
@@ -29,7 +29,7 @@
 						<div class="box box-success">
 							<div class="box-header with-border">
 								<h3 class="box-title">
-									Jobs
+									<la:message key="labels.easyml_jobs" />
 								</h3>
 								<div class="btn-tools pull-right">
 								</div>
@@ -43,7 +43,7 @@
 								</div>
 								<div>
 									<i class="fas fa-spinner fa-lg fa-spin"></i>
-									Processing...
+									<la:message key="labels.easyml_processing" />
 								</div>
 								<c:if test="${fn:length(project.jobs) == 0}">
 									<div class="row top10">
@@ -59,11 +59,11 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th>Destination</th>
-														<th class="col-sm-2 text-center">Start Time</th>
-														<th class="col-sm-2 text-center">End Time</th>
-														<th class="col-sm-2 text-center">Run Time</th>
-														<th class="col-sm-1 text-center">Status</th>
+														<th><la:message key="labels.automl_destination" /></th>
+														<th class="col-sm-2 text-center"><la:message key="labels.automl_start_time" /></th>
+														<th class="col-sm-2 text-center"><la:message key="labels.automl_end_time" /></th>
+														<th class="col-sm-2 text-center"><la:message key="labels.automl_run_time" /></th>
+														<th class="col-sm-1 text-center"><la:message key="labels.automl_status" /></th>
 													</tr>
 												</thead>
 												<tbody>

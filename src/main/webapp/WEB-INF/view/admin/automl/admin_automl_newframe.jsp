@@ -14,15 +14,15 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Create New Frame</h1>
+				<h1><la:message key="labels.automl_new_frame" /></h1>
 				<ol class="breadcrumb">
 					<li><la:link href="/admin/automl">
 							<la:message key="labels.crud_link_list" />
 						</la:link></li>
 					<li><la:link href="/admin/automl/details/${f:u(projectId)}">
-							Project
+							<la:message key="labels.automl_project" />
 						</la:link></li>
-					<li class="active">New Frame</li>
+					<li class="active"><la:message key="labels.automl_new_frame" /></li>
 				</ol>
 			</section>
 			<section class="content">
@@ -39,7 +39,7 @@
 									<div class="btn-group pull-right">
 										<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
 											<em class="fas fa-project-diagram"></em>
-											Project
+											<la:message key="labels.automl_project" />
 										</la:link>
 									</div>
 								</div>
@@ -50,7 +50,7 @@
 										</la:info>
 										<la:errors property="_global" />
 									</div>
-									<h4>Columns</h4>
+									<h4><la:message key="labels.automl_columns" /></h4>
 									<c:forEach var="item" varStatus="s" items="${columnItems}">
 									<div class="form-group">
 										<label for="${f:u(item.id)}" class="col-sm-3 control-label">${f:h(item.name)}</label>

@@ -14,15 +14,15 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Upload Data</h1>
+				<h1><la:message key="labels.automl_upload_dataset" /></h1>
 				<ol class="breadcrumb">
 					<li><la:link href="/admin/automl">
 							<la:message key="labels.crud_link_list" />
 						</la:link></li>
 					<li><la:link href="/admin/automl/details/${f:u(projectId)}">
-							Project
+							<la:message key="labels.automl_project" />
 						</la:link></li>
-					<li class="active">New Data</li>
+					<li class="active"><la:message key="labels.automl_upload_dataset" /></li>
 				</ol>
 			</section>
 			<section class="content">
@@ -32,11 +32,11 @@
 						<div class="col-md-12">
 							<div class="box box-success">
 								<div class="box-header with-border">
-									<h3 class="box-title">New Data</h3>
+									<h3 class="box-title"><la:message key="labels.automl_new_dataset" /></h3>
 									<div class="btn-group pull-right">
 										<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
 											<em class="fas fa-project-diagram"></em>
-											Project
+											<la:message key="labels.automl_project" />
 										</la:link>
 									</div>
 								</div>
@@ -48,7 +48,7 @@
 										<la:errors property="_global" />
 									</div>
 									<div class="form-group">
-										<label for="dataFile" class="col-sm-3 control-label">File</label>
+										<label for="dataFile" class="col-sm-3 control-label"><la:message key="labels.automl_data_file" /></label>
 										<div class="col-sm-9">
 											<la:errors property="dataFile" />
 											<input type="file" name="dataFile" />
@@ -63,7 +63,7 @@
 									<c:if test="${editable}">
 										<button type="submit" class="btn btn-success" name="uploaddataset" value="Upload">
 											<em class="fa fa-plus"></em>
-											Upload
+											<la:message key="labels.automl_upload" />
 										</button>
 									</c:if>
 								</div>

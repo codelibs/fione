@@ -14,12 +14,12 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Data Analysis: ${f:h(project.name)}</h1>
+				<h1><la:message key="labels.easyml_data_analysis_in" arg0="${f:h(project.name)}" /></h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../dataset">
-							Data Set
+							<la:message key="labels.easyml_dataset" />
 						</la:link></li>
-					<li class="active">Data Analysis</li>
+					<li class="active"><la:message key="labels.easyml_data_analysis" /></li>
 				</ol>
 			</section>
 			<section class="content">
@@ -38,14 +38,14 @@
 							<div class="box box-success">
 								<div class="box-header with-border">
 									<h3 class="box-title">
-										Prediction
+										<la:message key="labels.easyml_prediction" />
 									</h3>
 									<div class="btn-tools pull-right">
 									</div>
 								</div>
 								<div class="box-body">
 									<div class="form-group col-sm-12">
-										<label for="responseColumn">Predicted Column</label>
+										<label for="responseColumn"><la:message key="labels.easyml_predicted_column" /></label>
 										<la:errors property="responseColumn" />
 										<la:select property="responseColumn" styleId="responseColumn" styleClass="form-control">
 											<c:forEach var="item" items="${columnItems}">
@@ -54,23 +54,23 @@
 										</la:select>
 									</div>
 									<div class="form-group col-sm-12">
-										<label for="maxRuntimeSecs">Max Execution Time</label>
+										<label for="maxRuntimeSecs"><la:message key="labels.easyml_max_execution_time" /></label>
 										<la:errors property="maxRuntimeSecs" />
 										<la:select property="maxRuntimeSecs" styleId="maxRuntimeSecs" styleClass="form-control">
-											<la:option value="0">Unlimited</la:option>
-											<la:option value="60">1 min</la:option>
-											<la:option value="300">5 min</la:option>
-											<la:option value="600">10 min</la:option>
-											<la:option value="1800">30 min</la:option>
-											<la:option value="3600">1 hour</la:option>
-											<la:option value="86400">1 day</la:option>
+											<la:option value="0"><la:message key="labels.easyml_unlimited" /></la:option>
+											<la:option value="60"><la:message key="labels.easyml_1m" /></la:option>
+											<la:option value="300"><la:message key="labels.easyml_5m" /></la:option>
+											<la:option value="600"><la:message key="labels.easyml_10m" /></la:option>
+											<la:option value="1800"><la:message key="labels.easyml_30m" /></la:option>
+											<la:option value="3600"><la:message key="labels.easyml_1h" /></la:option>
+											<la:option value="86400"><la:message key="labels.easyml_1d" /></la:option>
 										</la:select>
 									</div>
 								</div>
 								<div class="box-footer">
 									<c:if test="${editable}">
 										<button type="submit" class="btn btn-success" name="runautoml" value="Run">
-											<em class="fas fa-hammer"></em> Run
+											<em class="fas fa-hammer"></em> <la:message key="labels.easyml_run" />
 										</button>
 									</c:if>
 								</div>
@@ -80,7 +80,7 @@
 							<div class="box box-success">
 								<div class="box-header with-border">
 									<h3 class="box-title">
-										Input Columns
+										<la:message key="labels.easyml_input_columns" />
 									</h3>
 									<div class="btn-tools pull-right">
 									</div>
@@ -90,13 +90,13 @@
 										<thead>
 											<tr>
 												<th class="col-sm-1 text-center"></th>
-												<th>Name</th>
-												<th class="col-sm-2 text-center">Type</th>
-												<th class="col-sm-1">Missing</th>
-												<th class="col-sm-1">Min</th>
-												<th class="col-sm-1">Max</th>
-												<th class="col-sm-1">Mean</th>
-												<th class="col-sm-1">Card.</th>
+												<th><la:message key="labels.automl_name" /></th>
+												<th class="col-sm-2 text-center"><la:message key="labels.automl_type" /></th>
+												<th class="col-sm-1"><la:message key="labels.automl_missing" /></th>
+												<th class="col-sm-1"><la:message key="labels.automl_min" /></th>
+												<th class="col-sm-1"><la:message key="labels.automl_max" /></th>
+												<th class="col-sm-1"><la:message key="labels.automl_mean" /></th>
+												<th class="col-sm-1"><la:message key="labels.automl_cardinality" /></th>
 											</tr>
 										</thead>
 										<tbody>

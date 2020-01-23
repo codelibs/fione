@@ -335,7 +335,7 @@ public class AdminAutomlAction extends FioneAdminAction {
             logger.warn("Failed to delete frame: {}", form.frameId, e);
             throw validationError(messages -> messages.addErrorsFailedToDeleteFrame(GLOBAL, form.frameId), this::asListHtml);
         }
-        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
+        return redirectDetailsHtml(form.projectId, null, form.leaderboardId);
     }
 
     @Execute
@@ -363,7 +363,7 @@ public class AdminAutomlAction extends FioneAdminAction {
             if (dataSet == null) {
                 throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
             }
-            if (dataSet.getSchema() == null) {
+            if (dataSet.getSchema() == null && DataSet.TRAIN.equals(dataSet.getType())) {
                 final DataSet[] dataSets = projectHelper.getDataSets(form.projectId);
                 if (dataSets.length > 1) {
                     dataSet.setType(DataSet.TEST);

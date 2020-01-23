@@ -20,9 +20,9 @@
 							<la:message key="labels.crud_link_list" />
 						</la:link></li>
 					<li><la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">
-							Project
+							<la:message key="labels.automl_project" />
 						</la:link></li>
-					<li class="active">Model</li>
+					<li class="active"><la:message key="labels.automl_model" /></li>
 				</ol>
 			</section>
 			<section class="content">
@@ -56,7 +56,7 @@
 						<c:if test="${model.parameters != null}">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Model Parameters</h3>
+								<h3 class="box-title"><la:message key="labels.automl_model_parameters" /></h3>
 								<div class="btn-group pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -78,8 +78,8 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th>Parameter</th>
-														<th>Value</th>
+														<th><la:message key="labels.automl_parameter" /></th>
+														<th><la:message key="labels.automl_value" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -100,7 +100,7 @@
 						<c:if test="${model.output != null}">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Output</h3>
+								<h3 class="box-title"><la:message key="labels.automl_output" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -122,8 +122,8 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th>Parameter</th>
-														<th>Value</th>
+														<th><la:message key="labels.automl_parameter" /></th>
+														<th><la:message key="labels.automl_value" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -144,7 +144,7 @@
 						<c:if test="${model.output.crossValidationModels != null}">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Cross Validation</h3>
+								<h3 class="box-title"><la:message key="labels.automl_cross_validation" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -166,8 +166,8 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th>Models</th>
-														<th>Predictions</th>
+														<th><la:message key="labels.automl_models" /></th>
+														<th><la:message key="labels.automl_predictions" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -391,7 +391,7 @@
 						<c:if test="${model.output.trainingMetrics != null}">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Training Metrics</h3>
+								<h3 class="box-title"><la:message key="labels.automl_training_metrics" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -413,8 +413,8 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th>Parameter</th>
-														<th>Value</th>
+														<th><la:message key="labels.automl_parameter" /></th>
+														<th><la:message key="labels.automl_value" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -435,7 +435,7 @@
 						<c:if test="${model.output.validationMetrics != null}">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Validation Metrics</h3>
+								<h3 class="box-title"><la:message key="labels.automl_validation_metrics" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -457,8 +457,8 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th>Parameter</th>
-														<th>Value</th>
+														<th><la:message key="labels.automl_parameter" /></th>
+														<th><la:message key="labels.automl_value" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -479,7 +479,7 @@
 						<c:if test="${model.output.crossValidationMetrics != null}">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Cross Validation Metrics</h3>
+								<h3 class="box-title"><la:message key="labels.automl_cross_validation_metrics" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -501,8 +501,8 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th>Parameter</th>
-														<th>Value</th>
+														<th><la:message key="labels.automl_parameter" /></th>
+														<th><la:message key="labels.automl_value" /></th>
 													</tr>
 												</thead>
 												<tbody>

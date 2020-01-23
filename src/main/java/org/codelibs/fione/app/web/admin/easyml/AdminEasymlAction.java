@@ -399,7 +399,7 @@ public class AdminEasymlAction extends FioneAdminAction {
             logger.warn("Failed to delete data: {}", form.dataSetId, e);
             throw validationError(messages -> messages.addErrorsFailedToDeleteDataset(GLOBAL, form.dataSetId), this::asListHtml);
         }
-        return redirectSummaryHtml(form.projectId, form.dataSetId, form.leaderboardId);
+        return redirectSummaryHtml(form.projectId, null, form.leaderboardId);
     }
 
     // ===================================================================================
@@ -626,6 +626,13 @@ public class AdminEasymlAction extends FioneAdminAction {
     }
 
     private HtmlResponse redirectSummaryHtml(final String projectId, final String dataSetId, final String leaderboardId) {
+        if (dataSetId == null || leaderboardId == null) {
+            final Project project = projectHelper.getProject(projectId);
+            if (project == null) {
+                throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, projectId), this::asListHtml);
+            }
+            return asJobHtml(project);
+        }
         final UrlChain moreUrl = moreUrl("summary", projectId).params(DATASET_ID, dataSetId, LEADERBOARD_ID, leaderboardId);
         return redirectWith(getClass(), moreUrl);
     }

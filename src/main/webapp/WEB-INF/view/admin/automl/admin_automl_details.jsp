@@ -16,7 +16,7 @@
 		<div class="content-wrapper">
 			<section class="content-header">
 				<h1>
-					Project: ${f:h(project.name)} <small><la:link
+					<la:message key="labels.automl_project_title" arg0="${f:h(project.name)}" /> <small><la:link
 							href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"
 						><i class="fas fa-redo-alt"></i></la:link></small>
 				</h1>
@@ -38,7 +38,7 @@
 					<div class="col-md-3">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Actions</h3>
+								<h3 class="box-title"><la:message key="labels.automl_actions" /></h3>
 								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
@@ -61,20 +61,20 @@
 											<span class="form-control">${f:h(leaderboardId)}</span>
 										</div>
 										</c:if>
-										<la:link href="/admin/automl/newdataset/${f:u(project.id)}" styleClass="btn btn-default">Upload DataSet</la:link>
+										<la:link href="/admin/automl/newdataset/${f:u(project.id)}" styleClass="btn btn-default"><la:message key="labels.automl_upload_dataset" /></la:link>
 										<c:if test="${not empty frameId}">
-											<la:link href="/admin/automl/setupml/${f:u(project.id)}/${f:u(frameId)}" styleClass="btn btn-default">Run AutoML</la:link>
+											<la:link href="/admin/automl/setupml/${f:u(project.id)}/${f:u(frameId)}" styleClass="btn btn-default"><la:message key="labels.automl_run_automl" /></la:link>
 										</c:if>
 										<c:if test="${not empty frameId and leaderboard != null}">
-											<la:link href="/admin/automl/prediction/${f:u(project.id)}/${f:u(frameId)}/${f:u(leaderboardId)}" styleClass="btn btn-default">Predict DataSet</la:link>
+											<la:link href="/admin/automl/prediction/${f:u(project.id)}/${f:u(frameId)}/${f:u(leaderboardId)}" styleClass="btn btn-default"><la:message key="labels.automl_predict_dataset" /></la:link>
 										</c:if>
 
 										<div class="btn-group" role="group">
 											<button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true"
-												aria-expanded="false">Options <i class="fas fa-caret-down"></i></button>
+												aria-expanded="false"><la:message key="labels.automl_options" /> <i class="fas fa-caret-down"></i></button>
 											<ul class="dropdown-menu">
-												<li><button type="submit" name="newsession" value="New Session" class="btn btn-link">New Session</button></li>
-												<li><button type="submit" name="deleteproject" value="Delete Project" class="btn btn-link">Delete Project</button></li>
+												<li><button type="submit" name="newsession" value="New Session" class="btn btn-link"><la:message key="labels.automl_new_session" /></button></li>
+												<li><button type="submit" name="deleteproject" value="Delete Project" class="btn btn-link"><la:message key="labels.automl_delete_project" /></button></li>
 											</ul>
 										</div>
 									</div>
@@ -94,15 +94,15 @@
 									<table class="table table-bordered table-striped">
 										<tbody>
 											<tr>
-												<th>Rows</th>
+												<th><la:message key="labels.automl_rows" /></th>
 												<td style="text-align:right;">${f:h(columnSummaries.rows)}</td>
 											</tr>
 											<tr>
-												<th>Columns</th>
+												<th><la:message key="labels.automl_columns" /></th>
 												<td style="text-align:right;">${f:h(columnSummaries.totalColumnCount)}</td>
 											</tr>
 											<tr>
-												<th>Compressed Size</th>
+												<th><la:message key="labels.automl_compressed_size" /></th>
 												<td style="text-align:right;">${fe:formatFileSize(columnSummaries.byteSize)}</td>
 											</tr>
 										</tbody>
@@ -112,7 +112,7 @@
 						</c:if>
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">DataSets</h3>
+								<h3 class="box-title"><la:message key="labels.automl_datasets" /></h3>
 								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
@@ -133,7 +133,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th class="col-sm-4 text-center">Action</th>
+														<th class="col-sm-4 text-center"><la:message key="labels.automl_action" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -147,26 +147,26 @@
 															<td>
 															<c:choose>
 															<c:when test="${data.type == 'train' and data.schema != null}">
-															<button type="submit" name="datasettype" value="test" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-area" title="Training Data"></i></button>
+															<button type="submit" name="datasettype" value="test" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-area" title="<la:message key="labels.automl_training_data" />"></i></button>
 															</c:when>
 															<c:when test="${data.type == 'test'}">
-															<button type="submit" name="datasettype" value="train" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-bar" title="Test Data"></i></button>
+															<button type="submit" name="datasettype" value="train" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-bar" title="<la:message key="labels.automl_test_data" />"></i></button>
 															</c:when>
 															<c:when test="${data.type == 'predict'}">
-															<button type="submit" name="datasettype" value="train" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-line" title="Test Data"></i></button>
+															<button type="submit" name="datasettype" value="train" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-line" title="<la:message key="labels.automl_predicted_data" />"></i></button>
 															</c:when>
-															<c:otherwise><em class="fas fa-question" style="color:#337ab7;" title="Unknown"></em></c:otherwise>
+															<c:otherwise><em class="fas fa-question" style="color:#337ab7;" title="<la:message key="labels.automl_unknown" />"></em></c:otherwise>
 															</c:choose>
 															${f:h(data.name)}</td>
 															<td class="text-center">
 															<c:if test="${data.schema != null}">
-															<la:link href="/admin/automl/newframe/${f:u(project.id)}/${f:u(data.id)}"><i class="fas fa-table" title="Create Frame"></i></la:link>
+															<la:link href="/admin/automl/newframe/${f:u(project.id)}/${f:u(data.id)}"><i class="fas fa-table" title="<la:message key="labels.automl_create_frame" />"></i></la:link>
 															</c:if>
 															<c:if test="${data.schema == null}">
-															<button type="submit" name="loaddataset" value="load" class="btn btn-link" style="padding:0;"><i class="fas fa-sync" title="Load Schema"></i></button>
+															<button type="submit" name="loaddataset" value="load" class="btn btn-link" style="padding:0;"><i class="fas fa-sync" title="<la:message key="labels.automl_load_schema" />"></i></button>
 															</c:if>
-															<button type="submit" name="downloaddataset" value="download" class="btn btn-link" style="padding:0;"><i class="fas fa-download" title="Download"></i></button>
-															<button type="submit" name="deletedataset" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="Delete"></i></button>
+															<button type="submit" name="downloaddataset" value="download" class="btn btn-link" style="padding:0;"><i class="fas fa-download" title="<la:message key="labels.automl_download" />"></i></button>
+															<button type="submit" name="deletedataset" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="<la:message key="labels.automl_delete" />"></i></button>
 															</td>
 														</form></tr>
 													</c:forEach>
@@ -179,7 +179,7 @@
 						</div>
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Frames</h3>
+								<h3 class="box-title"><la:message key="labels.automl_frames" /></h3>
 								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
@@ -200,7 +200,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th class="col-sm-3 text-center">Action</th>
+														<th class="col-sm-3 text-center"><la:message key="labels.automl_action" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -214,7 +214,7 @@
 															<td class="text-center">
 															<c:if test="${frameId == data}"><i class="far fa-check-square" style="color:#3c8dbc;"></i></c:if>
 															<c:if test="${frameId != data}"><la:link href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(data)}&lid=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
-															<button type="submit" name="deleteframe" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="Delete"></i></button>
+															<button type="submit" name="deleteframe" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="<la:message key="labels.automl_delete" />"></i></button>
 															</td>
 														</form></tr>
 													</c:forEach>
@@ -229,7 +229,7 @@
 					<div class="col-md-9">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Jobs</h3>
+								<h3 class="box-title"><la:message key="labels.automl_jobs" /></h3>
 								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -244,7 +244,7 @@
 										<input type="hidden" name="frameId" value="${f:h(frameId)}">
 										<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 										<input type="hidden" name="jobId" value="_all_">
-										<button type="submit" name="deletealljobs" value="Delete All" class="btn btn-link">Delete All</button>
+										<button type="submit" name="deletealljobs" value="Delete All" class="btn btn-link"><la:message key="labels.automl_delete_all" /></button>
 										</form></li>
 									</ul>
 								</div>
@@ -265,11 +265,11 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th>Destination</th>
-														<th class="col-sm-2 text-center">Start Time</th>
-														<th class="col-sm-2 text-center">End Time</th>
-														<th class="col-sm-2 text-center">Run Time</th>
-														<th class="col-sm-1 text-center">Status</th>
+														<th><la:message key="labels.automl_destination" /></th>
+														<th class="col-sm-2 text-center"><la:message key="labels.automl_start_time" /></th>
+														<th class="col-sm-2 text-center"><la:message key="labels.automl_end_time" /></th>
+														<th class="col-sm-2 text-center"><la:message key="labels.automl_run_time" /></th>
+														<th class="col-sm-1 text-center"><la:message key="labels.automl_status" /></th>
 														<th class="col-sm-1 text-center">&nbsp;</th>
 													</tr>
 												</thead>
@@ -319,7 +319,7 @@
 																	</c:otherwise>
 																</c:choose></td>
 															<td class="text-center">
-																<button type="submit" name="deletejob" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="Delete"></i></button>
+																<button type="submit" name="deletejob" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="<la:message key="labels.automl_delete" />"></i></button>
 															</td>
 														</form></tr>
 													</c:forEach>
@@ -333,7 +333,7 @@
 						<c:if test="${columnSummaries != null}">
 							<div class="box box-primary">
 								<div class="box-header with-border">
-									<h3 class="box-title">Column Summaries in ${f:h(fi:frameName(frameId))}</h3>
+									<h3 class="box-title"><la:message key="labels.automl_column_summaries" arg0="${f:h(fi:frameName(frameId))}" /></h3>
 									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
@@ -347,17 +347,17 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th>Label</th>
-														<th>Type</th>
-														<th>Missing</th>
-														<th>Zeros</th>
-														<th>+Inf.</th>
-														<th>-Inf.</th>
-														<th>Min</th>
-														<th>Max</th>
-														<th>Mean</th>
-														<th>Sigma</th>
-														<th>Card.</th>
+														<th><la:message key="labels.automl_label" /></th>
+														<th><la:message key="labels.automl_type" /></th>
+														<th><la:message key="labels.automl_missing" /></th>
+														<th><la:message key="labels.automl_zeros" /></th>
+														<th><la:message key="labels.automl_posinf" /></th>
+														<th><la:message key="labels.automl_neginf" /></th>
+														<th><la:message key="labels.automl_min" /></th>
+														<th><la:message key="labels.automl_max" /></th>
+														<th><la:message key="labels.automl_mean" /></th>
+														<th><la:message key="labels.automl_sigma" /></th>
+														<th><la:message key="labels.automl_cardinality" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -386,9 +386,9 @@
 						<c:if test="${frameData != null}">
 							<div class="box box-primary">
 								<div class="box-header with-border">
-									<h3 class="box-title">Data in ${f:h(fi:frameName(frameId))}</h3>
+									<h3 class="box-title"><la:message key="labels.automl_data_summaries" arg0="${f:h(fi:frameName(frameId))}" /></h3>
 									<div class="box-tools pull-right">
-										<span class="label label-info">${f:h(frameData.rows)} Data, ${f:h(frameData.numColumns)} Columns</span>
+										<span class="label label-info"><la:message key="labels.automl_data_and_column" arg0="${f:h(frameData.rows)}" arg1="${f:h(frameData.numColumns)}" /></span>
 										<c:if test="${frameData.columnOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset-10)}" class="btn btn-box-tool"><i class="fas fa-arrow-left"></i></a></c:if>
 										<c:if test="${frameData.columnOffset + 10 < frameData.numColumns}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset+10)}" class="btn btn-box-tool"><i class="fas fa-arrow-right"></i></a></c:if>
 										<c:if test="${frameData.rowOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset-10)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-up"></i></a></c:if>
@@ -438,7 +438,7 @@
 						<c:if test="${leaderboard != null}">
 							<div class="box box-primary">
 								<div class="box-header with-border">
-									<h3 class="box-title">Models in ${f:h(leaderboard.projectName)}</h3>
+									<h3 class="box-title"><la:message key="labels.automl_model_summaries" arg0="${f:h(leaderboard.projectName)}" /></h3>
 									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
@@ -452,7 +452,7 @@
 											<input type="hidden" name="projectId" value="${f:h(project.id)}">
 											<input type="hidden" name="frameId" value="${f:h(frameId)}">
 											<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-											<button type="submit" name="exportallmodels" value="Export All" class="btn btn-link">Export All</button>
+											<button type="submit" name="exportallmodels" value="Export All" class="btn btn-link"><la:message key="labels.automl_export_all" /></button>
 											</form></li>
 										</ul>
 									</div>

@@ -14,7 +14,7 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Project Dashboard</h1>
+				<h1><la:message key="labels.easyml_project_dashboard" /></h1>
 				<ol class="breadcrumb">
 				</ol>
 			</section>
@@ -24,7 +24,7 @@
 						<div class="box box-primary">
 							<div class="box-header with-border">
 								<h3 class="box-title">
-									Projects
+									<la:message key="labels.easyml_projects" />
 								</h3>
 								<div class="btn-tools pull-right">
 								</div>
@@ -65,7 +65,7 @@
 						<la:form action="/admin/easyml/uploaddataset" styleClass="form-horizontal" enctype="multipart/form-data">
 							<div class="box box-primary">
 								<div class="box-header with-border">
-									<h3 class="box-title">New Project</h3>
+									<h3 class="box-title"><la:message key="labels.easyml_new_project" /></h3>
 									<div class="btn-tools pull-right">
 									</div>
 								</div>
@@ -77,14 +77,14 @@
 										<la:errors property="_global" />
 									</div>
 									<div class="form-group">
-										<label for="name" class="col-sm-3 control-label">Project Name</label>
+										<label for="name" class="col-sm-3 control-label"><la:message key="labels.easyml_project_name" /></label>
 										<div class="col-sm-9">
 											<la:errors property="name" />
 											<la:text styleId="name" property="name" styleClass="form-control" />
 										</div>
 									</div>
 									<div class="form-group">
-										<label for="file" class="col-sm-3 control-label">Training Data</label>
+										<label for="file" class="col-sm-3 control-label"><la:message key="labels.easyml_training_data" /></label>
 										<div class="col-sm-9">
 											<la:errors property="file" />
 											<input type="file" name="file" />

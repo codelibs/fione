@@ -16,15 +16,15 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>Prediction Summary: ${f:h(project.name)}</h1>
+				<h1><la:message key="labels.easyml_prediction_summary" arg0="${f:h(project.name)}" /></h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../dataset">
-							Data Set
+							<la:message key="labels.easyml_dataset" />
 						</la:link></li>
 					<li><la:link href="../train/${f:u(projectId)}?did=${f:u(dataSetId)}">
-							Data Analysis
+							<la:message key="labels.easyml_data_analysis" />
 						</la:link></li>
-					<li class="active">Summary</li>
+					<li class="active"><la:message key="labels.easyml_summary" /></li>
 				</ol>
 			</section>
 			<section class="content">
@@ -39,17 +39,17 @@
 						<div class="info-box">
 							<span class="info-box-icon bg-aqua"><i class="fas fa-table"></i></span>
 							<div class="info-box-content">
-								<span class="info-box-number">${f:h(columnSummaries.rows)} Rows</span>
-								<span class="info-box-number">${f:h(columnSummaries.numColumns)} Colmns</span>
+								<span class="info-box-number"><la:message key="labels.easyml_x_rows" arg0="${f:h(columnSummaries.rows)}" /></span>
+								<span class="info-box-number"><la:message key="labels.easyml_x_columns" arg0="${f:h(columnSummaries.numColumns)}" /></span>
 								<div style="overflow: hidden;text-overflow: ellipsis;">${fi:frameName(frameId)}</div>
 							</div>
 						</div>
 						<div class="info-box">
 							<span class="info-box-icon bg-green"><i class="fas fa-hammer"></i></span>
 							<div class="info-box-content">
-								<span class="info-box-number">${fn:length(leaderboard.models)} Models</span>
+								<span class="info-box-number"><la:message key="labels.easyml_x_models" arg0="${fn:length(leaderboard.models)}" /></span>
 								<div style="overflow: hidden; text-overflow: ellipsis;">
-									<span class="label label-success">Best</span> ${leaderboard.models[0].name}
+									<span class="label label-success"><la:message key="labels.easyml_best" /></span> ${leaderboard.models[0].name}
 								</div>
 							</div>
 						</div>
@@ -57,7 +57,7 @@
 							<span class="info-box-icon bg-yellow"><i class="fas fa-chart-line"></i></span>
 							<div class="info-box-content">
 								<span class="info-box-number">${f:h(predictionMetric.name)} ${fi:formatNumber(predictionMetric.value,"%.8f")}</span>
-								<span class="label label-warning">Accuracy</span>
+								<span class="label label-warning"><la:message key="labels.easyml_accuracy" /></span>
 								<span style="color:#ffbb00;"><c:choose>
 									<c:when test="${predictionMetric.accuracy<=0.2}"><i                             class="fas fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i></c:when>
 									<c:when test="${predictionMetric.accuracy>0.2 and predictionMetric.accuracy<=0.4}"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i></c:when>
@@ -70,7 +70,7 @@
 						<c:if test="${fn:length(dataSets) gt 0}">
 							<div class="box box-primary">
 								<div class="box-header with-border">
-									<h3 class="box-title">DataSets</h3>
+									<h3 class="box-title"><la:message key="labels.easyml_datasets" /></h3>
 									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
@@ -84,7 +84,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th class="col-sm-4 text-center">Action</th>
+														<th class="col-sm-4 text-center"><la:message key="labels.easyml_action" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -101,9 +101,9 @@
 																	<button type="submit" name="downloaddataset" value="download" class="btn btn-link" style="padding: 0;">
 																		<i class="fas fa-download" title="Download"></i>
 																	</button>
-																	<%-- <button type="submit" name="deletedataset" value="Delete" class="btn btn-link" style="padding: 0;">
+																	<button type="submit" name="deletedataset" value="Delete" class="btn btn-link" style="padding: 0;">
 																		<i class="fas fa-trash-alt" title="Delete"></i>
-																	</button> --%>
+																	</button>
 																</td>
 															</form>
 														</tr>
@@ -119,7 +119,7 @@
 					<div class="col-md-9">
 						<div class="box box-info">
 							<div class="box-header with-border">
-								<h3 class="box-title">Fione Reports</h3>
+								<h3 class="box-title"><la:message key="labels.easyml_reports" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>

@@ -47,6 +47,390 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: EasyML */
     public static final String LABELS_EASYML = "{labels.easyml}";
 
+    /** The key of the message: Project: {0} */
+    public static final String LABELS_automl_project_title = "{labels.automl_project_title}";
+
+    /** The key of the message: Actions */
+    public static final String LABELS_automl_actions = "{labels.automl_actions}";
+
+    /** The key of the message: New Data Set */
+    public static final String LABELS_automl_upload_dataset = "{labels.automl_upload_dataset}";
+
+    /** The key of the message: Run AutoML */
+    public static final String LABELS_automl_run_automl = "{labels.automl_run_automl}";
+
+    /** The key of the message: New Prediction */
+    public static final String LABELS_automl_predict_dataset = "{labels.automl_predict_dataset}";
+
+    /** The key of the message: Options */
+    public static final String LABELS_automl_options = "{labels.automl_options}";
+
+    /** The key of the message: New Session */
+    public static final String LABELS_automl_new_session = "{labels.automl_new_session}";
+
+    /** The key of the message: Delete Project */
+    public static final String LABELS_automl_delete_project = "{labels.automl_delete_project}";
+
+    /** The key of the message: Rows */
+    public static final String LABELS_automl_rows = "{labels.automl_rows}";
+
+    /** The key of the message: Compressed Size */
+    public static final String LABELS_automl_compressed_size = "{labels.automl_compressed_size}";
+
+    /** The key of the message: Data Sets */
+    public static final String LABELS_automl_datasets = "{labels.automl_datasets}";
+
+    /** The key of the message: Action */
+    public static final String LABELS_automl_action = "{labels.automl_action}";
+
+    /** The key of the message: Training Data */
+    public static final String LABELS_automl_training_data = "{labels.automl_training_data}";
+
+    /** The key of the message: Test Data */
+    public static final String LABELS_automl_test_data = "{labels.automl_test_data}";
+
+    /** The key of the message: Predicted Data */
+    public static final String LABELS_automl_predicted_data = "{labels.automl_predicted_data}";
+
+    /** The key of the message: Unknown */
+    public static final String LABELS_automl_unknown = "{labels.automl_unknown}";
+
+    /** The key of the message: Create Frame */
+    public static final String LABELS_automl_create_frame = "{labels.automl_create_frame}";
+
+    /** The key of the message: Load Schema */
+    public static final String LABELS_automl_load_schema = "{labels.automl_load_schema}";
+
+    /** The key of the message: Download */
+    public static final String LABELS_automl_download = "{labels.automl_download}";
+
+    /** The key of the message: Frames */
+    public static final String LABELS_automl_frames = "{labels.automl_frames}";
+
+    /** The key of the message: Jobs */
+    public static final String LABELS_automl_jobs = "{labels.automl_jobs}";
+
+    /** The key of the message: Delete All */
+    public static final String LABELS_automl_delete_all = "{labels.automl_delete_all}";
+
+    /** The key of the message: Destination */
+    public static final String LABELS_automl_destination = "{labels.automl_destination}";
+
+    /** The key of the message: Start Time */
+    public static final String LABELS_automl_start_time = "{labels.automl_start_time}";
+
+    /** The key of the message: End Time */
+    public static final String LABELS_automl_end_time = "{labels.automl_end_time}";
+
+    /** The key of the message: Run Time */
+    public static final String LABELS_automl_run_time = "{labels.automl_run_time}";
+
+    /** The key of the message: Status */
+    public static final String LABELS_automl_status = "{labels.automl_status}";
+
+    /** The key of the message: Column Summaries in {0} */
+    public static final String LABELS_automl_column_summaries = "{labels.automl_column_summaries}";
+
+    /** The key of the message: Label */
+    public static final String LABELS_automl_label = "{labels.automl_label}";
+
+    /** The key of the message: Type */
+    public static final String LABELS_automl_type = "{labels.automl_type}";
+
+    /** The key of the message: Missing */
+    public static final String LABELS_automl_missing = "{labels.automl_missing}";
+
+    /** The key of the message: Zeros */
+    public static final String LABELS_automl_zeros = "{labels.automl_zeros}";
+
+    /** The key of the message: +Inf. */
+    public static final String LABELS_automl_posinf = "{labels.automl_posinf}";
+
+    /** The key of the message: -Inf. */
+    public static final String LABELS_automl_neginf = "{labels.automl_neginf}";
+
+    /** The key of the message: Min */
+    public static final String LABELS_automl_min = "{labels.automl_min}";
+
+    /** The key of the message: Max */
+    public static final String LABELS_automl_max = "{labels.automl_max}";
+
+    /** The key of the message: Mean */
+    public static final String LABELS_automl_mean = "{labels.automl_mean}";
+
+    /** The key of the message: Sigma */
+    public static final String LABELS_automl_sigma = "{labels.automl_sigma}";
+
+    /** The key of the message: Card. */
+    public static final String LABELS_automl_cardinality = "{labels.automl_cardinality}";
+
+    /** The key of the message: Data in {0} */
+    public static final String LABELS_automl_data_summaries = "{labels.automl_data_summaries}";
+
+    /** The key of the message: {0} Rows, {1} Columns */
+    public static final String LABELS_automl_data_and_column = "{labels.automl_data_and_column}";
+
+    /** The key of the message: Model in {0} */
+    public static final String LABELS_automl_model_summaries = "{labels.automl_model_summaries}";
+
+    /** The key of the message: Export All */
+    public static final String LABELS_automl_export_all = "{labels.automl_export_all}";
+
+    /** The key of the message: Project */
+    public static final String LABELS_automl_project = "{labels.automl_project}";
+
+    /** The key of the message: AutoML Settings */
+    public static final String LABELS_automl_settings = "{labels.automl_settings}";
+
+    /** The key of the message: Basic */
+    public static final String LABELS_automl_basic = "{labels.automl_basic}";
+
+    /** The key of the message: Predicted Column */
+    public static final String LABELS_automl_predicted_column = "{labels.automl_predicted_column}";
+
+    /** The key of the message: Max Runtime Seconds */
+    public static final String LABELS_automl_max_runtime_secs = "{labels.automl_max_runtime_secs}";
+
+    /** The key of the message: Advance */
+    public static final String LABELS_automl_advance = "{labels.automl_advance}";
+
+    /** The key of the message: Project Name */
+    public static final String LABELS_automl_project_name = "{labels.automl_project_name}";
+
+    /** The key of the message: Ignored Columns */
+    public static final String LABELS_automl_ignored_columns = "{labels.automl_ignored_columns}";
+
+    /** The key of the message: n Folds */
+    public static final String LABELS_automl_nfolds = "{labels.automl_nfolds}";
+
+    /** The key of the message: Balance Classes */
+    public static final String LABELS_automl_balance_classes = "{labels.automl_balance_classes}";
+
+    /** The key of the message: True */
+    public static final String LABELS_automl_true = "{labels.automl_true}";
+
+    /** The key of the message: False */
+    public static final String LABELS_automl_false = "{labels.automl_false}";
+
+    /** The key of the message: Seed */
+    public static final String LABELS_automl_seed = "{labels.automl_seed}";
+
+    /** The key of the message: Max Models */
+    public static final String LABELS_automl_max_models = "{labels.automl_max_models}";
+
+    /** The key of the message: Max Runtime Seconds Per Model */
+    public static final String LABELS_automl_max_runtime_secs_per_model = "{labels.automl_max_runtime_secs_per_model}";
+
+    /** The key of the message: Stopping Rounds */
+    public static final String LABELS_automl_stopping_rounds = "{labels.automl_stopping_rounds}";
+
+    /** The key of the message: Stopping Metric */
+    public static final String LABELS_automl_stopping_metric = "{labels.automl_stopping_metric}";
+
+    /** The key of the message: Stopping Tolerance */
+    public static final String LABELS_automl_stopping_tolerance = "{labels.automl_stopping_tolerance}";
+
+    /** The key of the message: Keep Cross Validation Predictions */
+    public static final String LABELS_automl_keep_xval_redictions = "{labels.automl_keep_xval_redictions}";
+
+    /** The key of the message: Keep Cross Validation Models */
+    public static final String LABELS_automl_keep_xval_models = "{labels.automl_keep_xval_models}";
+
+    /** The key of the message: Keep Cross Validation Fold Assignment */
+    public static final String LABELS_automl_keep_xval_fold_assignment = "{labels.automl_keep_xval_fold_assignment}";
+
+    /** The key of the message: Sort Metric */
+    public static final String LABELS_automl_sort_metric = "{labels.automl_sort_metric}";
+
+    /** The key of the message: Max Categorical Features */
+    public static final String LABELS_automl_max_categorical_features = "{labels.automl_max_categorical_features}";
+
+    /** The key of the message: Run */
+    public static final String LABELS_automl_run = "{labels.automl_run}";
+
+    /** The key of the message: Prediction */
+    public static final String LABELS_automl_prediction = "{labels.automl_prediction}";
+
+    /** The key of the message: Prediction for {0} */
+    public static final String LABELS_automl_prediction_for = "{labels.automl_prediction_for}";
+
+    /** The key of the message: Prediction Name */
+    public static final String LABELS_automl_prediction_name = "{labels.automl_prediction_name}";
+
+    /** The key of the message: Model */
+    public static final String LABELS_automl_model = "{labels.automl_model}";
+
+    /** The key of the message: Model */
+    public static final String LABELS_automl_use_model = "{labels.automl_use_model}";
+
+    /** The key of the message: Predict */
+    public static final String LABELS_automl_predict = "{labels.automl_predict}";
+
+    /** The key of the message: New Project */
+    public static final String LABELS_automl_new_project = "{labels.automl_new_project}";
+
+    /** The key of the message: New Frame */
+    public static final String LABELS_automl_new_frame = "{labels.automl_new_frame}";
+
+    /** The key of the message: Columns */
+    public static final String LABELS_automl_columns = "{labels.automl_columns}";
+
+    /** The key of the message: Upload */
+    public static final String LABELS_automl_new_dataset = "{labels.automl_new_dataset}";
+
+    /** The key of the message: Data File */
+    public static final String LABELS_automl_data_file = "{labels.automl_data_file}";
+
+    /** The key of the message: Upload */
+    public static final String LABELS_automl_upload = "{labels.automl_upload}";
+
+    /** The key of the message: Model Parameters */
+    public static final String LABELS_automl_model_parameters = "{labels.automl_model_parameters}";
+
+    /** The key of the message: Parameter */
+    public static final String LABELS_automl_parameter = "{labels.automl_parameter}";
+
+    /** The key of the message: Value */
+    public static final String LABELS_automl_value = "{labels.automl_value}";
+
+    /** The key of the message: Outputs */
+    public static final String LABELS_automl_output = "{labels.automl_output}";
+
+    /** The key of the message: Cross Validation */
+    public static final String LABELS_automl_cross_validation = "{labels.automl_cross_validation}";
+
+    /** The key of the message: Models */
+    public static final String LABELS_automl_models = "{labels.automl_models}";
+
+    /** The key of the message: Predictions */
+    public static final String LABELS_automl_predictions = "{labels.automl_predictions}";
+
+    /** The key of the message: Training Metrics */
+    public static final String LABELS_automl_training_metrics = "{labels.automl_training_metrics}";
+
+    /** The key of the message: Validation Metrics */
+    public static final String LABELS_automl_validation_metrics = "{labels.automl_validation_metrics}";
+
+    /** The key of the message: Cross Validation Metrics */
+    public static final String LABELS_automl_cross_validation_metrics = "{labels.automl_cross_validation_metrics}";
+
+    /** The key of the message: Delete */
+    public static final String LABELS_automl_delete = "{labels.automl_delete}";
+
+    /** The key of the message: Project Dashboard */
+    public static final String LABELS_easyml_project_dashboard = "{labels.easyml_project_dashboard}";
+
+    /** The key of the message: Projects */
+    public static final String LABELS_easyml_projects = "{labels.easyml_projects}";
+
+    /** The key of the message: New Project */
+    public static final String LABELS_easyml_new_project = "{labels.easyml_new_project}";
+
+    /** The key of the message: Project Name */
+    public static final String LABELS_easyml_project_name = "{labels.easyml_project_name}";
+
+    /** The key of the message: Training Data */
+    public static final String LABELS_easyml_training_data = "{labels.easyml_training_data}";
+
+    /** The key of the message: Data Set */
+    public static final String LABELS_easyml_dataset = "{labels.easyml_dataset}";
+
+    /** The key of the message: Data Analysis: {0} */
+    public static final String LABELS_easyml_data_analysis_in = "{labels.easyml_data_analysis_in}";
+
+    /** The key of the message: Data Analysis */
+    public static final String LABELS_easyml_data_analysis = "{labels.easyml_data_analysis}";
+
+    /** The key of the message: Predicted Column */
+    public static final String LABELS_easyml_predicted_column = "{labels.easyml_predicted_column}";
+
+    /** The key of the message: Max Execution Time */
+    public static final String LABELS_easyml_max_execution_time = "{labels.easyml_max_execution_time}";
+
+    /** The key of the message: Unlimited */
+    public static final String LABELS_easyml_unlimited = "{labels.easyml_unlimited}";
+
+    /** The key of the message: 1 min */
+    public static final String LABELS_easyml_1m = "{labels.easyml_1m}";
+
+    /** The key of the message: 5 min */
+    public static final String LABELS_easyml_5m = "{labels.easyml_5m}";
+
+    /** The key of the message: 10 min */
+    public static final String LABELS_easyml_10m = "{labels.easyml_10m}";
+
+    /** The key of the message: 30 min */
+    public static final String LABELS_easyml_30m = "{labels.easyml_30m}";
+
+    /** The key of the message: 1 hour */
+    public static final String LABELS_easyml_1h = "{labels.easyml_1h}";
+
+    /** The key of the message: 1 day */
+    public static final String LABELS_easyml_1d = "{labels.easyml_1d}";
+
+    /** The key of the message: Run */
+    public static final String LABELS_easyml_run = "{labels.easyml_run}";
+
+    /** The key of the message: Input Columns */
+    public static final String LABELS_easyml_input_columns = "{labels.easyml_input_columns}";
+
+    /** The key of the message: Name */
+    public static final String LABELS_easyml_name = "{labels.easyml_name}";
+
+    /** The key of the message: Prediction Summary: {0} */
+    public static final String LABELS_easyml_prediction_summary = "{labels.easyml_prediction_summary}";
+
+    /** The key of the message: Summary */
+    public static final String LABELS_easyml_summary = "{labels.easyml_summary}";
+
+    /** The key of the message: {0} Rows */
+    public static final String LABELS_easyml_x_rows = "{labels.easyml_x_rows}";
+
+    /** The key of the message: {0} Columns */
+    public static final String LABELS_easyml_x_columns = "{labels.easyml_x_columns}";
+
+    /** The key of the message: {0} Models */
+    public static final String LABELS_easyml_x_models = "{labels.easyml_x_models}";
+
+    /** The key of the message: Best */
+    public static final String LABELS_easyml_best = "{labels.easyml_best}";
+
+    /** The key of the message: Accuracy */
+    public static final String LABELS_easyml_accuracy = "{labels.easyml_accuracy}";
+
+    /** The key of the message: Action */
+    public static final String LABELS_easyml_action = "{labels.easyml_action}";
+
+    /** The key of the message: Fione Reports */
+    public static final String LABELS_easyml_reports = "{labels.easyml_reports}";
+
+    /** The key of the message: New Prediction: {0} */
+    public static final String LABELS_easyml_new_prediction = "{labels.easyml_new_prediction}";
+
+    /** The key of the message: Prediction */
+    public static final String LABELS_easyml_prediction = "{labels.easyml_prediction}";
+
+    /** The key of the message: Upload Data Set */
+    public static final String LABELS_easyml_upload_dataset = "{labels.easyml_upload_dataset}";
+
+    /** The key of the message: Prediction Data */
+    public static final String LABELS_easyml_prediction_data = "{labels.easyml_prediction_data}";
+
+    /** The key of the message: Upload */
+    public static final String LABELS_easyml_upload = "{labels.easyml_upload}";
+
+    /** The key of the message: Jobs: {0} */
+    public static final String LABELS_easyml_jobs_in = "{labels.easyml_jobs_in}";
+
+    /** The key of the message: Jobs */
+    public static final String LABELS_easyml_jobs = "{labels.easyml_jobs}";
+
+    /** The key of the message: Processing... */
+    public static final String LABELS_easyml_processing = "{labels.easyml_processing}";
+
+    /** The key of the message: Data Sets */
+    public static final String LABELS_easyml_datasets = "{labels.easyml_datasets}";
+
     /**
      * Assert the property is not null.
      * @param property The value of the property. (NotNull)

@@ -16,18 +16,18 @@
 		</jsp:include>
 		<div class="content-wrapper">
 			<section class="content-header">
-				<h1>New Prediction: ${f:h(project.name)}</h1>
+				<h1><la:message key="labels.easyml_new_prediction" arg0="${f:h(project.name)}" /></h1>
 				<ol class="breadcrumb">
 					<li><la:link href="../dataset">
-							Data Set
+							<la:message key="labels.easyml_dataset" />
 						</la:link></li>
 					<li><la:link href="../train/${f:u(projectId)}?did=${f:u(dataSetId)}">
-							Data Analysis
+							<la:message key="labels.easyml_data_analysis" />
 						</la:link></li>
 					<li><la:link href="../summary/${f:u(projectId)}?did=${f:u(dataSetId)}&lid=${f:u(leaderboardId)}">
-							Summary
+							<la:message key="labels.easyml_summary" />
 						</la:link></li>
-					<li class="active">Prediction</li>
+					<li class="active"><la:message key="labels.easyml_prediction" /></li>
 				</ol>
 			</section>
 			<section class="content">
@@ -40,7 +40,7 @@
 							<div class="box box-success">
 								<div class="box-header with-border">
 									<h3 class="box-title">
-										Upload DataSet
+										<la:message key="labels.easyml_upload_dataset" />
 									</h3>
 									<div class="btn-tools pull-right">
 									</div>
@@ -53,7 +53,7 @@
 										<la:errors property="_global" />
 									</div>
 									<div class="form-group">
-										<label for="file" class="col-sm-3 control-label">Prediction Data</label>
+										<label for="file" class="col-sm-3 control-label"><la:message key="labels.easyml_prediction_data" /></label>
 										<div class="col-sm-9">
 											<la:errors property="file" />
 											<input type="file" name="file" />
@@ -70,7 +70,7 @@
 											value="<la:message key="labels.crud_button_create" />"
 										>
 											<em class="fa fa-file-upload"></em>
-											Upload
+											<la:message key="labels.easyml_upload" />
 										</button>
 									</c:if>
 								</div>
