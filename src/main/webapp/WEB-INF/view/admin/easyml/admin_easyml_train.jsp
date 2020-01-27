@@ -54,6 +54,24 @@
 										</la:select>
 									</div>
 									<div class="form-group col-sm-12">
+										<label for="responseColumn"><la:message key="labels.easyml_prediction_type" /></label>
+										<div class="radio">
+											<label><input type="radio" name="predictionType" id="predictionTypeB" value="b" checked>
+												<la:message key="labels.easyml_binaryclass_classification" />
+											</label>
+										</div>
+										<div class="radio">
+											<label><input type="radio" name="predictionType" id="predictionTypeM" value="m">
+												<la:message key="labels.easyml_multiclass_classification" />
+											</label>
+										</div>
+										<div class="radio">
+											<label><input type="radio" name="predictionType" id="predictionTypeR" value="r">
+												<la:message key="labels.easyml_numeric_prediction" />
+											</label>
+										</div>
+									</div>
+									<div class="form-group col-sm-12">
 										<label for="maxRuntimeSecs"><la:message key="labels.easyml_max_execution_time" /></label>
 										<la:errors property="maxRuntimeSecs" />
 										<la:select property="maxRuntimeSecs" styleId="maxRuntimeSecs" styleClass="form-control">
@@ -115,7 +133,10 @@
 													<td>${fi:formatNumber(data.min,"%.4f")}</td>
 													<td>${fi:formatNumber(data.max,"%.4f")}</td>
 													<td>${fi:formatNumber(data.mean,"%.4f")}</td>
-													<td>${f:h(data.cardinality)}</td>
+													<td>
+													<c:if test="${data.value=='Enum'}">${f:h(data.cardinality)}</c:if>
+													<c:if test="${data.value!='Enum'}">-</c:if>
+													</td>
 												</tr>
 											</c:forEach>
 										</tbody>

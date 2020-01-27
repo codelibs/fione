@@ -7,7 +7,7 @@
 			<span class="direct-chat-name pull-right">You</span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
-		<div class="direct-chat-text" style="background: #fff;">What do you think this result?</div>
+		<div class="direct-chat-text" style="background: #fff;">What do you think of this result?</div>
 	</div>
 	<div class="direct-chat-msg">
 		<div class="direct-chat-info clearfix">

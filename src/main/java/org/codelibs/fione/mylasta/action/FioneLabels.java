@@ -431,6 +431,18 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Data Sets */
     public static final String LABELS_easyml_datasets = "{labels.easyml_datasets}";
 
+    /** The key of the message: Prediction Type */
+    public static final String LABELS_easyml_prediction_type = "{labels.easyml_prediction_type}";
+
+    /** The key of the message: Binary-Class Classification */
+    public static final String LABELS_easyml_binaryclass_classification = "{labels.easyml_binaryclass_classification}";
+
+    /** The key of the message: Multi-Class Classification */
+    public static final String LABELS_easyml_multiclass_classification = "{labels.easyml_multiclass_classification}";
+
+    /** The key of the message: Numeric Prediction */
+    public static final String LABELS_easyml_numeric_prediction = "{labels.easyml_numeric_prediction}";
+
     /**
      * Assert the property is not null.
      * @param property The value of the property. (NotNull)

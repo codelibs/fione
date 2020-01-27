@@ -208,6 +208,7 @@ public class AdminEasymlAction extends FioneAdminAction {
                     this::asListHtml);
         }
         form.columns.put(StringCodecUtil.encodeUrlSafe(form.responseColumn), "on");
+        form.columnTypes.put(StringCodecUtil.encodeUrlSafe(form.responseColumn), "r".equals(form.predictionType) ? "Numeric" : "Enum");
         try {
             final FrameV3 columnSummaries = projectHelper.getColumnSummaries(form.projectId, form.frameId);
             final String[] ignoredColumns =

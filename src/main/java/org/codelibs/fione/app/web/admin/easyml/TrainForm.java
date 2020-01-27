@@ -89,4 +89,6 @@ public class TrainForm {
     @ValidateTypeFailure
     public Integer maxCategoricalFeatures = 10000;
 
+    @Required
+    public String predictionType;
 }
