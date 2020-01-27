@@ -21,6 +21,7 @@ import java.util.Map;
 import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
 
+import org.codelibs.fione.Constants;
 import org.lastaflute.web.validation.Required;
 import org.lastaflute.web.validation.theme.conversion.ValidateTypeFailure;
 
@@ -90,5 +91,5 @@ public class TrainForm {
     public Integer maxCategoricalFeatures = 10000;
 
     @Required
-    public String predictionType;
+    public String predictionType = Constants.BINARYCLASS_TYPE;
 }

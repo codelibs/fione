@@ -31,6 +31,7 @@ import org.apache.logging.log4j.Logger;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fess.annotation.Secured;
 import org.codelibs.fess.util.RenderDataUtil;
+import org.codelibs.fione.Constants;
 import org.codelibs.fione.app.web.base.FioneAdminAction;
 import org.codelibs.fione.entity.DataSet;
 import org.codelibs.fione.entity.Project;
@@ -208,7 +209,8 @@ public class AdminEasymlAction extends FioneAdminAction {
                     this::asListHtml);
         }
         form.columns.put(StringCodecUtil.encodeUrlSafe(form.responseColumn), "on");
-        form.columnTypes.put(StringCodecUtil.encodeUrlSafe(form.responseColumn), "r".equals(form.predictionType) ? "Numeric" : "Enum");
+        form.columnTypes.put(StringCodecUtil.encodeUrlSafe(form.responseColumn),
+                Constants.REGRESSION_TYPE.equals(form.predictionType) ? "Numeric" : "Enum");
         try {
             final FrameV3 columnSummaries = projectHelper.getColumnSummaries(form.projectId, form.frameId);
             final String[] ignoredColumns =
@@ -450,10 +452,16 @@ public class AdminEasymlAction extends FioneAdminAction {
                             if ("int".equals(column.type)) {
                                 if (column.mean > 0.0f && column.mean < 1.0f) {
                                     form.responseColumn = StringCodecUtil.encodeUrlSafe(column.label);
+                                    form.predictionType = Constants.REGRESSION_TYPE;
                                 }
                             } else if ("enum".equals(column.type)) {
                                 if (column.domainCardinality < 10) {
                                     form.responseColumn = StringCodecUtil.encodeUrlSafe(column.label);
+                                    if (column.domainCardinality > 2) {
+                                        form.predictionType = Constants.MULTICLASS_TYPE;
+                                    } else {
+                                        form.predictionType = Constants.BINARYCLASS_TYPE;
+                                    }
                                 }
                             }
                         }
@@ -499,6 +507,18 @@ public class AdminEasymlAction extends FioneAdminAction {
                 params.put("accuracy", 0.0f);
             }
             return params;
+        case "mean_per_class_error":
+            params.put("name", "MPCE");
+            if (leaderboard.sortMetrics.length > 0) {
+                params.put("value", leaderboard.sortMetrics[0]);
+                // TODO improve the following value...
+                final double accuracy = (1.0f - leaderboard.sortMetrics[0]) * 2.0f - 1.0f;
+                params.put("accuracy", Math.max(accuracy, 0.0f));
+            } else {
+                params.put("value", Double.NaN);
+                params.put("accuracy", 0.0f);
+            }
+            return params;
         case "mean_residual_deviance":
             final Map<String, Object> modelMetric = getTopModelMetric(leaderboard);
             if (modelMetric.containsKey("rmse") && modelMetric.containsKey("mae")) {
@@ -516,6 +536,7 @@ public class AdminEasymlAction extends FioneAdminAction {
             }
         default:
             params.put("name", leaderboard.sortMetric);
+            params.put("accuracy", 0.0f);
             if (leaderboard.sortMetrics.length > 0) {
                 params.put("value", leaderboard.sortMetrics[0]);
             } else {

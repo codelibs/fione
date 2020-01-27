@@ -56,17 +56,17 @@
 									<div class="form-group col-sm-12">
 										<label for="responseColumn"><la:message key="labels.easyml_prediction_type" /></label>
 										<div class="radio">
-											<label><input type="radio" name="predictionType" id="predictionTypeB" value="b" checked>
+											<label><la:radio property="predictionType" value="b"></la:radio>
 												<la:message key="labels.easyml_binaryclass_classification" />
 											</label>
 										</div>
 										<div class="radio">
-											<label><input type="radio" name="predictionType" id="predictionTypeM" value="m">
+											<label><la:radio property="predictionType" value="m"></la:radio>
 												<la:message key="labels.easyml_multiclass_classification" />
 											</label>
 										</div>
 										<div class="radio">
-											<label><input type="radio" name="predictionType" id="predictionTypeR" value="r">
+											<label><la:radio property="predictionType" value="r"></la:radio>
 												<la:message key="labels.easyml_numeric_prediction" />
 											</label>
 										</div>

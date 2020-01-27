@@ -15,7 +15,14 @@
  */
 package org.codelibs.fione;
 
-public class Constants {
+public class Constants extends org.codelibs.fess.Constants {
     private Constants() {
     }
+
+    public static final String REGRESSION_TYPE = "r";
+
+    public static final String MULTICLASS_TYPE = "m";
+
+    public static final String BINARYCLASS_TYPE = "b";
+
 }
