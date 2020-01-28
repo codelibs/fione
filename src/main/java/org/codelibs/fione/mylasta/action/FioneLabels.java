@@ -27,6 +27,9 @@ public class FioneLabels extends FessMessages {
     private static final long serialVersionUID = 1L;
 
     /** The key of the message: Fione */
+    public static final String LABELS_fione_brand_title = "{labels.fione_brand_title}";
+
+    /** The key of the message: Fione */
     public static final String LABELS_menu_fione = "{labels.menu_fione}";
 
     /** The key of the message: EasyML */
@@ -49,6 +52,9 @@ public class FioneLabels extends FessMessages {
 
     /** The key of the message: Project: {0} */
     public static final String LABELS_automl_project_title = "{labels.automl_project_title}";
+
+    /** The key of the message: Data Viewer: {0} */
+    public static final String LABELS_automl_dataview_title = "{labels.automl_dataview_title}";
 
     /** The key of the message: Actions */
     public static final String LABELS_automl_actions = "{labels.automl_actions}";

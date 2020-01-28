@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title><la:message key="labels.admin_brand_title" /> | <la:message key="labels.automl" /></title>
+<title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 <c:if test="${autoReload}"><meta http-equiv="refresh" content="10;URL=${contextPath}/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"/></c:if>
 </head>
@@ -200,7 +200,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th class="col-sm-3 text-center"><la:message key="labels.automl_action" /></th>
+														<th class="col-sm-4 text-center"><la:message key="labels.automl_action" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -214,6 +214,7 @@
 															<td class="text-center">
 															<c:if test="${frameId == data}"><i class="far fa-check-square" style="color:#3c8dbc;"></i></c:if>
 															<c:if test="${frameId != data}"><la:link href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(data)}&lid=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
+															<la:link href="/admin/automl/dataview/${f:u(project.id)}?fid=${f:u(data)}&lid=${f:u(leaderboardId)}"><i class="far fa-eye"></i></la:link>
 															<button type="submit" name="deleteframe" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="<la:message key="labels.automl_delete" />"></i></button>
 															</td>
 														</form></tr>
@@ -380,58 +381,6 @@
 											</table>
 										</div>
 									</div>
-								</div>
-							</div>
-						</c:if>
-						<c:if test="${frameData != null}">
-							<div class="box box-primary">
-								<div class="box-header with-border">
-									<h3 class="box-title"><la:message key="labels.automl_data_summaries" arg0="${f:h(fi:frameName(frameId))}" /></h3>
-									<div class="box-tools pull-right">
-										<span class="label label-info"><la:message key="labels.automl_data_and_column" arg0="${f:h(frameData.rows)}" arg1="${f:h(frameData.numColumns)}" /></span>
-										<c:if test="${frameData.columnOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset-10)}" class="btn btn-box-tool"><i class="fas fa-arrow-left"></i></a></c:if>
-										<c:if test="${frameData.columnOffset + 10 < frameData.numColumns}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset+10)}" class="btn btn-box-tool"><i class="fas fa-arrow-right"></i></a></c:if>
-										<c:if test="${frameData.rowOffset > 0}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset-10)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-up"></i></a></c:if>
-										<c:if test="${frameData.rowOffset + 10 < frameData.rows}"><a href="${contextPath}/admin/automl/details/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset+10)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-down"></i></a></c:if>
-										<button type="button" class="btn btn-box-tool" data-widget="collapse">
-											<i class="fa fa-minus"></i>
-										</button>
-									</div>
-								</div>
-								<div class="box-body">
-									<%-- List --%>
-									<c:if test="${frameData.rows == 0}">
-										<div class="row top10">
-											<div class="col-sm-12">
-												<em class="fa fa-info-circle text-light-blue"></em>
-												<la:message key="labels.list_could_not_find_crud_table" />
-											</div>
-										</div>
-									</c:if>
-									<c:if test="${frameData.rows gt 0}">
-										<div class="row">
-											<div class="col-sm-12">
-												<table class="table table-bordered table-striped small">
-													<thead>
-														<tr>
-															<c:forEach var="data" varStatus="s" items="${frameData.columnNames}">
-																<th>${f:h(data)}</th>
-															</c:forEach>
-														</tr>
-													</thead>
-													<tbody>
-														<c:forEach var="data" varStatus="s" begin="0" end="${frameData.rowSize}">
-															<tr>
-																<c:forEach var="data" varStatus="x" items="${frameData.row}">
-																	<td>${f:h(data)}</td>
-																</c:forEach>
-															</tr>
-														</c:forEach>
-													</tbody>
-												</table>
-											</div>
-										</div>
-									</c:if>
 								</div>
 							</div>
 						</c:if>

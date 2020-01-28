@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title><la:message key="labels.admin_brand_title" /> | <la:message key="labels.easyml" /></title>
+<title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.easyml" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 <meta http-equiv="refresh" content="5;URL=${contextPath}/admin/easyml/job/${f:u(project.id)}" />
 </head>
