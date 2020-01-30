@@ -12,7 +12,7 @@
 /src/main/webapp/WEB-INF/env/thumbnail/lib/
 /src/main/webapp/WEB-INF/thumbnails/
 /src/main/webapp/jar/
-/dbflute_fess/log/*.log
+/dbflute_fione/log/*.log
 /dbflute_h2/log/*.log
 /dbflute_mysql/log/*.log
 /dbflute_oracle/log/*.log

@@ -3,12 +3,12 @@
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
 	<modelVersion>4.0.0</modelVersion>
-	<groupId>org.codelibs.fess</groupId>
+	<groupId>org.codelibs.fione</groupId>
 	<artifactId>fione</artifactId>
 	<packaging>war</packaging>
 	<name>Fione</name>
 	<version>13.6.0-SNAPSHOT</version>
-	<url>https://fess.codelibs.org/</url>
+	<url>https://fione.codelibs.org/</url>
 	<inceptionYear>2009</inceptionYear>
 	<licenses>
 		<license>
@@ -19,7 +19,7 @@
 	</licenses>
 	<organization>
 		<name>CodeLibs</name>
-		<url>https://fess.codelibs.org/</url>
+		<url>https://www.codelibs.org/</url>
 	</organization>
 	<issueManagement>
 		<url>https://github.com/codelibs/fione/issues</url>
@@ -176,10 +176,10 @@
 				<artifactId>maven-jxr-plugin</artifactId>
 				<version>3.0.0</version>
 				<configuration>
-					<docTitle>&lt;a href="https://fess.codelibs.org/"
-						target="_blank"&gt;Enterprise Search Server: Fess
+					<docTitle>&lt;a href="https://fione.codelibs.org/"
+						target="_blank"&gt;Machine Learning Server: Fione
 						Reference&lt;/a&gt;</docTitle>
-					<windowTitle>Open Source Enterprise Search: Fess Source Code
+					<windowTitle>Open Source Machine Learning Server: Fione Source Code
 						Reference</windowTitle>
 				</configuration>
 			</plugin>
@@ -229,9 +229,9 @@
 				<version>1.1.0</version>
 				<configuration>
 					<dbfluteVersion>${dbflute.version}</dbfluteVersion>
-					<packageBase>org.codelibs.fess.dbflute</packageBase>
+					<packageBase>org.codelibs.fione.dbflute</packageBase>
 					<clientProject>fess</clientProject>
-					<dbfluteClientDir>${basedir}/dbflute_fess</dbfluteClientDir>
+					<dbfluteClientDir>${basedir}/dbflute_fione</dbfluteClientDir>
 				</configuration>
 			</plugin>
 			<plugin>
