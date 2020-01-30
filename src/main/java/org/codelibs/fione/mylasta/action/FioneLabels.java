@@ -323,6 +323,27 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Delete */
     public static final String LABELS_automl_delete = "{labels.automl_delete}";
 
+    /** The key of the message: Predict */
+    public static final String LABELS_automl_model_predict = "{labels.automl_model_predict}";
+
+    /** The key of the message: Project */
+    public static final String LABELS_automl_model_project = "{labels.automl_model_project}";
+
+    /** The key of the message: Export */
+    public static final String LABELS_automl_model_export = "{labels.automl_model_export}";
+
+    /** The key of the message: Gen Model */
+    public static final String LABELS_automl_model_genmodel = "{labels.automl_model_genmodel}";
+
+    /** The key of the message: MOJO */
+    public static final String LABELS_automl_model_mojo = "{labels.automl_model_mojo}";
+
+    /** The key of the message: Graph */
+    public static final String LABELS_automl_model_graph = "{labels.automl_model_graph}";
+
+    /** The key of the message: Details */
+    public static final String LABELS_automl_model_details = "{labels.automl_model_details}";
+
     /** The key of the message: Project Dashboard */
     public static final String LABELS_easyml_project_dashboard = "{labels.easyml_project_dashboard}";
 

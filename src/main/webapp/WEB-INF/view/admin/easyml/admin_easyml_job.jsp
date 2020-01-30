@@ -94,7 +94,7 @@
 																		<i class="fas fa-times"></i>
 																	</c:when>
 																	<c:when test="${data.status == 'RUNNING' }">
-																		<div class="progress">
+																		<div class="progress" style="background-color:#999;">
 																			<div class="progress-bar" role="progressbar" aria-valuenow="${f:h(data.progressInt)}"
 																				aria-valuemin="0" aria-valuemax="100" style="width:${f:h(data.progressInt)}%;"
 																			>

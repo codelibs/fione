@@ -588,7 +588,9 @@ public class AdminAutomlAction extends FioneAdminAction {
         final String token = doubleSubmitManager.saveToken(myTokenGroupType());
 
         final ModelSchemaBaseV3 model = projectHelper.getModel(projectId, modelId);
-
+        if (model == null) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
+        }
         return asHtml(path_AdminAutoml_AdminAutomlModelJsp).renderWith(
                 data -> {
                     RenderDataUtil.register(data, "token", token);

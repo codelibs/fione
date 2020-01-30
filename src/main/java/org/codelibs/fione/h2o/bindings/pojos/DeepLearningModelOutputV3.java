@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import org.codelibs.fione.entity.ChartData;
+
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
@@ -141,6 +143,11 @@ public class DeepLearningModelOutputV3 extends ModelOutputSchemaV3 {
     @Override
     public String toString() {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+    }
+
+    @Override
+    public ChartData getVariableImportancesChart() {
+        return getVariableImportancesChart(variableImportances);
     }
 
 }

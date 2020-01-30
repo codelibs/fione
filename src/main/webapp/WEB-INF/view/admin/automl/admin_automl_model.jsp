@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
+<link href="${fe:url('/css/admin/fione/c3.min.css')}" rel="stylesheet" type="text/css" />
+<script src="${fe:url('/js/admin/fione/d3.min.js')}" type="text/javascript" charset="utf-8"></script>
+<script src="${fe:url('/js/admin/fione/c3.min.js')}" type="text/javascript"></script>
 </head>
 <body class="skin-blue sidebar-mini">
 	<div class="wrapper">
@@ -41,18 +44,90 @@
 						<input type="hidden" name="frameId" value="${f:h(frameId)}">
 						<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 						<div class="btn-group" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
-							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?mid=${f:u(model.modelId.name)}" class="btn btn-default"><i class="fas fa-file-signature"></i>Predict</a>
-							<button type="submit" name="downloadmojo" value="load" class="btn btn-default"><i class="fas fa-download"></i>MOJO</button>
-							<button type="submit" name="downloadgenmodel" value="load" class="btn btn-default"><i class="fas fa-download"></i>Gen Model</button>
-							<button type="submit" name="exportmodel" value="load" class="btn btn-default"><i class="fas fa-file-export"></i>Export</button>
-							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i>Project</la:link>
+							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?mid=${f:u(model.modelId.name)}" class="btn btn-default"><i class="fas fa-file-signature"></i><la:message key="labels.automl_model_predict" /></a>
+							<button type="submit" name="downloadmojo" value="load" class="btn btn-default"><i class="fas fa-download"></i><la:message key="labels.automl_model_mojo" /></button>
+							<button type="submit" name="downloadgenmodel" value="load" class="btn btn-default"><i class="fas fa-download"></i><la:message key="labels.automl_model_genmodel" /></button>
+							<button type="submit" name="exportmodel" value="load" class="btn btn-default"><i class="fas fa-file-export"></i><la:message key="labels.automl_model_export" /></button>
+							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
 						</div>
 						<div class="btn-group pull-right" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
-							<button type="submit" name="deletemodel" value="load" class="btn btn-default"><i class="fas fa-trash-alt"></i>Delete</button>
+							<button type="submit" name="deletemodel" value="load" class="btn btn-default"><i class="fas fa-trash-alt"></i><la:message key="labels.automl_delete" /></button>
 						</div>
 						</form>
 					</div>
 					<div class="col-md-6">
+						<c:if test="${model.output.scoringHistory != null}">
+						<div class="box box-primary">
+							<div class="box-header with-border">
+								<h3 class="box-title">${f:h(model.output.scoringHistory.name)}</h3>
+								<div class="btn-tools pull-right">
+									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+										<i class="fa fa-minus"></i>
+									</button>
+								</div>
+							</div>
+							<div class="box-body">
+								<c:if test="${model.output.scoringHistory.rowcount == 0}">
+									<div class="row top10">
+										<div class="col-sm-12">
+											<em class="fa fa-info-circle text-light-blue"></em>
+											<la:message key="labels.list_could_not_find_crud_table" />
+										</div>
+									</div>
+								</c:if>
+								<c:if test="${model.output.scoringHistory.rowcount gt 0}">
+									<div class="row">
+										<div class="col-sm-12">
+										<ul class="nav nav-tabs" role="tablist" id="scoringHistoryTabs">
+											<li role="presentation" class="active"><a href="#scoringHistoryGraph" aria-controls="scoringHistoryGraph" role="tab" data-toggle="tab"><la:message key="labels.automl_model_graph" /></a></li>
+											<li role="presentation"><a href="#scoringHistoryDetails" aria-controls="scoringHistoryDetails" role="tab" data-toggle="tab"><la:message key="labels.automl_model_details" /></a></li>
+										</ul>
+										<div class="tab-content">
+										<div role="tabpanel" class="tab-pane active" id="scoringHistoryGraph">
+										<div id="scoringHistoryChart"></div>
+<c:set var="chart" value="${model.output.scoringHistoryChart}"/><script><!--
+var chart = c3.generate({
+  bindto: '#scoringHistoryChart',
+  data: {
+    x: '${f:h(chart.axisName)}',
+    columns: ${chart.columnData},
+    },
+  axis: ${chart.axisData}
+});
+// -->
+</script>
+										</div>
+										<div role="tabpanel" class="tab-pane" id="scoringHistoryDetails">
+											<table class="table table-bordered table-striped small">
+												<thead>
+													<tr>
+													<c:forEach var="i" varStatus="s" begin="0" end="${fn:length(model.output.scoringHistory.columns)-1}">
+														<c:if test="${not empty model.output.scoringHistory.columns[i].name}">
+														<th>${f:h(model.output.scoringHistory.columns[i].name)}</th>
+														</c:if>
+													</c:forEach>
+													</tr>
+												</thead>
+												<tbody>
+													<c:forEach var="i" begin="0" end="${model.output.scoringHistory.rowcount-1}">
+														<tr>
+														<c:forEach var="j" begin="0" end="${fn:length(model.output.scoringHistory.columns)-1}">
+															<c:if test="${not empty model.output.scoringHistory.columns[j].name}">
+															<td>${f:h(model.output.scoringHistory.data[j][i])}</td>
+															</c:if>
+														</c:forEach>
+														</tr>
+													</c:forEach>
+												</tbody>
+											</table>
+										</div>
+										</div>
+										</div>
+									</div>
+								</c:if>
+							</div>
+						</div>
+						</c:if>
 						<c:if test="${model.parameters != null}">
 						<div class="box box-primary">
 							<div class="box-header with-border">
@@ -235,56 +310,6 @@
 							</div>
 						</div>
 						</c:if>
-						<c:if test="${model.output.scoringHistory != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title">${f:h(model.output.scoringHistory.name)}</h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
-										<i class="fa fa-minus"></i>
-									</button>
-								</div>
-							</div>
-							<div class="box-body">
-								<c:if test="${model.output.scoringHistory.rowcount == 0}">
-									<div class="row top10">
-										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
-											<la:message key="labels.list_could_not_find_crud_table" />
-										</div>
-									</div>
-								</c:if>
-								<c:if test="${model.output.scoringHistory.rowcount gt 0}">
-									<div class="row">
-										<div class="col-sm-12">
-											<table class="table table-bordered table-striped small">
-												<thead>
-													<tr>
-													<c:forEach var="i" varStatus="s" begin="0" end="${fn:length(model.output.scoringHistory.columns)-1}">
-														<c:if test="${not empty model.output.scoringHistory.columns[i].name}">
-														<th>${f:h(model.output.scoringHistory.columns[i].name)}</th>
-														</c:if>
-													</c:forEach>
-													</tr>
-												</thead>
-												<tbody>
-													<c:forEach var="i" begin="0" end="${model.output.scoringHistory.rowcount-1}">
-														<tr>
-														<c:forEach var="j" begin="0" end="${fn:length(model.output.scoringHistory.columns)-1}">
-															<c:if test="${not empty model.output.scoringHistory.columns[j].name}">
-															<td>${f:h(model.output.scoringHistory.data[j][i])}</td>
-															</c:if>
-														</c:forEach>
-														</tr>
-													</c:forEach>
-												</tbody>
-											</table>
-										</div>
-									</div>
-								</c:if>
-							</div>
-						</div>
-						</c:if>
 					</div>
 					<div class="col-md-6">
 						<c:catch var="vie"><c:if test="${model.output.variableImportances==null}"></c:if></c:catch>
@@ -310,6 +335,29 @@
 								<c:if test="${model.output.variableImportances.rowcount gt 0}">
 									<div class="row">
 										<div class="col-sm-12">
+										<ul class="nav nav-tabs" role="tablist" id="variableImportancesTabs">
+											<li role="presentation" class="active"><a href="#variableImportancesGraph" aria-controls="variableImportancesGraph" role="tab" data-toggle="tab"><la:message key="labels.automl_model_graph" /></a></li>
+											<li role="presentation"><a href="#variableImportancesDetails" aria-controls="variableImportancesDetails" role="tab" data-toggle="tab"><la:message key="labels.automl_model_details" /></a></li>
+										</ul>
+										<div class="tab-content">
+										<div role="tabpanel" class="tab-pane active" id="variableImportancesGraph">
+										<div id="variableImportancesChart"></div>
+<c:set var="chart" value="${model.output.variableImportancesChart}"/><script><!--
+<!--
+var chart = c3.generate({
+  bindto: '#variableImportancesChart',
+  data: {
+    x: '${f:h(chart.axisName)}',
+    columns: ${chart.columnData},
+    types: ${chart.columnTypeData}
+  },
+  axis: ${chart.axisData},
+  size: ${chart.sizeData}
+});
+// -->
+</script>
+										</div>
+										<div role="tabpanel" class="tab-pane" id="variableImportancesDetails">
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
@@ -332,6 +380,8 @@
 													</c:forEach>
 												</tbody>
 											</table>
+										</div>
+										</div>
 										</div>
 									</div>
 								</c:if>

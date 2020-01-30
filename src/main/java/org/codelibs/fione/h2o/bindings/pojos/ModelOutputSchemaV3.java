@@ -16,7 +16,10 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
+
+import org.codelibs.fione.entity.ChartData;
 
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
@@ -170,4 +173,58 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
         return fieldNames;
     }
 
+    public ChartData getScoringHistoryChart() {
+        final Map<String, Integer> columnIndexMap = new HashMap<>();
+        for (int i = 0; i < scoringHistory.columns.length; i++) {
+            columnIndexMap.put(scoringHistory.columns[i].name, i);
+        }
+        final String[] xNames = new String[] { "number_of_trees", "epochs", "iteration" };
+        final String[] yNames = new String[] { "training_deviance", "training_classification_error", "deviance_train" };
+        for (final String xName : xNames) {
+            for (final String yName : yNames) {
+                final ChartData chart = getScoringHistoryChart(columnIndexMap, xName, yName);
+                if (chart != null) {
+                    return chart;
+                }
+            }
+        }
+        return null;
+    }
+
+    private ChartData getScoringHistoryChart(final Map<String, Integer> columnIndexMap, final String xName, final String yName) {
+        if (columnIndexMap.containsKey(xName) && columnIndexMap.containsKey(yName)) {
+            final ChartData chartData = new ChartData();
+            chartData.addColumn(xName, scoringHistory.data[columnIndexMap.get(xName)]);
+            chartData.addColumn(yName, scoringHistory.data[columnIndexMap.get(yName)]);
+            chartData.setAxisName(xName);
+            chartData.addAxisLabel("x", xName);
+            chartData.addAxisLabel("y", yName);
+            return chartData;
+        }
+        return null;
+    }
+
+    public ChartData getVariableImportancesChart() {
+        return null;
+    }
+
+    protected ChartData getVariableImportancesChart(final TwoDimTableV3 dimTable) {
+        final Map<String, Integer> columnIndexMap = new HashMap<>();
+        for (int i = 0; i < dimTable.columns.length; i++) {
+            columnIndexMap.put(dimTable.columns[i].name, i);
+        }
+        if (columnIndexMap.containsKey("variable") && columnIndexMap.containsKey("scaled_importance")) {
+            final ChartData chartData = new ChartData();
+            chartData.addColumn("variable", dimTable.data[columnIndexMap.get("variable")]);
+            chartData.addColumn("scaled_importance", dimTable.data[columnIndexMap.get("scaled_importance")], "bar");
+            chartData.setAxisName("variable");
+            chartData.addAxisLabel("x", "variable");
+            chartData.addAxisType("x", "category");
+            chartData.addAxisLabel("y", "scaled_importance");
+            chartData.setAxisRotated(true);
+            chartData.setHeight(dimTable.rowcount * 30);
+            return chartData;
+        }
+        return null;
+    }
 }
