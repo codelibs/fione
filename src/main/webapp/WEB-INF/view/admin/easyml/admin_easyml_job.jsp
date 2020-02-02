@@ -74,6 +74,7 @@
 																		<la:link
 																			href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
 																		>${f:h(data.dest.name)}</la:link>
+																		<c:if test="${data.status == 'RUNNING'}"><i class="fas fa-circle-notch fa-spin"></i>${f:h(data.progressMsg)}</c:if>
 																	</c:when>
 																	<c:otherwise>${f:h(data.dest.name)}</c:otherwise>
 																</c:choose></td>
