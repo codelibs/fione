@@ -248,6 +248,7 @@
 					<tasks>
 						<ant antfile="${basedir}/dbflute.xml"
 							target="download.dbflute" />
+						<ant antfile="deps.xml" target="install.jars" />
 					</tasks>
 				</configuration>
 				<goals>

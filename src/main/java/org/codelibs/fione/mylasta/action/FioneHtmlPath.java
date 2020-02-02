@@ -50,6 +50,9 @@ public interface FioneHtmlPath {
     /** The path of the HTML: /admin/automl/admin_automl_runml.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlRunmlJsp = new HtmlNext("/admin/automl/admin_automl_runml.jsp");
 
+    /** The path of the HTML: /admin/automl/admin_automl_serving.jsp */
+    HtmlNext path_AdminAutoml_AdminAutomlServingJsp = new HtmlNext("/admin/automl/admin_automl_serving.jsp");
+
     /** The path of the HTML: /admin/easyml/admin_easyml_dataset.jsp */
     HtmlNext path_AdminEasyml_AdminEasymlDatasetJsp = new HtmlNext("/admin/easyml/admin_easyml_dataset.jsp");
 

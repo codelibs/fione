@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="deps" basedir=".">
+	<property name="target.dir" value="${basedir}/target/deps" />
+	<property name="fione.dir" value="${basedir}/src/main/webapp/WEB-INF/env/fione" />
+
+	<!-- Maven Repository -->
+	<property name="maven.snapshot.repo.url" value="https://oss.sonatype.org/content/repositories/snapshots" />
+	<property name="maven.release.repo.url" value="https://repo1.maven.org/maven2" />
+
+	<target name="install.jars">
+		<mkdir dir="${target.dir}" />
+		<delete dir="${fione.dir}/lib" />
+		<mkdir dir="${fione.dir}/lib" />
+		<!-- fione-serving -->
+		<antcall target="install.env.jar">
+			<param name="repo.url" value="${maven.snapshot.repo.url}" />
+			<param name="jar.groupId" value="org/codelibs/fione" />
+			<param name="jar.artifactId" value="fione-serving" />
+			<param name="jar.version" value="0.1.0-SNAPSHOT" />
+			<param name="file.version" value="0.1.0-20200202.124610-3" />
+		</antcall>
+	</target>
+
+	<target name="install.env.jar">
+		<get dest="${target.dir}">
+			<url url="${repo.url}/${jar.groupId}/${jar.artifactId}/${jar.version}/${jar.artifactId}-${file.version}.jar" />
+		</get>
+		<copy file="${target.dir}/${jar.artifactId}-${file.version}.jar"
+			todir="${fione.dir}/lib"/>
+	</target>
+</project>

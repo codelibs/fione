@@ -22,6 +22,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map.Entry;
 
 import javax.servlet.http.HttpServletRequest;
@@ -670,6 +671,57 @@ public class AdminAutomlAction extends FioneAdminAction {
         return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
     }
 
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse serving(final String projectId) {
+        final String token = doubleSubmitManager.saveToken(myTokenGroupType());
+
+        final String modelId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(MODEL_ID)).orElse(null);
+        final ModelSchemaBaseV3 model = projectHelper.getModel(projectId, modelId);
+        if (model == null) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
+        }
+        final String frameId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID)).orElse(null);
+        return asHtml(path_AdminAutoml_AdminAutomlServingJsp).renderWith(
+                data -> {
+                    RenderDataUtil.register(data, "token", token);
+                    RenderDataUtil.register(data, "projectId", projectId);
+                    RenderDataUtil.register(data, "frameId", frameId);
+                    RenderDataUtil.register(data, "leaderboardId",
+                            LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null));
+                    RenderDataUtil.register(data, "model", model);
+                    RenderDataUtil.register(data, "dockerZipName", getServingZipName(projectId, modelId));
+                    RenderDataUtil.register(data, "dockerTagName", getProjectNameId(projectId));
+                });
+    }
+
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public ActionResponse downloadserving(final ModelForm form) {
+        validate(form, messages -> {}, () -> redirectServingHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectServingHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+
+        return asStream(getServingZipName(form.projectId, form.modelId)).contentTypeOctetStream().stream(
+                out -> projectHelper.writeServing(form.projectId, form.modelId, out));
+    }
+
+    private String getServingZipName(final String projectId, final String modelId) {
+        final StringBuilder buf = new StringBuilder();
+        try {
+            buf.append(getProjectNameId(projectId));
+            buf.append('_');
+            buf.append(modelId.split("_")[0].toLowerCase(Locale.ROOT));
+        } catch (final Exception e) {
+            buf.append("fione-serving");
+        }
+        buf.append(".zip");
+        return buf.toString();
+    }
+
+    private String getProjectNameId(final String projectId) {
+        return StringCodecUtil.decode(projectId).replaceAll("[^\\w]", "_").toLowerCase(Locale.ROOT);
+    }
+
     // ===================================================================================
     //                                                                              JSP
     //                                                                           =========
@@ -772,6 +824,28 @@ public class AdminAutomlAction extends FioneAdminAction {
         if (StringUtil.isNotBlank(leaderboardId)) {
             params.add(LEADERBOARD_ID);
             params.add(leaderboardId);
+        }
+        if (!params.isEmpty()) {
+            final Object[] args = params.toArray(n -> new String[n]);
+            moreUrl.params(args);
+        }
+        return redirectWith(getClass(), moreUrl);
+    }
+
+    private HtmlResponse redirectServingHtml(final String projectId, final String modelId, final String frameId, final String leaderboardId) {
+        final UrlChain moreUrl = moreUrl("serving", projectId);
+        final List<String> params = new ArrayList<>();
+        if (StringUtil.isNotBlank(frameId)) {
+            params.add(FRAME_ID);
+            params.add(frameId);
+        }
+        if (StringUtil.isNotBlank(leaderboardId)) {
+            params.add(LEADERBOARD_ID);
+            params.add(leaderboardId);
+        }
+        if (StringUtil.isNotBlank(modelId)) {
+            params.add(MODEL_ID);
+            params.add(modelId);
         }
         if (!params.isEmpty()) {
             final Object[] args = params.toArray(n -> new String[n]);

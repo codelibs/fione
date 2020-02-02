@@ -17,6 +17,7 @@ package org.codelibs.fione.helper;
 
 import static org.codelibs.fione.h2o.bindings.H2oApi.keyToString;
 
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,6 +25,8 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.io.Reader;
 import java.io.StringWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -33,20 +36,25 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import javax.annotation.Resource;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.codelibs.core.io.CopyUtil;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.core.net.UuidUtil;
 import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fess.exception.StorageException;
 import org.codelibs.fess.mylasta.direction.FessConfig;
 import org.codelibs.fess.util.ComponentUtil;
+import org.codelibs.fess.util.ResourceUtil;
 import org.codelibs.fione.entity.DataSet;
 import org.codelibs.fione.entity.Project;
 import org.codelibs.fione.exception.CacheNotFoundException;
+import org.codelibs.fione.exception.FioneSystemException;
 import org.codelibs.fione.exception.H2oAccessException;
 import org.codelibs.fione.h2o.bindings.H2oApi;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
@@ -907,6 +915,37 @@ public class ProjectHelper {
         h2oHelper.writeGenModel(modelId, in -> {
             try {
                 out.write(in);
+            } catch (final IOException e) {
+                throw new IORuntimeException(e);
+            }
+        }, e -> logger.warn("Failed to write {} in {}", modelId, projectId, e));
+    }
+
+    public void writeServing(final String projectId, final String modelId, final WrittenStreamOut out) {
+        h2oHelper.writeMojo(modelId, in -> {
+            try (ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(out.stream()))) {
+                // Dockerfile
+                zos.putNextEntry(new ZipEntry("serving/Dockerfile"));
+                final Path dockerfilePath = ResourceUtil.getEnvPath("fione", "resources", "Dockerfile.serving");
+                try (InputStream fis = Files.newInputStream(dockerfilePath)) {
+                    CopyUtil.copy(fis, zos);
+                }
+                // fione-serving.jar
+                zos.putNextEntry(new ZipEntry("serving/fione-serving.jar"));
+                final Path libPath = ResourceUtil.getEnvPath("fione", "lib");
+                final Path[] jarPaths = Files.list(libPath).filter(f -> {
+                    final String fileName = f.getFileName().toString();
+                    return fileName.startsWith("fione-serving-") && fileName.endsWith("jar");
+                }).toArray(n -> new Path[n]);
+                if (jarPaths.length == 0) {
+                    throw new FioneSystemException("fione-serving.jar is not found.");
+                }
+                try (InputStream fis = Files.newInputStream(jarPaths[0])) {
+                    CopyUtil.copy(fis, zos);
+                }
+                // mojo
+                zos.putNextEntry(new ZipEntry("serving/model.zip"));
+                CopyUtil.copy(in, zos);
             } catch (final IOException e) {
                 throw new IORuntimeException(e);
             }

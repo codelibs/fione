@@ -1,0 +1,11 @@
+FROM adoptopenjdk:11-jre-hotspot
+
+RUN mkdir /opt/fione && \
+    echo "#!/bin/bash\njava -jar /opt/fione/fione-serving.jar" > /usr/bin/serve && \
+    chmod +x /usr/bin/serve
+COPY fione-serving.jar /opt/fione
+COPY model.zip /opt/fione
+
+ENV MODEL_PATH /opt/fione/model.zip
+
+CMD ["java", "-jar", "/opt/fione/fione-serving.jar"]

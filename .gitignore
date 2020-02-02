@@ -10,6 +10,7 @@
 /src/main/webapp/WEB-INF/env/crawler/lib/
 /src/main/webapp/WEB-INF/env/suggest/lib/
 /src/main/webapp/WEB-INF/env/thumbnail/lib/
+/src/main/webapp/WEB-INF/env/fione/lib/
 /src/main/webapp/WEB-INF/thumbnails/
 /src/main/webapp/jar/
 /dbflute_fione/log/*.log
