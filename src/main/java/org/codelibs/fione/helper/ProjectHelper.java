@@ -811,7 +811,7 @@ public class ProjectHelper {
         }
     }
 
-    protected String convertColumnType(final String columnType) {
+    public String convertColumnType(final String columnType) {
         switch (columnType) {
         case "String":
         case "string":

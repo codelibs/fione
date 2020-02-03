@@ -61,7 +61,7 @@
 								</div>
 							</div>
 							<div class="box-body">
-							<h3>Download</h3>
+							<h3>Download Zip File</h3>
 							<p>To download Dockerfile, click the above "<i class="fab fa-docker"></i>Download" button.</p>
 							<h3>Build Docker Image</h3>
 							<p>${f:h(dockerZipName)} contains Dockerfile to build Serving API.</p>
@@ -75,11 +75,11 @@ $ docker build -t ${f:h(dockerTagName)}/serving:1.0 .</code></pre>
 							<p>Query the model using the predict API.</p>
 <pre><code>$ curl -XPOST -H "Content-Type: application/json" localhost:8081/invocations -d '{
   "instances": [
-    {...instance object...}
+    <c:if test="${instance!=null}">${f:h(instance)}</c:if><c:if test="${instance==null}">{...instance object...}</c:if>
   ]
 }'</code></pre>
-							<p>To check available columns in "...instance object...", you can see the following result.</p>
-<pre><code>$ curl -s -XGET -H "Content-Type: application/json" localhost:8081/model | jq '.instance'</code></pre>
+							<p>To check model information, you can see the following result.</p>
+<pre><code>$ curl -s -XGET -H "Content-Type: application/json" localhost:8081/model</code></pre>
 							</div>
 						</div>
 					</div>

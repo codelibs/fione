@@ -21,8 +21,10 @@ import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Map.Entry;
 
 import javax.servlet.http.HttpServletRequest;
@@ -52,11 +54,14 @@ import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
+import org.codelibs.fione.h2o.bindings.pojos.ModelOutputSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.taglib.FioneFunctions;
 import org.codelibs.fione.util.StringCodecUtil;
+import org.json.simple.JSONObject;
 import org.lastaflute.web.Execute;
 import org.lastaflute.web.UrlChain;
 import org.lastaflute.web.response.ActionResponse;
@@ -692,6 +697,22 @@ public class AdminAutomlAction extends FioneAdminAction {
                     RenderDataUtil.register(data, "model", model);
                     RenderDataUtil.register(data, "dockerZipName", getServingZipName(projectId, modelId));
                     RenderDataUtil.register(data, "dockerTagName", getProjectNameId(projectId));
+                    if (model instanceof ModelSchemaV3) {
+                        ModelOutputSchemaV3 outputSchema = ((ModelSchemaV3<?, ?>) model).output;
+                        Map<String, Object> instanceMap = new HashMap<>();
+                        for (int i = 0; i < outputSchema.names.length; i++) {
+                            String name = outputSchema.names[i];
+                            if (!model.responseColumnName.equals(name)) {
+                                String convertColumnType = projectHelper.convertColumnType(outputSchema.columnTypes[i]);
+                                if ("numeric".equals(convertColumnType)) {
+                                    instanceMap.put(name, 0.0);
+                                } else {
+                                    instanceMap.put(name, "?");
+                                }
+                            }
+                        }
+                        RenderDataUtil.register(data, "instance", new JSONObject(instanceMap).toString());
+                    }
                 });
     }
 

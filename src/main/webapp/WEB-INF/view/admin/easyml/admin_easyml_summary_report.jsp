@@ -55,7 +55,38 @@
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
 			<div><a href="${contextPath}/admin/automl/model/${f:u(projectId)}/${f:u(leaderboard.models[0].name)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(leaderboard.models[0].name)}</a> is a best model in generated ones.</div>
-			<div>Please upload <a href="${contextPath}/admin/easyml/prediction/${f:u(projectId)}?did=${f:u(dataSetId)}&lid=${f:u(leaderboardId)}">DATA File</a> if you would like to append the prediction result.</div>
+		</div>
+	</div>
+	<div class="direct-chat-msg right">
+		<div class="direct-chat-info clearfix">
+			<span class="direct-chat-name pull-right">You</span>
+		</div>
+		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
+		<div class="direct-chat-text" style="background: #fff;">How do I get predicted results from data I'd like to predict?</div>
+	</div>
+	<div class="direct-chat-msg">
+		<div class="direct-chat-info clearfix">
+			<span class="direct-chat-name pull-left">Fione</span>
+		</div>
+		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
+		<div class="direct-chat-text">
+			<div>Please upload data file at <a href="${contextPath}/admin/easyml/prediction/${f:u(projectId)}?did=${f:u(dataSetId)}&lid=${f:u(leaderboardId)}">Prediction page</a>.</div>
+		</div>
+	</div>
+	<div class="direct-chat-msg right">
+		<div class="direct-chat-info clearfix">
+			<span class="direct-chat-name pull-right">You</span>
+		</div>
+		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
+		<div class="direct-chat-text" style="background: #fff;">How do I integrate the best prediction model into my system?</div>
+	</div>
+	<div class="direct-chat-msg">
+		<div class="direct-chat-info clearfix">
+			<span class="direct-chat-name pull-left">Fione</span>
+		</div>
+		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
+		<div class="direct-chat-text">
+			<div>I provide Fione Serving API as Docker container. See <a href="${contextPath}/admin/automl/serving/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&mid=${f:u(leaderboard.models[0].name)}">Serving page</a>.</div>
 		</div>
 	</div>
 	</c:if>
@@ -65,7 +96,7 @@
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
-			<div>If you have any questions/comments, please file it to <a href="https://github.com/codelibs/fione/issues" target="_blank">github.com/codelibs/fione</a>.</div>
+			<div>If you have any comments, please file it to <a href="https://github.com/codelibs/fione/issues" target="_blank">github.com/codelibs/fione</a>.</div>
 		</div>
 	</div>
 
