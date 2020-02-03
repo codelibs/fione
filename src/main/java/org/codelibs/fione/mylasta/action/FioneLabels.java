@@ -344,6 +344,39 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Details */
     public static final String LABELS_automl_model_details = "{labels.automl_model_details}";
 
+    /** The key of the message: Fione Serving with Docker */
+    public static final String LABELS_automl_serving_with_docker = "{labels.automl_serving_with_docker}";
+
+    /** The key of the message: Download Zip File */
+    public static final String LABELS_automl_download_zip_file = "{labels.automl_download_zip_file}";
+
+    /** The key of the message: To download Dockerfile, click the above "&lt;i class="fab fa-docker"&gt;&lt;/i&gt;Download" button. */
+    public static final String LABELS_automl_download_dockerfile = "{labels.automl_download_dockerfile}";
+
+    /** The key of the message: Build Docker Image */
+    public static final String LABELS_automl_build_dockerimage = "{labels.automl_build_dockerimage}";
+
+    /** The key of the message: {0} contains Dockerfile to build Serving API. */
+    public static final String LABELS_automl_contain_dockerfile = "{labels.automl_contain_dockerfile}";
+
+    /** The key of the message: Run Serving API Container */
+    public static final String LABELS_automl_run_serving_api = "{labels.automl_run_serving_api}";
+
+    /** The key of the message: Start Fione Serving container as below. */
+    public static final String LABELS_automl_start_serving_container = "{labels.automl_start_serving_container}";
+
+    /** The key of the message: Access Predict API */
+    public static final String LABELS_automl_access_predict_api = "{labels.automl_access_predict_api}";
+
+    /** The key of the message: Query the model using the predict API. */
+    public static final String LABELS_automl_query_predict_api = "{labels.automl_query_predict_api}";
+
+    /** The key of the message: To check model information, you can see the following result. */
+    public static final String LABELS_automl_show_model_info = "{labels.automl_show_model_info}";
+
+    /** The key of the message: Serving */
+    public static final String LABELS_automl_serving = "{labels.automl_serving}";
+
     /** The key of the message: Project Dashboard */
     public static final String LABELS_easyml_project_dashboard = "{labels.easyml_project_dashboard}";
 
@@ -469,6 +502,51 @@ public class FioneLabels extends FessMessages {
 
     /** The key of the message: Numeric Prediction */
     public static final String LABELS_easyml_numeric_prediction = "{labels.easyml_numeric_prediction}";
+
+    /** The key of the message: You */
+    public static final String LABELS_easyml_you = "{labels.easyml_you}";
+
+    /** The key of the message: Fione */
+    public static final String LABELS_easyml_fione = "{labels.easyml_fione}";
+
+    /** The key of the message: What do you think of this result? */
+    public static final String LABELS_easyml_what_do_you_think = "{labels.easyml_what_do_you_think}";
+
+    /** The key of the message: Prediction Accuracy is unsatisfactory... You cannot use generated models.&lt;br&gt;&lt;strong&gt;{0}&lt;/strong&gt; may not contain important features to predict &lt;strong&gt;{1}&lt;/strong&gt;.&lt;br&gt;To improve the accuracy, you need to check the current data and create a new dataset containing meaningful columns.&lt;br&gt;I suggest you try it with other dataset again.&lt;br&gt;Please click &lt;a href="{2}"&gt;Project View&lt;/a&gt; to check more details. */
+    public static final String LABELS_easyml_what_do_you_think_answer1 = "{labels.easyml_what_do_you_think_answer1}";
+
+    /** The key of the message: Prediction Accuracy is low. You need to improve &lt;strong&gt;{0}&lt;/strong&gt;.&lt;br&gt;Adding input columns or data, the accuracy may increase.&lt;br&gt;Please click &lt;a href="{1}"&gt;Project View&lt;/a&gt; to check more details. */
+    public static final String LABELS_easyml_what_do_you_think_answer2 = "{labels.easyml_what_do_you_think_answer2}";
+
+    /** The key of the message: Prediction Accuracy is good. */
+    public static final String LABELS_easyml_what_do_you_think_answer3 = "{labels.easyml_what_do_you_think_answer3}";
+
+    /** The key of the message: Prediction Accuracy is very good. */
+    public static final String LABELS_easyml_what_do_you_think_answer4 = "{labels.easyml_what_do_you_think_answer4}";
+
+    /** The key of the message: Prediction Accuracy is excellent! */
+    public static final String LABELS_easyml_what_do_you_think_answer5 = "{labels.easyml_what_do_you_think_answer5}";
+
+    /** The key of the message: Which model should I use? */
+    public static final String LABELS_easyml_which_model_should_I_use = "{labels.easyml_which_model_should_I_use}";
+
+    /** The key of the message: &lt;a href="{0}"&gt;{1}&lt;/a&gt; is a best model in generated ones. */
+    public static final String LABELS_easyml_which_model_should_I_use_answer = "{labels.easyml_which_model_should_I_use_answer}";
+
+    /** The key of the message: How do I get predicted results from data I'd like to predict? */
+    public static final String LABELS_easyml_how_do_i_get_result = "{labels.easyml_how_do_i_get_result}";
+
+    /** The key of the message: Please upload data file at &lt;a href="{0}"&gt;Prediction page&lt;/a&gt;. */
+    public static final String LABELS_easyml_how_do_i_get_result_answer = "{labels.easyml_how_do_i_get_result_answer}";
+
+    /** The key of the message: How do I integrate the best prediction model into my system? */
+    public static final String LABELS_easyml_how_do_i_integrate = "{labels.easyml_how_do_i_integrate}";
+
+    /** The key of the message: I provide Fione Serving API as Docker container. See &lt;a href="{0}"&gt;Serving page&lt;/a&gt;. */
+    public static final String LABELS_easyml_how_do_i_integrate_answer = "{labels.easyml_how_do_i_integrate_answer}";
+
+    /** The key of the message: If you have any comments, please file it to &lt;a href="https://github.com/codelibs/fione/issues" target="_blank"&gt;github.com/codelibs/fione&lt;/a&gt;. */
+    public static final String LABELS_easyml_any_comments = "{labels.easyml_any_comments}";
 
     /**
      * Assert the property is not null.

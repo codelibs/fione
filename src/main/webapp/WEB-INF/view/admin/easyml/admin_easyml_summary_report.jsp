@@ -4,38 +4,32 @@
 <div class="direct-chat-messages" style="height:auto;">
 	<div class="direct-chat-msg right">
 		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-right">You</span>
+			<span class="direct-chat-name pull-right"><la:message key="labels.easyml_you" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
-		<div class="direct-chat-text" style="background: #fff;">What do you think of this result?</div>
+		<div class="direct-chat-text" style="background: #fff;"><la:message key="labels.easyml_what_do_you_think" /></div>
 	</div>
 	<div class="direct-chat-msg">
 		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left">Fione</span>
+			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
 			<c:choose>
 				<c:when test="${predictionMetric.accuracy<=0.2}">
-					<div>Prediction Accuracy is unsatisfactory... You cannot use generated models.</div>
-					<div><strong>${fi:frameName(frameId)}</strong> may not contain important features to predict <strong>${f:h(responseColumn)}</strong>.</div>
-					<div>To improve the accuracy, you need to check the current data and create a new dataset containing meaningful columns.</div>
-					<div>I suggest you try it with other dataset again.</div>
-					<div>Please click <a href="${contextPath}/admin/automl/details/${f:u(projectId)}">Project View</a> to check more details.</div>
+					<div><la:message key="labels.easyml_what_do_you_think_answer1" arg0="${fi:frameName(frameId)}" arg1="${f:h(responseColumn)}" arg2="${contextPath}/admin/automl/details/${f:u(projectId)}"/></div>
 				</c:when>
 				<c:when test="${predictionMetric.accuracy>0.2 and predictionMetric.accuracy<=0.4}">
-					<div>Prediction Accuracy is low. You need to improve <strong>${fi:frameName(frameId)}</strong>.</div>
-					<div>Adding input columns or data, the accuracy may increase.</div>
-					<div>Please click <a href="${contextPath}/admin/automl/details/${f:u(projectId)}">Project View</a> to check more details.</div>
+					<div><la:message key="labels.easyml_what_do_you_think_answer2" arg0="${fi:frameName(frameId)}" arg1="${contextPath}/admin/automl/details/${f:u(projectId)}" /></div>
 				</c:when>
 				<c:when test="${predictionMetric.accuracy>0.4 and predictionMetric.accuracy<=0.6}">
-					<div>Prediction Accuracy is good.</div>
+					<div><la:message key="labels.easyml_what_do_you_think_answer3" /></div>
 				</c:when>
 				<c:when test="${predictionMetric.accuracy>0.6 and predictionMetric.accuracy<=0.8}">
-					<div>Prediction Accuracy is very good.</div>
+					<div><la:message key="labels.easyml_what_do_you_think_answer4" /></div>
 				</c:when>
 				<c:when test="${predictionMetric.accuracy>0.8}">
-					<div>Prediction Accuracy is excellent!</div>
+					<div><la:message key="labels.easyml_what_do_you_think_answer5" /></div>
 				</c:when>
 			</c:choose>
 		</div>
@@ -43,60 +37,60 @@
 	<c:if test="${predictionMetric.accuracy>0.4}">
 	<div class="direct-chat-msg right">
 		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-right">You</span>
+			<span class="direct-chat-name pull-right"><la:message key="labels.easyml_you" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
-		<div class="direct-chat-text" style="background: #fff;">Which model should I use?</div>
+		<div class="direct-chat-text" style="background: #fff;"><la:message key="labels.easyml_which_model_should_I_use" /></div>
 	</div>
 	<div class="direct-chat-msg">
 		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left">Fione</span>
+			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
-			<div><a href="${contextPath}/admin/automl/model/${f:u(projectId)}/${f:u(leaderboard.models[0].name)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(leaderboard.models[0].name)}</a> is a best model in generated ones.</div>
+			<div><la:message key="labels.easyml_which_model_should_I_use_answer" arg0="${contextPath}/admin/automl/model/${f:u(projectId)}/${f:u(leaderboard.models[0].name)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" arg1="${f:h(leaderboard.models[0].name)}"/></div>
 		</div>
 	</div>
 	<div class="direct-chat-msg right">
 		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-right">You</span>
+			<span class="direct-chat-name pull-right"><la:message key="labels.easyml_you" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
-		<div class="direct-chat-text" style="background: #fff;">How do I get predicted results from data I'd like to predict?</div>
+		<div class="direct-chat-text" style="background: #fff;"><la:message key="labels.easyml_how_do_i_get_result" /></div>
 	</div>
 	<div class="direct-chat-msg">
 		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left">Fione</span>
+			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
-			<div>Please upload data file at <a href="${contextPath}/admin/easyml/prediction/${f:u(projectId)}?did=${f:u(dataSetId)}&lid=${f:u(leaderboardId)}">Prediction page</a>.</div>
+			<div><la:message key="labels.easyml_how_do_i_get_result_answer" arg0="${contextPath}/admin/easyml/prediction/${f:u(projectId)}?did=${f:u(dataSetId)}&lid=${f:u(leaderboardId)}"/></div>
 		</div>
 	</div>
 	<div class="direct-chat-msg right">
 		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-right">You</span>
+			<span class="direct-chat-name pull-right"><la:message key="labels.easyml_you" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
-		<div class="direct-chat-text" style="background: #fff;">How do I integrate the best prediction model into my system?</div>
+		<div class="direct-chat-text" style="background: #fff;"><la:message key="labels.easyml_how_do_i_integrate" /></div>
 	</div>
 	<div class="direct-chat-msg">
 		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left">Fione</span>
+			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
-			<div>I provide Fione Serving API as Docker container. See <a href="${contextPath}/admin/automl/serving/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&mid=${f:u(leaderboard.models[0].name)}">Serving page</a>.</div>
+			<div><la:message key="labels.easyml_how_do_i_integrate_answer" arg0="${contextPath}/admin/automl/serving/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&mid=${f:u(leaderboard.models[0].name)}"/></div>
 		</div>
 	</div>
 	</c:if>
 	<div class="direct-chat-msg">
 		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left">Fione</span>
+			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
-			<div>If you have any comments, please file it to <a href="https://github.com/codelibs/fione/issues" target="_blank">github.com/codelibs/fione</a>.</div>
+			<div><la:message key="labels.easyml_any_comments" /></div>
 		</div>
 	</div>
 

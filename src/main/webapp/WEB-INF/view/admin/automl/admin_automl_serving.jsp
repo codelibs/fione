@@ -41,7 +41,7 @@
 						<input type="hidden" name="frameId" value="${f:h(frameId)}">
 						<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 						<div class="btn-group" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
-							<button type="submit" name="downloadserving" value="load" class="btn btn-default"><i class="fab fa-docker"></i>Download</button>
+							<button type="submit" name="downloadserving" value="load" class="btn btn-default"><i class="fab fa-docker"></i><la:message key="labels.automl_download" /></button>
 							<la:link href="/admin/automl/model/${f:u(projectId)}/${f:u(model.modelId.name)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-hammer"></i><la:message key="labels.automl_model" /></la:link>
 							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
 						</div>
@@ -53,7 +53,7 @@
 					<div class="col-md-12">
 						<div class="box box-primary">
 							<div class="box-header with-border">
-								<h3 class="box-title">Fione Serving with Docker</h3>
+								<h3 class="box-title"><la:message key="labels.automl_serving_with_docker" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -61,24 +61,24 @@
 								</div>
 							</div>
 							<div class="box-body">
-							<h3>Download Zip File</h3>
-							<p>To download Dockerfile, click the above "<i class="fab fa-docker"></i>Download" button.</p>
-							<h3>Build Docker Image</h3>
-							<p>${f:h(dockerZipName)} contains Dockerfile to build Serving API.</p>
+							<h3><la:message key="labels.automl_download_zip_file" /></h3>
+							<p><la:message key="labels.automl_download_dockerfile" /></p>
+							<h3><la:message key="labels.automl_build_dockerimage" /></h3>
+							<p><la:message key="labels.automl_contain_dockerfile" arg0="${f:h(dockerZipName)}" /></p>
 <pre><code>$ unzip ${f:h(dockerZipName)}
 $ cd serving
 $ docker build -t ${f:h(dockerTagName)}/serving:1.0 .</code></pre>
-							<h3>Run Serving API Server</h3>
-							<p>Start Fione Serving container as below.</p>
+							<h3><la:message key="labels.automl_run_serving_api" /></h3>
+							<p><la:message key="labels.automl_start_serving_container" /></p>
 <pre><code>$ docker run -t --rm -p 8081:8080 -t ${f:h(dockerTagName)}/serving:1.0 &</code></pre>
-							<h3>Access Predict API</h3>
-							<p>Query the model using the predict API.</p>
+							<h3><la:message key="labels.automl_access_predict_api" /></h3>
+							<p><la:message key="labels.automl_query_predict_api" /></p>
 <pre><code>$ curl -XPOST -H "Content-Type: application/json" localhost:8081/invocations -d '{
   "instances": [
     <c:if test="${instance!=null}">${f:h(instance)}</c:if><c:if test="${instance==null}">{...instance object...}</c:if>
   ]
 }'</code></pre>
-							<p>To check model information, you can see the following result.</p>
+							<p><la:message key="labels.automl_show_model_info" /></p>
 <pre><code>$ curl -s -XGET -H "Content-Type: application/json" localhost:8081/model</code></pre>
 							</div>
 						</div>

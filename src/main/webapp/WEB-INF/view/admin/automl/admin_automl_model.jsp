@@ -46,7 +46,7 @@
 						<div class="btn-group" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
 							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?mid=${f:u(model.modelId.name)}" class="btn btn-default"><i class="fas fa-file-signature"></i><la:message key="labels.automl_model_predict" /></a>
 							<button type="submit" name="downloadmojo" value="load" class="btn btn-default"><i class="fas fa-download"></i><la:message key="labels.automl_model_mojo" /></button>
-							<la:link href="/admin/automl/serving/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&mid=${f:u(model.modelId.name)}" styleClass="btn btn-default"><i class="fas fa-server"></i>Serving</la:link>
+							<la:link href="/admin/automl/serving/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&mid=${f:u(model.modelId.name)}" styleClass="btn btn-default"><i class="fas fa-server"></i><la:message key="labels.automl_serving" /></la:link>
 							<button type="submit" name="exportmodel" value="load" class="btn btn-default"><i class="fas fa-file-export"></i><la:message key="labels.automl_model_export" /></button>
 							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
 						</div>
