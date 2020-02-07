@@ -7,7 +7,7 @@
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.easyml" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -33,34 +33,34 @@
 			<section class="content">
 				<div class="row">
 					<div class="col-md-12">
-						<la:form action="/admin/easyml/uploadprediction" styleClass="form-horizontal" enctype="multipart/form-data">
+						<la:form action="/admin/easyml/uploadprediction" enctype="multipart/form-data">
 							<la:hidden property="projectId"/>
 							<la:hidden property="dataSetId"/>
 							<la:hidden property="leaderboardId"/>
-							<div class="box box-success">
-								<div class="box-header with-border">
-									<h3 class="box-title">
+							<div class="card card-outline card-success">
+								<div class="card-header">
+									<h3 class="card-title">
 										<la:message key="labels.easyml_upload_dataset" />
 									</h3>
 									<div class="btn-tools pull-right">
 									</div>
 								</div>
-								<div class="box-body">
+								<div class="card-body">
 									<div>
 										<la:info id="msg" message="true">
 											<div class="alert alert-info">${msg}</div>
 										</la:info>
 										<la:errors property="_global" />
 									</div>
-									<div class="form-group">
-										<label for="file" class="col-sm-3 control-label"><la:message key="labels.easyml_prediction_data" /></label>
+									<div class="form-group row">
+										<label for="file" class="col-sm-3 col-form-label"><la:message key="labels.easyml_prediction_data" /></label>
 										<div class="col-sm-9">
 											<la:errors property="file" />
-											<input type="file" name="file" />
+											<input type="file" name="file" class="form-control-file"/>
 										</div>
 									</div>
 								</div>
-								<div class="box-footer">
+								<div class="card-footer">
 									<la:link href="../summary/${f:u(projectId)}?did=${f:u(dataSetId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
 										<em class="fa fa-arrow-circle-left"></em>
 										<la:message key="labels.crud_button_back" />

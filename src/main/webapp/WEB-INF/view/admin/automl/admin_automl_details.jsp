@@ -6,7 +6,7 @@
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 <c:if test="${autoReload}"><meta http-equiv="refresh" content="10;URL=${contextPath}/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"/></c:if>
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -36,14 +36,14 @@
 						<la:errors />
 					</div>
 					<div class="col-md-3">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_actions" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_actions" /></h3>
 								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<div class="row">
 									<form method="post" action="${contextPath}/admin/automl/">
 									<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
@@ -83,14 +83,14 @@
 							</div>
 						</div>
 						<c:if test="${columnSummaries != null}">
-							<div class="box box-primary">
-								<div class="box-header with-border">
-									<h3 class="box-title">${f:h(fi:frameName(frameId))}</h3>
+							<div class="card card-outline card-primary">
+								<div class="card-header">
+									<h3 class="card-title">${f:h(fi:frameName(frameId))}</h3>
 									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 									</div>
 								</div>
-								<div class="box-body">
+								<div class="card-body">
 									<table class="table table-bordered table-striped">
 										<tbody>
 											<tr>
@@ -110,18 +110,18 @@
 								</div>
 							</div>
 						</c:if>
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_datasets" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_datasets" /></h3>
 								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${fn:length(project.dataSets) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -133,7 +133,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th class="col-sm-4 text-center"><la:message key="labels.automl_action" /></th>
+														<th style="width: 30%" class=" text-center"><la:message key="labels.automl_action" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -177,18 +177,18 @@
 								</c:if>
 							</div>
 						</div>
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_frames" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_frames" /></h3>
 								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${fn:length(project.frameIds) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -200,7 +200,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th class="col-sm-4 text-center"><la:message key="labels.automl_action" /></th>
+														<th style="width: 30%" class=" text-center"><la:message key="labels.automl_action" /></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -228,9 +228,9 @@
 						</div>
 					</div>
 					<div class="col-md-9">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_jobs" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_jobs" /></h3>
 								<div class="box-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
@@ -250,12 +250,12 @@
 									</ul>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<%-- List --%>
 								<c:if test="${fn:length(project.jobs) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -267,11 +267,11 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_destination" /></th>
-														<th class="col-sm-2 text-center"><la:message key="labels.automl_start_time" /></th>
-														<th class="col-sm-2 text-center"><la:message key="labels.automl_end_time" /></th>
-														<th class="col-sm-2 text-center"><la:message key="labels.automl_run_time" /></th>
-														<th class="col-sm-1 text-center"><la:message key="labels.automl_status" /></th>
-														<th class="col-sm-1 text-center">&nbsp;</th>
+														<th style="width: 20%" class=" text-center"><la:message key="labels.automl_start_time" /></th>
+														<th style="width: 20%" class=" text-center"><la:message key="labels.automl_end_time" /></th>
+														<th style="width: 20%" class=" text-center"><la:message key="labels.automl_run_time" /></th>
+														<th style="width: 15%" class="text-center"><la:message key="labels.automl_status" /></th>
+														<th style="width: 15%" class="text-center">&nbsp;</th>
 													</tr>
 												</thead>
 												<tbody>
@@ -333,16 +333,16 @@
 							</div>
 						</div>
 						<c:if test="${columnSummaries != null}">
-							<div class="box box-primary">
-								<div class="box-header with-border">
-									<h3 class="box-title"><la:message key="labels.automl_column_summaries" arg0="${f:h(fi:frameName(frameId))}" /></h3>
+							<div class="card card-outline card-primary">
+								<div class="card-header">
+									<h3 class="card-title"><la:message key="labels.automl_column_summaries" arg0="${f:h(fi:frameName(frameId))}" /></h3>
 									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
 									</div>
 								</div>
-								<div class="box-body">
+								<div class="card-body">
 									<%-- List --%>
 									<div class="row">
 										<div class="col-sm-12">
@@ -386,9 +386,9 @@
 							</div>
 						</c:if>
 						<c:if test="${leaderboard != null}">
-							<div class="box box-primary">
-								<div class="box-header with-border">
-									<h3 class="box-title"><la:message key="labels.automl_model_summaries" arg0="${f:h(leaderboard.projectName)}" /></h3>
+							<div class="card card-outline card-primary">
+								<div class="card-header">
+									<h3 class="card-title"><la:message key="labels.automl_model_summaries" arg0="${f:h(leaderboard.projectName)}" /></h3>
 									<div class="box-tools pull-right">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
@@ -407,12 +407,12 @@
 										</ul>
 									</div>
 								</div>
-								<div class="box-body">
+								<div class="card-body">
 									<%-- List --%>
 									<c:if test="${fn:length(leaderboard.models) == 0}">
 										<div class="row top10">
 											<div class="col-sm-12">
-												<em class="fa fa-info-circle text-light-blue"></em>
+												<em class="fa fa-info-circle text-primary"></em>
 												<la:message key="labels.list_could_not_find_crud_table" />
 											</div>
 										</div>

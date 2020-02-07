@@ -5,7 +5,7 @@
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.easyml" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -23,7 +23,7 @@
 				</ol>
 			</section>
 			<section class="content">
-				<la:form action="/admin/easyml" styleClass="form-horizontal">
+				<la:form action="/admin/easyml" >
 					<la:hidden property="projectId"/>
 					<la:hidden property="dataSetId"/>
 					<la:hidden property="frameId"/>
@@ -35,16 +35,16 @@
 							<la:errors />
 						</div>
 						<div class="col-md-3">
-							<div class="box box-success">
-								<div class="box-header with-border">
-									<h3 class="box-title">
+							<div class="card card-outline card-success">
+								<div class="card-header">
+									<h3 class="card-title">
 										<la:message key="labels.easyml_prediction" />
 									</h3>
 									<div class="btn-tools pull-right">
 									</div>
 								</div>
-								<div class="box-body">
-									<div class="form-group col-sm-12">
+								<div class="card-body">
+									<div class="form-group row col-sm-12">
 										<label for="responseColumn"><la:message key="labels.easyml_predicted_column" /></label>
 										<la:errors property="responseColumn" />
 										<la:select property="responseColumn" styleId="responseColumn" styleClass="form-control">
@@ -53,7 +53,7 @@
 											</c:forEach>
 										</la:select>
 									</div>
-									<div class="form-group col-sm-12">
+									<div class="form-group row col-sm-12">
 										<label for="responseColumn"><la:message key="labels.easyml_prediction_type" /></label>
 										<div class="radio">
 											<label><la:radio property="predictionType" value="b"></la:radio>
@@ -71,7 +71,7 @@
 											</label>
 										</div>
 									</div>
-									<div class="form-group col-sm-12">
+									<div class="form-group row col-sm-12">
 										<label for="maxRuntimeSecs"><la:message key="labels.easyml_max_execution_time" /></label>
 										<la:errors property="maxRuntimeSecs" />
 										<la:select property="maxRuntimeSecs" styleId="maxRuntimeSecs" styleClass="form-control">
@@ -85,7 +85,7 @@
 										</la:select>
 									</div>
 								</div>
-								<div class="box-footer">
+								<div class="card-footer">
 									<c:if test="${editable}">
 										<button type="submit" class="btn btn-success" name="runautoml" value="Run">
 											<em class="fas fa-hammer"></em> <la:message key="labels.easyml_run" />
@@ -95,15 +95,15 @@
 							</div>
 						</div>
 						<div class="col-md-9">
-							<div class="box box-success">
-								<div class="box-header with-border">
-									<h3 class="box-title">
+							<div class="card card-outline card-success">
+								<div class="card-header">
+									<h3 class="card-title">
 										<la:message key="labels.easyml_input_columns" />
 									</h3>
 									<div class="btn-tools pull-right">
 									</div>
 								</div>
-								<div class="box-body">
+								<div class="card-body">
 									<table class="table table-bordered table-striped">
 										<thead>
 											<tr>

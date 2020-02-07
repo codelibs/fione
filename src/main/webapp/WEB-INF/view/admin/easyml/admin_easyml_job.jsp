@@ -6,7 +6,7 @@
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 <meta http-equiv="refresh" content="5;URL=${contextPath}/admin/easyml/job/${f:u(project.id)}" />
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -26,15 +26,15 @@
 			<section class="content">
 				<div class="row">
 					<div class="col-md-12">
-						<div class="box box-success">
-							<div class="box-header with-border">
-								<h3 class="box-title">
+						<div class="card card-outline card-success">
+							<div class="card-header">
+								<h3 class="card-title">
 									<la:message key="labels.easyml_jobs" />
 								</h3>
 								<div class="btn-tools pull-right">
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<div>
 									<la:info id="msg" message="true">
 										<div class="alert alert-info">${msg}</div>
@@ -48,7 +48,7 @@
 								<c:if test="${fn:length(project.jobs) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>

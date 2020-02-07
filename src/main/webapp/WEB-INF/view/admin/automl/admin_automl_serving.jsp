@@ -5,7 +5,7 @@
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -45,22 +45,22 @@
 							<la:link href="/admin/automl/model/${f:u(projectId)}/${f:u(model.modelId.name)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-hammer"></i><la:message key="labels.automl_model" /></la:link>
 							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
 						</div>
-						<div class="btn-group pull-right" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
+						<div class="card-tools" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
 							<button type="submit" name="deletemodel" value="load" class="btn btn-default"><i class="fas fa-trash-alt"></i><la:message key="labels.automl_delete" /></button>
 						</div>
 						</form>
 					</div>
 					<div class="col-md-12">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_serving_with_docker" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_serving_with_docker" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 							<h3><la:message key="labels.automl_download_zip_file" /></h3>
 							<p><la:message key="labels.automl_download_dockerfile" /></p>
 							<h3><la:message key="labels.automl_build_dockerimage" /></h3>

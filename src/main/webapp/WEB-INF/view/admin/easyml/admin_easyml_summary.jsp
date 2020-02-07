@@ -7,7 +7,7 @@
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.easyml" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -49,7 +49,7 @@
 							<div class="info-box-content">
 								<span class="info-box-number"><la:message key="labels.easyml_x_models" arg0="${fn:length(leaderboard.models)}" /></span>
 								<div style="overflow: hidden; text-overflow: ellipsis;">
-									<span class="label label-success"><la:message key="labels.easyml_best" /></span> ${leaderboard.models[0].name}
+									<span class="badge bg-success"><la:message key="labels.easyml_best" /></span> ${leaderboard.models[0].name}
 								</div>
 							</div>
 						</div>
@@ -57,7 +57,7 @@
 							<span class="info-box-icon bg-yellow"><i class="fas fa-chart-line"></i></span>
 							<div class="info-box-content">
 								<span class="info-box-number">${f:h(predictionMetric.name)} ${fi:formatNumber(predictionMetric.value,"%.8f")}</span>
-								<span class="label label-warning"><la:message key="labels.easyml_accuracy" /></span>
+								<span class="badge bg-warning"><la:message key="labels.easyml_accuracy" /></span>
 								<span style="color:#ffbb00;"><c:choose>
 									<c:when test="${predictionMetric.accuracy<=0.2}"><i                             class="fas fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i></c:when>
 									<c:when test="${predictionMetric.accuracy>0.2 and predictionMetric.accuracy<=0.4}"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i><i class="far fa-star"></i></c:when>
@@ -68,16 +68,16 @@
 							</div>
 						</div>
 						<c:if test="${fn:length(dataSets) gt 0}">
-							<div class="box box-primary">
-								<div class="box-header with-border">
-									<h3 class="box-title"><la:message key="labels.easyml_datasets" /></h3>
-									<div class="box-tools pull-right">
+							<div class="card card-outline card-primary">
+								<div class="card-header">
+									<h3 class="card-title"><la:message key="labels.easyml_datasets" /></h3>
+									<div class="card-tools">
 										<button type="button" class="btn btn-box-tool" data-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
 									</div>
 								</div>
-								<div class="box-body">
+								<div class="card-body">
 									<div class="row">
 										<div class="col-sm-12">
 											<table class="table table-bordered table-striped">
@@ -117,16 +117,16 @@
 						</c:if>
 					</div>
 					<div class="col-md-9">
-						<div class="box box-info">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.easyml_reports" /></h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+						<div class="card bg-info">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.easyml_reports" /></h3>
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<jsp:include page="/WEB-INF/view/admin/easyml/admin_easyml_summary_report.jsp"></jsp:include>
 							</div>
 						</div>

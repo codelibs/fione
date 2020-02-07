@@ -5,7 +5,7 @@
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -30,19 +30,19 @@
 			<section class="content">
 				<div class="row">
 					<div class="col-md-12">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title">
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title">
 									<la:message key="labels.crud_title_list" />
 								</h3>
-								<div class="btn-group pull-right">
+								<div class="card-tools">
 									<la:link href="newproject" styleClass="btn btn-success btn-xs ${f:h(editableClass)}">
 										<em class="fa fa-plus"></em>
 										<la:message key="labels.crud_link_create" />
 									</la:link>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<%-- Message --%>
 								<div>
 									<la:info id="msg" message="true">
@@ -54,7 +54,7 @@
 								<c:if test="${fn:length(projects) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>

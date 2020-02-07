@@ -8,7 +8,7 @@
 <script src="${fe:url('/js/admin/fione/d3.min.js')}" type="text/javascript" charset="utf-8"></script>
 <script src="${fe:url('/js/admin/fione/c3.min.js')}" type="text/javascript"></script>
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -50,27 +50,27 @@
 							<button type="submit" name="exportmodel" value="load" class="btn btn-default"><i class="fas fa-file-export"></i><la:message key="labels.automl_model_export" /></button>
 							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
 						</div>
-						<div class="btn-group pull-right" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
+						<div class="card-tools" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
 							<button type="submit" name="deletemodel" value="load" class="btn btn-default"><i class="fas fa-trash-alt"></i><la:message key="labels.automl_delete" /></button>
 						</div>
 						</form>
 					</div>
 					<div class="col-md-6">
 						<c:if test="${model.output.scoringHistory != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title">${f:h(model.output.scoringHistory.name)}</h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title">${f:h(model.output.scoringHistory.name)}</h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${model.output.scoringHistory.rowcount == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -129,20 +129,20 @@ var chart = c3.generate({
 						</div>
 						</c:if>
 						<c:if test="${model.parameters != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_model_parameters" /></h3>
-								<div class="btn-group pull-right">
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_model_parameters" /></h3>
+								<div class="card-tools">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${fn:length(model.parameters.fieldNames) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -173,20 +173,20 @@ var chart = c3.generate({
 						</div>
 						</c:if>
 						<c:if test="${model.output != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_output" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_output" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${fn:length(model.output.fieldNames) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -217,20 +217,20 @@ var chart = c3.generate({
 						</div>
 						</c:if>
 						<c:if test="${model.output.crossValidationModels != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_cross_validation" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_cross_validation" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${fn:length(model.output.crossValidationModels) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -261,20 +261,20 @@ var chart = c3.generate({
 						</div>
 						</c:if>
 						<c:if test="${model.output.modelSummary != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title">${f:h(model.output.modelSummary.name)}</h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title">${f:h(model.output.modelSummary.name)}</h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${model.output.modelSummary.rowcount == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -314,20 +314,20 @@ var chart = c3.generate({
 					<div class="col-md-6">
 						<c:catch var="vie"><c:if test="${model.output.variableImportances==null}"></c:if></c:catch>
 						<c:if test="${empty vie and model.output.variableImportances!=null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title">${f:h(model.output.variableImportances.name)}</h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title">${f:h(model.output.variableImportances.name)}</h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${model.output.variableImportances.rowcount == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -389,20 +389,20 @@ var chart = c3.generate({
 						</div>
 						</c:if>
 						<c:if test="${model.output.crossValidationMetricsSummary != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title">${f:h(model.output.crossValidationMetricsSummary.name)}</h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title">${f:h(model.output.crossValidationMetricsSummary.name)}</h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${model.output.crossValidationMetricsSummary.rowcount == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -439,20 +439,20 @@ var chart = c3.generate({
 						</div>
 						</c:if>
 						<c:if test="${model.output.trainingMetrics != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_training_metrics" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_training_metrics" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${fn:length(model.output.trainingMetrics.fieldNames) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -483,20 +483,20 @@ var chart = c3.generate({
 						</div>
 						</c:if>
 						<c:if test="${model.output.validationMetrics != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_validation_metrics" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_validation_metrics" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${fn:length(model.output.validationMetrics.fieldNames) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>
@@ -527,20 +527,20 @@ var chart = c3.generate({
 						</div>
 						</c:if>
 						<c:if test="${model.output.crossValidationMetrics != null}">
-						<div class="box box-primary">
-							<div class="box-header with-border">
-								<h3 class="box-title"><la:message key="labels.automl_cross_validation_metrics" /></h3>
+						<div class="card card-outline card-primary">
+							<div class="card-header">
+								<h3 class="card-title"><la:message key="labels.automl_cross_validation_metrics" /></h3>
 								<div class="btn-tools pull-right">
 									<button type="button" class="btn btn-box-tool" data-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
 							</div>
-							<div class="box-body">
+							<div class="card-body">
 								<c:if test="${fn:length(model.output.crossValidationMetrics.fieldNames) == 0}">
 									<div class="row top10">
 										<div class="col-sm-12">
-											<em class="fa fa-info-circle text-light-blue"></em>
+											<em class="fa fa-info-circle text-primary"></em>
 											<la:message key="labels.list_could_not_find_crud_table" />
 										</div>
 									</div>

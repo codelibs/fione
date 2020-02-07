@@ -5,7 +5,7 @@
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -26,36 +26,36 @@
 				</ol>
 			</section>
 			<section class="content">
-				<la:form action="/admin/automl/uploaddataset" styleClass="form-horizontal" enctype="multipart/form-data">
+				<la:form action="/admin/automl/uploaddataset" enctype="multipart/form-data">
 					<la:hidden property="projectId" />
 					<div class="row">
 						<div class="col-md-12">
-							<div class="box box-success">
-								<div class="box-header with-border">
-									<h3 class="box-title"><la:message key="labels.automl_new_dataset" /></h3>
-									<div class="btn-group pull-right">
+							<div class="card card-outline card-success">
+								<div class="card-header">
+									<h3 class="card-title"><la:message key="labels.automl_new_dataset" /></h3>
+									<div class="card-tools">
 										<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
 											<em class="fas fa-project-diagram"></em>
 											<la:message key="labels.automl_project" />
 										</la:link>
 									</div>
 								</div>
-								<div class="box-body">
+								<div class="card-body">
 									<div>
 										<la:info id="msg" message="true">
 											<div class="alert alert-info">${msg}</div>
 										</la:info>
 										<la:errors property="_global" />
 									</div>
-									<div class="form-group">
-										<label for="dataFile" class="col-sm-3 control-label"><la:message key="labels.automl_data_file" /></label>
+									<div class="form-group row">
+										<label for="dataFile" class="col-sm-3 col-form-label"><la:message key="labels.automl_data_file" /></label>
 										<div class="col-sm-9">
 											<la:errors property="dataFile" />
-											<input type="file" name="dataFile" />
+											<input type="file" name="dataFile" class="form-control-file"/>
 										</div>
 									</div>
 								</div>
-								<div class="box-footer">
+								<div class="card-footer">
 									<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-default">
 										<em class="fa fa-arrow-circle-left"></em>
 										<la:message key="labels.crud_button_back" />

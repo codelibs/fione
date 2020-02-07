@@ -5,7 +5,7 @@
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
 </head>
-<body class="skin-blue sidebar-mini">
+<body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
@@ -23,37 +23,37 @@
 				</ol>
 			</section>
 			<section class="content">
-				<la:form action="/admin/automl" styleClass="form-horizontal">
+				<la:form action="/admin/automl" >
 					<div class="row">
 						<div class="col-md-12">
-							<div class="box box-success">
-								<div class="box-header with-border">
-									<h3 class="box-title">
+							<div class="card card-outline card-success">
+								<div class="card-header">
+									<h3 class="card-title">
 										<la:message key="labels.crud_title_create" />
 									</h3>
-									<div class="btn-group pull-right">
+									<div class="card-tools">
 										<la:link href="../list" styleClass="btn btn-primary btn-xs">
 											<em class="fa fa-th-list"></em>
 											<la:message key="labels.crud_link_list" />
 										</la:link>
 									</div>
 								</div>
-								<div class="box-body">
+								<div class="card-body">
 									<div>
 										<la:info id="msg" message="true">
 											<div class="alert alert-info">${msg}</div>
 										</la:info>
 										<la:errors property="_global" />
 									</div>
-									<div class="form-group">
-										<label for="name" class="col-sm-3 control-label"><la:message key="labels.automl_project_name" /></label>
+									<div class="form-group row">
+										<label for="name" class="col-sm-3 col-form-label"><la:message key="labels.automl_project_name" /></label>
 										<div class="col-sm-9">
 											<la:errors property="name" />
 											<la:text styleId="name" property="name" styleClass="form-control" />
 										</div>
 									</div>
 								</div>
-								<div class="box-footer">
+								<div class="card-footer">
 									<button type="submit" class="btn btn-default" name="list" value="<la:message key="labels.crud_button_back" />">
 										<em class="fa fa-arrow-circle-left"></em>
 										<la:message key="labels.crud_button_back" />
