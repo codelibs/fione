@@ -13,18 +13,26 @@
 			<jsp:param name="menuType" value="automl" />
 		</jsp:include>
 		<div class="content-wrapper">
-			<section class="content-header">
-				<h1><la:message key="labels.automl_prediction" /></h1>
-				<ol class="breadcrumb">
-					<li><la:link href="/admin/automl">
-							<la:message key="labels.crud_link_list" />
-						</la:link></li>
-					<li><la:link href="/admin/automl/details/${f:u(projectId)}">
-							<la:message key="labels.automl_project" />
-						</la:link></li>
-					<li class="active"><la:message key="labels.automl_prediction" /></li>
-				</ol>
-			</section>
+			<div class="content-header">
+				<div class="container-fluid">
+					<div class="row mb-2">
+						<div class="col-sm-6">
+							<h1><la:message key="labels.automl_prediction" /></h1>
+						</div>
+						<div class="col-sm-6">
+							<ol class="breadcrumb float-sm-right">
+								<li class="breadcrumb-item"><la:link href="/admin/automl">
+									<la:message key="labels.crud_link_list" />
+								</la:link></li>
+								<li class="breadcrumb-item"><la:link href="/admin/automl/details/${f:u(projectId)}">
+									<la:message key="labels.automl_project" />
+								</la:link></li>
+								<li class="breadcrumb-item active"><la:message key="labels.automl_prediction" /></li>
+							</ol>
+						</div>
+					</div>
+				</div>
+			</div>
 			<section class="content">
 				<la:form action="/admin/automl" >
 					<la:hidden property="projectId" />

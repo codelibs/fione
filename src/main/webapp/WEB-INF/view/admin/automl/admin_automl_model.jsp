@@ -16,18 +16,26 @@
 			<jsp:param name="menuType" value="automl" />
 		</jsp:include>
 		<div class="content-wrapper">
-			<section class="content-header">
-				<h1>${f:h(model.modelId.name)}</h1>
-				<ol class="breadcrumb">
-					<li><la:link href="/admin/automl">
-							<la:message key="labels.crud_link_list" />
-						</la:link></li>
-					<li><la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">
-							<la:message key="labels.automl_project" />
-						</la:link></li>
-					<li class="active"><la:message key="labels.automl_model" /></li>
-				</ol>
-			</section>
+			<div class="content-header">
+				<div class="container-fluid">
+					<div class="row mb-2">
+						<div class="col-sm-6">
+
+							<h1>${f:h(model.modelId.name)}</h1>
+						</div>
+						<div class="col-sm-6">
+							<ol class="breadcrumb float-sm-right">
+								<li class="breadcrumb-item"><la:link href="/admin/automl">
+								<la:message key="labels.crud_link_list" /></la:link></li>
+								<li class="breadcrumb-item"><la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">
+									<la:message key="labels.automl_project" />
+								</la:link></li>
+								<li class="breadcrumb-item active"><la:message key="labels.automl_model" /></li>
+							</ol>
+						</div>
+					</div>
+				</div>
+			</div>
 			<section class="content">
 				<div class="row">
 					<div class="col-md-12">
