@@ -13,11 +13,21 @@
 			<jsp:param name="menuType" value="easyml" />
 		</jsp:include>
 		<div class="content-wrapper">
-			<section class="content-header">
-				<h1><la:message key="labels.easyml_project_dashboard" /></h1>
-				<ol class="breadcrumb">
-				</ol>
-			</section>
+			<div class="content-header">
+				<div class="container-fluid">
+					<div class="row mb-2">
+						<div class="col-sm-6">
+							<h1>
+								<la:message key="labels.easyml_project_dashboard" />
+							</h1>
+						</div>
+						<div class="col-sm-6">
+							<ol class="breadcrumb float-sm-right">
+							</ol>
+						</div>
+					</div>
+				</div>
+			</div>
 			<section class="content">
 				<div class="row">
 					<div class="col-md-3">
