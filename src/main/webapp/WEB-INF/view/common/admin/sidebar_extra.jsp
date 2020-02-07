@@ -1,15 +1,24 @@
 <%@page pageEncoding="UTF-8" contentType="text/html; charset=UTF-8"%>
-<li class="treeview <c:if test="${param.menuCategoryType=='fione'}">active</c:if>"><a href="#"><em
-		class='fas fa-robot' style="width:20px;"
-	></em> <span><la:message key="labels.menu_fione" /></span> <em class="fa fa-angle-left pull-right"></em></a>
-	<ul class="treeview-menu">
-		<li <c:if test="${param.menuType=='easyml'}">class="active"</c:if>><la:link href="/admin/easyml/">
-				<em class='fa fa-genderless'></em>
-				<span><la:message key="labels.menu_easyml" /></span>
-			</la:link></li>
-		<li <c:if test="${param.menuType=='automl'}">class="active"</c:if>><la:link href="/admin/automl/">
-				<em class='fa fa-genderless'></em>
-				<span><la:message key="labels.menu_automl" /></span>
-			</la:link></li>
-	</ul></li>
-
+<li class="nav-item has-treeview <c:if test="${param.menuCategoryType=='fione'}">active</c:if>">
+	<a href="#">
+		<em class='nav-icon fas fa-robot' style="width:20px;"></em>
+		<p>
+			<la:message key="labels.menu_fione" />
+			<i class="right fas fa-angle-left"></i>
+		</p>
+	</a>
+	<ul class="nav nav-treeview">
+		<li class="nav-item">
+				<a href="${fe:url("/admin/easyml/")}" class="nav-link <c:if test="${param.menuType=='easyml'}">active</c:if>">
+					<em class='fa fa-genderless nav-icon'></em>
+					<p><la:message key="labels.menu_easyml" /></p>
+				</a>
+		</li>
+		<li class="nav-item">
+				<a href="${fe:url("/admin/automl/")}" class="nav-link <c:if test="${param.menuType=='automl'}">active</c:if>">
+					<em class='fa fa-genderless nav-icon'></em>
+					<p><la:message key="labels.menu_automl" /></p>
+				</a>
+		</li>
+	</ul>
+</li>
