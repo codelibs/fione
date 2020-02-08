@@ -208,9 +208,8 @@ public class AdminEasymlAction extends FioneAdminAction {
             throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, StringCodecUtil.decode(form.dataSetId)),
                     this::asListHtml);
         }
-        form.columns.put(StringCodecUtil.encodeUrlSafe(form.responseColumn), "on");
-        form.columnTypes.put(StringCodecUtil.encodeUrlSafe(form.responseColumn),
-                Constants.REGRESSION_TYPE.equals(form.predictionType) ? "Numeric" : "Enum");
+        form.columns.put(form.responseColumn, "on");
+        form.columnTypes.put(form.responseColumn, Constants.REGRESSION_TYPE.equals(form.predictionType) ? "Numeric" : "Enum");
         try {
             final FrameV3 columnSummaries = projectHelper.getColumnSummaries(form.projectId, form.frameId);
             final String[] ignoredColumns =
