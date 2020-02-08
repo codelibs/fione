@@ -51,15 +51,15 @@
 						<input type="hidden" name="modelId" value="${f:h(model.modelId.name)}">
 						<input type="hidden" name="frameId" value="${f:h(frameId)}">
 						<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-						<div class="btn-group" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
-							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?mid=${f:u(model.modelId.name)}" class="btn btn-default"><i class="fas fa-file-signature"></i><la:message key="labels.automl_model_predict" /></a>
-							<button type="submit" name="downloadmojo" value="load" class="btn btn-default"><i class="fas fa-download"></i><la:message key="labels.automl_model_mojo" /></button>
-							<la:link href="/admin/automl/serving/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&mid=${f:u(model.modelId.name)}" styleClass="btn btn-default"><i class="fas fa-server"></i><la:message key="labels.automl_serving" /></la:link>
-							<button type="submit" name="exportmodel" value="load" class="btn btn-default"><i class="fas fa-file-export"></i><la:message key="labels.automl_model_export" /></button>
-							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
+						<div class="btn-group mb-2" role="toolbar" aria-label="Toolbar">
+							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?mid=${f:u(model.modelId.name)}" class="btn btn-outline-primary"><i class="fas fa-file-signature"></i><la:message key="labels.automl_model_predict" /></a>
+							<button type="submit" name="downloadmojo" value="load" class="btn btn-outline-primary"><i class="fas fa-download"></i><la:message key="labels.automl_model_mojo" /></button>
+							<la:link href="/admin/automl/serving/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&mid=${f:u(model.modelId.name)}" styleClass="btn btn-outline-primary"><i class="fas fa-server"></i><la:message key="labels.automl_serving" /></la:link>
+							<button type="submit" name="exportmodel" value="load" class="btn btn-outline-primary"><i class="fas fa-file-export"></i><la:message key="labels.automl_model_export" /></button>
+							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-outline-primary"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
 						</div>
-						<div class="card-tools" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
-							<button type="submit" name="deletemodel" value="load" class="btn btn-default"><i class="fas fa-trash-alt"></i><la:message key="labels.automl_delete" /></button>
+						<div class="float-right">
+							<button type="submit" name="deletemodel" value="load" class="btn btn-outline-danger"><i class="fas fa-trash-alt"></i><la:message key="labels.automl_delete" /></button>
 						</div>
 						</form>
 					</div>
@@ -68,8 +68,8 @@
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title">${f:h(model.output.scoringHistory.name)}</h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
@@ -87,11 +87,11 @@
 									<div class="row">
 										<div class="col-sm-12">
 										<ul class="nav nav-tabs" role="tablist" id="scoringHistoryTabs">
-											<li role="presentation" class="active"><a href="#scoringHistoryGraph" aria-controls="scoringHistoryGraph" role="tab" data-toggle="tab"><la:message key="labels.automl_model_graph" /></a></li>
-											<li role="presentation"><a href="#scoringHistoryDetails" aria-controls="scoringHistoryDetails" role="tab" data-toggle="tab"><la:message key="labels.automl_model_details" /></a></li>
+											<li class="nav-item"><a class="nav-link active" id="scoringHistoryGraphTab" data-toggle="tab" href="#scoringHistoryGraph" role="tab" aria-controls="scoringHistoryGraph" aria-selected="true"><la:message key="labels.automl_model_graph" /></a></li>
+											<li class="nav-item"><a class="nav-link" id="scoringHistoryDetailsTab" data-toggle="tab" href="#scoringHistoryDetails" role="tab" aria-controls="scoringHistoryGraph" aria-selected="false"><la:message key="labels.automl_model_details" /></a></li>
 										</ul>
 										<div class="tab-content">
-										<div role="tabpanel" class="tab-pane active" id="scoringHistoryGraph">
+										<div role="tabpanel" class="tab-pane fade show active" id="scoringHistoryGraph">
 										<div id="scoringHistoryChart"></div>
 <c:set var="chart" value="${model.output.scoringHistoryChart}"/><script><!--
 var chart = c3.generate({
@@ -105,8 +105,8 @@ var chart = c3.generate({
 // -->
 </script>
 										</div>
-										<div role="tabpanel" class="tab-pane" id="scoringHistoryDetails">
-											<table class="table table-bordered table-striped small">
+										<div role="tabpanel" class="tab-pane fade" id="scoringHistoryDetails">
+											<table class="table table-bordered table-striped small mt-1">
 												<thead>
 													<tr>
 													<c:forEach var="i" varStatus="s" begin="0" end="${fn:length(model.output.scoringHistory.columns)-1}">
@@ -141,7 +141,7 @@ var chart = c3.generate({
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_model_parameters" /></h3>
 								<div class="card-tools">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
@@ -184,8 +184,8 @@ var chart = c3.generate({
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_output" /></h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
@@ -228,8 +228,8 @@ var chart = c3.generate({
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_cross_validation" /></h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
@@ -272,8 +272,8 @@ var chart = c3.generate({
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title">${f:h(model.output.modelSummary.name)}</h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
@@ -325,8 +325,8 @@ var chart = c3.generate({
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title">${f:h(model.output.variableImportances.name)}</h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
@@ -344,11 +344,11 @@ var chart = c3.generate({
 									<div class="row">
 										<div class="col-sm-12">
 										<ul class="nav nav-tabs" role="tablist" id="variableImportancesTabs">
-											<li role="presentation" class="active"><a href="#variableImportancesGraph" aria-controls="variableImportancesGraph" role="tab" data-toggle="tab"><la:message key="labels.automl_model_graph" /></a></li>
-											<li role="presentation"><a href="#variableImportancesDetails" aria-controls="variableImportancesDetails" role="tab" data-toggle="tab"><la:message key="labels.automl_model_details" /></a></li>
+											<li class="nav-item"><a class="nav-link active" id="variableImportancesGraphTab" data-toggle="tab" href="#variableImportancesGraph" role="tab" aria-controls="variableImportancesGraph" aria-selected="true"><la:message key="labels.automl_model_graph" /></a></li>
+											<li class="nav-item"><a class="nav-link" id="variableImportancesDetailsTab" data-toggle="tab" href="#variableImportancesDetails" role="tab" aria-controls="variableImportancesDetails" aria-selected="false"><la:message key="labels.automl_model_details" /></a></li>
 										</ul>
 										<div class="tab-content">
-										<div role="tabpanel" class="tab-pane active" id="variableImportancesGraph">
+										<div role="tabpanel" class="tab-pane fade show active" id="variableImportancesGraph">
 										<div id="variableImportancesChart"></div>
 <c:set var="chart" value="${model.output.variableImportancesChart}"/><script><!--
 <!--
@@ -365,8 +365,8 @@ var chart = c3.generate({
 // -->
 </script>
 										</div>
-										<div role="tabpanel" class="tab-pane" id="variableImportancesDetails">
-											<table class="table table-bordered table-striped small">
+										<div role="tabpanel" class="tab-pane fade" id="variableImportancesDetails">
+											<table class="table table-bordered table-striped small mt-1">
 												<thead>
 													<tr>
 													<c:forEach var="i" varStatus="s" begin="0" end="${fn:length(model.output.variableImportances.columns)-1}">
@@ -400,8 +400,8 @@ var chart = c3.generate({
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title">${f:h(model.output.crossValidationMetricsSummary.name)}</h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
@@ -450,8 +450,8 @@ var chart = c3.generate({
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_training_metrics" /></h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
@@ -494,8 +494,8 @@ var chart = c3.generate({
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_validation_metrics" /></h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>
@@ -538,8 +538,8 @@ var chart = c3.generate({
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_cross_validation_metrics" /></h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>

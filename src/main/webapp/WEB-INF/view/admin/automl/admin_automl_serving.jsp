@@ -48,13 +48,13 @@
 						<input type="hidden" name="modelId" value="${f:h(model.modelId.name)}">
 						<input type="hidden" name="frameId" value="${f:h(frameId)}">
 						<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-						<div class="btn-group" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
-							<button type="submit" name="downloadserving" value="load" class="btn btn-default"><i class="fab fa-docker"></i><la:message key="labels.automl_download" /></button>
-							<la:link href="/admin/automl/model/${f:u(projectId)}/${f:u(model.modelId.name)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-hammer"></i><la:message key="labels.automl_model" /></la:link>
-							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
+						<div class="btn-group mb-2" role="toolbar" aria-label="Toolbar">
+							<button type="submit" name="downloadserving" value="load" class="btn btn-outline-primary"><i class="fab fa-docker"></i><la:message key="labels.automl_download" /></button>
+							<la:link href="/admin/automl/model/${f:u(projectId)}/${f:u(model.modelId.name)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-outline-primary"><i class="fas fa-hammer"></i><la:message key="labels.automl_model" /></la:link>
+							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-outline-primary"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
 						</div>
-						<div class="card-tools" role="toolbar" aria-label="Toolbar" style="margin-bottom:5px;">
-							<button type="submit" name="deletemodel" value="load" class="btn btn-default"><i class="fas fa-trash-alt"></i><la:message key="labels.automl_delete" /></button>
+						<div class="float-right">
+							<button type="submit" name="deletemodel" value="load" class="btn btn-outline-danger"><i class="fas fa-trash-alt"></i><la:message key="labels.automl_delete" /></button>
 						</div>
 						</form>
 					</div>
@@ -62,8 +62,8 @@
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_serving_with_docker" /></h3>
-								<div class="btn-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 								</div>

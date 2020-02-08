@@ -19,6 +19,7 @@
 						<div class="col-sm-6">
 							<h1>
 								<la:message key="labels.automl_dataview_title" arg0="${f:h(project.name)}" />
+								<small style="font-size:50%"><la:link href="/admin/automl/details/${f:u(project.id)}"><em class="fas fa-arrow-left"></em></la:link></small>
 							</h1>
 						</div>
 						<div class="col-sm-6">
@@ -41,46 +42,12 @@
 						<la:errors />
 					</div>
 					<div class="col-md-3">
-						<div class="card card-outline card-primary">
-							<div class="card-header">
-								<h3 class="card-title"><la:message key="labels.automl_actions" /></h3>
-								<div class="box-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
-								</div>
-							</div>
-							<div class="card-body">
-								<div class="row">
-									<form method="post" action="${contextPath}/admin/automl/">
-									<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
-									<input type="hidden" name="projectId" value="${f:h(project.id)}">
-									<div class="btn-group-vertical col-sm-12" role="group" aria-label="Actions">
-										<c:if test="${not empty frameId}">
-										<div class="input-group">
-											<span class="input-group-addon" id="basic-addon1"><i class="fas fa-table"></i></span>
-											<span class="form-control">${f:h(fi:frameName(frameId))}</span>
-										</div>
-										</c:if>
-										<c:if test="${not empty frameId and leaderboard != null}">
-										<div class="input-group">
-											<span class="input-group-addon" id="basic-addon1"><i class="fas fa-hammer"></i></span>
-											<span class="form-control">${f:h(leaderboardId)}</span>
-										</div>
-										</c:if>
-										<la:link href="/admin/automl/details/${f:u(project.id)}" styleClass="btn btn-default">
-											<em class="fas fa-project-diagram"></em>
-											<la:message key="labels.automl_project" />
-										</la:link>
-									</div>
-									</form>
-								</div>
-							</div>
-						</div>
 						<c:if test="${columnSummaries != null}">
 							<div class="card card-outline card-primary">
 								<div class="card-header">
 									<h3 class="card-title">${f:h(fi:frameName(frameId))}</h3>
-									<div class="box-tools pull-right">
-										<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+									<div class="card-tools">
+										<button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fa fa-minus"></i></button>
 									</div>
 								</div>
 								<div class="card-body">
@@ -106,8 +73,8 @@
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_datasets" /></h3>
-								<div class="box-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
 							<div class="card-body">
@@ -126,7 +93,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th style="width: 30%" class=" text-center"><la:message key="labels.automl_action" /></th>
+														<th style="width:35%"></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -173,8 +140,8 @@
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_frames" /></h3>
-								<div class="box-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
 							<div class="card-body">
@@ -193,7 +160,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th style="width: 25%" class="text-center"><la:message key="labels.automl_action" /></th>
+														<th style="width:30%"></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -224,13 +191,13 @@
 							<div class="card card-outline card-primary">
 								<div class="card-header">
 									<h3 class="card-title"><la:message key="labels.automl_data_summaries" arg0="${f:h(fi:frameName(frameId))}" /></h3>
-									<div class="box-tools pull-right">
+									<div class="card-tools">
 										<span class="badge bg-info"><la:message key="labels.automl_data_and_column" arg0="${f:h(frameData.rowOffset+1)}" arg1="${f:h(frameData.columnOffset+1)}" /></span>
 										<c:if test="${frameData.columnOffset > 0}"><a href="${contextPath}/admin/automl/dataview/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset-20)}" class="btn btn-box-tool"><i class="fas fa-arrow-left"></i></a></c:if>
 										<c:if test="${frameData.columnOffset + 20 < frameData.numColumns}"><a href="${contextPath}/admin/automl/dataview/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset)}&data.column_offset=${f:u(frameData.columnOffset+20)}" class="btn btn-box-tool"><i class="fas fa-arrow-right"></i></a></c:if>
 										<c:if test="${frameData.rowOffset > 0}"><a href="${contextPath}/admin/automl/dataview/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset-20)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-up"></i></a></c:if>
 										<c:if test="${frameData.rowOffset + 20 < frameData.rows}"><a href="${contextPath}/admin/automl/dataview/${f:u(project.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&data.row_offset=${f:u(frameData.rowOffset+20)}&data.column_offset=${f:u(frameData.columnOffset)}" class="btn btn-box-tool"><i class="fas fa-arrow-down"></i></a></c:if>
-										<button type="button" class="btn btn-box-tool" data-widget="collapse">
+										<button type="button" class="btn btn-tool" data-card-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
 									</div>

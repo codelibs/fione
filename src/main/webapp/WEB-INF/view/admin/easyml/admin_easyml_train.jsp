@@ -16,10 +16,10 @@
 			<div class="content-header">
 				<div class="container-fluid">
 					<div class="row mb-2">
-						<div class="col-sm-6">
+						<div class="col-6">
 							<h1><la:message key="labels.easyml_data_analysis_in" arg0="${f:h(project.name)}" /></h1>
 						</div>
-						<div class="col-sm-6">
+						<div class="col-6">
 							<ol class="breadcrumb float-sm-right">
 								<li class="breadcrumb-item"><la:link href="../dataset">
 									<la:message key="labels.easyml_dataset" />
@@ -53,37 +53,34 @@
 									</div>
 								</div>
 								<div class="card-body">
-									<div class="form-group row col-sm-12">
+									<div class="form-group">
 										<label for="responseColumn"><la:message key="labels.easyml_predicted_column" /></label>
 										<la:errors property="responseColumn" />
-										<la:select property="responseColumn" styleId="responseColumn" styleClass="form-control">
+										<la:select property="responseColumn" styleId="responseColumn" styleClass="custom-select">
 											<c:forEach var="item" items="${columnItems}">
 												<la:option value="${f:u(item.id)}">${f:h(item.name)}</la:option>
 											</c:forEach>
 										</la:select>
 									</div>
-									<div class="form-group row col-sm-12">
-										<label for="responseColumn"><la:message key="labels.easyml_prediction_type" /></label>
-										<div class="radio">
-											<label><la:radio property="predictionType" value="b"></la:radio>
-												<la:message key="labels.easyml_binaryclass_classification" />
-											</label>
+									<div class="form-group">
+										<label><la:message key="labels.easyml_prediction_type" /></label>
+										<div class="form-check">
+											<la:radio property="predictionType" value="b" styleClass="form-check-input"></la:radio>
+											<label class="form-check-label" for="predictionType"><la:message key="labels.easyml_binaryclass_classification" /></label>
 										</div>
-										<div class="radio">
-											<label><la:radio property="predictionType" value="m"></la:radio>
-												<la:message key="labels.easyml_multiclass_classification" />
-											</label>
+										<div class="form-check">
+											<la:radio property="predictionType" value="m" styleClass="form-check-input"></la:radio>
+											<label class="form-check-label" for="predictionType"><la:message key="labels.easyml_multiclass_classification" /></label>
 										</div>
-										<div class="radio">
-											<label><la:radio property="predictionType" value="r"></la:radio>
-												<la:message key="labels.easyml_numeric_prediction" />
-											</label>
+										<div class="form-check">
+											<la:radio property="predictionType" value="r" styleClass="form-check-input"></la:radio>
+											<label class="form-check-label" for="predictionType"><la:message key="labels.easyml_numeric_prediction" /></label>
 										</div>
 									</div>
-									<div class="form-group row col-sm-12">
+									<div class="form-group">
 										<label for="maxRuntimeSecs"><la:message key="labels.easyml_max_execution_time" /></label>
 										<la:errors property="maxRuntimeSecs" />
-										<la:select property="maxRuntimeSecs" styleId="maxRuntimeSecs" styleClass="form-control">
+										<la:select property="maxRuntimeSecs" styleId="maxRuntimeSecs" styleClass="custom-select">
 											<la:option value="0"><la:message key="labels.easyml_unlimited" /></la:option>
 											<la:option value="60"><la:message key="labels.easyml_1m" /></la:option>
 											<la:option value="300"><la:message key="labels.easyml_5m" /></la:option>
@@ -116,14 +113,14 @@
 									<table class="table table-bordered table-striped">
 										<thead>
 											<tr>
-												<th class="col-sm-1 text-center"></th>
-												<th><la:message key="labels.automl_name" /></th>
-												<th class="col-sm-2 text-center"><la:message key="labels.automl_type" /></th>
-												<th class="col-sm-1"><la:message key="labels.automl_missing" /></th>
-												<th class="col-sm-1"><la:message key="labels.automl_min" /></th>
-												<th class="col-sm-1"><la:message key="labels.automl_max" /></th>
-												<th class="col-sm-1"><la:message key="labels.automl_mean" /></th>
-												<th class="col-sm-1"><la:message key="labels.automl_cardinality" /></th>
+												<th style="width:5%" scope="col"></th>
+												<th style="width:25%" scope="col"><la:message key="labels.automl_name" /></th>
+												<th style="width:20%" class="col-2 text-center" scope="col"><la:message key="labels.automl_type" /></th>
+												<th style="width:10%" scope="col"><la:message key="labels.automl_missing" /></th>
+												<th style="width:10%" scope="col"><la:message key="labels.automl_min" /></th>
+												<th style="width:10%" scope="col"><la:message key="labels.automl_max" /></th>
+												<th style="width:10%" scope="col"><la:message key="labels.automl_mean" /></th>
+												<th style="width:10%" scope="col"><la:message key="labels.automl_cardinality" /></th>
 											</tr>
 										</thead>
 										<tbody>
@@ -131,7 +128,7 @@
 												<tr>
 													<td class="text-center"><input type="checkbox" name="columns.${f:h(data.id)}"<c:if test="${columns.containsKey(data.id)}"> checked="checked"</c:if>></td>
 													<td>${f:h(data.name)}</td>
-													<td>
+													<td class="col-2">
 														<select name="columnTypes.${f:h(data.id)}" id="columnTypes.${f:h(data.id)}" class="form-control">
 														<c:forEach var="colType" items="${columnTypeItems}">
 															<option value="${f:u(colType.value)}" <c:if test="${colType.value == data.value}">selected</c:if>>${f:h(colType.label)}</option>

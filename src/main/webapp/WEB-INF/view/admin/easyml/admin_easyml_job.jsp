@@ -67,11 +67,11 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th><la:message key="labels.automl_destination" /></th>
-														<th class="col-sm-2 text-center"><la:message key="labels.automl_start_time" /></th>
-														<th class="col-sm-2 text-center"><la:message key="labels.automl_end_time" /></th>
-														<th class="col-sm-2 text-center"><la:message key="labels.automl_run_time" /></th>
-														<th class="col-sm-1 text-center"><la:message key="labels.automl_status" /></th>
+														<th style="width:45%"><la:message key="labels.automl_destination" /></th>
+														<th style="width:15%" class="text-center"><la:message key="labels.automl_start_time" /></th>
+														<th style="width:15%" class="text-center"><la:message key="labels.automl_end_time" /></th>
+														<th style="width:15%" class="text-center"><la:message key="labels.automl_run_time" /></th>
+														<th style="width:10%" class="text-center"><la:message key="labels.automl_status" /></th>
 													</tr>
 												</thead>
 												<tbody>

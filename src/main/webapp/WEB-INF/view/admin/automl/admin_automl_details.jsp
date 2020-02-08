@@ -19,7 +19,7 @@
 					<div class="row mb-2">
 						<div class="col-sm-6">
 							<h1>
-								<la:message key="labels.automl_project_title" arg0="${f:h(project.name)}" /> <small><la:link
+								<la:message key="labels.automl_project_title" arg0="${f:h(project.name)}" /> <small style="font-size:50%"><la:link
 									href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"
 							><i class="fas fa-redo-alt"></i></la:link></small>
 							</h1>
@@ -47,8 +47,8 @@
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_actions" /></h3>
-								<div class="box-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
 							<div class="card-body">
@@ -56,16 +56,16 @@
 									<form method="post" action="${contextPath}/admin/automl/">
 									<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
 									<input type="hidden" name="projectId" value="${f:h(project.id)}">
-									<div class="btn-group-vertical col-sm-12" role="group" aria-label="Actions">
+									<div class="btn-group-vertical" role="group" aria-label="Actions" style="display:block">
 										<c:if test="${not empty frameId}">
 										<div class="input-group">
-											<span class="input-group-addon" id="basic-addon1"><i class="fas fa-table"></i></span>
+											<div class="input-group-prepend" id="basic-addon1"><div class="input-group-text"><i class="fas fa-table"></i></div></div>
 											<span class="form-control">${f:h(fi:frameName(frameId))}</span>
 										</div>
 										</c:if>
 										<c:if test="${not empty frameId and leaderboard != null}">
 										<div class="input-group">
-											<span class="input-group-addon" id="basic-addon1"><i class="fas fa-hammer"></i></span>
+											<div class="input-group-prepend" id="basic-addon1"><div class="input-group-text"><i class="fas fa-hammer"></i></div></div>
 											<span class="form-control">${f:h(leaderboardId)}</span>
 										</div>
 										</c:if>
@@ -79,7 +79,7 @@
 
 										<div class="btn-group" role="group">
 											<button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true"
-												aria-expanded="false"><la:message key="labels.automl_options" /> <i class="fas fa-caret-down"></i></button>
+												aria-expanded="false"><la:message key="labels.automl_options" /></button>
 											<ul class="dropdown-menu">
 												<li><button type="submit" name="newsession" value="New Session" class="btn btn-link"><la:message key="labels.automl_new_session" /></button></li>
 												<li><button type="submit" name="deleteproject" value="Delete Project" class="btn btn-link"><la:message key="labels.automl_delete_project" /></button></li>
@@ -94,8 +94,8 @@
 							<div class="card card-outline card-primary">
 								<div class="card-header">
 									<h3 class="card-title">${f:h(fi:frameName(frameId))}</h3>
-									<div class="box-tools pull-right">
-										<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+									<div class="card-tools">
+										<button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fa fa-minus"></i></button>
 									</div>
 								</div>
 								<div class="card-body">
@@ -121,8 +121,8 @@
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_datasets" /></h3>
-								<div class="box-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
 							<div class="card-body">
@@ -141,7 +141,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th style="width: 30%" class=" text-center"><la:message key="labels.automl_action" /></th>
+														<th style="width:35%"></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -152,7 +152,7 @@
 														<input type="hidden" name="dataSetId" value="${f:h(data.id)}">
 														<input type="hidden" name="frameId" value="${f:h(frameId)}">
 														<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-															<td>
+															<td class="text-break">
 															<c:choose>
 															<c:when test="${data.type == 'train' and data.schema != null}">
 															<button type="submit" name="datasettype" value="test" class="btn btn-link" style="padding:0;"><i class="fas fa-chart-area" title="<la:message key="labels.automl_training_data" />"></i></button>
@@ -188,8 +188,8 @@
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_frames" /></h3>
-								<div class="box-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse"><i class="fa fa-minus"></i></button>
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fa fa-minus"></i></button>
 								</div>
 							</div>
 							<div class="card-body">
@@ -208,7 +208,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th style="width: 30%" class=" text-center"><la:message key="labels.automl_action" /></th>
+														<th style="width:35%"></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -239,8 +239,8 @@
 						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.automl_jobs" /></h3>
-								<div class="box-tools pull-right">
-									<button type="button" class="btn btn-box-tool" data-widget="collapse">
+								<div class="card-tools">
+									<button type="button" class="btn btn-tool" data-card-widget="collapse">
 										<i class="fa fa-minus"></i>
 									</button>
 									<button type="button" class="btn btn-box-tool dropdown-toggle" data-toggle="dropdown" aria-expanded="true">
@@ -274,12 +274,12 @@
 											<table class="table table-bordered table-striped small">
 												<thead>
 													<tr>
-														<th><la:message key="labels.automl_destination" /></th>
-														<th style="width: 20%" class=" text-center"><la:message key="labels.automl_start_time" /></th>
-														<th style="width: 20%" class=" text-center"><la:message key="labels.automl_end_time" /></th>
-														<th style="width: 20%" class=" text-center"><la:message key="labels.automl_run_time" /></th>
-														<th style="width: 15%" class="text-center"><la:message key="labels.automl_status" /></th>
-														<th style="width: 15%" class="text-center">&nbsp;</th>
+														<th style="width:35%"><la:message key="labels.automl_destination" /></th>
+														<th style="width:15%" class="text-center"><la:message key="labels.automl_start_time" /></th>
+														<th style="width:15%" class="text-center"><la:message key="labels.automl_end_time" /></th>
+														<th style="width:15%" class="text-center"><la:message key="labels.automl_run_time" /></th>
+														<th style="width:15%" class="text-center"><la:message key="labels.automl_status" /></th>
+														<th style="width:5%" class="text-center">&nbsp;</th>
 													</tr>
 												</thead>
 												<tbody>
@@ -344,8 +344,8 @@
 							<div class="card card-outline card-primary">
 								<div class="card-header">
 									<h3 class="card-title"><la:message key="labels.automl_column_summaries" arg0="${f:h(fi:frameName(frameId))}" /></h3>
-									<div class="box-tools pull-right">
-										<button type="button" class="btn btn-box-tool" data-widget="collapse">
+									<div class="card-tools">
+										<button type="button" class="btn btn-tool" data-card-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
 									</div>
@@ -397,8 +397,8 @@
 							<div class="card card-outline card-primary">
 								<div class="card-header">
 									<h3 class="card-title"><la:message key="labels.automl_model_summaries" arg0="${f:h(leaderboard.projectName)}" /></h3>
-									<div class="box-tools pull-right">
-										<button type="button" class="btn btn-box-tool" data-widget="collapse">
+									<div class="card-tools">
+										<button type="button" class="btn btn-tool" data-card-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
 										<button type="button" class="btn btn-box-tool dropdown-toggle" data-toggle="dropdown" aria-expanded="true">

@@ -45,7 +45,7 @@
 					</div>
 					<div class="col-md-3">
 						<div class="info-box">
-							<span class="info-box-icon bg-aqua"><i class="fas fa-table"></i></span>
+							<span class="info-box-icon bg-info"><i class="fas fa-table"></i></span>
 							<div class="info-box-content">
 								<span class="info-box-number"><la:message key="labels.easyml_x_rows" arg0="${f:h(columnSummaries.rows)}" /></span>
 								<span class="info-box-number"><la:message key="labels.easyml_x_columns" arg0="${f:h(columnSummaries.numColumns)}" /></span>
@@ -53,16 +53,17 @@
 							</div>
 						</div>
 						<div class="info-box">
-							<span class="info-box-icon bg-green"><i class="fas fa-hammer"></i></span>
+							<span class="info-box-icon bg-success"><i class="fas fa-hammer"></i></span>
 							<div class="info-box-content">
 								<span class="info-box-number"><la:message key="labels.easyml_x_models" arg0="${fn:length(leaderboard.models)}" /></span>
 								<div style="overflow: hidden; text-overflow: ellipsis;">
-									<span class="badge bg-success"><la:message key="labels.easyml_best" /></span> ${leaderboard.models[0].name}
+									<span class="badge bg-success"><la:message key="labels.easyml_best" /></span>
+									<div class="text-break">${leaderboard.models[0].name}</div>
 								</div>
 							</div>
 						</div>
 						<div class="info-box">
-							<span class="info-box-icon bg-yellow"><i class="fas fa-chart-line"></i></span>
+							<span class="info-box-icon bg-warning"><i class="fas fa-chart-line"></i></span>
 							<div class="info-box-content">
 								<span class="info-box-number">${f:h(predictionMetric.name)} ${fi:formatNumber(predictionMetric.value,"%.8f")}</span>
 								<span class="badge bg-warning"><la:message key="labels.easyml_accuracy" /></span>
@@ -80,7 +81,7 @@
 								<div class="card-header">
 									<h3 class="card-title"><la:message key="labels.easyml_datasets" /></h3>
 									<div class="card-tools">
-										<button type="button" class="btn btn-box-tool" data-widget="collapse">
+										<button type="button" class="btn btn-tool" data-card-widget="collapse">
 											<i class="fa fa-minus"></i>
 										</button>
 									</div>
@@ -92,7 +93,7 @@
 												<thead>
 													<tr>
 														<th><la:message key="labels.automl_name" /></th>
-														<th class="col-sm-4 text-center"><la:message key="labels.easyml_action" /></th>
+														<th class="w-25 text-center"></th>
 													</tr>
 												</thead>
 												<tbody>
@@ -125,7 +126,7 @@
 						</c:if>
 					</div>
 					<div class="col-md-9">
-						<div class="card bg-info">
+						<div class="card card-outline card-primary">
 							<div class="card-header">
 								<h3 class="card-title"><la:message key="labels.easyml_reports" /></h3>
 								<div class="card-tools">

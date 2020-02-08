@@ -3,15 +3,15 @@
 %>
 <div class="direct-chat-messages" style="height:auto;">
 	<div class="direct-chat-msg right">
-		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-right"><la:message key="labels.easyml_you" /></span>
+		<div class="direct-chat-infos clearfix">
+			<span class="direct-chat-name float-right"><la:message key="labels.easyml_you" /></span>
 		</div>
-		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
+		<span class="direct-chat-img"><em class="fas fa-user fa-2x float-right" style="color:#64a1fc;"></em></span>
 		<div class="direct-chat-text" style="background: #fff;"><la:message key="labels.easyml_what_do_you_think" /></div>
 	</div>
 	<div class="direct-chat-msg">
-		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
+		<div class="direct-chat-infos clearfix">
+			<span class="direct-chat-name float-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
@@ -36,15 +36,15 @@
 	</div>
 	<c:if test="${predictionMetric.accuracy>0.4}">
 	<div class="direct-chat-msg right">
-		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-right"><la:message key="labels.easyml_you" /></span>
+		<div class="direct-chat-infos clearfix">
+			<span class="direct-chat-name float-right"><la:message key="labels.easyml_you" /></span>
 		</div>
-		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
+		<span class="direct-chat-img"><em class="fas fa-user fa-2x float-right" style="color:#64a1fc;"></em></span>
 		<div class="direct-chat-text" style="background: #fff;"><la:message key="labels.easyml_which_model_should_I_use" /></div>
 	</div>
 	<div class="direct-chat-msg">
-		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
+		<div class="direct-chat-infos clearfix">
+			<span class="direct-chat-name float-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
@@ -52,15 +52,15 @@
 		</div>
 	</div>
 	<div class="direct-chat-msg right">
-		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-right"><la:message key="labels.easyml_you" /></span>
+		<div class="direct-chat-infos clearfix">
+			<span class="direct-chat-name float-right"><la:message key="labels.easyml_you" /></span>
 		</div>
-		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
+		<span class="direct-chat-img"><em class="fas fa-user fa-2x float-right" style="color:#64a1fc;"></em></span>
 		<div class="direct-chat-text" style="background: #fff;"><la:message key="labels.easyml_how_do_i_get_result" /></div>
 	</div>
 	<div class="direct-chat-msg">
-		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
+		<div class="direct-chat-infos clearfix">
+			<span class="direct-chat-name float-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
@@ -68,15 +68,15 @@
 		</div>
 	</div>
 	<div class="direct-chat-msg right">
-		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-right"><la:message key="labels.easyml_you" /></span>
+		<div class="direct-chat-infos clearfix">
+			<span class="direct-chat-name float-right"><la:message key="labels.easyml_you" /></span>
 		</div>
-		<span class="direct-chat-img"><em class="fas fa-user fa-2x pull-right" style="color:#64a1fc;"></em></span>
+		<span class="direct-chat-img"><em class="fas fa-user fa-2x float-right" style="color:#64a1fc;"></em></span>
 		<div class="direct-chat-text" style="background: #fff;"><la:message key="labels.easyml_how_do_i_integrate" /></div>
 	</div>
 	<div class="direct-chat-msg">
-		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
+		<div class="direct-chat-infos clearfix">
+			<span class="direct-chat-name float-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
@@ -85,8 +85,8 @@
 	</div>
 	</c:if>
 	<div class="direct-chat-msg">
-		<div class="direct-chat-info clearfix">
-			<span class="direct-chat-name pull-left"><la:message key="labels.easyml_fione" /></span>
+		<div class="direct-chat-infos clearfix">
+			<span class="direct-chat-name float-left"><la:message key="labels.easyml_fione" /></span>
 		</div>
 		<span class="direct-chat-img"><em class="fas fa-robot fa-2x" style="color: #f39c12;"></em></span>
 		<div class="direct-chat-text">
