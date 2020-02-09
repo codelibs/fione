@@ -8,7 +8,7 @@ Fione is AutoML extension for Fess.
 ## Documents
 
 - [fione.codelibs.org](https://fione.codelibs.org/)
-- [docker-fione](https://github.com/codelibs/docker-fione/blob/master/README.md#getting-started).
+- [docker-fione](https://github.com/codelibs/docker-fione/blob/master/README.md#getting-started)
 - [discuss.codelibs.org](https://discuss.codelibs.org/c/FioneEN)
 
 ## Development
