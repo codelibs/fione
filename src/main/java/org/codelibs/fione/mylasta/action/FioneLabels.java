@@ -56,6 +56,9 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Data Viewer: {0} */
     public static final String LABELS_automl_dataview_title = "{labels.automl_dataview_title}";
 
+    /** The key of the message: Data Viewer */
+    public static final String LABELS_automl_dataview = "{labels.automl_dataview}";
+
     /** The key of the message: Actions */
     public static final String LABELS_automl_actions = "{labels.automl_actions}";
 
@@ -545,7 +548,7 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: I provide Fione Serving API as Docker container. See &lt;a href="{0}"&gt;Serving page&lt;/a&gt;. */
     public static final String LABELS_easyml_how_do_i_integrate_answer = "{labels.easyml_how_do_i_integrate_answer}";
 
-    /** The key of the message: If you have any comments, please file it to &lt;a href="https://github.com/codelibs/fione/issues" target="_blank"&gt;github.com/codelibs/fione&lt;/a&gt;. */
+    /** The key of the message: If you have any comments, please post it to &lt;a href="https://discuss.codelibs.org/c/FioneEN" target="_blank"&gt;discuss.codelibs.org&lt;/a&gt;. */
     public static final String LABELS_easyml_any_comments = "{labels.easyml_any_comments}";
 
     /**

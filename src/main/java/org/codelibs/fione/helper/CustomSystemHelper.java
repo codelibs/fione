@@ -55,7 +55,6 @@ public class CustomSystemHelper extends SystemHelper {
 
     @Override
     public String getHelpLink(final String name) {
-        // TODO fione help
-        return super.getHelpLink(name);
+        return getHelpUrl("https://fione.codelibs.org/{lang}/");
     }
 }

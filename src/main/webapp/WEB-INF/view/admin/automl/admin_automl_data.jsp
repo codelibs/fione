@@ -19,7 +19,6 @@
 						<div class="col-sm-6">
 							<h1>
 								<la:message key="labels.automl_dataview_title" arg0="${f:h(project.name)}" />
-								<small style="font-size:50%"><la:link href="/admin/automl/details/${f:u(project.id)}"><em class="fas fa-arrow-left"></em></la:link></small>
 							</h1>
 						</div>
 						<div class="col-sm-6">
@@ -27,7 +26,10 @@
 								<li class="breadcrumb-item"><la:link href="../list">
 									<la:message key="labels.crud_link_list" />
 								</la:link></li>
-								<li class="breadcrumb-item active">${f:h(project.name)}</li>
+								<li class="breadcrumb-item"><la:link href="/admin/automl/details/${f:u(project.id)}">
+									${f:h(project.name)}
+								</la:link></li>
+								<li class="breadcrumb-item active"><la:message key="labels.automl_dataview" /></li>
 							</ol>
 						</div>
 					</div>
