@@ -43,25 +43,45 @@
 							<div class="alert alert-info">${msg}</div>
 						</la:info>
 						<la:errors />
-					</div>
-					<div class="col-md-12">
-					<form method="post" action="${contextPath}/admin/automl/">
-						<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
-						<input type="hidden" name="projectId" value="${f:h(projectId)}">
-						<input type="hidden" name="modelId" value="${f:h(model.modelId.name)}">
-						<input type="hidden" name="frameId" value="${f:h(frameId)}">
-						<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-						<div class="btn-group mb-2" role="toolbar" aria-label="Toolbar">
-							<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?mid=${f:u(model.modelId.name)}" class="btn btn-outline-primary"><i class="fas fa-file-signature"></i><la:message key="labels.automl_model_predict" /></a>
-							<button type="submit" name="downloadmojo" value="load" class="btn btn-outline-primary"><i class="fas fa-download"></i><la:message key="labels.automl_model_mojo" /></button>
-							<la:link href="/admin/automl/serving/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&mid=${f:u(model.modelId.name)}" styleClass="btn btn-outline-primary"><i class="fas fa-server"></i><la:message key="labels.automl_serving" /></la:link>
-							<button type="submit" name="exportmodel" value="load" class="btn btn-outline-primary"><i class="fas fa-file-export"></i><la:message key="labels.automl_model_export" /></button>
-							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-outline-primary"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
+						<div class="card card-outline">
+							<div class="card-body p-2">
+								<form method="post" action="${contextPath}/admin/automl/">
+								<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
+								<input type="hidden" name="projectId" value="${f:h(projectId)}">
+								<input type="hidden" name="modelId" value="${f:h(model.modelId.name)}">
+								<input type="hidden" name="frameId" value="${f:h(frameId)}">
+								<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
+								<div class="btn-group" role="toolbar" aria-label="Toolbar">
+									<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?mid=${f:u(model.modelId.name)}" class="btn btn-default">
+										<i class="fas fa-file-signature"></i>
+										<la:message key="labels.automl_predict_dataset" />
+									</a>
+									<la:link href="/admin/automl/serving/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}&mid=${f:u(model.modelId.name)}" styleClass="btn btn-default">
+										<i class="fas fa-server"></i>
+										<la:message key="labels.automl_serving" />
+									</la:link>
+									<button type="submit" name="downloadmojo" value="load" class="btn btn-default">
+										<i class="fas fa-download"></i>
+										<la:message key="labels.automl_model_mojo" />
+									</button>
+									<button type="submit" name="exportmodel" value="load" class="btn btn-default">
+										<i class="fas fa-file-export"></i>
+										<la:message key="labels.automl_model_export" />
+									</button>
+									<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+										<i class="fas fa-project-diagram"></i>
+										<la:message key="labels.automl_model_project" />
+									</la:link>
+								</div>
+								<div class="float-right">
+									<button type="submit" name="deletemodel" value="load" class="btn btn-outline-danger">
+										<i class="fas fa-trash-alt"></i>
+										<la:message key="labels.automl_delete" />
+									</button>
+								</div>
+								</form>
+							</div>
 						</div>
-						<div class="float-right">
-							<button type="submit" name="deletemodel" value="load" class="btn btn-outline-danger"><i class="fas fa-trash-alt"></i><la:message key="labels.automl_delete" /></button>
-						</div>
-						</form>
 					</div>
 					<div class="col-md-6">
 						<c:if test="${model.output.scoringHistory != null}">

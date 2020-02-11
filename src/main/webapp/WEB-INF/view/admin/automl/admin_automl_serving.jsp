@@ -40,23 +40,31 @@
 							<div class="alert alert-info">${msg}</div>
 						</la:info>
 						<la:errors />
-					</div>
-					<div class="col-md-12">
-					<form method="post" action="${contextPath}/admin/automl/">
-						<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
-						<input type="hidden" name="projectId" value="${f:h(projectId)}">
-						<input type="hidden" name="modelId" value="${f:h(model.modelId.name)}">
-						<input type="hidden" name="frameId" value="${f:h(frameId)}">
-						<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-						<div class="btn-group mb-2" role="toolbar" aria-label="Toolbar">
-							<button type="submit" name="downloadserving" value="load" class="btn btn-outline-primary"><i class="fab fa-docker"></i><la:message key="labels.automl_download" /></button>
-							<la:link href="/admin/automl/model/${f:u(projectId)}/${f:u(model.modelId.name)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-outline-primary"><i class="fas fa-hammer"></i><la:message key="labels.automl_model" /></la:link>
-							<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-outline-primary"><i class="fas fa-project-diagram"></i><la:message key="labels.automl_model_project" /></la:link>
+						<div class="card card-outline">
+							<div class="card-body p-2">
+								<form method="post" action="${contextPath}/admin/automl/">
+								<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
+								<input type="hidden" name="projectId" value="${f:h(projectId)}">
+								<input type="hidden" name="modelId" value="${f:h(model.modelId.name)}">
+								<input type="hidden" name="frameId" value="${f:h(frameId)}">
+								<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
+								<div class="btn-group" role="toolbar" aria-label="Toolbar">
+									<button type="submit" name="downloadserving" value="load" class="btn btn-default">
+										<i class="fab fa-docker"></i>
+										<la:message key="labels.automl_download" />
+									</button>
+									<la:link href="/admin/automl/model/${f:u(projectId)}/${f:u(model.modelId.name)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+										<i class="fas fa-hammer"></i>
+										<la:message key="labels.automl_model" />
+									</la:link>
+									<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+										<i class="fas fa-project-diagram"></i>
+										<la:message key="labels.automl_model_project" />
+									</la:link>
+								</div>
+								</form>
+							</div>
 						</div>
-						<div class="float-right">
-							<button type="submit" name="deletemodel" value="load" class="btn btn-outline-danger"><i class="fas fa-trash-alt"></i><la:message key="labels.automl_delete" /></button>
-						</div>
-						</form>
 					</div>
 					<div class="col-md-12">
 						<div class="card card-outline card-primary">
