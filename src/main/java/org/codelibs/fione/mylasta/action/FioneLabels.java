@@ -551,6 +551,9 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: If you have any comments, please post it to &lt;a href="https://discuss.codelibs.org/c/FioneEN" target="_blank"&gt;discuss.codelibs.org&lt;/a&gt;. */
     public static final String LABELS_easyml_any_comments = "{labels.easyml_any_comments}";
 
+    /** The key of the message: Output Columns */
+    public static final String LABELS_easyml_output_columns = "{labels.easyml_output_columns}";
+
     /**
      * Assert the property is not null.
      * @param property The value of the property. (NotNull)

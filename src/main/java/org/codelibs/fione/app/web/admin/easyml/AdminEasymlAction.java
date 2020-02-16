@@ -22,6 +22,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -53,6 +54,7 @@ import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.util.StringCodecUtil;
+import org.lastaflute.di.util.tiger.Maps;
 import org.lastaflute.web.Execute;
 import org.lastaflute.web.UrlChain;
 import org.lastaflute.web.response.ActionResponse;
@@ -354,14 +356,15 @@ public class AdminEasymlAction extends FioneAdminAction {
                 predictDataSet.setType(DataSet.TEST);
                 projectHelper.store(form.projectId, predictDataSet);
                 projectHelper.createFrame(form.projectId, predictDataSet, response -> {
-                    String name = fileName;
-                    final int pos = name.lastIndexOf('.');
-                    if (pos != -1) {
-                        name = name.substring(0, pos);
-                    }
                     projectHelper.predict(form.projectId, keyToString(response.body().destinationFrame),
-                            keyToString(leaderboard.models[0]),
-                            name + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(systemHelper.getCurrentTime()));
+                            keyToString(leaderboard.models[0]), form.name, d -> {
+                                if (form.columnNames != null && form.columnNames.length > 0) {
+                                    final Map<String, String> columnMap = new LinkedHashMap<>();
+                                    Arrays.stream(form.columnNames).map(StringCodecUtil::decode).forEach(s -> columnMap.put(s, s));
+                                    columnMap.put("predict", getResponseColumn(leaderboard.projectName));
+                                    projectHelper.filterColumns(form.projectId, d, columnMap);
+                                }
+                            });
                 });
             });
             saveMessage(messages -> messages.addSuccessUploadedDataset(GLOBAL, fileName));
@@ -627,13 +630,39 @@ public class AdminEasymlAction extends FioneAdminAction {
         if (project == null) {
             throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, projectId), this::asListHtml);
         }
+        final LeaderboardV99 leaderboard = projectHelper.getLeaderboard(projectId, leaderboardId);
+        final String responseColumn;
+        final String modelName;
+        if (leaderboard != null) {
+            responseColumn = getResponseColumn(leaderboard.projectName);
+            if (leaderboard.models != null && leaderboard.models.length > 0) {
+                modelName = "predict_" + leaderboard.models[0].name;
+            } else {
+                modelName = "predict_" + new SimpleDateFormat("yyyyMMddHHmmss").format(systemHelper.getCurrentTime());
+            }
+        } else {
+            responseColumn = null;
+            modelName = "predict_" + new SimpleDateFormat("yyyyMMddHHmmss").format(systemHelper.getCurrentTime());
+        }
         return asHtml(path_AdminEasyml_AdminEasymlPredictJsp).useForm(UploadPredictionForm.class, setup -> setup.setup(form -> {
             form.projectId = projectId;
             form.dataSetId = dataSetId;
             form.leaderboardId = leaderboardId;
-        })).renderWith(data -> {
-            RenderDataUtil.register(data, "project", project);
-        });
+            form.name = modelName;
+        })).renderWith(
+                data -> {
+                    RenderDataUtil.register(data, "project", project);
+                    final List<Map<String, String>> columnList = new ArrayList<>();
+                    final DataSet dataSet = project.getDataSet(dataSetId);
+                    if (dataSet != null) {
+                        final ParseV3 schema = dataSet.getSchema();
+                        if (schema != null) {
+                            Arrays.stream(schema.columnNames).filter(s -> !s.equals(responseColumn))
+                                    .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
+                        }
+                    }
+                    RenderDataUtil.register(data, "columnItems", columnList);
+                });
     }
 
     private HtmlResponse redirectJobHtml(final String projectId) {

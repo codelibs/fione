@@ -61,10 +61,28 @@
 										<la:errors property="_global" />
 									</div>
 									<div class="form-group row">
+										<label for="name" class="col-sm-3 col-form-label"><la:message key="labels.easyml_name" /></label>
+										<div class="col-sm-9">
+											<la:errors property="name" />
+											<la:text property="name" styleId="name" styleClass="form-control"/>
+										</div>
+									</div>
+									<div class="form-group row">
 										<label for="file" class="col-sm-3 col-form-label"><la:message key="labels.easyml_prediction_data" /></label>
 										<div class="col-sm-9">
 											<la:errors property="file" />
 											<input type="file" name="file" class="form-control-file"/>
+										</div>
+									</div>
+									<div class="form-group row">
+										<label for="columnNames" class="col-sm-3 col-form-label"><la:message key="labels.easyml_output_columns" /></label>
+										<div class="col-sm-9">
+											<la:errors property="columnNames" />
+											<la:select property="columnNames" styleId="columnNames" multiple="true" styleClass="form-control">
+												<c:forEach var="item" items="${columnItems}">
+													<la:option value="${f:u(item.value)}">${f:h(item.label)}</la:option>
+												</c:forEach>
+											</la:select>
 										</div>
 									</div>
 								</div>

@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.app.web.admin.easyml;
 
+import org.codelibs.core.lang.StringUtil;
 import org.lastaflute.web.ruts.multipart.MultipartFormFile;
 import org.lastaflute.web.validation.Required;
 
@@ -30,5 +31,10 @@ public class UploadPredictionForm {
 
     @Required
     public MultipartFormFile file;
+
+    public String[] columnNames = StringUtil.EMPTY_STRINGS;
+
+    @Required
+    public String name;
 
 }

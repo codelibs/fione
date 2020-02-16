@@ -22,6 +22,9 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.io.PrintWriter;
 import java.io.Reader;
 import java.io.StringWriter;
@@ -29,13 +32,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -45,6 +51,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.codelibs.core.io.CopyUtil;
 import org.codelibs.core.lang.StringUtil;
+import org.codelibs.core.lang.ThreadUtil;
 import org.codelibs.core.net.UuidUtil;
 import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fess.exception.StorageException;
@@ -87,7 +94,11 @@ import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.Lists;
 import com.google.gson.Gson;
+import com.orangesignal.csv.CsvConfig;
+import com.orangesignal.csv.CsvReader;
+import com.orangesignal.csv.CsvWriter;
 
+import io.minio.ErrorCode;
 import io.minio.MinioClient;
 import io.minio.Result;
 import io.minio.errors.ErrorResponseException;
@@ -689,6 +700,11 @@ public class ProjectHelper {
     }
 
     public void predict(final String projectId, final String frameId, final String modelId, final String name) {
+        predict(projectId, frameId, modelId, name, d -> {});
+    }
+
+    public void predict(final String projectId, final String frameId, final String modelId, final String name,
+            final Consumer<DataSet> consumer) {
         final JobV3 workingJob = createWorkingJob(name, "Export Prediction", 0.25f);
         store(projectId, workingJob);
         h2oHelper.predict(modelId, frameId).execute(
@@ -722,6 +738,7 @@ public class ProjectHelper {
                                                                                 StringCodecUtil.encodeUrlSafe(name + ".csv"));
                                                                 dataSet.setType(DataSet.PREDICT);
                                                                 store(projectId, dataSet);
+                                                                consumer.accept(dataSet);
                                                                 finish(projectId, workingJob, null);
                                                             } else {
                                                                 logger.warn("Failed to export frame: {}", exportFrameResponse);
@@ -1043,6 +1060,98 @@ public class ProjectHelper {
                 finish(projectId, workingJob, new H2oAccessException("Failed to export " + (size - counter.get()) + " models."));
             }
         }, "ExportAllModels").start();
+    }
+
+    protected InputStream openStorageObject(final MinioClient minioClient, final String bucketName, final String objectName) {
+        for (int i = 0; i < 60; i++) {
+            try {
+                return minioClient.getObject(bucketName, objectName);
+            } catch (final ErrorResponseException e) {
+                if (e.errorResponse().errorCode() != ErrorCode.NO_SUCH_OBJECT) {
+                    throw new StorageException("Failed to access " + objectName, e);
+                }
+            } catch (final Exception e) {
+                throw new StorageException("Failed to access " + objectName, e);
+            }
+            ThreadUtil.sleepQuietly(1000L);
+        }
+        throw new StorageException(objectName + " does not exist");
+    }
+
+    public void filterColumns(final String projectId, final DataSet dataSet, final Map<String, String> columnMap) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+        final String objectName = getDataPath(projectId, dataSet.getName());
+        final String tempObjectName = objectName + ".tmp";
+        final CsvConfig csvConfig = new CsvConfig(',', '"', '"');
+        csvConfig.setIgnoreEmptyLines(true);
+        try (final CsvReader csvReader =
+                new CsvReader(new InputStreamReader(openStorageObject(minioClient, fessConfig.getStorageBucket(), objectName),
+                        Constants.UTF_8_CHARSET), csvConfig)) {
+            final Map<String, Integer> indexMap = new HashMap<>();
+            final List<String> headerList = csvReader.readValues();
+            for (int i = 0; i < headerList.size(); i++) {
+                final String name = headerList.get(i);
+                if (columnMap.containsKey(name)) {
+                    indexMap.put(columnMap.get(name), i);
+                }
+            }
+            if (indexMap.isEmpty()) {
+                if (logger.isDebugEnabled()) {
+                    logger.debug("columns do not exist: {}", columnMap);
+                }
+                return;
+            }
+
+            try (final PipedOutputStream pipedOut = new PipedOutputStream(); final PipedInputStream pipedIn = new PipedInputStream()) {
+                final Thread pipeWriter = new Thread(() -> {
+                    try {
+                        minioClient.putObject(fessConfig.getStorageBucket(), tempObjectName, pipedIn, null, null, null, null);
+                    } catch (final Exception e) {
+                        logger.warn("Failed to write {}.", tempObjectName, e);
+                    }
+                });
+
+                pipedIn.connect(pipedOut);
+                pipeWriter.start();
+
+                try (final CsvWriter csvWriter = new CsvWriter(new OutputStreamWriter(pipedOut), csvConfig)) {
+                    final List<String> indices = columnMap.values().stream().collect(Collectors.toList());
+                    csvWriter.writeValues(indices);
+                    List<String> list;
+                    while ((list = csvReader.readValues()) != null) {
+                        final List<String> l = list;
+                        final List<String> valueList = indices.stream().map(s -> {
+                            if (indexMap.containsKey(s)) {
+                                final int index = indexMap.get(s).intValue();
+                                if (index < l.size()) {
+                                    return l.get(index);
+                                }
+                            }
+                            return StringUtil.EMPTY;
+                        }).collect(Collectors.toList());
+                        csvWriter.writeValues(valueList);
+                    }
+                }
+                pipeWriter.join();
+            }
+        } catch (final Exception e) {
+            throw new StorageException("Failed to write " + objectName, e);
+        }
+
+        try {
+            if (logger.isDebugEnabled()) {
+                logger.debug("copying {} to {}.", tempObjectName, objectName);
+            }
+            minioClient.copyObject(fessConfig.getStorageBucket(), objectName, null, null, fessConfig.getStorageBucket(), tempObjectName,
+                    null, null);
+            if (logger.isDebugEnabled()) {
+                logger.debug("removing {}.", tempObjectName);
+            }
+            minioClient.removeObject(fessConfig.getStorageBucket(), tempObjectName);
+        } catch (final Exception e) {
+            throw new StorageException("Failed to update " + objectName, e);
+        }
     }
 
     protected JobV3 createWorkingJob(final String target, final String description, final float progress) {

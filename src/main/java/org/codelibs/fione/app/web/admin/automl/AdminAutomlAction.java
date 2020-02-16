@@ -698,12 +698,12 @@ public class AdminAutomlAction extends FioneAdminAction {
                     RenderDataUtil.register(data, "dockerZipName", getServingZipName(projectId, modelId));
                     RenderDataUtil.register(data, "dockerTagName", getProjectNameId(projectId));
                     if (model instanceof ModelSchemaV3) {
-                        ModelOutputSchemaV3 outputSchema = ((ModelSchemaV3<?, ?>) model).output;
-                        Map<String, Object> instanceMap = new HashMap<>();
+                        final ModelOutputSchemaV3 outputSchema = ((ModelSchemaV3<?, ?>) model).output;
+                        final Map<String, Object> instanceMap = new HashMap<>();
                         for (int i = 0; i < outputSchema.names.length; i++) {
-                            String name = outputSchema.names[i];
+                            final String name = outputSchema.names[i];
                             if (!model.responseColumnName.equals(name)) {
-                                String convertColumnType = projectHelper.convertColumnType(outputSchema.columnTypes[i]);
+                                final String convertColumnType = projectHelper.convertColumnType(outputSchema.columnTypes[i]);
                                 if ("numeric".equals(convertColumnType)) {
                                     instanceMap.put(name, 0.0);
                                 } else {
