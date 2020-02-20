@@ -9,6 +9,8 @@
 	<div class="wrapper">
 		<jsp:include page="/WEB-INF/view/common/admin/header.jsp"></jsp:include>
 		<jsp:include page="/WEB-INF/view/common/admin/sidebar.jsp">
+			<jsp:param name="brandName" value="Fione" />
+			<jsp:param name="logoPath" value="${fe:url('/images/fione/logo-head.png')}" />
 			<jsp:param name="menuCategoryType" value="fione" />
 			<jsp:param name="menuType" value="easyml" />
 		</jsp:include>
