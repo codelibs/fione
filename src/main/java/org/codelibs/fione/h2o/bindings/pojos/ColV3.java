@@ -15,6 +15,11 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import org.codelibs.fione.entity.ChartData;
+
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
@@ -150,4 +155,36 @@ public class ColV3 extends SchemaV3 {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
+    public ChartData getHistogramChart() {
+        if (histogramBins != null) {
+            final ChartData chartData = new ChartData();
+            final String xName = "interval";
+            final String yName = "count";
+            final int range = histogramBins.length / 50;
+            double pos = histogramBase;
+            final List<Double> xList = new ArrayList<>();
+            final List<Long> yList = new ArrayList<>();
+            long sum = 0;
+            for (int i = 0; i < histogramBins.length; i++) {
+                if (i % range == 0) {
+                    xList.add(pos);
+                    if (i != 0) {
+                        yList.add(sum);
+                        sum = 0;
+                    }
+                }
+                pos += histogramStride;
+                sum += histogramBins[i];
+            }
+            yList.add(sum);
+            chartData.addColumn(xName, xList.toArray(n -> new Double[n]));
+            chartData.addColumn(label, yList.toArray(n -> new Long[n]));
+            chartData.setAxisName(xName);
+            chartData.addAxisLabel("x", xName);
+            chartData.addAxisLabel("y", yName);
+            return chartData;
+
+        }
+        return null;
+    }
 }

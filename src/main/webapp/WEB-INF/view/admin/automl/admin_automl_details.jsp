@@ -373,7 +373,9 @@
 												<tbody>
 													<c:forEach var="data" varStatus="s" items="${columnSummaries.columns}">
 														<tr>
-															<td>${f:h(data.label)}</td>
+															<td>
+															<la:link href="/admin/automl/columnview/${f:u(project.id)}/${f:u(data.label)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(data.label)}</la:link>
+															</td>
 															<td>${f:h(data.type)}</td>
 															<td>${f:h(data.missingCount)}</td>
 															<td>${f:h(data.zeroCount)}</td>

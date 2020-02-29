@@ -67,6 +67,7 @@ import org.codelibs.fione.h2o.bindings.H2oApi;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
+import org.codelibs.fione.h2o.bindings.pojos.ColV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
@@ -871,6 +872,40 @@ public class ProjectHelper {
             });
             frameData.refresh();
             return frameData;
+        } catch (final Exception e) {
+            if (e.getCause() instanceof CacheNotFoundException) {
+                return null;
+            }
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to get data from cache.", e);
+            }
+            return null;
+
+        }
+    }
+
+    public ColV3 getFrameColumnData(final FramesV3 params) {
+        try {
+            final String cacheKey = params.toString();
+            final ColV3 colData =
+                    (ColV3) responseCache.get(cacheKey, () -> {
+                        final Response<FramesV3> response = h2oHelper.getFrameColumnData(params).execute();
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("getFrameColumnData: {}", response);
+                        }
+                        if (response.code() == 200) {
+                            final FramesV3 frames = response.body();
+                            if (frames.frames != null && frames.frames.length > 0 && frames.frames[0] != null
+                                    && frames.frames[0].columns.length > 0) {
+                                return frames.frames[0].columns[0];
+                            }
+                        } else if (response.code() == 404) {
+                            throw new CacheNotFoundException();
+                        }
+                        logger.warn("Failed to read leaderboard: {}", response);
+                        throw new CacheNotFoundException();
+                    });
+            return colData;
         } catch (final Exception e) {
             if (e.getCause() instanceof CacheNotFoundException) {
                 return null;

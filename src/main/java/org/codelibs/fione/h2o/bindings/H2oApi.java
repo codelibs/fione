@@ -2306,16 +2306,16 @@ public class H2oApi {
     /**
      * Return the summary metrics for a column, e.g. min, max, mean, sigma, percentiles, etc.
      */
-    public FramesV3 frameColumnSummary(final FrameKeyV3 frameId, final String column) throws IOException {
+    public Call<FramesV3> frameColumnSummary(final FrameKeyV3 frameId, final String column) {
         final Frames s = getService(Frames.class);
-        return s.columnSummary(keyToString(frameId), column).execute().body();
+        return s.columnSummary(keyToString(frameId), column);
     }
 
-    public FramesV3 frameColumnSummary(final FramesV3 params) throws IOException {
+    public Call<FramesV3> frameColumnSummary(final FramesV3 params) {
         final Frames s = getService(Frames.class);
         return s.columnSummary(keyToString(params.frameId), params.column, params.rowOffset, params.rowCount, params.columnOffset,
                 params.fullColumnCount, params.columnCount, params.findCompatibleModels, params.path, params.force, params.numParts,
-                params.compression, params.separator, params._excludeFields).execute().body();
+                params.compression, params.separator, params._excludeFields);
     }
 
     /**
@@ -2336,31 +2336,31 @@ public class H2oApi {
     /**
      * Return the specified column from a Frame.
      */
-    public FramesV3 frameColumn(final FrameKeyV3 frameId, final String column) throws IOException {
+    public Call<FramesV3> frameColumn(final FrameKeyV3 frameId, final String column) {
         final Frames s = getService(Frames.class);
-        return s.column(keyToString(frameId), column).execute().body();
+        return s.column(keyToString(frameId), column);
     }
 
-    public FramesV3 frameColumn(final FramesV3 params) throws IOException {
+    public Call<FramesV3> frameColumn(final FramesV3 params) {
         final Frames s = getService(Frames.class);
         return s.column(keyToString(params.frameId), params.column, params.rowOffset, params.rowCount, params.columnOffset,
                 params.fullColumnCount, params.columnCount, params.findCompatibleModels, params.path, params.force, params.numParts,
-                params.compression, params.separator, params._excludeFields).execute().body();
+                params.compression, params.separator, params._excludeFields);
     }
 
     /**
      * Return all the columns from a Frame.
      */
-    public FramesV3 frameColumns(final FrameKeyV3 frameId) throws IOException {
+    public Call<FramesV3> frameColumns(final FrameKeyV3 frameId) {
         final Frames s = getService(Frames.class);
-        return s.columns(keyToString(frameId)).execute().body();
+        return s.columns(keyToString(frameId));
     }
 
-    public FramesV3 frameColumns(final FramesV3 params) throws IOException {
+    public Call<FramesV3> frameColumns(final FramesV3 params) {
         final Frames s = getService(Frames.class);
         return s.columns(keyToString(params.frameId), params.column, params.rowOffset, params.rowCount, params.columnOffset,
                 params.fullColumnCount, params.columnCount, params.findCompatibleModels, params.path, params.force, params.numParts,
-                params.compression, params.separator, params._excludeFields).execute().body();
+                params.compression, params.separator, params._excludeFields);
     }
 
     /**

@@ -48,6 +48,7 @@ import org.codelibs.fione.h2o.bindings.pojos.AutoMLCustomParameterV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecScopeProvider;
+import org.codelibs.fione.h2o.bindings.pojos.ColV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
@@ -284,6 +285,76 @@ public class AdminAutomlAction extends FioneAdminAction {
                 }
                 if (frameData != null) {
                     RenderDataUtil.register(data, "frameData", frameData);
+                }
+            });
+        } catch (final Exception e) {
+            logger.warn("Failed to read " + projectId, e);
+            throw validationError(messages -> messages.addErrorsFailedToLoadProject(GLOBAL, StringCodecUtil.decode(projectId)),
+                    this::asListHtml);
+        }
+    }
+
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public HtmlResponse columnview(final String projectId, final String columnName) {
+        final String token = doubleSubmitManager.saveToken(myTokenGroupType());
+        try {
+            final Project project = projectHelper.getProject(projectId);
+            final String frameId = LaRequestUtil.getOptionalRequest().map(req -> {
+                final String fid = req.getParameter(FRAME_ID);
+                if (fid != null) {
+                    for (final String id : project.getFrameIds()) {
+                        if (fid.equals(id)) {
+                            return id;
+                        }
+                    }
+                }
+                if (project.getFrameIds().length > 0) {
+                    return project.getFrameIds()[0];
+                }
+                return null;
+            }).orElse(null);
+            final FrameV3 columnSummaries = frameId != null ? projectHelper.getColumnSummaries(projectId, frameId) : null;
+
+            final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> {
+                final String mid = req.getParameter(LEADERBOARD_ID);
+                String lastId = null;
+                for (final JobV3 id : project.getJobs()) {
+                    if (id.getKind() == Kind.AUTO_ML && "DONE".equals(id.status)) {
+                        final String destId = keyToString(id.dest);
+                        if (mid != null && mid.equals(destId)) {
+                            return destId;
+                        }
+                        lastId = destId;
+                    }
+                }
+                if (lastId != null) {
+                    return lastId;
+                }
+                return null;
+            }).orElse(null);
+
+            final ColV3 columnData = LaRequestUtil.getOptionalRequest().map(req -> {
+                if (frameId == null) {
+                    return null;
+                }
+                final FramesV3 params = new FramesV3();
+                params.frameId = new FrameKeyV3(frameId);
+                params.column = columnName;
+                return projectHelper.getFrameColumnData(params);
+            }).orElse(null);
+
+            return asHtml(path_AdminAutoml_AdminAutomlColumnJsp).renderWith(data -> {
+                RenderDataUtil.register(data, "token", token);
+                RenderDataUtil.register(data, "project", project);
+                RenderDataUtil.register(data, "frameId", frameId);
+                RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+                RenderDataUtil.register(data, "columnName", columnName);
+                if (columnSummaries != null) {
+                    RenderDataUtil.register(data, "columnSummaries", columnSummaries);
+                }
+                if (columnData != null) {
+                    RenderDataUtil.register(data, "columnData", columnData);
                 }
             });
         } catch (final Exception e) {

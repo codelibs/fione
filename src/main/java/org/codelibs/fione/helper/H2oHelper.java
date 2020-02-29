@@ -236,6 +236,10 @@ public class H2oHelper {
         return new Callable<>(getH2oApi().frame(params));
     }
 
+    public Callable<FramesV3> getFrameColumnData(final FramesV3 params) {
+        return new Callable<>(getH2oApi().frameColumnSummary(params.frameId, params.column));
+    }
+
     public Callable<InitIDV3> newSession() {
         return new Callable<>(getH2oApi().newSession(getSessionKey()));
     }

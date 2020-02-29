@@ -377,6 +377,15 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: To check model information, you can see the following result. */
     public static final String LABELS_automl_show_model_info = "{labels.automl_show_model_info}";
 
+    /** The key of the message: Column Viewer: {0} - {1} */
+    public static final String LABELS_automl_columnview_title = "{labels.automl_columnview_title}";
+
+    /** The key of the message: Column Viewer */
+    public static final String LABELS_automl_columnview = "{labels.automl_columnview}";
+
+    /** The key of the message: Histogram: {0} */
+    public static final String LABELS_automl_column_histogram = "{labels.automl_column_histogram}";
+
     /** The key of the message: Serving */
     public static final String LABELS_automl_serving = "{labels.automl_serving}";
 
