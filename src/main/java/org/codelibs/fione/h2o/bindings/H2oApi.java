@@ -2265,14 +2265,14 @@ public class H2oApi {
     /**
      * Cancel a running job.
      */
-    public JobsV3 cancelJob(final JobKeyV3 jobId) throws IOException {
+    public Call<JobsV3> cancelJob(final JobKeyV3 jobId) {
         final Jobs s = getService(Jobs.class);
-        return s.cancel(keyToString(jobId)).execute().body();
+        return s.cancel(keyToString(jobId));
     }
 
-    public JobsV3 cancelJob(final JobKeyV3 jobId, final String _excludeFields) throws IOException {
+    public Call<JobsV3> cancelJob(final JobKeyV3 jobId, final String _excludeFields) {
         final Jobs s = getService(Jobs.class);
-        return s.cancel(keyToString(jobId), _excludeFields).execute().body();
+        return s.cancel(keyToString(jobId), _excludeFields);
     }
 
     /**

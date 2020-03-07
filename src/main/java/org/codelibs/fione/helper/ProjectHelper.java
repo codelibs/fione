@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.helper;
 
+import static org.codelibs.core.stream.StreamUtil.stream;
 import static org.codelibs.fione.h2o.bindings.H2oApi.keyToString;
 
 import java.io.BufferedOutputStream;
@@ -40,6 +41,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
@@ -218,6 +220,10 @@ public class ProjectHelper {
     }
 
     protected String[] getFrames(final Project project) {
+        return getFrames(project, (x, y) -> x.startsWith(y));
+    }
+
+    protected String[] getFrames(final Project project, final BiPredicate<String, String> condition) {
         final List<String> frameIdList = new ArrayList<>();
         Arrays.stream(project.getDataSets()).map(d -> getFrameName(project.getId(), d.getId())).forEach(baseName -> {
             try {
@@ -228,7 +234,7 @@ public class ProjectHelper {
                 if (response.code() == 200) {
                     for (final FrameBaseV3 frame : response.body().frames) {
                         final String frameId = keyToString(frame.frameId);
-                        if (frameId != null && frameId.startsWith(baseName)) {
+                        if (frameId != null && condition.test(frameId, baseName)) {
                             frameIdList.add(frameId);
                         }
                     }
@@ -617,40 +623,53 @@ public class ProjectHelper {
         } finally {
             jobLock.writeLock().unlock();
         }
+
+        final JobKeyV3 jobKey = new JobKeyV3(jobId);
+        h2oHelper.getJobs(jobKey).execute(getJobResponse -> {
+            if (logger.isDebugEnabled()) {
+                logger.debug("getJobs: {}", getJobResponse);
+            }
+            if (getJobResponse.code() == 200) {
+                final JobV3 job = getJobResponse.body().findJob(jobId);
+                if (job != null && JobV3.RUNNING.equals(job.status)) {
+                    final Response<JobsV3> cancelJobResponse = h2oHelper.cancelJob(jobKey).execute();
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("cancelJob: {}", cancelJobResponse);
+                    }
+                }
+            } else {
+                logger.warn("Failed to get job: {}", getJobResponse);
+            }
+        }, t -> logger.warn("Failed to get job: {}", jobId, t));
     }
 
     public synchronized void deleteAllJobs(final String projectId) {
         jobLock.writeLock().lock();
         try {
-            store(projectId, new JobV3[0]);
-        } finally {
-            jobLock.writeLock().unlock();
-        }
-    }
-
-    protected void refreshJobs(final String projectId) {
-        jobLock.writeLock().lock();
-        try {
-            store(projectId, Arrays.stream(getJobs(projectId, false)).filter(job -> {
-                try {
-                    final String jobKey = keyToString(job.key);
-                    final Response<JobsV3> response = h2oHelper.getJobs(jobKey).execute(requestTimeout);
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("getJobs: {}", response);
-                    }
-                    if (response.code() == 200) {
-                        for (final JobV3 j : response.body().jobs) {
-                            if (jobKey.equals(keyToString(j.key))) {
-                                return true;
+            final JobV3[] jobs =
+                    Arrays.stream(getJobs(projectId, false)).filter(j -> j.getKind() == Kind.AUTO_ML && !JobV3.RUNNING.equals(j.status))
+                            .toArray(n -> new JobV3[n]);
+            if (jobs.length > 0) {
+                new Thread(() -> stream(jobs).of(
+                        stream -> stream.forEach(job -> {
+                            final String leaderboardId = keyToString(job.dest);
+                            if (StringUtil.isNotBlank(leaderboardId)) {
+                                final LeaderboardV99 leaderboard = getLeaderboard(projectId, leaderboardId);
+                                if (leaderboard != null) {
+                                    stream(leaderboard.models).of(
+                                            st -> st.map(H2oApi::keyToString).filter(StringUtil::isNotBlank).forEach(modelId -> {
+                                                try {
+                                                    deleteModel(projectId, modelId);
+                                                } catch (final Exception e) {
+                                                    logger.warn("Failed to delete {} in {}", modelId, projectId, e);
+                                                }
+                                            }));
+                                }
                             }
-                        }
-                    }
-                    return false;
-                } catch (final Exception e) {
-                    logger.warn("Failed to access job: {}", job.key, e);
-                    return true;
-                }
-            }).toArray(n -> new JobV3[n]));
+                        })), "DeleteModels").start();
+            }
+            store(projectId, Arrays.stream(getJobs(projectId, false)).filter(j -> JobV3.RUNNING.equals(j.status))
+                    .toArray(n -> new JobV3[n]));
         } finally {
             jobLock.writeLock().unlock();
         }
@@ -786,8 +805,22 @@ public class ProjectHelper {
     }
 
     public void renewSession(final String projectId) {
+        final Project project = getProject(projectId);
         responseCache.invalidateAll();
-        refreshJobs(projectId);
+        deleteAllJobs(projectId);
+        Arrays.stream(getFrames(project, (x, y) -> x.endsWith(y + ".hex"))).forEach(frameId -> {
+            try {
+                final Response<FramesV3> deleteFrameResponse = h2oHelper.deleteFrame(frameId).execute();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("deleteFrame: {}", deleteFrameResponse);
+                }
+                if (deleteFrameResponse.code() != 200) {
+                    logger.warn("Failed to delete {}: {}", frameId, deleteFrameResponse);
+                }
+            } catch (final Exception e) {
+                logger.warn("Failed to delete {}", frameId, e);
+            }
+        });
         h2oHelper.closeSession();
     }
 

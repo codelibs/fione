@@ -168,7 +168,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 final String mid = req.getParameter(LEADERBOARD_ID);
                 String lastId = null;
                 for (final JobV3 id : project.getJobs()) {
-                    if (id.getKind() == Kind.AUTO_ML && "DONE".equals(id.status)) {
+                    if (id.getKind() == Kind.AUTO_ML && JobV3.DONE.equals(id.status)) {
                         final String destId = keyToString(id.dest);
                         if (mid != null && mid.equals(destId)) {
                             return destId;
