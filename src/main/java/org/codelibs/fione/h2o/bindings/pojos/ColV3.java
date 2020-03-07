@@ -16,6 +16,7 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.codelibs.fione.entity.ChartData;
@@ -129,6 +130,10 @@ public class ColV3 extends SchemaV3 {
      */
     public double[] percentiles;
 
+    private ChartData histogramChart;
+
+    private ChartData labelListChart;
+
     /**
      * Public constructor
      */
@@ -155,35 +160,72 @@ public class ColV3 extends SchemaV3 {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
-    public ChartData getHistogramChart() {
-        if (histogramBins != null) {
-            final ChartData chartData = new ChartData();
-            final String xName = "interval";
-            final String yName = "count";
-            final int range = histogramBins.length / 50;
-            double pos = histogramBase;
-            final List<Double> xList = new ArrayList<>();
-            final List<Long> yList = new ArrayList<>();
-            long sum = 0;
-            for (int i = 0; i < histogramBins.length; i++) {
-                if (i % range == 0) {
-                    xList.add(pos);
-                    if (i != 0) {
-                        yList.add(sum);
-                        sum = 0;
-                    }
-                }
-                pos += histogramStride;
-                sum += histogramBins[i];
-            }
-            yList.add(sum);
-            chartData.addColumn(xName, xList.toArray(n -> new Double[n]));
-            chartData.addColumn(label, yList.toArray(n -> new Long[n]));
-            chartData.setAxisName(xName);
-            chartData.addAxisLabel("x", xName);
-            chartData.addAxisLabel("y", yName);
-            return chartData;
+    public boolean isAvailableCharts() {
+        return getHistogramChart() != null || getLabelListChart() != null;
+    }
 
+    public ChartData getHistogramChart() {
+        if (histogramChart != null) {
+            return histogramChart;
+        }
+        if (histogramBins != null) {
+            if ("real".equals(type) || "int".equals(type)) {
+                histogramChart = new ChartData();
+                final String xName = "interval";
+                final String yName = "count";
+                final int range = histogramBins.length / 50 + 1;
+                double pos = histogramBase;
+                final List<Double> xList = new ArrayList<>();
+                final List<Long> yList = new ArrayList<>();
+                long sum = 0;
+                for (int i = 0; i < histogramBins.length; i++) {
+                    if (i % range == 0) {
+                        xList.add(pos);
+                        if (i != 0) {
+                            yList.add(sum);
+                            sum = 0;
+                        }
+                    }
+                    pos += histogramStride;
+                    sum += histogramBins[i];
+                }
+                yList.add(sum);
+                histogramChart.addColumn(xName, xList.toArray(n -> new Double[n]));
+                histogramChart.addColumn(label, yList.toArray(n -> new Long[n]));
+                histogramChart.setAxisName(xName);
+                histogramChart.addAxisLabel("x", xName);
+                histogramChart.addAxisLabel("y", yName);
+                return histogramChart;
+
+            }
+        }
+        return null;
+    }
+
+    public ChartData getLabelListChart() {
+        if (labelListChart != null) {
+            return labelListChart;
+        }
+        if (histogramBins != null && domain != null) {
+            if ("enum".equals(type)) {
+                final String xName = "label";
+                final String yName = "count";
+                labelListChart = new ChartData();
+                labelListChart.addColumn(xName, domain);
+                labelListChart.addColumn(yName, Arrays.stream(histogramBins).mapToObj(v -> Long.valueOf(v)).toArray(n -> new Long[n]),
+                        "bar");
+                labelListChart.setAxisName(xName);
+                labelListChart.addAxisLabel("x", xName);
+                labelListChart.addAxisType("x", "category");
+                labelListChart.addAxisLabel("y", yName);
+                labelListChart.setAxisRotated(true);
+                int height = domain.length * 30;
+                if (height < 200) {
+                    height = 200;
+                }
+                labelListChart.setHeight(height);
+                return labelListChart;
+            }
         }
         return null;
     }

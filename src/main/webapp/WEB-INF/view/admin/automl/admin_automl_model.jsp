@@ -373,7 +373,6 @@ var chart = c3.generate({
 										<div role="tabpanel" class="tab-pane fade show active" id="variableImportancesGraph">
 										<div id="variableImportancesChart"></div>
 <c:set var="chart" value="${model.output.variableImportancesChart}"/><script><!--
-<!--
 var chart = c3.generate({
   bindto: '#variableImportancesChart',
   data: {

@@ -234,7 +234,7 @@
 						</div>
 					</div>
 					<div class="col-md-9">
-						<c:if test="${columnData != null and columnData.histogramBins != null}">
+						<c:if test="${columnData != null and columnData.histogramChart != null}">
 							<div class="card card-outline card-primary">
 								<div class="card-header">
 									<h3 class="card-title"><la:message key="labels.automl_column_histogram" arg0="${f:h(columnName)}" /></h3>
@@ -260,6 +260,37 @@ var chart = c3.generate({
 </script>
 								</div>
 							</div>
+						</c:if>
+						<c:if test="${columnData != null and columnData.labelListChart != null}">
+							<div class="card card-outline card-primary">
+								<div class="card-header">
+									<h3 class="card-title"><la:message key="labels.automl_column_label" arg0="${f:h(columnName)}" /></h3>
+									<div class="card-tools">
+										<button type="button" class="btn btn-tool" data-card-widget="collapse">
+											<i class="fa fa-minus"></i>
+										</button>
+									</div>
+								</div>
+								<div class="card-body">
+									<div id="labelListChart"></div>
+<c:set var="chart" value="${columnData.labelListChart}"/><script><!--
+var chart = c3.generate({
+  bindto: '#labelListChart',
+  data: {
+    x: '${f:h(chart.axisName)}',
+    columns: ${chart.columnData},
+    types: ${chart.columnTypeData}
+  },
+  axis: ${chart.axisData},
+  size: ${chart.sizeData}
+});
+// -->
+</script>
+								</div>
+							</div>
+						</c:if>
+						<c:if test="${columnData == null or not columnData.availableCharts}">
+						<div class="alert alert-info"><la:message key="labels.automl_column_noanalysis" arg0="${f:h(columnName)}" /></div>
 						</c:if>
 					</div>
 				</div>

@@ -386,6 +386,12 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Histogram: {0} */
     public static final String LABELS_automl_column_histogram = "{labels.automl_column_histogram}";
 
+    /** The key of the message: Label: {0} */
+    public static final String LABELS_automl_column_label = "{labels.automl_column_label}";
+
+    /** The key of the message: No data analysis for {0} */
+    public static final String LABELS_automl_column_noanalysis = "{labels.automl_column_noanalysis}";
+
     /** The key of the message: Serving */
     public static final String LABELS_automl_serving = "{labels.automl_serving}";
 
