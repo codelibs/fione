@@ -43,6 +43,7 @@ import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildControlV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildModelsV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLBuildSpecV99;
 import org.codelibs.fione.h2o.bindings.pojos.AutoMLInputV99;
+import org.codelibs.fione.h2o.bindings.pojos.CloudV3;
 import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesListV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
@@ -129,6 +130,10 @@ public class H2oHelper {
 
     public void setEndpoint(final String endpoint) {
         this.endpoint = endpoint;
+    }
+
+    public Callable<CloudV3> getCloudStatus() {
+        return new Callable<>(getH2oApi().cloudStatus());
     }
 
     public Callable<ImportFilesV3> importFiles(final String path) {

@@ -18,6 +18,7 @@ copy_to_fess() {
   cp -r src/main/java/org/codelibs/fione ../fess/src/main/java/org/codelibs
   cp -r src/main/webapp/WEB-INF/view/admin/automl ../fess/src/main/webapp/WEB-INF/view/admin
   cp -r src/main/webapp/WEB-INF/view/admin/easyml ../fess/src/main/webapp/WEB-INF/view/admin
+  cp -r src/main/webapp/WEB-INF/view/admin/systemml ../fess/src/main/webapp/WEB-INF/view/admin
   cp -r src/main/webapp/WEB-INF/env/fione ../fess/src/main/webapp/WEB-INF/env
   cp -r src/main/webapp/images/fione ../fess/src/main/webapp/images
   cp -r src/main/webapp/css/admin/fione ../fess/src/main/webapp/css/admin
@@ -39,6 +40,7 @@ copy_from_fess() {
   cp -r ../fess/src/main/java/org/codelibs/fione src/main/java/org/codelibs
   cp -r ../fess/src/main/webapp/WEB-INF/view/admin/automl src/main/webapp/WEB-INF/view/admin
   cp -r ../fess/src/main/webapp/WEB-INF/view/admin/easyml src/main/webapp/WEB-INF/view/admin
+  cp -r ../fess/src/main/webapp/WEB-INF/view/admin/systemml src/main/webapp/WEB-INF/view/admin
   cp -r ../fess/src/main/webapp/WEB-INF/env/fione src/main/webapp/WEB-INF/env
   cp -r ../fess/src/main/webapp/images/fione src/main/webapp/images
   cp -r ../fess/src/main/webapp/css/admin/fione src/main/webapp/css/admin

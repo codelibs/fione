@@ -38,6 +38,9 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: AutoML */
     public static final String LABELS_menu_automl = "{labels.menu_automl}";
 
+    /** The key of the message: System */
+    public static final String LABELS_menu_systemml = "{labels.menu_systemml}";
+
     /** The key of the message: AutoML */
     public static final String LABELS_AUTOML = "{labels.automl}";
 
@@ -568,6 +571,111 @@ public class FioneLabels extends FessMessages {
 
     /** The key of the message: Output Columns */
     public static final String LABELS_easyml_output_columns = "{labels.easyml_output_columns}";
+
+    /** The key of the message: System */
+    public static final String LABELS_SYSTEMML = "{labels.systemml}";
+
+    /** The key of the message: System */
+    public static final String LABELS_systemml_title_details = "{labels.systemml_title_details}";
+
+    /** The key of the message: Information */
+    public static final String LABELS_systemml_info = "{labels.systemml_info}";
+
+    /** The key of the message: Version */
+    public static final String LABELS_systemml_version = "{labels.systemml_version}";
+
+    /** The key of the message: Branch Name */
+    public static final String LABELS_systemml_branch_name = "{labels.systemml_branch_name}";
+
+    /** The key of the message: Last Commit Hash */
+    public static final String LABELS_systemml_last_commit_hash = "{labels.systemml_last_commit_hash}";
+
+    /** The key of the message: Describe */
+    public static final String LABELS_systemml_describe = "{labels.systemml_describe}";
+
+    /** The key of the message: Compiled By */
+    public static final String LABELS_systemml_compiledby = "{labels.systemml_compiledby}";
+
+    /** The key of the message: Compiled On */
+    public static final String LABELS_systemml_compiledon = "{labels.systemml_compiledon}";
+
+    /** The key of the message: Build Number */
+    public static final String LABELS_systemml_build_number = "{labels.systemml_build_number}";
+
+    /** The key of the message: Build Age */
+    public static final String LABELS_systemml_build_age = "{labels.systemml_build_age}";
+
+    /** The key of the message: Build Too Old */
+    public static final String LABELS_systemml_build_too_old = "{labels.systemml_build_too_old}";
+
+    /** The key of the message: Node Index */
+    public static final String LABELS_systemml_node_idx = "{labels.systemml_node_idx}";
+
+    /** The key of the message: Cloud Name */
+    public static final String LABELS_systemml_cloud_name = "{labels.systemml_cloud_name}";
+
+    /** The key of the message: Cloud Size */
+    public static final String LABELS_systemml_cloud_size = "{labels.systemml_cloud_size}";
+
+    /** The key of the message: Cloud Uptime */
+    public static final String LABELS_systemml_cloud_uptime = "{labels.systemml_cloud_uptime}";
+
+    /** The key of the message: Timezone(Cloud) */
+    public static final String LABELS_systemml_cloud_internal_tz = "{labels.systemml_cloud_internal_tz}";
+
+    /** The key of the message: Timezone(Data File) */
+    public static final String LABELS_systemml_datafile_parser_tz = "{labels.systemml_datafile_parser_tz}";
+
+    /** The key of the message: Bad Nodes */
+    public static final String LABELS_systemml_bad_nodes = "{labels.systemml_bad_nodes}";
+
+    /** The key of the message: Consensus */
+    public static final String LABELS_systemml_consensus = "{labels.systemml_consensus}";
+
+    /** The key of the message: Locked */
+    public static final String LABELS_systemml_locked = "{labels.systemml_locked}";
+
+    /** The key of the message: Client */
+    public static final String LABELS_systemml_is_client = "{labels.systemml_is_client}";
+
+    /** The key of the message: Security */
+    public static final String LABELS_systemml_security = "{labels.systemml_security}";
+
+    /** The key of the message: Leader Index */
+    public static final String LABELS_systemml_leader_idx = "{labels.systemml_leader_idx}";
+
+    /** The key of the message: Nodes */
+    public static final String LABELS_systemml_nodes = "{labels.systemml_nodes}";
+
+    /** The key of the message: Name */
+    public static final String LABELS_systemml_name = "{labels.systemml_name}";
+
+    /** The key of the message: Ping */
+    public static final String LABELS_systemml_ping = "{labels.systemml_ping}";
+
+    /** The key of the message: Cores */
+    public static final String LABELS_systemml_core = "{labels.systemml_core}";
+
+    /** The key of the message: Load */
+    public static final String LABELS_systemml_load = "{labels.systemml_load}";
+
+    /** The key of the message: My CPU */
+    public static final String LABELS_systemml_mycpup = "{labels.systemml_mycpup}";
+
+    /** The key of the message: Sys CPU */
+    public static final String LABELS_systemml_syscpup = "{labels.systemml_syscpup}";
+
+    /** The key of the message: GFLOPS */
+    public static final String LABELS_systemml_gflops = "{labels.systemml_gflops}";
+
+    /** The key of the message: GC(Free/Max) */
+    public static final String LABELS_systemml_gc = "{labels.systemml_gc}";
+
+    /** The key of the message: Disk(Free/Max) */
+    public static final String LABELS_systemml_disk = "{labels.systemml_disk}";
+
+    /** The key of the message: Mem Band */
+    public static final String LABELS_systemml_membw = "{labels.systemml_membw}";
 
     /**
      * Assert the property is not null.

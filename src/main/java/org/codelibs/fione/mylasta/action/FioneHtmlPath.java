@@ -73,4 +73,7 @@ public interface FioneHtmlPath {
 
     /** The path of the HTML: /admin/easyml/admin_easyml_train.jsp */
     HtmlNext path_AdminEasyml_AdminEasymlTrainJsp = new HtmlNext("/admin/easyml/admin_easyml_train.jsp");
+
+    /** The path of the HTML: /admin/systemml/admin_systemml.jsp */
+    HtmlNext path_AdminSystemml_AdminSystemmlJsp = new HtmlNext("/admin/systemml/admin_systemml.jsp");
 }

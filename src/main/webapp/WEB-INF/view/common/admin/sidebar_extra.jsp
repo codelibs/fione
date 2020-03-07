@@ -20,5 +20,11 @@
 					<p><la:message key="labels.menu_automl" /></p>
 				</a>
 		</li>
+		<li class="nav-item">
+				<a href="${fe:url('/admin/systemml/')}" class="nav-link <c:if test="${param.menuType=='systemml'}">active</c:if>">
+					<em class='fa fa-genderless nav-icon'></em>
+					<p><la:message key="labels.menu_systemml" /></p>
+				</a>
+		</li>
 	</ul>
 </li>
