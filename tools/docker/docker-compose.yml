@@ -3,6 +3,7 @@ services:
   minio01:
     image: minio/minio
     container_name: minio01
+    restart: always
     ports:
       - "9000:9000"
     environment:
@@ -18,6 +19,7 @@ services:
   h2o01:
     image: codelibs/h2o:3.28.1.1
     container_name: h2o01
+    restart: always
     ports:
       - "54321:54321"
     environment:
