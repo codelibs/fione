@@ -35,7 +35,7 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<fess.version>13.6.0</fess.version>
+		<fess.version>13.6.1</fess.version>
 		<retrofit.version>2.7.0</retrofit.version>
 
 		<!-- Main Framework -->
@@ -58,14 +58,14 @@
 		<okhttp.version>3.14.6</okhttp.version>
 
 		<!-- Crawler -->
-		<crawler.version>3.6.0</crawler.version>
+		<crawler.version>3.6.1</crawler.version>
 
 		<!-- Suggest -->
-		<suggest.version>7.6.0</suggest.version>
+		<suggest.version>7.6.1</suggest.version>
 
 		<!-- Elasticsearch -->
-		<elasticsearch.version>7.6.0</elasticsearch.version>
-		<elasticsearch.httpclient.version>7.6.0</elasticsearch.httpclient.version>
+		<elasticsearch.version>7.6.1</elasticsearch.version>
+		<elasticsearch.httpclient.version>7.6.1</elasticsearch.httpclient.version>
 		<cluster.runner.version>${elasticsearch.version}.0</cluster.runner.version>
 
 		<!-- Tomcat -->

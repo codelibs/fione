@@ -16,7 +16,7 @@ services:
     command: server /data
 
   h2o01:
-    image: codelibs/h2o:3.28.0.4
+    image: codelibs/h2o:3.28.1.1
     container_name: h2o01
     ports:
       - "54321:54321"
