@@ -578,8 +578,11 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: System */
     public static final String LABELS_systemml_title_details = "{labels.systemml_title_details}";
 
-    /** The key of the message: Information */
+    /** The key of the message: Environment */
     public static final String LABELS_systemml_info = "{labels.systemml_info}";
+
+    /** The key of the message: Build */
+    public static final String LABELS_systemml_buildinfo = "{labels.systemml_buildinfo}";
 
     /** The key of the message: Version */
     public static final String LABELS_systemml_version = "{labels.systemml_version}";
@@ -676,6 +679,15 @@ public class FioneLabels extends FessMessages {
 
     /** The key of the message: Mem Band */
     public static final String LABELS_systemml_membw = "{labels.systemml_membw}";
+
+    /** The key of the message: Options */
+    public static final String LABELS_systemml_options = "{labels.systemml_options}";
+
+    /** The key of the message: Shutdown H2O */
+    public static final String LABELS_systemml_restart_h2o = "{labels.systemml_restart_h2o}";
+
+    /** The key of the message: Reload */
+    public static final String LABELS_systemml_reload = "{labels.systemml_reload}";
 
     /**
      * Assert the property is not null.

@@ -59,6 +59,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseSetupV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.RapidsSchemaV3;
+import org.codelibs.fione.h2o.bindings.pojos.ShutdownV3;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.AutoMLBuilder;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.Frames;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.Jobs;
@@ -134,6 +135,10 @@ public class H2oHelper {
 
     public Callable<CloudV3> getCloudStatus() {
         return new Callable<>(getH2oApi().cloudStatus());
+    }
+
+    public Callable<ShutdownV3> shutdownCluster() {
+        return new Callable<>(getH2oApi().shutdownCluster());
     }
 
     public Callable<ImportFilesV3> importFiles(final String path) {

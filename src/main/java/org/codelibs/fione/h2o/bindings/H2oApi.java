@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fione.exception.H2oAccessException;
 import org.codelibs.fione.h2o.bindings.pojos.*;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.About;
@@ -2138,14 +2139,14 @@ public class H2oApi {
     /**
      * Shut down the cluster.
      */
-    public ShutdownV3 shutdownCluster() throws IOException {
+    public Call<ShutdownV3> shutdownCluster() {
         final Shutdown s = getService(Shutdown.class);
-        return s.shutdown().execute().body();
+        return s.shutdown(StringUtil.EMPTY);
     }
 
-    public ShutdownV3 shutdownCluster(final String _excludeFields) throws IOException {
+    public Call<ShutdownV3> shutdownCluster(final String _excludeFields) {
         final Shutdown s = getService(Shutdown.class);
-        return s.shutdown(_excludeFields).execute().body();
+        return s.shutdown(_excludeFields);
     }
 
     /**

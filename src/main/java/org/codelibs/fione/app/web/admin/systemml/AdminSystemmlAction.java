@@ -23,6 +23,7 @@ import org.codelibs.fess.annotation.Secured;
 import org.codelibs.fess.util.RenderDataUtil;
 import org.codelibs.fione.app.web.base.FioneAdminAction;
 import org.codelibs.fione.h2o.bindings.pojos.CloudV3;
+import org.codelibs.fione.h2o.bindings.pojos.ShutdownV3;
 import org.codelibs.fione.helper.H2oHelper;
 import org.lastaflute.web.Execute;
 import org.lastaflute.web.response.HtmlResponse;
@@ -62,15 +63,38 @@ public class AdminSystemmlAction extends FioneAdminAction {
         return asListHtml();
     }
 
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse shutdowncluster(final SystemForm form) {
+        validate(form, messages -> {}, this::asListHtml);
+        verifyTokenKeep(this::asListHtml);
+        try {
+            final Response<ShutdownV3> shutdownClusterResponse = h2oHelper.shutdownCluster().execute();
+            if (logger.isDebugEnabled()) {
+                logger.debug("shutdownClusterResponse: {}", shutdownClusterResponse);
+            }
+            if (shutdownClusterResponse.code() == 200) {
+                saveMessage(messages -> messages.addSuccessShutdownH2o(GLOBAL));
+            } else {
+                saveMessage(messages -> messages.addErrorsFailedToShutdownH2o(GLOBAL));
+            }
+        } catch (final Exception e) {
+            logger.warn("Failed to restart H2O.", e);
+            throw validationError(messages -> messages.addErrorsFailedToShutdownH2o(GLOBAL), this::asListHtml);
+        }
+        return redirect(getClass());
+    }
+
     // ===================================================================================
     //                                                                              JSP
     //                                                                           =========
 
     private HtmlResponse asListHtml() {
-        saveToken();
+        final String token = doubleSubmitManager.saveToken(myTokenGroupType());
         return asHtml(path_AdminSystemml_AdminSystemmlJsp).renderWith(data -> {
+            RenderDataUtil.register(data, "token", token);
             try {
-                Response<CloudV3> cloudStatusResponse = h2oHelper.getCloudStatus().execute();
+                final Response<CloudV3> cloudStatusResponse = h2oHelper.getCloudStatus().execute();
                 if (logger.isDebugEnabled()) {
                     logger.debug("cloudStatusResponse: {}", cloudStatusResponse);
                 }

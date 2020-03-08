@@ -74,6 +74,9 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Update DataSet {0}. */
     public static final String SUCCESS_update_dataset = "{success.update_dataset}";
 
+    /** The key of the message: Stopping H2O cluster. */
+    public static final String SUCCESS_shutdown_h2o = "{success.shutdown_h2o}";
+
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
 
@@ -139,6 +142,9 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Failed to update DataSet {0}. */
     public static final String ERRORS_failed_to_update_dataset = "{errors.failed_to_update_dataset}";
+
+    /** The key of the message: Failed to stop H2O cluster. */
+    public static final String ERRORS_failed_to_shutdown_h2o = "{errors.failed_to_shutdown_h2o}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -374,6 +380,20 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessUpdateDataset(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_update_dataset, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.shutdown_h2o' with parameters.
+     * <pre>
+     * message: Stopping H2O cluster.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessShutdownH2o(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_shutdown_h2o));
         return this;
     }
 
@@ -699,6 +719,20 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addErrorsFailedToUpdateDataset(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(ERRORS_failed_to_update_dataset, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_shutdown_h2o' with parameters.
+     * <pre>
+     * message: Failed to stop H2O cluster.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToShutdownH2o(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_shutdown_h2o));
         return this;
     }
 }
