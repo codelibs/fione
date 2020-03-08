@@ -689,6 +689,9 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Reload */
     public static final String LABELS_systemml_reload = "{labels.systemml_reload}";
 
+    /** The key of the message: No available servers. */
+    public static final String LABELS_systemml_no_servers = "{labels.systemml_no_servers}";
+
     /**
      * Assert the property is not null.
      * @param property The value of the property. (NotNull)

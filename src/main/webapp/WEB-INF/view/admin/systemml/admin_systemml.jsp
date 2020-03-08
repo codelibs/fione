@@ -30,7 +30,7 @@
 				<div class="row">
 					<c:if test="${cloudStatus == null}">
 					<div class="col-md-12">
-						<div class="alert alert-info">No servers.</div>
+						<div class="alert alert-info"><la:message key="labels.systemml_no_servers" /></div>
 					</div>
 					</c:if>
 					<c:if test="${cloudStatus != null}">
