@@ -59,6 +59,7 @@ clean() {
   rm -fr ../fess/src/main/java/org/codelibs/fione
   rm -fr ../fess/src/main/webapp/WEB-INF/view/admin/automl
   rm -fr ../fess/src/main/webapp/WEB-INF/view/admin/easyml
+  rm -fr ../fess/src/main/webapp/WEB-INF/view/admin/systemml
   rm -fr ../fess/src/main/webapp/WEB-INF/env/fione
   rm -fr ../fess/src/main/webapp/images/fione
   rm -fr ../fess/src/main/webapp/css/admin/fione
