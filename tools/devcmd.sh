@@ -21,7 +21,7 @@ copy_to_fess() {
   cp -r src/main/webapp/WEB-INF/view/admin/systemml ../fess/src/main/webapp/WEB-INF/view/admin
   cp -r src/main/webapp/WEB-INF/env/fione ../fess/src/main/webapp/WEB-INF/env
   cp -r src/main/webapp/images/fione ../fess/src/main/webapp/images
-  cp -r src/main/webapp/css/admin/fione ../fess/src/main/webapp/css/admin
+  #cp -r src/main/webapp/css/admin/fione ../fess/src/main/webapp/css/admin
   cp -r src/main/webapp/js/admin/fione ../fess/src/main/webapp/js/admin
   cp src/main/webapp/WEB-INF/fi.tld ../fess/src/main/webapp/WEB-INF
   cp src/main/webapp/WEB-INF/view/common/admin/sidebar_extra.jsp ../fess/src/main/webapp/WEB-INF/view/common/admin
@@ -43,7 +43,7 @@ copy_from_fess() {
   cp -r ../fess/src/main/webapp/WEB-INF/view/admin/systemml src/main/webapp/WEB-INF/view/admin
   cp -r ../fess/src/main/webapp/WEB-INF/env/fione src/main/webapp/WEB-INF/env
   cp -r ../fess/src/main/webapp/images/fione src/main/webapp/images
-  cp -r ../fess/src/main/webapp/css/admin/fione src/main/webapp/css/admin
+  #cp -r ../fess/src/main/webapp/css/admin/fione src/main/webapp/css/admin
   cp -r ../fess/src/main/webapp/js/admin/fione src/main/webapp/js/admin
   cp ../fess/src/main/webapp/WEB-INF/fi.tld src/main/webapp/WEB-INF
   cp ../fess/src/main/webapp/WEB-INF/view/common/admin/sidebar_extra.jsp src/main/webapp/WEB-INF/view/common/admin
