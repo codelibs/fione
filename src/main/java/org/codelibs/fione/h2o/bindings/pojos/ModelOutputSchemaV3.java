@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.commons.lang3.ArrayUtils;
 import org.codelibs.fione.entity.ChartData;
 
 import com.google.gson.GsonBuilder;
@@ -215,8 +216,14 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
         }
         if (columnIndexMap.containsKey("variable") && columnIndexMap.containsKey("scaled_importance")) {
             final ChartData chartData = new ChartData();
-            chartData.addColumn("variable", dimTable.data[columnIndexMap.get("variable")]);
-            chartData.addColumn("scaled_importance", dimTable.data[columnIndexMap.get("scaled_importance")], "bar");
+            Object[] variables = dimTable.data[columnIndexMap.get("variable")];
+            variables = Arrays.copyOf(variables, variables.length);
+            ArrayUtils.reverse(variables);
+            chartData.addColumn("variable", variables);
+            Object[] importances = dimTable.data[columnIndexMap.get("scaled_importance")];
+            importances = Arrays.copyOf(importances, importances.length);
+            ArrayUtils.reverse(importances);
+            chartData.addColumn("scaled_importance", importances, "bar");
             chartData.setAxisName("variable");
             chartData.addAxisLabel("x", "variable");
             chartData.addAxisType("x", "category");

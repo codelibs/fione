@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import org.apache.commons.lang3.ArrayUtils;
 import org.codelibs.fione.entity.ChartData;
 
 import com.google.gson.GsonBuilder;
@@ -171,7 +172,6 @@ public class ColV3 extends SchemaV3 {
         if (histogramBins != null) {
             if ("real".equals(type) || "int".equals(type)) {
                 histogramChart = new ChartData();
-                final String xName = "interval";
                 final String yName = "count";
                 final int range = histogramBins.length / 50 + 1;
                 double pos = histogramBase;
@@ -190,10 +190,10 @@ public class ColV3 extends SchemaV3 {
                     sum += histogramBins[i];
                 }
                 yList.add(sum);
-                histogramChart.addColumn(xName, xList.toArray(n -> new Double[n]));
-                histogramChart.addColumn(label, yList.toArray(n -> new Long[n]));
-                histogramChart.setAxisName(xName);
-                histogramChart.addAxisLabel("x", xName);
+                histogramChart.addColumn(label, xList.toArray(n -> new Double[n]));
+                histogramChart.addColumn(yName, yList.toArray(n -> new Long[n]));
+                histogramChart.setAxisName(label);
+                histogramChart.addAxisLabel("x", label);
                 histogramChart.addAxisLabel("y", yName);
                 return histogramChart;
 
@@ -211,9 +211,13 @@ public class ColV3 extends SchemaV3 {
                 final String xName = "label";
                 final String yName = "count";
                 labelListChart = new ChartData();
-                labelListChart.addColumn(xName, domain);
-                labelListChart.addColumn(yName, Arrays.stream(histogramBins).mapToObj(v -> Long.valueOf(v)).toArray(n -> new Long[n]),
-                        "bar");
+                String[] domains = Arrays.copyOf(domain, domain.length);
+                ArrayUtils.reverse(domains);
+                labelListChart.addColumn(xName, domains);
+                Long[] bins = Arrays.stream(histogramBins).mapToObj(Long::valueOf).toArray(n -> new Long[n]);
+                bins = Arrays.copyOf(bins, bins.length);
+                ArrayUtils.reverse(bins);
+                labelListChart.addColumn(yName, bins, "bar");
                 labelListChart.setAxisName(xName);
                 labelListChart.addAxisLabel("x", xName);
                 labelListChart.addAxisType("x", "category");

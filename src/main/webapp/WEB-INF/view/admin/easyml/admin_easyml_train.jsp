@@ -67,16 +67,16 @@
 									<div class="form-group">
 										<label><la:message key="labels.easyml_prediction_type" /></label>
 										<div class="form-check">
-											<la:radio property="predictionType" value="b" styleClass="form-check-input"></la:radio>
-											<label class="form-check-label" for="predictionType"><la:message key="labels.easyml_binaryclass_classification" /></label>
+											<la:radio property="predictionType" value="b" styleClass="form-check-input" styleId="binaryclassClassification"></la:radio>
+											<label class="form-check-label" for="binaryclassClassification"><la:message key="labels.easyml_binaryclass_classification" /></label>
 										</div>
 										<div class="form-check">
-											<la:radio property="predictionType" value="m" styleClass="form-check-input"></la:radio>
-											<label class="form-check-label" for="predictionType"><la:message key="labels.easyml_multiclass_classification" /></label>
+											<la:radio property="predictionType" value="m" styleClass="form-check-input" styleId="multiclassClassification"></la:radio>
+											<label class="form-check-label" for="multiclassClassification"><la:message key="labels.easyml_multiclass_classification" /></label>
 										</div>
 										<div class="form-check">
-											<la:radio property="predictionType" value="r" styleClass="form-check-input"></la:radio>
-											<label class="form-check-label" for="predictionType"><la:message key="labels.easyml_numeric_prediction" /></label>
+											<la:radio property="predictionType" value="r" styleClass="form-check-input" styleId="numericPrediction"></la:radio>
+											<label class="form-check-label" for="numericPrediction"><la:message key="labels.easyml_numeric_prediction" /></label>
 										</div>
 									</div>
 									<div class="form-group">

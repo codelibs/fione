@@ -16,21 +16,26 @@
 package org.codelibs.fione.entity;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.lastaflute.taglib.function.LaFunctions;
+
+import com.google.common.collect.Lists;
 
 public class ChartData {
 
     private String axisName;
 
-    private final Map<String, Object[]> columnMap = new HashMap<>();
+    private final Map<String, Object[]> columnMap = new LinkedHashMap<>();
 
-    private final Map<String, Object> columnTypeMap = new HashMap<>();
+    private final Map<String, Object> columnTypeMap = new LinkedHashMap<>();
 
-    private final Map<String, Map<String, Object>> axisMap = new HashMap<>();
+    private final Map<String, Map<String, Object>> axisMap = new LinkedHashMap<>();
 
-    private final Map<String, Object> sizeMap = new HashMap<>();
+    private final Map<String, Object> sizeMap = new LinkedHashMap<>();
 
     private boolean axisRotated;
 
@@ -131,7 +136,61 @@ public class ChartData {
         sizeMap.put("height", heigth);
     }
 
+    public int getHeight() {
+        final Object value = sizeMap.get("height");
+        if (value instanceof Number) {
+            return ((Number) value).intValue() + 100;
+        }
+        return 400;
+    }
+
     public String getSizeData() {
         return toJsonString(sizeMap);
+    }
+
+    public List<Map<String, Object>> getXAxis() {
+        final StringBuilder buf = new StringBuilder(1000);
+        buf.append('[');
+        final Object[] values = columnMap.get(axisName);
+        if (values != null) {
+            for (final Object value : values) {
+                if (value instanceof Number) {
+                    buf.append(value).append(',');
+                } else {
+                    buf.append("\"").append(value).append("\",");
+                }
+            }
+        }
+        buf.append(']');
+        final Map<String, Object> params = new HashMap<>();
+        params.put("data", buf.toString());
+        params.put("name", axisName);
+        return Lists.newArrayList(params);
+    }
+
+    public List<Map<String, Object>> getYAxis() {
+        return columnMap.entrySet().stream().filter(e -> !e.getKey().equals(axisName)).map(e -> {
+            final Map<String, Object> params = new HashMap<>();
+            params.put("name", e.getKey());
+            return params;
+        }).collect(Collectors.toList());
+    }
+
+    public List<Map<String, Object>> getSeries() {
+        return columnMap.entrySet().stream().filter(e -> !e.getKey().equals(axisName)).map(e -> {
+            final StringBuilder buf = new StringBuilder(1000);
+            buf.append('[');
+            for (final Object value : e.getValue()) {
+                if (value instanceof Number) {
+                    buf.append(value).append(',');
+                } else {
+                    buf.append("\"").append(value).append("\",");
+                }
+            }
+            buf.append("]");
+            final Map<String, Object> params = new HashMap<>();
+            params.put("data", buf.toString());
+            return params;
+        }).collect(Collectors.toList());
     }
 }

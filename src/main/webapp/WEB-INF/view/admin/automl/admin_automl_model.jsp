@@ -4,9 +4,7 @@
 <meta charset="UTF-8">
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
-<link href="${fe:url('/css/admin/fione/c3.min.css')}" rel="stylesheet" type="text/css" />
-<script src="${fe:url('/js/admin/fione/d3.min.js')}" type="text/javascript" charset="utf-8"></script>
-<script src="${fe:url('/js/admin/fione/c3.min.js')}" type="text/javascript"></script>
+<script src="${fe:url('/js/admin/fione/echarts.min.js')}" type="text/javascript"></script>
 </head>
 <body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
@@ -113,16 +111,23 @@
 										</ul>
 										<div class="tab-content">
 										<div role="tabpanel" class="tab-pane fade show active" id="scoringHistoryGraph">
-										<div id="scoringHistoryChart"></div>
-<c:set var="chart" value="${model.output.scoringHistoryChart}"/><script><!--
-var chart = c3.generate({
-  bindto: '#scoringHistoryChart',
-  data: {
-    x: '${f:h(chart.axisName)}',
-    columns: ${chart.columnData},
-    },
-  axis: ${chart.axisData}
-});
+										<c:set var="chart" value="${model.output.scoringHistoryChart}"/><div id="scoringHistoryChart" style="width:100%;height:400px;"></div>
+<script><!--
+echarts.init(document.getElementById('scoringHistoryChart')).setOption({
+    xAxis: [<c:forEach var="xAxis" items="${chart.xAxis}">{
+        name: '${f:h(xAxis.name)}',
+        nameLocation: 'center',
+        data: ${f:h(xAxis.data)}
+    },</c:forEach>],
+    yAxis: [<c:forEach var="yAxis" items="${chart.yAxis}">{
+        name: '${f:h(yAxis.name)}',
+        type: 'value'
+    },</c:forEach>],
+    series: [<c:forEach var="data" items="${chart.series}">{
+        data: ${data.data},
+        type: 'line'
+    },</c:forEach>]}
+)
 // -->
 </script>
 										</div>
@@ -370,18 +375,30 @@ var chart = c3.generate({
 										</ul>
 										<div class="tab-content">
 										<div role="tabpanel" class="tab-pane fade show active" id="variableImportancesGraph">
-										<div id="variableImportancesChart"></div>
-<c:set var="chart" value="${model.output.variableImportancesChart}"/><script><!--
-var chart = c3.generate({
-  bindto: '#variableImportancesChart',
-  data: {
-    x: '${f:h(chart.axisName)}',
-    columns: ${chart.columnData},
-    types: ${chart.columnTypeData}
-  },
-  axis: ${chart.axisData},
-  size: ${chart.sizeData}
-});
+										<c:set var="chart" value="${model.output.variableImportancesChart}"/><div id="variableImportancesChart" style="width:100%;height:${chart.height}px;"></div>
+<script><!--
+echarts.init(document.getElementById('variableImportancesChart')).setOption({
+    tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+            type: 'shadow'
+        }
+    },
+    xAxis: [<c:forEach var="xAxis" items="${chart.yAxis}">{
+        name: '${f:h(xAxis.name)}',
+        nameLocation: 'center',
+        type: 'value'
+    },</c:forEach>],
+    yAxis: [<c:forEach var="yAxis" items="${chart.xAxis}">{
+        name: '${f:h(yAxis.name)}',
+        type: 'category',
+        data: ${yAxis.data}
+    },</c:forEach>],
+    series: [<c:forEach var="data" items="${chart.series}">{
+        data: ${data.data},
+        type: 'bar'
+    },</c:forEach>]}
+)
 // -->
 </script>
 										</div>

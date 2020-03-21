@@ -4,9 +4,7 @@
 <meta charset="UTF-8">
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
-<link href="${fe:url('/css/admin/fione/c3.min.css')}" rel="stylesheet" type="text/css" />
-<script src="${fe:url('/js/admin/fione/d3.min.js')}" type="text/javascript" charset="utf-8"></script>
-<script src="${fe:url('/js/admin/fione/c3.min.js')}" type="text/javascript"></script>
+<script src="${fe:url('/js/admin/fione/echarts.min.js')}" type="text/javascript"></script>
 </head>
 <body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
@@ -245,19 +243,26 @@
 									</div>
 								</div>
 								<div class="card-body">
-									<div id="histogramChart"></div>
-<c:set var="chart" value="${columnData.histogramChart}"/><script><!--
-var chart = c3.generate({
-  bindto: '#histogramChart',
-  data: {
-    x: '${f:h(chart.axisName)}',
-    columns: ${chart.columnData},
-    type: 'bar'
-    },
-  axis: ${chart.axisData}
-});
+									<c:set var="chart" value="${columnData.histogramChart}"/><div id="histogramChart" style="width:100%;height:400px;"></div>
+<script><!--
+echarts.init(document.getElementById('histogramChart')).setOption({
+    xAxis: [<c:forEach var="xAxis" items="${chart.xAxis}">{
+        name: '${f:h(xAxis.name)}',
+        nameLocation: 'center',
+        data: ${f:h(xAxis.data)}
+    },</c:forEach>],
+    yAxis: [<c:forEach var="yAxis" items="${chart.yAxis}">{
+        name: '${f:h(yAxis.name)}',
+        type: 'value'
+    },</c:forEach>],
+    series: [<c:forEach var="data" items="${chart.series}">{
+        data: ${data.data},
+        type: 'bar'
+    },</c:forEach>]}
+)
 // -->
 </script>
+
 								</div>
 							</div>
 						</c:if>
@@ -272,18 +277,30 @@ var chart = c3.generate({
 									</div>
 								</div>
 								<div class="card-body">
-									<div id="labelListChart"></div>
-<c:set var="chart" value="${columnData.labelListChart}"/><script><!--
-var chart = c3.generate({
-  bindto: '#labelListChart',
-  data: {
-    x: '${f:h(chart.axisName)}',
-    columns: ${chart.columnData},
-    types: ${chart.columnTypeData}
-  },
-  axis: ${chart.axisData},
-  size: ${chart.sizeData}
-});
+									<c:set var="chart" value="${columnData.labelListChart}"/><div id="labelListChart" style="width:100%;height:${chart.height}px;"></div>
+<script><!--
+echarts.init(document.getElementById('labelListChart')).setOption({
+    tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+            type: 'shadow'
+        }
+    },
+    xAxis: [<c:forEach var="xAxis" items="${chart.yAxis}">{
+        name: '${f:h(xAxis.name)}',
+        nameLocation: 'center',
+        type: 'value'
+    },</c:forEach>],
+    yAxis: [<c:forEach var="yAxis" items="${chart.xAxis}">{
+        name: '${f:h(yAxis.name)}',
+        type: 'category',
+        data: ${yAxis.data}
+    },</c:forEach>],
+    series: [<c:forEach var="data" items="${chart.series}">{
+        data: ${data.data},
+        type: 'bar'
+    },</c:forEach>]}
+)
 // -->
 </script>
 								</div>
