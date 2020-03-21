@@ -21,8 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.lastaflute.taglib.function.LaFunctions;
-
 import com.google.common.collect.Lists;
 
 public class ChartData {
@@ -46,28 +44,6 @@ public class ChartData {
     public void addColumn(final String name, final Object[] values, final String type) {
         addColumn(name, values);
         columnTypeMap.put(name, type);
-    }
-
-    public String getColumnData() {
-        final StringBuilder buf = new StringBuilder(1000);
-        buf.append('[');
-        columnMap.entrySet().forEach(e -> {
-            buf.append("[\"").append(LaFunctions.h(e.getKey())).append('\"');
-            for (final Object value : e.getValue()) {
-                if (value instanceof Number) {
-                    buf.append(',').append(value);
-                } else {
-                    buf.append(",\"").append(value).append('\"');
-                }
-            }
-            buf.append("],");
-        });
-        buf.append(']');
-        return buf.toString();
-    }
-
-    public String getColumnTypeData() {
-        return toJsonString(columnTypeMap);
     }
 
     public void setAxisName(final String name) {
@@ -99,39 +75,6 @@ public class ChartData {
         this.axisRotated = rotated;
     }
 
-    public String getAxisData() {
-        final StringBuilder buf = new StringBuilder(100);
-        buf.append('{');
-        if (axisRotated) {
-            buf.append("rotated:true,");
-        }
-        axisMap.entrySet().forEach(e -> {
-            buf.append(LaFunctions.h(e.getKey())).append(':');
-            buf.append(toJsonString(e.getValue())).append(',');
-        });
-        buf.append('}');
-        return buf.toString();
-    }
-
-    protected String toJsonString(final Map<String, Object> map) {
-        final StringBuilder buf = new StringBuilder(1000);
-        buf.append('{');
-        map.entrySet().forEach(e -> {
-            buf.append(LaFunctions.h(e.getKey())).append(':');
-            final Object value = e.getValue();
-            if (value instanceof Number) {
-                buf.append(value.toString());
-            } else if (value instanceof Boolean) {
-                buf.append(((Boolean) value).booleanValue());
-            } else {
-                buf.append('\"').append(value).append('\"');
-            }
-            buf.append(',');
-        });
-        buf.append('}');
-        return buf.toString();
-    }
-
     public void setHeight(final int heigth) {
         sizeMap.put("height", heigth);
     }
@@ -142,10 +85,6 @@ public class ChartData {
             return ((Number) value).intValue() + 100;
         }
         return 400;
-    }
-
-    public String getSizeData() {
-        return toJsonString(sizeMap);
     }
 
     public List<Map<String, Object>> getXAxis() {
