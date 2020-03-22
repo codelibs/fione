@@ -232,6 +232,88 @@
 						</div>
 					</div>
 					<div class="col-md-9">
+						<c:if test="${columnData != null and columnData.columnSummaryChart != null}">
+							<div class="card card-outline card-primary">
+								<div class="card-header">
+									<h3 class="card-title"><la:message key="labels.automl_column_summary" arg0="${f:h(columnName)}" /></h3>
+									<div class="card-tools">
+										<button type="button" class="btn btn-tool" data-card-widget="collapse">
+											<i class="fa fa-minus"></i>
+										</button>
+									</div>
+								</div>
+								<div class="card-body">
+									<c:set var="chart" value="${columnData.columnSummaryChart}"/><div id="columnSummaryChart" style="width:100%;height:100px;"></div>
+<script><!--
+echarts.init(document.getElementById('columnSummaryChart')).setOption({
+    tooltip: {
+        trigger: 'item',
+        axisPointer: {
+            type: 'shadow'
+        }
+    },
+    xAxis: {
+        type: 'value',
+    },
+    yAxis: [<c:forEach var="yAxis" items="${chart.yAxis}">{
+        data: ['${f:h(yAxis.name)}'],
+        type: 'category',
+        axisLabel: {
+            formatter: '{value}'
+        },
+    },</c:forEach>],
+    series: [<c:forEach var="data" items="${chart.series}">{
+        data: [${data.data}],
+        type: 'boxplot',
+        tooltip: {
+            formatter: function (param) {
+                return [
+                    'max: ' + param.data[5],
+                    'Q3: ' + param.data[4],
+                    'median: ' + param.data[3],
+                    'Q1: ' + param.data[2],
+                    'min: ' + param.data[1]
+                ].join('<br/>')
+            }
+        }
+    },</c:forEach>]}
+)
+// -->
+</script>
+
+								</div>
+							</div>
+						</c:if>
+						<c:if test="${columnData != null and columnData.columnCharacteristicsChart != null}">
+							<div class="card card-outline card-primary">
+								<div class="card-header">
+									<h3 class="card-title"><la:message key="labels.automl_column_histogram" arg0="${f:h(columnName)}" /></h3>
+									<div class="card-tools">
+										<button type="button" class="btn btn-tool" data-card-widget="collapse">
+											<i class="fa fa-minus"></i>
+										</button>
+									</div>
+								</div>
+								<div class="card-body">
+									<c:set var="chart" value="${columnData.columnCharacteristicsChart}"/><div id="columnCharacteristicsChart" style="width:100%;height:300px;"></div>
+<script><!--
+echarts.init(document.getElementById('columnCharacteristicsChart')).setOption({
+    series: [<c:forEach var="data" items="${chart.series}">{
+        data: ${data.data},
+        type: 'pie',
+        label: {
+            position: 'outer',
+            alignTo: 'edge',
+            margin: 20
+        },
+    },</c:forEach>]}
+)
+// -->
+</script>
+
+								</div>
+							</div>
+						</c:if>
 						<c:if test="${columnData != null and columnData.histogramChart != null}">
 							<div class="card card-outline card-primary">
 								<div class="card-header">

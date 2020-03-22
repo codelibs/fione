@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.apache.commons.text.StringEscapeUtils;
+
 import com.google.common.collect.Lists;
 
 public class ChartData {
@@ -34,8 +36,6 @@ public class ChartData {
     private final Map<String, Map<String, Object>> axisMap = new LinkedHashMap<>();
 
     private final Map<String, Object> sizeMap = new LinkedHashMap<>();
-
-    private boolean axisRotated;
 
     public void addColumn(final String name, final Object[] values) {
         columnMap.put(name, values);
@@ -71,10 +71,6 @@ public class ChartData {
         params.put(name, value);
     }
 
-    public void setAxisRotated(final boolean rotated) {
-        this.axisRotated = rotated;
-    }
-
     public void setHeight(final int heigth) {
         sizeMap.put("height", heigth);
     }
@@ -93,11 +89,7 @@ public class ChartData {
         final Object[] values = columnMap.get(axisName);
         if (values != null) {
             for (final Object value : values) {
-                if (value instanceof Number) {
-                    buf.append(value).append(',');
-                } else {
-                    buf.append("\"").append(value).append("\",");
-                }
+                toJsonString(buf, value, ",");
             }
         }
         buf.append(']');
@@ -120,16 +112,31 @@ public class ChartData {
             final StringBuilder buf = new StringBuilder(1000);
             buf.append('[');
             for (final Object value : e.getValue()) {
-                if (value instanceof Number) {
-                    buf.append(value).append(',');
-                } else {
-                    buf.append("\"").append(value).append("\",");
-                }
+                toJsonString(buf, value, ",");
             }
             buf.append("]");
             final Map<String, Object> params = new HashMap<>();
             params.put("data", buf.toString());
             return params;
         }).collect(Collectors.toList());
+    }
+
+    private void toJsonString(final StringBuilder buf, final Object value, final String end) {
+        if (value instanceof Number) {
+            buf.append(value).append(end);
+        } else if (value instanceof Map) {
+            buf.append('{');
+            @SuppressWarnings("unchecked")
+            final Map<String, Object> map = (Map<String, Object>) value;
+            map.entrySet().forEach(e -> {
+                toJsonString(buf, e.getKey(), ":");
+                toJsonString(buf, e.getValue(), ",");
+            });
+            buf.append('}').append(end);
+        } else if (value != null) {
+            buf.append("\"").append(StringEscapeUtils.escapeJson(value.toString())).append('\"').append(end);
+        } else {
+            buf.append("null").append(end);
+        }
     }
 }

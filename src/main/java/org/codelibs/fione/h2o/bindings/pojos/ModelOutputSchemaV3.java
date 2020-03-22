@@ -228,7 +228,6 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
             chartData.addAxisLabel("x", "variable");
             chartData.addAxisType("x", "category");
             chartData.addAxisLabel("y", "scaled_importance");
-            chartData.setAxisRotated(true);
             chartData.setHeight(dimTable.rowcount * 30);
             return chartData;
         }

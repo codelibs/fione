@@ -930,7 +930,10 @@ public class ProjectHelper {
                             final FramesV3 frames = response.body();
                             if (frames.frames != null && frames.frames.length > 0 && frames.frames[0] != null
                                     && frames.frames[0].columns.length > 0) {
-                                return frames.frames[0].columns[0];
+                                final FrameV3 frame = frames.frames[0];
+                                final ColV3 col = frame.columns[0];
+                                col.setRows(frame.rows);
+                                return col;
                             }
                         } else if (response.code() == 404) {
                             throw new CacheNotFoundException();

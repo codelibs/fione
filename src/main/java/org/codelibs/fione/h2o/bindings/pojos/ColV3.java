@@ -18,8 +18,10 @@ package org.codelibs.fione.h2o.bindings.pojos;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.commons.lang3.ArrayUtils;
+import org.apache.groovy.util.Maps;
 import org.codelibs.fione.entity.ChartData;
 
 import com.google.gson.GsonBuilder;
@@ -135,6 +137,12 @@ public class ColV3 extends SchemaV3 {
 
     private ChartData labelListChart;
 
+    private ChartData columnSummaryChart;
+
+    private ChartData columnCharacteristicsChart;
+
+    private long rows = 0;
+
     /**
      * Public constructor
      */
@@ -222,7 +230,6 @@ public class ColV3 extends SchemaV3 {
                 labelListChart.addAxisLabel("x", xName);
                 labelListChart.addAxisType("x", "category");
                 labelListChart.addAxisLabel("y", yName);
-                labelListChart.setAxisRotated(true);
                 int height = domain.length * 30;
                 if (height < 200) {
                     height = 200;
@@ -232,5 +239,40 @@ public class ColV3 extends SchemaV3 {
             }
         }
         return null;
+    }
+
+    public ChartData getColumnSummaryChart() {
+        if (columnCharacteristicsChart != null) {
+            return columnCharacteristicsChart;
+        }
+        if (percentiles != null && mins != null && maxs != null) {
+            columnSummaryChart = new ChartData();
+            columnSummaryChart.addColumn(label, new Double[] { mins[0], percentiles[4], percentiles[8], percentiles[12], maxs[0] });
+            return columnSummaryChart;
+        }
+        return null;
+    }
+
+    public ChartData getColumnCharacteristicsChart() {
+        if (columnCharacteristicsChart != null) {
+            return columnCharacteristicsChart;
+        }
+        final long others = rows - missingCount - zeroCount - negativeInfinityCount - positiveInfinityCount;
+        if (others > 0) {
+            columnCharacteristicsChart = new ChartData();
+            final List<Map<String, Object>> list = new ArrayList<>();
+            list.add(Maps.of("name", "Values", "value", others));
+            list.add(Maps.of("name", "Zeros", "value", zeroCount));
+            list.add(Maps.of("name", "Missing", "value", missingCount));
+            list.add(Maps.of("name", "-Infinity", "value", negativeInfinityCount));
+            list.add(Maps.of("name", "+Infinity", "value", positiveInfinityCount));
+            columnCharacteristicsChart.addColumn(label, list.toArray(n -> new Map[n]));
+            return columnCharacteristicsChart;
+        }
+        return null;
+    }
+
+    public void setRows(long rows) {
+        this.rows = rows;
     }
 }
