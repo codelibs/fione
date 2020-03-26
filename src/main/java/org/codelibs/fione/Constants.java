@@ -25,4 +25,6 @@ public class Constants extends org.codelibs.fess.Constants {
 
     public static final String BINARYCLASS_TYPE = "b";
 
+    public static final String CHART_MAX_ITEM_SIZE = "fione.chart.max_item_size";
+
 }

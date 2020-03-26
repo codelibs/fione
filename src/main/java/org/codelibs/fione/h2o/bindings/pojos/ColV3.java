@@ -22,6 +22,7 @@ import java.util.Map;
 
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.groovy.util.Maps;
+import org.codelibs.fione.Constants;
 import org.codelibs.fione.entity.ChartData;
 
 import com.google.gson.GsonBuilder;
@@ -218,13 +219,20 @@ public class ColV3 extends SchemaV3 {
             if ("enum".equals(type)) {
                 final String xName = "label";
                 final String yName = "count";
+                final int maxLength = Integer.parseInt(System.getProperty(Constants.CHART_MAX_ITEM_SIZE, "1000"));
                 labelListChart = new ChartData();
                 String[] domains = Arrays.copyOf(domain, domain.length);
                 ArrayUtils.reverse(domains);
+                if (domains.length > maxLength) {
+                    domains = Arrays.copyOfRange(domains, 0, maxLength);
+                }
                 labelListChart.addColumn(xName, domains);
                 Long[] bins = Arrays.stream(histogramBins).mapToObj(Long::valueOf).toArray(n -> new Long[n]);
                 bins = Arrays.copyOf(bins, bins.length);
                 ArrayUtils.reverse(bins);
+                if (domains.length > maxLength) {
+                    bins = Arrays.copyOfRange(bins, 0, maxLength);
+                }
                 labelListChart.addColumn(yName, bins, "bar");
                 labelListChart.setAxisName(xName);
                 labelListChart.addAxisLabel("x", xName);
