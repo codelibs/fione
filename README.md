@@ -13,6 +13,17 @@ Fione is AutoML extension for Fess.
 
 ## Development
 
+### Create Source Code For Development
+
+    git clone https://github.com/codelibs/fione.git
+    git clone https://github.com/codelibs/fess.git
+    cd fione
+    bash ./tools/devcmd.sh copy
+    bash ./tools/devcmd.sh start
+    cd ../fess
+
+See [Development Guide](https://fess.codelibs.org/dev/getting-started.html) for Fess.
+
 ### Generate Source Code
 
 For updating fione\_message, use dbflute:freegen
