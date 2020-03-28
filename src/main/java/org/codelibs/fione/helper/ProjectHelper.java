@@ -883,38 +883,22 @@ public class ProjectHelper {
     }
 
     public FrameV3 getFrameData(final FramesV3 params) {
-        try {
-            final String cacheKey = params.toString();
-            final FrameV3 frameData = (FrameV3) responseCache.get(cacheKey, () -> {
-                final Response<FramesV3> response = h2oHelper.getFrameData(params).execute();
-                if (logger.isDebugEnabled()) {
-                    logger.debug("getFrameData: {}", response);
-                }
-                if (response.code() == 200) {
-                    final FramesV3 frames = response.body();
-                    for (final FrameV3 frame : frames.frames) {
-                        if (params.frameId.name.equals(frame.frameId.name)) {
-                            return frame;
-                        }
-                    }
-                } else if (response.code() == 404) {
-                    throw new CacheNotFoundException();
-                }
-                logger.warn("Failed to read leaderboard: {}", response);
-                throw new CacheNotFoundException();
-            });
-            frameData.refresh();
-            return frameData;
-        } catch (final Exception e) {
-            if (e.getCause() instanceof CacheNotFoundException) {
-                return null;
-            }
-            if (logger.isDebugEnabled()) {
-                logger.debug("Failed to get data from cache.", e);
-            }
-            return null;
-
+        final Response<FramesV3> response = h2oHelper.getFrameData(params).execute();
+        if (logger.isDebugEnabled()) {
+            logger.debug("getFrameData: {}", response);
         }
+        if (response.code() == 200) {
+            final FramesV3 frames = response.body();
+            for (final FrameV3 frame : frames.frames) {
+                if (params.frameId.name.equals(frame.frameId.name)) {
+                    return frame;
+                }
+            }
+        } else if (response.code() == 404) {
+            return null;
+        }
+        logger.warn("Failed to read leaderboard: {}", response);
+        return null;
     }
 
     public ColV3 getFrameColumnData(final FramesV3 params) {
