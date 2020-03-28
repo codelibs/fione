@@ -79,6 +79,17 @@
 											</la:select>
 										</div>
 									</div>
+									<div class="form-group row">
+										<label for="columnNames" class="col-sm-3 col-form-label"><la:message key="labels.easyml_output_columns" /></label>
+										<div class="col-sm-9">
+											<la:errors property="columnNames" />
+											<la:select property="columnNames" styleId="columnNames" multiple="true" styleClass="form-control">
+												<c:forEach var="item" items="${columnItems}">
+													<la:option value="${f:u(item.value)}">${f:h(item.label)}</la:option>
+												</c:forEach>
+											</la:select>
+										</div>
+									</div>
 								</div>
 								<div class="card-footer">
 									<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">

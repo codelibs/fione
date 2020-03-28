@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.app.web.admin.automl;
 
+import org.codelibs.core.lang.StringUtil;
 import org.lastaflute.web.validation.Required;
 
 public class PredictSettingForm {
@@ -32,4 +33,6 @@ public class PredictSettingForm {
 
     @Required
     public String name;
+
+    public String[] columnNames = StringUtil.EMPTY_STRINGS;
 }

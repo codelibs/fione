@@ -22,6 +22,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -63,6 +64,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.taglib.FioneFunctions;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.json.simple.JSONObject;
+import org.lastaflute.di.util.tiger.Maps;
 import org.lastaflute.web.Execute;
 import org.lastaflute.web.UrlChain;
 import org.lastaflute.web.response.ActionResponse;
@@ -603,7 +605,14 @@ public class AdminAutomlAction extends FioneAdminAction {
         verifyToken(this::asNewProjectHtml);
 
         try {
-            projectHelper.predict(form.projectId, form.frameId, form.modelId, form.name);
+            projectHelper.predict(form.projectId, form.frameId, form.modelId, form.name, d -> {
+                if (form.columnNames != null && form.columnNames.length > 0) {
+                    final Map<String, String> columnMap = new LinkedHashMap<>();
+                    Arrays.stream(form.columnNames).map(StringCodecUtil::decode).forEach(s -> columnMap.put(s, s));
+                    columnMap.put("predict", getResponseColumn(form.leaderboardId));
+                    projectHelper.filterColumns(form.projectId, d, columnMap);
+                }
+            });
             saveMessage(messages -> messages.addSuccessExportingFrame(GLOBAL, form.frameId, form.name));
         } catch (final Exception e) {
             logger.warn("Failed to run AutoML.", e);
@@ -885,7 +894,18 @@ public class AdminAutomlAction extends FioneAdminAction {
                 frameName = frameName.substring(0, pos);
             }
             form.name = frameName + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(systemHelper.getCurrentTime());
-        })).renderWith(data -> RenderDataUtil.register(data, "modelIdItems", modelIdItems));
+        })).renderWith(
+                data -> {
+                    RenderDataUtil.register(data, "modelIdItems", modelIdItems);
+                    final List<Map<String, String>> columnList = new ArrayList<>();
+                    final FrameV3 frame = projectHelper.getColumnSummaries(projectId, frameId);
+                    if (frame != null) {
+                        final String responseColumn = getResponseColumn(leaderboardId);
+                        Arrays.stream(frame.columns).map(c -> c.label).filter(s -> !s.equals(responseColumn))
+                                .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
+                    }
+                    RenderDataUtil.register(data, "columnItems", columnList);
+                });
     }
 
     private HtmlResponse redirectDetailsHtml(final String projectId, final String frameId, final String leaderboardId) {

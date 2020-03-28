@@ -24,6 +24,7 @@ import java.util.function.BiFunction;
 import javax.annotation.Resource;
 
 import org.codelibs.core.collection.Maps;
+import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fess.app.web.base.FessAdminAction;
 import org.codelibs.fess.util.RenderDataUtil;
 import org.codelibs.fione.exception.FioneSystemException;
@@ -141,5 +142,16 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
     protected void registerStoppingMetricItems(final RenderData data) {
         RenderDataUtil.register(data, "stoppingMetricItems",
                 Arrays.stream(ScoreKeeperStoppingMetric.values()).map(ScoreKeeperStoppingMetric::toString).toArray(n -> new String[n]));
+    }
+
+    protected String getResponseColumn(final String projectName) {
+        if (projectName == null) {
+            return StringUtil.EMPTY;
+        }
+        final int pos = projectName.indexOf("@@");
+        if (pos == -1) {
+            return projectName;
+        }
+        return projectName.split("@@", 2)[1];
     }
 }

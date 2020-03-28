@@ -565,17 +565,6 @@ public class AdminEasymlAction extends FioneAdminAction {
         return null;
     }
 
-    private String getResponseColumn(final String projectName) {
-        if (projectName == null) {
-            return StringUtil.EMPTY;
-        }
-        final int pos = projectName.indexOf("@@");
-        if (pos == -1) {
-            return projectName;
-        }
-        return projectName.split("@@", 2)[1];
-    }
-
     private HtmlResponse asSummaryHtml(final String projectId, final String dataSetId, final String leaderboardId) {
         final String token = doubleSubmitManager.saveToken(myTokenGroupType());
         final Project project = projectHelper.getProject(projectId);

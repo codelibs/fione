@@ -275,6 +275,9 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Model */
     public static final String LABELS_automl_use_model = "{labels.automl_use_model}";
 
+    /** The key of the message: Output Columns */
+    public static final String LABELS_automl_output_columns = "{labels.automl_output_columns}";
+
     /** The key of the message: Predict */
     public static final String LABELS_automl_predict = "{labels.automl_predict}";
 
