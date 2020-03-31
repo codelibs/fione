@@ -29,14 +29,20 @@ public interface FioneHtmlPath {
     /** The path of the HTML: /admin/automl/admin_automl_column.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlColumnJsp = new HtmlNext("/admin/automl/admin_automl_column.jsp");
 
+    /** The path of the HTML: /admin/automl/admin_automl_columnlist.jsp */
+    HtmlNext path_AdminAutoml_AdminAutomlColumnlistJsp = new HtmlNext("/admin/automl/admin_automl_columnlist.jsp");
+
     /** The path of the HTML: /admin/automl/admin_automl_data.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlDataJsp = new HtmlNext("/admin/automl/admin_automl_data.jsp");
 
-    /** The path of the HTML: /admin/automl/admin_automl_details.jsp */
-    HtmlNext path_AdminAutoml_AdminAutomlDetailsJsp = new HtmlNext("/admin/automl/admin_automl_details.jsp");
+    /** The path of the HTML: /admin/automl/admin_automl_job.jsp */
+    HtmlNext path_AdminAutoml_AdminAutomlJobJsp = new HtmlNext("/admin/automl/admin_automl_job.jsp");
 
     /** The path of the HTML: /admin/automl/admin_automl_model.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlModelJsp = new HtmlNext("/admin/automl/admin_automl_model.jsp");
+
+    /** The path of the HTML: /admin/automl/admin_automl_modellist.jsp */
+    HtmlNext path_AdminAutoml_AdminAutomlModellistJsp = new HtmlNext("/admin/automl/admin_automl_modellist.jsp");
 
     /** The path of the HTML: /admin/automl/admin_automl_newdata.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlNewdataJsp = new HtmlNext("/admin/automl/admin_automl_newdata.jsp");

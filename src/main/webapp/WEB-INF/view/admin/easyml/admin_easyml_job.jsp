@@ -82,7 +82,7 @@
 															<td><i class="fas fa-${f:u(data.iconType)}"></i> <c:choose>
 																	<c:when test="${data.iconType == 'hammer'}">
 																		<la:link
-																			href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
+																			href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
 																		>${f:h(data.dest.name)}</la:link>
 																		<c:if test="${data.status == 'RUNNING'}"><br><i class="fas fa-circle-notch fa-spin"></i>${f:h(data.progressMsg)}</c:if>
 																	</c:when>

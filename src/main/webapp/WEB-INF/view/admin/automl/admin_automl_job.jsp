@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <title><la:message key="labels.fione_brand_title" /> | <la:message key="labels.automl" /></title>
 <jsp:include page="/WEB-INF/view/common/admin/head.jsp"></jsp:include>
-<c:if test="${autoReload}"><meta http-equiv="refresh" content="10;URL=${contextPath}/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"/></c:if>
+<c:if test="${autoReload}"><meta http-equiv="refresh" content="10;URL=${contextPath}/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"/></c:if>
 </head>
 <body class="hold-transition skin-blue sidebar-mini">
 	<div class="wrapper">
@@ -22,7 +22,7 @@
 						<div class="col-sm-6">
 							<h1>
 								<la:message key="labels.automl_project_title" arg0="${f:h(project.name)}" /> <small style="font-size:50%"><la:link
-									href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"
+									href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}"
 							><i class="fas fa-redo-alt"></i></la:link></small>
 							</h1>
 						</div>
@@ -56,7 +56,7 @@
 									</la:link>
 									<c:if test="${not empty frameId}">
 										<la:link href="/admin/automl/setupml/${f:u(project.id)}/${f:u(frameId)}" styleClass="btn btn-default">
-											<i class="fas fa-hammer"></i>
+											<i class="fas fa-running"></i>
 											<la:message key="labels.automl_run_automl" />
 										</la:link>
 									</c:if>
@@ -67,10 +67,22 @@
 										</la:link>
 									</c:if>
 									<c:if test="${not empty frameId}">
+										<la:link href="/admin/automl/columnlist/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+											<i class="fas fa-columns"></i>
+											<la:message key="labels.automl_columnview" />
+										</la:link>
+									</c:if>
+									<c:if test="${not empty frameId}">
 										<la:link href="/admin/automl/dataview/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
 											<i class="far fa-eye"></i>
 											<la:message key="labels.automl_dataview" />
 											</la:link>
+									</c:if>
+									<c:if test="${not empty frameId and leaderboard != null}">
+										<la:link href="/admin/automl/modellist/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+											<i class="fas fa-hammer"></i>
+											<la:message key="labels.automl_modelview" />
+										</la:link>
 									</c:if>
 								</div>
 
@@ -221,7 +233,7 @@
 															<td>${f:h(fi:frameName(data))}</td>
 															<td class="text-center">
 															<c:if test="${frameId == data}"><i class="far fa-check-square" style="color:#3c8dbc;"></i></c:if>
-															<c:if test="${frameId != data}"><la:link href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(data)}&lid=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
+															<c:if test="${frameId != data}"><la:link href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(data)}&lid=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
 															<la:link href="/admin/automl/dataview/${f:u(project.id)}?fid=${f:u(data)}&lid=${f:u(leaderboardId)}"><i class="far fa-eye"></i></la:link>
 															<button type="submit" name="deleteframe" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="<la:message key="labels.automl_delete" />"></i></button>
 															</td>
@@ -293,7 +305,7 @@
 															<td><i class="fas fa-${f:u(data.iconType)}"></i> <c:choose>
 																	<c:when test="${data.iconType == 'hammer'}">
 																		<la:link
-																			href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
+																			href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
 																		>${f:h(data.dest.name)}</la:link>
 																		<c:if test="${data.status == 'RUNNING'}"><br><i class="fas fa-circle-notch fa-spin"></i>${f:h(data.progressMsg)}</c:if>
 																	</c:when>
@@ -340,121 +352,6 @@
 								</c:if>
 							</div>
 						</div>
-						<c:if test="${columnSummaries != null}">
-							<div class="card card-outline card-primary">
-								<div class="card-header">
-									<h3 class="card-title"><la:message key="labels.automl_column_summaries" arg0="${f:h(fi:frameName(frameId))}" /></h3>
-									<div class="card-tools">
-										<button type="button" class="btn btn-tool" data-card-widget="collapse">
-											<i class="fa fa-minus"></i>
-										</button>
-									</div>
-								</div>
-								<div class="card-body">
-									<%-- List --%>
-									<div class="row">
-										<div class="col-sm-12">
-											<table class="table table-bordered table-striped small">
-												<thead>
-													<tr>
-														<th><la:message key="labels.automl_label" /></th>
-														<th><la:message key="labels.automl_type" /></th>
-														<th><la:message key="labels.automl_missing" /></th>
-														<th><la:message key="labels.automl_zeros" /></th>
-														<th><la:message key="labels.automl_posinf" /></th>
-														<th><la:message key="labels.automl_neginf" /></th>
-														<th><la:message key="labels.automl_min" /></th>
-														<th><la:message key="labels.automl_max" /></th>
-														<th><la:message key="labels.automl_mean" /></th>
-														<th><la:message key="labels.automl_sigma" /></th>
-														<th><la:message key="labels.automl_cardinality" /></th>
-													</tr>
-												</thead>
-												<tbody>
-													<c:forEach var="data" varStatus="s" items="${columnSummaries.columns}">
-														<tr>
-															<td>
-															<la:link href="/admin/automl/columnview/${f:u(project.id)}/${f:u(data.label)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(data.label)}</la:link>
-															</td>
-															<td>${f:h(data.type)}</td>
-															<td>${f:h(data.missingCount)}</td>
-															<td>${f:h(data.zeroCount)}</td>
-															<td>${f:h(data.positiveInfinityCount)}</td>
-															<td>${f:h(data.negativeInfinityCount)}</td>
-															<td><fmt:formatNumber value="${data.mins[0]}" maxFractionDigits="6" /></td>
-															<td><fmt:formatNumber value="${data.maxs[0]}" maxFractionDigits="6" /></td>
-															<td><fmt:formatNumber value="${data.mean}" maxFractionDigits="6" /></td>
-															<td><fmt:formatNumber value="${data.sigma}" maxFractionDigits="6" /></td>
-															<td>${f:h(data.domainCardinality)}</td>
-														</tr>
-													</c:forEach>
-												</tbody>
-											</table>
-										</div>
-									</div>
-								</div>
-							</div>
-						</c:if>
-						<c:if test="${leaderboard != null}">
-							<div class="card card-outline card-primary">
-								<div class="card-header">
-									<h3 class="card-title"><la:message key="labels.automl_model_summaries" arg0="${f:h(leaderboard.projectName)}" /></h3>
-									<div class="card-tools">
-										<button type="button" class="btn btn-tool" data-card-widget="collapse">
-											<i class="fa fa-minus"></i>
-										</button>
-										<button type="button" class="btn btn-box-tool dropdown-toggle" data-toggle="dropdown" aria-expanded="true">
-											<i class="fas fa-th-list"></i>
-										</button>
-										<ul class="dropdown-menu" role="menu">
-											<li><form method="post" action="${contextPath}/admin/automl/">
-											<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
-											<input type="hidden" name="projectId" value="${f:h(project.id)}">
-											<input type="hidden" name="frameId" value="${f:h(frameId)}">
-											<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-											<button type="submit" name="exportallmodels" value="Export All" class="btn btn-link"><la:message key="labels.automl_export_all" /></button>
-											</form></li>
-										</ul>
-									</div>
-								</div>
-								<div class="card-body">
-									<%-- List --%>
-									<c:if test="${fn:length(leaderboard.models) == 0}">
-										<div class="row top10">
-											<div class="col-sm-12">
-												<em class="fa fa-info-circle text-primary"></em>
-												<la:message key="labels.list_could_not_find_crud_table" />
-											</div>
-										</div>
-									</c:if>
-									<c:if test="${fn:length(leaderboard.models) gt 0}">
-										<div class="row">
-											<div class="col-sm-12">
-												<table class="table table-bordered table-striped small">
-													<thead>
-														<tr>
-															<c:forEach var="data" varStatus="s" items="${leaderboard.columnNames}">
-																<th>${f:h(data)}</th>
-															</c:forEach>
-														</tr>
-													</thead>
-													<tbody>
-														<c:forEach var="data" varStatus="s" items="${leaderboard.models}">
-															<tr>
-																<c:forEach var="data" varStatus="x" items="${leaderboard.row}">
-																	<c:if test="${fn:contains(data, 'AutoML')}"><td><a href="${contextPath}/admin/automl/model/${f:u(project.id)}/${f:u(data)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(data)}</a></td></c:if>
-																	<c:if test="${not fn:contains(data, 'AutoML')}"><td>${f:h(data)}</td></c:if>
-																</c:forEach>
-															</tr>
-														</c:forEach>
-													</tbody>
-												</table>
-											</div>
-										</div>
-									</c:if>
-								</div>
-							</div>
-						</c:if>
 					</div>
 				</div>
 			</section>

@@ -29,7 +29,7 @@
 								<li class="breadcrumb-item"><la:link href="../list">
 									<la:message key="labels.crud_link_list" />
 								</la:link></li>
-								<li class="breadcrumb-item"><la:link href="/admin/automl/details/${f:u(project.id)}">
+								<li class="breadcrumb-item"><la:link href="/admin/automl/job/${f:u(project.id)}">
 									${f:h(project.name)}
 								</la:link></li>
 								<li class="breadcrumb-item active"><la:message key="labels.automl_columnview" /></li>
@@ -66,7 +66,7 @@
 											<la:message key="labels.automl_predict_dataset" />
 										</la:link>
 									</c:if>
-									<la:link href="/admin/automl/details/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+									<la:link href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
 										<i class="fas fa-project-diagram"></i>
 										<la:message key="labels.automl_project" />
 									</la:link>

@@ -72,7 +72,7 @@
 												</thead>
 												<tbody>
 													<c:forEach var="data" varStatus="s" items="${projects}">
-														<tr data-href="${contextPath}/admin/automl/details/${f:u(data.id)}">
+														<tr data-href="${contextPath}/admin/automl/job/${f:u(data.id)}">
 															<td>${f:h(data.name)}</td>
 														</tr>
 													</c:forEach>

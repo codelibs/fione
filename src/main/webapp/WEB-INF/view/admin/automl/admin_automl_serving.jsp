@@ -26,7 +26,7 @@
 								<li class="breadcrumb-item"><la:link href="/admin/automl">
 									<la:message key="labels.crud_link_list" />
 								</la:link></li>
-								<li class="breadcrumb-item"><la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">
+								<li class="breadcrumb-item"><la:link href="/admin/automl/job/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">
 									<la:message key="labels.automl_project" />
 								</la:link></li>
 								<li class="breadcrumb-item active"><la:message key="labels.automl_model" /></li>
@@ -59,7 +59,7 @@
 										<i class="fas fa-hammer"></i>
 										<la:message key="labels.automl_model" />
 									</la:link>
-									<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+									<la:link href="/admin/automl/job/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
 										<i class="fas fa-project-diagram"></i>
 										<la:message key="labels.automl_model_project" />
 									</la:link>

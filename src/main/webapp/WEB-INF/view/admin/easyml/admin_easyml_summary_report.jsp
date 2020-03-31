@@ -17,10 +17,10 @@
 		<div class="direct-chat-text">
 			<c:choose>
 				<c:when test="${predictionMetric.accuracy<=0.2}">
-					<div><la:message key="labels.easyml_what_do_you_think_answer1" arg0="${fi:frameName(frameId)}" arg1="${f:h(responseColumn)}" arg2="${contextPath}/admin/automl/details/${f:u(projectId)}"/></div>
+					<div><la:message key="labels.easyml_what_do_you_think_answer1" arg0="${fi:frameName(frameId)}" arg1="${f:h(responseColumn)}" arg2="${contextPath}/admin/automl/job/${f:u(projectId)}"/></div>
 				</c:when>
 				<c:when test="${predictionMetric.accuracy>0.2 and predictionMetric.accuracy<=0.4}">
-					<div><la:message key="labels.easyml_what_do_you_think_answer2" arg0="${fi:frameName(frameId)}" arg1="${contextPath}/admin/automl/details/${f:u(projectId)}" /></div>
+					<div><la:message key="labels.easyml_what_do_you_think_answer2" arg0="${fi:frameName(frameId)}" arg1="${contextPath}/admin/automl/job/${f:u(projectId)}" /></div>
 				</c:when>
 				<c:when test="${predictionMetric.accuracy>0.4 and predictionMetric.accuracy<=0.6}">
 					<div><la:message key="labels.easyml_what_do_you_think_answer3" /></div>

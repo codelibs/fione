@@ -69,6 +69,7 @@ import org.lastaflute.web.Execute;
 import org.lastaflute.web.UrlChain;
 import org.lastaflute.web.response.ActionResponse;
 import org.lastaflute.web.response.HtmlResponse;
+import org.lastaflute.web.response.next.HtmlNext;
 import org.lastaflute.web.ruts.process.ActionRuntime;
 import org.lastaflute.web.util.LaRequestUtil;
 
@@ -146,7 +147,23 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     @Execute
     @Secured({ ROLE, ROLE + VIEW })
-    public HtmlResponse details(final String projectId) {
+    public HtmlResponse job(final String projectId) {
+        return doDetailsView(projectId, path_AdminAutoml_AdminAutomlJobJsp);
+    }
+
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public HtmlResponse columnlist(final String projectId) {
+        return doDetailsView(projectId, path_AdminAutoml_AdminAutomlColumnlistJsp);
+    }
+
+    @Execute
+    @Secured({ ROLE, ROLE + VIEW })
+    public HtmlResponse modellist(final String projectId) {
+        return doDetailsView(projectId, path_AdminAutoml_AdminAutomlModellistJsp);
+    }
+
+    protected HtmlResponse doDetailsView(final String projectId, HtmlNext nextHtml) {
         final String token = doubleSubmitManager.saveToken(myTokenGroupType());
         try {
             final Project project = projectHelper.getProject(projectId);
@@ -185,7 +202,7 @@ public class AdminAutomlAction extends FioneAdminAction {
             }).orElse(null);
             final LeaderboardV99 leaderboard = leaderboardId != null ? projectHelper.getLeaderboard(projectId, leaderboardId) : null;
 
-            return asHtml(path_AdminAutoml_AdminAutomlDetailsJsp).renderWith(data -> {
+            return asHtml(nextHtml).renderWith(data -> {
                 RenderDataUtil.register(data, "token", token);
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, "frameId", frameId);

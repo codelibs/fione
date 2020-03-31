@@ -26,7 +26,7 @@
 								<li class="breadcrumb-item"><la:link href="/admin/automl">
 									<la:message key="labels.crud_link_list" />
 								</la:link></li>
-								<li class="breadcrumb-item"><la:link href="/admin/automl/details/${f:u(projectId)}">
+								<li class="breadcrumb-item"><la:link href="/admin/automl/job/${f:u(projectId)}">
 									<la:message key="labels.automl_project" />
 								</la:link></li>
 								<li class="breadcrumb-item active"><la:message key="labels.automl_prediction" /></li>
@@ -48,7 +48,7 @@
 										<la:message key="labels.automl_prediction_for" arg0="${f:h(fi:frameName(frameId))}" />
 									</h3>
 									<div class="card-tools">
-										<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
+										<la:link href="/admin/automl/job/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
 											<em class="fas fa-project-diagram"></em>
 											<la:message key="labels.automl_project" />
 										</la:link>
@@ -92,7 +92,7 @@
 									</div>
 								</div>
 								<div class="card-footer">
-									<la:link href="/admin/automl/details/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+									<la:link href="/admin/automl/job/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
 										<em class="fa fa-arrow-circle-left"></em>
 										<la:message key="labels.crud_button_back" />
 									</la:link>

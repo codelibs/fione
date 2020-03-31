@@ -26,7 +26,7 @@
 								<li class="breadcrumb-item"><la:link href="/admin/automl">
 									<la:message key="labels.crud_link_list" />
 								</la:link></li>
-								<li class="breadcrumb-item"><la:link href="/admin/automl/details/${f:u(projectId)}">
+								<li class="breadcrumb-item"><la:link href="/admin/automl/job/${f:u(projectId)}">
 									<la:message key="labels.automl_project" />
 								</la:link></li>
 								<li class="breadcrumb-item active"><la:message key="labels.automl_run_automl" /></li>
@@ -45,7 +45,7 @@
 								<div class="card-header">
 									<h3 class="card-title"><la:message key="labels.automl_settings" /></h3>
 									<div class="card-tools">
-										<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
+										<la:link href="/admin/automl/job/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
 											<em class="fas fa-project-diagram"></em>
 											<la:message key="labels.automl_project" />
 										</la:link>
@@ -225,7 +225,7 @@
 									</div>
 								</div>
 								<div class="card-footer">
-									<la:link href="/admin/automl/details/${f:u(projectId)}" styleClass="btn btn-default">
+									<la:link href="/admin/automl/job/${f:u(projectId)}" styleClass="btn btn-default">
 										<em class="fa fa-arrow-circle-left"></em>
 										<la:message key="labels.crud_button_back" />
 									</la:link>
