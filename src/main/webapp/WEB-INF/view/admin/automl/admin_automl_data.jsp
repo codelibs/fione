@@ -65,9 +65,27 @@
 											<la:message key="labels.automl_predict_dataset" />
 										</la:link>
 									</c:if>
+									<c:if test="${not empty frameId and leaderboard != null}">
+										<la:link href="/admin/automl/prediction/${f:u(project.id)}/${f:u(frameId)}/${f:u(leaderboardId)}" styleClass="btn btn-default">
+											<i class="fas fa-file-signature"></i>
+											<la:message key="labels.automl_predict_dataset" />
+										</la:link>
+									</c:if>
+									<c:if test="${not empty frameId}">
+										<la:link href="/admin/automl/columnlist/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+											<i class="fas fa-columns"></i>
+											<la:message key="labels.automl_columnview" />
+										</la:link>
+									</c:if>
+									<c:if test="${not empty frameId and leaderboard != null}">
+										<la:link href="/admin/automl/modellist/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
+											<i class="fas fa-hammer"></i>
+											<la:message key="labels.automl_modelview" />
+										</la:link>
+									</c:if>
 									<la:link href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
-										<i class="fas fa-project-diagram"></i>
-										<la:message key="labels.automl_project" />
+										<i class="fas fa-tasks"></i>
+										<la:message key="labels.automl_job" />
 									</la:link>
 								</div>
 								<div class="float-right">

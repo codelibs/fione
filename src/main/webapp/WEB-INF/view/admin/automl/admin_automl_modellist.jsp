@@ -76,8 +76,8 @@
 											</la:link>
 									</c:if>
 									<la:link href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
-										<i class="fas fa-project-diagram"></i>
-										<la:message key="labels.automl_model_project" />
+										<i class="fas fa-tasks"></i>
+										<la:message key="labels.automl_job" />
 									</la:link>
 								</div>
 

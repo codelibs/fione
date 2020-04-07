@@ -59,7 +59,7 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Data Viewer: {0} */
     public static final String LABELS_automl_dataview_title = "{labels.automl_dataview_title}";
 
-    /** The key of the message: Data Viewer */
+    /** The key of the message: Data */
     public static final String LABELS_automl_dataview = "{labels.automl_dataview}";
 
     /** The key of the message: Actions */
@@ -73,6 +73,9 @@ public class FioneLabels extends FessMessages {
 
     /** The key of the message: New Prediction */
     public static final String LABELS_automl_predict_dataset = "{labels.automl_predict_dataset}";
+
+    /** The key of the message: Models */
+    public static final String LABELS_automl_modelview = "{labels.automl_modelview}";
 
     /** The key of the message: Options */
     public static final String LABELS_automl_options = "{labels.automl_options}";
@@ -335,7 +338,7 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Predict */
     public static final String LABELS_automl_model_predict = "{labels.automl_model_predict}";
 
-    /** The key of the message: Project */
+    /** The key of the message: Job */
     public static final String LABELS_automl_model_project = "{labels.automl_model_project}";
 
     /** The key of the message: Export */

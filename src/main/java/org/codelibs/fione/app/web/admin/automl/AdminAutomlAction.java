@@ -82,7 +82,7 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     private static final String DATA_ROW_OFFSET = "data.row_offset";
 
-    private static final String DETAILS = "details";
+    private static final String DETAILS = "job";
 
     public static final String ROLE = "admin-automl";
 
