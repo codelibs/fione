@@ -641,6 +641,45 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     @Execute
     @Secured({ ROLE })
+    public HtmlResponse pivot(final String projectId, final String frameId) {
+        saveToken();
+        return asPivotHtml(projectId, frameId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse pivotframe(final PivotForm form) {
+        validate(form, messages -> {}, this::asNewProjectHtml);
+        verifyToken(this::asNewProjectHtml);
+
+        final Project project = projectHelper.getProject(form.projectId);
+        if (project == null) {
+            throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, form.projectId), this::asListHtml);
+        }
+
+        String frameId = FioneFunctions.appendFrameId(form.frameId, form.frameName);
+        try {
+            Map<String, Object> params = new HashMap<>();
+            Map<String, Object> pivotParams = new HashMap<>();
+            pivotParams.put("id", form.frameId);
+            pivotParams.put("index", StringCodecUtil.decode(form.indexName));
+            pivotParams.put("column", StringCodecUtil.decode(form.columnName));
+            pivotParams.put("value", StringCodecUtil.decode(form.valueName));
+            pivotParams.put("destination", frameId);
+            params.put("name", frameId);
+            params.put("pivot", pivotParams);
+            projectHelper.pivot(form.projectId, params);
+            saveMessage(messages -> messages.addSuccessCreatingPivotFrame(GLOBAL, FioneFunctions.frameName(frameId)));
+        } catch (final Exception e) {
+            logger.warn("Failed to pivot the frame.", e);
+            throw validationError(messages -> messages.addErrorsFailedToCreatePivotFrame(GLOBAL, FioneFunctions.frameName(frameId)),
+                    () -> asSetupMlHtml(form.projectId, form.frameId));
+        }
+        return redirectDetailsHtml(form.projectId, form.frameId, null);
+    }
+
+    @Execute
+    @Secured({ ROLE })
     public HtmlResponse deletealljobs(final JobForm form) {
         validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
@@ -919,6 +958,28 @@ public class AdminAutomlAction extends FioneAdminAction {
                     if (frame != null) {
                         final String responseColumn = getResponseColumn(leaderboardId);
                         Arrays.stream(frame.columns).map(c -> c.label).filter(s -> !s.equals(responseColumn))
+                                .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
+                    }
+                    RenderDataUtil.register(data, "columnItems", columnList);
+                });
+    }
+
+    private HtmlResponse asPivotHtml(final String projectId, final String frameId) {
+        return asHtml(path_AdminAutoml_AdminAutomlPivotJsp).useForm(PivotForm.class, setup -> setup.setup(form -> {
+            form.projectId = projectId;
+            form.frameId = frameId;
+            String frameName = FioneFunctions.frameName(frameId);
+            final int pos = frameName.lastIndexOf('.');
+            if (pos != -1) {
+                frameName = frameName.substring(0, pos);
+            }
+            form.frameName = "pivot";
+        })).renderWith(
+                data -> {
+                    final List<Map<String, String>> columnList = new ArrayList<>();
+                    final FrameV3 frame = projectHelper.getColumnSummaries(projectId, frameId);
+                    if (frame != null) {
+                        Arrays.stream(frame.columns).map(c -> c.label)
                                 .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
                     }
                     RenderDataUtil.register(data, "columnItems", columnList);

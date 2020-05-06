@@ -8,4 +8,6 @@
 	</component>
 	<component name="prjectHelper" class="org.codelibs.fione.helper.ProjectHelper">
 	</component>
+	<component name="pythonHelper" class="org.codelibs.fione.helper.PythonHelper">
+	</component>
 </components>

@@ -137,7 +137,7 @@ public class JobV3 extends SchemaV3 {
             return Kind.UNKNOWN;
         } else if (description.contains("AutoML build") || description.contains("AutoML starting")) {
             return Kind.AUTO_ML;
-        } else if (description.contains("Parse") || description.contains("Export dataset")) {
+        } else if (description.contains("Parse") || description.contains("Export dataset") || description.contains("Pivot")) {
             return Kind.FRAME;
         } else if (description.contains("Grid Search")) {
             return Kind.GRID;

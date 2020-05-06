@@ -47,7 +47,7 @@ public class CustomSystemHelper extends SystemHelper {
         }
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final H2oHelper h2oHelper = ComponentUtil.getComponent(H2oHelper.class);
-        h2oHelper.setEndpoint(fessConfig.getSystemProperty("h2o.endpoint", "http://localhost:54321"));
+        h2oHelper.setEndpoint(getH2oEndpoint());
         h2oHelper.setSecretAccessKey(fessConfig.getStorageAccessKey());
         h2oHelper.setSecretKeyId(fessConfig.getStorageSecretKey());
         h2oHelper.invalidate();
@@ -56,5 +56,10 @@ public class CustomSystemHelper extends SystemHelper {
     @Override
     public String getHelpLink(final String name) {
         return getHelpUrl("https://fione.codelibs.org/{lang}/");
+    }
+
+    public String getH2oEndpoint() {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        return fessConfig.getSystemProperty("h2o.endpoint", "http://localhost:54321");
     }
 }

@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 
 import org.apache.logging.log4j.LogManager;
@@ -90,6 +91,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.RapidsSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.SchemaV3;
 import org.codelibs.fione.util.StringCodecUtil;
+import org.lastaflute.core.smartdeploy.ManagedHotdeploy;
 import org.lastaflute.di.exception.IORuntimeException;
 import org.lastaflute.web.servlet.request.stream.WrittenStreamOut;
 
@@ -114,7 +116,10 @@ public class ProjectHelper {
     private static final Logger logger = LogManager.getLogger(ProjectHelper.class);
 
     @Resource
-    private H2oHelper h2oHelper;
+    protected H2oHelper h2oHelper;
+
+    @Resource
+    protected PythonHelper pythonHelper;
 
     protected String projectFolderName = "fione";
 
@@ -124,7 +129,19 @@ public class ProjectHelper {
 
     protected ReadWriteLock jobLock = new ReentrantReadWriteLock();
 
-    protected Cache<Object, SchemaV3> responseCache = CacheBuilder.newBuilder().expireAfterWrite(10, TimeUnit.MINUTES).build();
+    protected Cache<Object, SchemaV3> responseCache;
+
+    @PostConstruct
+    public void init() {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final CacheBuilder<Object, Object> cacheBuilder = CacheBuilder.newBuilder();
+        if (ManagedHotdeploy.isHotdeploy()) {
+            cacheBuilder.expireAfterWrite(10, TimeUnit.SECONDS);
+        } else {
+            cacheBuilder.expireAfterWrite(fessConfig.getSystemPropertyAsInt("fione.api.cache.expire", 10), TimeUnit.MINUTES);
+        }
+        responseCache = cacheBuilder.build();
+    }
 
     public Project[] getProjects() {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
@@ -1165,7 +1182,7 @@ public class ProjectHelper {
                     } catch (final Exception e) {
                         logger.warn("Failed to write {}.", tempObjectName, e);
                     }
-                });
+                }, "Filtercolumns");
 
                 pipedIn.connect(pipedOut);
                 pipeWriter.start();
@@ -1242,6 +1259,28 @@ public class ProjectHelper {
             }
         }
         store(projectId, job);
+    }
+
+    public void pivot(String projectId, Map<String, Object> params) {
+        final JobV3 workingJob = createWorkingJob((String) params.get("name"), "Pivot Frame", 0.2f);
+        store(projectId, workingJob);
+        try {
+            new Thread(() -> {
+                try {
+                    pythonHelper.execute("pivot", params, progress -> {
+                        workingJob.progress = progress;
+                        store(projectId, workingJob);
+                    });
+                    finish(projectId, workingJob, null);
+                } catch (Exception e) {
+                    logger.warn("Failed to pivot frame: projectId:{}, params:{}", projectId, params, e);
+                    finish(projectId, workingJob, e);
+                }
+            }, "PivotFrame").start();
+        } catch (Exception e) {
+            logger.warn("Failed to pivot frame: projectId:{}, params:{}", projectId, params, e);
+            finish(projectId, workingJob, e);
+        }
     }
 
     protected String getPredictCsvPath(final String projectId, final String name) {

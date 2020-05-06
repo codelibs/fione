@@ -25,6 +25,18 @@
 
   <function>
     <description>
+      Return job name
+    </description>
+    <name>jobName</name>
+    <function-class>org.codelibs.fione.taglib.FioneFunctions</function-class>
+    <function-signature>java.lang.String jobName(java.lang.String)</function-signature>
+    <example>
+      ${fi:jobName(name)}
+    </example>
+  </function>
+
+  <function>
+    <description>
       Return formatted value
     </description>
     <name>formatNumber</name>

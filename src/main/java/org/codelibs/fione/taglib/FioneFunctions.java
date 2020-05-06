@@ -26,6 +26,13 @@ public class FioneFunctions {
         // nothing
     }
 
+    public static String jobName(final String name) {
+        if (name != null && name.trim().endsWith(".hex")) {
+            return frameName(name);
+        }
+        return name;
+    }
+
     public static String frameName(final String frameId) {
         if (frameId == null) {
             return null;
@@ -38,8 +45,28 @@ public class FioneFunctions {
         final String[] values = name.split("_");
         if (values.length == 2) {
             return StringCodecUtil.decode(values[1]);
+        } else if (values.length == 3) {
+            return StringCodecUtil.decode(values[1]) + ":" + StringCodecUtil.decode(values[2]);
         }
         return frameId;
+    }
+
+    public static String appendFrameId(final String frameId, String newName) {
+        if (frameId == null) {
+            return null;
+        }
+        String name = frameId;
+        String suffix = StringUtil.EMPTY;
+        final int pos = frameId.lastIndexOf('.');
+        if (pos != -1) {
+            name = frameId.substring(0, pos);
+            suffix = frameId.substring(pos);
+        }
+        final String[] values = name.split("_");
+        if (values.length >= 2) {
+            return values[0] + "_" + values[1] + "_" + StringCodecUtil.encodeUrlSafe(newName) + suffix;
+        }
+        return name + "_" + StringCodecUtil.encodeUrlSafe(newName) + suffix;
     }
 
     public static String formatNumber(final Object value, final String format) {
