@@ -51,7 +51,7 @@ public class FioneFunctions {
         return frameId;
     }
 
-    public static String appendFrameId(final String frameId, String newName) {
+    public static String appendFrameId(final String frameId, final String newName) {
         if (frameId == null) {
             return null;
         }

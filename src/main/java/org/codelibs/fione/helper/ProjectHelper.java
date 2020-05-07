@@ -237,7 +237,7 @@ public class ProjectHelper {
     }
 
     protected String[] getFrames(final Project project) {
-        return getFrames(project, (x, y) -> x.startsWith(y));
+        return getFrames(project, String::startsWith);
     }
 
     protected String[] getFrames(final Project project, final BiPredicate<String, String> condition) {
@@ -1195,7 +1195,7 @@ public class ProjectHelper {
                         final List<String> l = list;
                         final List<String> valueList = indices.stream().map(s -> {
                             if (indexMap.containsKey(s)) {
-                                final int index = indexMap.get(s).intValue();
+                                final int index = indexMap.get(s);
                                 if (index < l.size()) {
                                     return l.get(index);
                                 }
@@ -1261,7 +1261,7 @@ public class ProjectHelper {
         store(projectId, job);
     }
 
-    public void pivot(String projectId, Map<String, Object> params) {
+    public void pivot(final String projectId, final Map<String, Object> params) {
         final JobV3 workingJob = createWorkingJob((String) params.get("name"), "Pivot Frame", 0.2f);
         store(projectId, workingJob);
         try {
@@ -1272,12 +1272,12 @@ public class ProjectHelper {
                         store(projectId, workingJob);
                     });
                     finish(projectId, workingJob, null);
-                } catch (Exception e) {
+                } catch (final Exception e) {
                     logger.warn("Failed to pivot frame: projectId:{}, params:{}", projectId, params, e);
                     finish(projectId, workingJob, e);
                 }
             }, "PivotFrame").start();
-        } catch (Exception e) {
+        } catch (final Exception e) {
             logger.warn("Failed to pivot frame: projectId:{}, params:{}", projectId, params, e);
             finish(projectId, workingJob, e);
         }

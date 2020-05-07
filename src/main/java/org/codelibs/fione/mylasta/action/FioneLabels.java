@@ -431,6 +431,18 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Create */
     public static final String LABELS_automl_pivot_create = "{labels.automl_pivot_create}";
 
+    /** The key of the message: Data Set */
+    public static final String LABELS_automl_menu_dataset = "{labels.automl_menu_dataset}";
+
+    /** The key of the message: Frame */
+    public static final String LABELS_automl_menu_frame = "{labels.automl_menu_frame}";
+
+    /** The key of the message: Machine Learning */
+    public static final String LABELS_automl_menu_machine_learning = "{labels.automl_menu_machine_learning}";
+
+    /** The key of the message: Pivot */
+    public static final String LABELS_automl_pivot = "{labels.automl_pivot}";
+
     /** The key of the message: Project Dashboard */
     public static final String LABELS_easyml_project_dashboard = "{labels.easyml_project_dashboard}";
 

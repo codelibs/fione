@@ -163,7 +163,7 @@ public class AdminAutomlAction extends FioneAdminAction {
         return doDetailsView(projectId, path_AdminAutoml_AdminAutomlModellistJsp);
     }
 
-    protected HtmlResponse doDetailsView(final String projectId, HtmlNext nextHtml) {
+    protected HtmlResponse doDetailsView(final String projectId, final HtmlNext nextHtml) {
         final String token = doubleSubmitManager.saveToken(myTokenGroupType());
         try {
             final Project project = projectHelper.getProject(projectId);
@@ -657,10 +657,10 @@ public class AdminAutomlAction extends FioneAdminAction {
             throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, form.projectId), this::asListHtml);
         }
 
-        String frameId = FioneFunctions.appendFrameId(form.frameId, form.frameName);
+        final String frameId = FioneFunctions.appendFrameId(form.frameId, form.frameName);
         try {
-            Map<String, Object> params = new HashMap<>();
-            Map<String, Object> pivotParams = new HashMap<>();
+            final Map<String, Object> params = new HashMap<>();
+            final Map<String, Object> pivotParams = new HashMap<>();
             pivotParams.put("id", form.frameId);
             pivotParams.put("index", StringCodecUtil.decode(form.indexName));
             pivotParams.put("column", StringCodecUtil.decode(form.columnName));

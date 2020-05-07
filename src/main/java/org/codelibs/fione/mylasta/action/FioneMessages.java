@@ -15,7 +15,6 @@
  */
 package org.codelibs.fione.mylasta.action;
 
-import org.codelibs.fione.mylasta.action.FioneLabels;
 import org.lastaflute.core.message.UserMessage;
 
 /**
@@ -150,7 +149,7 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Failed to stop H2O cluster. */
     public static final String ERRORS_failed_to_shutdown_h2o = "{errors.failed_to_shutdown_h2o}";
 
-    /** The key of the message: Failed to create {0}. */
+    /** The key of the message: Failed to create Frame {0}. */
     public static final String ERRORS_failed_to_create_pivot_frame = "{errors.failed_to_create_pivot_frame}";
 
     /**
@@ -761,7 +760,7 @@ public class FioneMessages extends FioneLabels {
     /**
      * Add the created action message for the key 'errors.failed_to_create_pivot_frame' with parameters.
      * <pre>
-     * message: Failed to create {0}.
+     * message: Failed to create Frame {0}.
      * </pre>
      * @param property The property name for the message. (NotNull)
      * @param arg0 The parameter arg0 for message. (NotNull)

@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import java.lang.reflect.Field;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -49,7 +50,7 @@ public class SchemaV3 {
 
     public String[] getFieldNames() {
         if (fieldNames == null) {
-            fieldNames = Arrays.stream(getClass().getFields()).map(f -> f.getName()).toArray(n -> new String[n]);
+            fieldNames = Arrays.stream(getClass().getFields()).map(Field::getName).toArray(n -> new String[n]);
         }
         return fieldNames;
     }

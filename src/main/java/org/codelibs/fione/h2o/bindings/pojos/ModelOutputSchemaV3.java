@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -168,7 +169,7 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
     public String[] getFieldNames() {
         if (fieldNames == null) {
             fieldNames =
-                    Arrays.stream(getClass().getFields()).filter(f -> isOutputClass(f.getType())).map(f -> f.getName())
+                    Arrays.stream(getClass().getFields()).filter(f -> isOutputClass(f.getType())).map(Field::getName)
                             .toArray(n -> new String[n]);
         }
         return fieldNames;

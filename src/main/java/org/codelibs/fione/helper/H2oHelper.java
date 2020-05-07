@@ -35,6 +35,7 @@ import org.codelibs.core.exception.IORuntimeException;
 import org.codelibs.curl.Curl;
 import org.codelibs.curl.CurlResponse;
 import org.codelibs.fess.app.web.base.login.FessLoginAssist;
+import org.codelibs.fess.mylasta.action.FessUserBean;
 import org.codelibs.fess.util.ComponentUtil;
 import org.codelibs.fione.exception.FioneSystemException;
 import org.codelibs.fione.exception.H2oAccessException;
@@ -265,7 +266,7 @@ public class H2oHelper {
     protected String getSessionKey() {
         String sessionKey;
         try {
-            sessionKey = ComponentUtil.getComponent(FessLoginAssist.class).getSavedUserBean().map(u -> u.getUserId()).orElse("guest");
+            sessionKey = ComponentUtil.getComponent(FessLoginAssist.class).getSavedUserBean().map(FessUserBean::getUserId).orElse("guest");
         } catch (final Exception e) {
             if (logger.isDebugEnabled()) {
                 logger.debug("Failed to get sessionKey.", e);

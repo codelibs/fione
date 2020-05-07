@@ -280,7 +280,7 @@ public class ColV3 extends SchemaV3 {
         return null;
     }
 
-    public void setRows(long rows) {
+    public void setRows(final long rows) {
         this.rows = rows;
     }
 }

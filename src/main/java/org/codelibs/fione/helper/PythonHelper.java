@@ -59,7 +59,7 @@ public class PythonHelper {
         handlebars = new Handlebars(loader);
     }
 
-    public void execute(String name, Map<String, Object> params, Consumer<Float> progress) {
+    public void execute(final String name, final Map<String, Object> params, final Consumer<Float> progress) {
         final File pyFile = ComponentUtil.getSystemHelper().createTempFile("fione_", ".py");
         try {
             writePythonFile(name, params, pyFile);
@@ -72,7 +72,7 @@ public class PythonHelper {
         }
     }
 
-    protected void executePython(final File pyFile, Consumer<Float> progress) {
+    protected void executePython(final File pyFile, final Consumer<Float> progress) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final ProcessHelper processHelper = ComponentUtil.getProcessHelper();
         final ServletContext servletContext = ComponentUtil.getComponent(ServletContext.class);
@@ -115,9 +115,9 @@ public class PythonHelper {
         }
     }
 
-    protected void writePythonFile(String name, Map<String, Object> params, final File pyFile) {
-        Map<String, Object> h2oParams = new HashMap<>();
-        String endpoint = ((CustomSystemHelper) ComponentUtil.getSystemHelper()).getH2oEndpoint();
+    protected void writePythonFile(final String name, final Map<String, Object> params, final File pyFile) {
+        final Map<String, Object> h2oParams = new HashMap<>();
+        final String endpoint = ((CustomSystemHelper) ComponentUtil.getSystemHelper()).getH2oEndpoint();
         h2oParams.put("url", endpoint);
         params.put("h2o", h2oParams);
         try (final Writer writer = new BufferedWriter(new FileWriter(pyFile, Constants.UTF_8_CHARSET))) {
@@ -125,7 +125,7 @@ public class PythonHelper {
             final Context hbsContext = Context.newContext(params);
             template.apply(hbsContext, writer);
             writer.flush();
-        } catch (IOException e) {
+        } catch (final IOException e) {
             throw new PythonExecutionException("Failed to write " + pyFile.getAbsolutePath(), e);
         }
     }

@@ -83,10 +83,10 @@
 																	<c:when test="${data.iconType == 'hammer'}">
 																		<la:link
 																			href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
-																		>${f:h(data.dest.name)}</la:link>
+																		>${f:h(fi:jobName(data.dest.name))}</la:link>
 																		<c:if test="${data.status == 'RUNNING'}"><br><i class="fas fa-circle-notch fa-spin"></i>${f:h(data.progressMsg)}</c:if>
 																	</c:when>
-																	<c:otherwise>${f:h(data.dest.name)}</c:otherwise>
+																	<c:otherwise>${f:h(fi:jobName(data.dest.name))}</c:otherwise>
 																</c:choose></td>
 															<td class="text-center"><fmt:formatDate value="${fe:date(data.startTime)}" type="BOTH" /></td>
 															<td class="text-center"><c:if test="${data.status == 'RUNNING'}">-</c:if> <c:if

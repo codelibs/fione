@@ -475,7 +475,7 @@ public class AdminEasymlAction extends FioneAdminAction {
             RenderDataUtil.register(data, "project", project);
             registerColumnItems(schema, data, (maps, i) -> {
                 if (i.intValue() < columnSummaries.columns.length) {
-                    final ColV3 column = columnSummaries.columns[i.intValue()];
+                    final ColV3 column = columnSummaries.columns[i];
                     maps.$("missing", Long.toString(column.missingCount));
                     maps.$("min", column.mins != null && column.mins.length > 0 ? Double.toString(column.mins[0]) : StringUtil.EMPTY);
                     maps.$("max", column.maxs != null && column.maxs.length > 0 ? Double.toString(column.maxs[0]) : StringUtil.EMPTY);

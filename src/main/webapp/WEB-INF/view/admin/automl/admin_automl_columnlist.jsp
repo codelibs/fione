@@ -43,56 +43,7 @@
 						<la:errors />
 						<div class="card card-outline">
 							<div class="card-body p-2">
-								<form method="post" action="${contextPath}/admin/automl/">
-								<input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
-								<input type="hidden" name="projectId" value="${f:h(project.id)}">
-								<div class="btn-group" role="toolbar" aria-label="Toolbar">
-									<la:link href="/admin/automl/newdataset/${f:u(project.id)}" styleClass="btn btn-default">
-										<i class="fas fa-table"></i>
-										<la:message key="labels.automl_upload_dataset" />
-									</la:link>
-									<c:if test="${not empty frameId}">
-										<la:link href="/admin/automl/setupml/${f:u(project.id)}/${f:u(frameId)}" styleClass="btn btn-default">
-											<i class="fas fa-running"></i>
-											<la:message key="labels.automl_run_automl" />
-										</la:link>
-									</c:if>
-									<c:if test="${not empty frameId and leaderboard != null}">
-										<la:link href="/admin/automl/prediction/${f:u(project.id)}/${f:u(frameId)}/${f:u(leaderboardId)}" styleClass="btn btn-default">
-											<i class="fas fa-file-signature"></i>
-											<la:message key="labels.automl_predict_dataset" />
-										</la:link>
-									</c:if>
-									<c:if test="${not empty frameId}">
-										<la:link href="/admin/automl/dataview/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
-											<i class="far fa-eye"></i>
-											<la:message key="labels.automl_dataview" />
-											</la:link>
-									</c:if>
-									<c:if test="${not empty frameId and leaderboard != null}">
-										<la:link href="/admin/automl/modellist/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
-											<i class="fas fa-hammer"></i>
-											<la:message key="labels.automl_modelview" />
-										</la:link>
-									</c:if>
-									<la:link href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
-										<i class="fas fa-tasks"></i>
-										<la:message key="labels.automl_job" />
-									</la:link>
-								</div>
-
-								<div class="float-right">
-									<div class="btn-group" role="group">
-										<button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-											<la:message key="labels.automl_options" />
-											</button>
-										<ul class="dropdown-menu">
-											<li><button type="submit" name="newsession" value="New Session" class="btn btn-link"><la:message key="labels.automl_new_session" /></button></li>
-											<li><button type="submit" name="deleteproject" value="Delete Project" class="btn btn-link"><la:message key="labels.automl_delete_project" /></button></li>
-										</ul>
-									</div>
-								</div>
-								</form>
+								<jsp:include page="/WEB-INF/view/admin/automl/admin_automl_toolbar.jsp"></jsp:include>
 							</div>
 						</div>
 					</div>
@@ -229,7 +180,6 @@
 															<td class="text-center">
 															<c:if test="${frameId == data}"><i class="far fa-check-square" style="color:#3c8dbc;"></i></c:if>
 															<c:if test="${frameId != data}"><la:link href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(data)}&lid=${f:u(leaderboardId)}"><i class="far fa-square"></i></la:link></c:if>
-															<la:link href="/admin/automl/dataview/${f:u(project.id)}?fid=${f:u(data)}&lid=${f:u(leaderboardId)}"><i class="far fa-eye"></i></la:link>
 															<button type="submit" name="deleteframe" value="Delete" class="btn btn-link" style="padding:0;"><i class="fas fa-trash-alt" title="<la:message key="labels.automl_delete" />"></i></button>
 															</td>
 														</form></tr>
