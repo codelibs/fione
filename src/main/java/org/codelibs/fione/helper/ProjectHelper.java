@@ -138,7 +138,7 @@ public class ProjectHelper {
         if (ManagedHotdeploy.isHotdeploy()) {
             cacheBuilder.expireAfterWrite(10, TimeUnit.SECONDS);
         } else {
-            cacheBuilder.expireAfterWrite(fessConfig.getSystemPropertyAsInt("fione.api.cache.expire", 10), TimeUnit.MINUTES);
+            cacheBuilder.expireAfterWrite(fessConfig.getSystemPropertyAsInt("fione.api.cache.expire", 5), TimeUnit.MINUTES);
         }
         responseCache = cacheBuilder.build();
     }
@@ -439,7 +439,7 @@ public class ProjectHelper {
     public FrameV3 getColumnSummaries(final String projectId, final String frameId) {
         try {
             final String cacheKey = "frameSummary@" + projectId + "," + frameId;
-            final FrameV3 columnSummaries = (FrameV3) responseCache.get(cacheKey, () -> {
+            return (FrameV3) responseCache.get(cacheKey, () -> {
                 final Response<FramesV3> response = h2oHelper.getFrameSummary(frameId).execute();
                 if (logger.isDebugEnabled()) {
                     logger.debug("getFrameSummary: {}", response);
@@ -447,16 +447,15 @@ public class ProjectHelper {
                 if (response.code() == 200) {
                     final FramesV3 data = response.body();
                     if (data.frames.length == 1) {
-                        if (data.frames[0] == null) {
+                        FrameV3 frame = data.frames[0];
+                        if (frame == null || frame.byteSize == 0L) {
                             throw new CacheNotFoundException();
                         }
-                        return data.frames[0];
+                        return frame;
                     }
                 }
                 throw new CacheNotFoundException();
             });
-            columnSummaries.refresh();
-            return columnSummaries;
         } catch (final Exception e) {
             if (e.getCause() instanceof CacheNotFoundException) {
                 return null;
@@ -710,7 +709,7 @@ public class ProjectHelper {
     public LeaderboardV99 getLeaderboard(final String projectId, final String leaderboardId) {
         try {
             final String cacheKey = "leaderboard@" + projectId + "," + leaderboardId;
-            final LeaderboardV99 leaderboard = (LeaderboardV99) responseCache.get(cacheKey, () -> {
+            return (LeaderboardV99) responseCache.get(cacheKey, () -> {
                 final Response<LeaderboardV99> response = h2oHelper.getLeaderboard(leaderboardId).execute();
                 if (logger.isDebugEnabled()) {
                     logger.debug("getLeaderboard: {}", response);
@@ -723,8 +722,6 @@ public class ProjectHelper {
                 logger.warn("Failed to read leaderboard: {}", response);
                 throw new CacheNotFoundException();
             });
-            leaderboard.refresh();
-            return leaderboard;
         } catch (final Exception e) {
             if (e.getCause() instanceof CacheNotFoundException) {
                 return null;

@@ -18,7 +18,6 @@ package org.codelibs.fione.h2o.bindings.pojos;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.codelibs.core.lang.StringUtil;
 
@@ -158,12 +157,6 @@ public class FrameV3 extends FrameBaseV3 {
         return Arrays.stream(columns).map(c -> c.label).toArray(n -> new String[n]);
     }
 
-    private transient AtomicInteger counter = new AtomicInteger(0);
-
-    public void refresh() {
-        counter.set(0);
-    }
-
     public int getRowSize() {
         if (columns != null && columns.length > 0) {
             if (columns[0].data != null) {
@@ -176,21 +169,22 @@ public class FrameV3 extends FrameBaseV3 {
         return 0;
     }
 
-    public String[] getRow() {
-        final int index = counter.getAndAdd(1);
-        if (index >= getRowSize()) {
-            return StringUtil.EMPTY_STRINGS;
-        }
-        final List<String> list = new ArrayList<>();
-        for (final ColV3 column : columns) {
-            if (column.data != null) {
-                list.add(Double.toString(column.data[index]));
-            } else if (column.stringData != null) {
-                list.add(column.stringData[index]);
-            } else {
-                list.add(StringUtil.EMPTY);
+    public List<List<String>> getDataRows() {
+        final List<List<String>> dataList = new ArrayList<>(20);
+        final int rowSize = getRowSize();
+        for (int i = 0; i < rowSize; i++) {
+            final List<String> list = new ArrayList<>();
+            for (final ColV3 column : columns) {
+                if (column.data != null) {
+                    list.add(Double.toString(column.data[i]));
+                } else if (column.stringData != null) {
+                    list.add(column.stringData[i]);
+                } else {
+                    list.add(StringUtil.EMPTY);
+                }
             }
+            dataList.add(list);
         }
-        return list.toArray(n -> new String[n]);
+        return dataList;
     }
 }

@@ -233,10 +233,10 @@
 														</tr>
 													</thead>
 													<tbody>
-														<c:forEach var="data" varStatus="s" begin="0" end="${frameData.rowSize}">
+														<c:forEach var="row" varStatus="s" items="${frameData.dataRows}">
 															<tr>
-																<c:forEach var="data" varStatus="x" items="${frameData.row}">
-																	<td>${f:h(data)}</td>
+																<c:forEach var="v" varStatus="x" items="${row}">
+																	<td>${f:h(v)}</td>
 																</c:forEach>
 															</tr>
 														</c:forEach>
