@@ -344,7 +344,7 @@
 						<data>
 							<type>directory</type>
 							<src>${project.build.directory}/fione</src>
-							<includes>**/WEB-INF/classes/**,**/WEB-INF/env/**,**/WEB-INF/plugin/**,**/css/**,**/images/**,**/js/**,**/WEB-INF/view/**,**/WEB-INF/fi.tld,**/WEB-INF/lib/retrofit*,**/WEB-INF/lib/converter-gson*</includes>
+							<includes>**/WEB-INF/classes/**,**/WEB-INF/env/**,**/css/**,**/images/**,**/js/**,**/WEB-INF/view/**,**/WEB-INF/fi.tld,**/WEB-INF/lib/retrofit*,**/WEB-INF/lib/converter-gson*</includes>
 							<mapper>
 								<type>perm</type>
 								<prefix>${packaging.fess.app.dir}</prefix>
@@ -402,7 +402,6 @@
 									<includes>
 										<include>**/WEB-INF/classes/**</include>
 										<include>**/WEB-INF/env/**</include>
-										<include>**/WEB-INF/plugin/**</include>
 										<include>**/css/**</include>
 										<include>**/images/**</include>
 										<include>**/js/**</include>

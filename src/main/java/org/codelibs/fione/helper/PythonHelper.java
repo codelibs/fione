@@ -55,7 +55,7 @@ public class PythonHelper {
 
     @PostConstruct
     public void init() {
-        final FileTemplateLoader loader = new FileTemplateLoader(ResourceUtil.getPluginPath("fione", "python").toFile());
+        final FileTemplateLoader loader = new FileTemplateLoader(ResourceUtil.getEnvPath("fione", "python").toFile());
         handlebars = new Handlebars(loader);
     }
 
