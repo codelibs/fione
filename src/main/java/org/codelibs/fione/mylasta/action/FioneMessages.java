@@ -77,8 +77,8 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Stopping H2O cluster. */
     public static final String SUCCESS_shutdown_h2o = "{success.shutdown_h2o}";
 
-    /** The key of the message: Creating Frame {0}. */
-    public static final String SUCCESS_creating_pivot_frame = "{success.creating_pivot_frame}";
+    /** The key of the message: Running Module {0}. */
+    public static final String SUCCESS_run_module = "{success.run_module}";
 
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
@@ -149,8 +149,8 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Failed to stop H2O cluster. */
     public static final String ERRORS_failed_to_shutdown_h2o = "{errors.failed_to_shutdown_h2o}";
 
-    /** The key of the message: Failed to create Frame {0}. */
-    public static final String ERRORS_failed_to_create_pivot_frame = "{errors.failed_to_create_pivot_frame}";
+    /** The key of the message: Failed to run Module {0}. */
+    public static final String ERRORS_failed_to_run_module = "{errors.failed_to_run_module}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -404,17 +404,17 @@ public class FioneMessages extends FioneLabels {
     }
 
     /**
-     * Add the created action message for the key 'success.creating_pivot_frame' with parameters.
+     * Add the created action message for the key 'success.run_module' with parameters.
      * <pre>
-     * message: Creating Frame {0}.
+     * message: Running Module {0}.
      * </pre>
      * @param property The property name for the message. (NotNull)
      * @param arg0 The parameter arg0 for message. (NotNull)
      * @return this. (NotNull)
      */
-    public FioneMessages addSuccessCreatingPivotFrame(String property, String arg0) {
+    public FioneMessages addSuccessRunModule(String property, String arg0) {
         assertPropertyNotNull(property);
-        add(property, new UserMessage(SUCCESS_creating_pivot_frame, arg0));
+        add(property, new UserMessage(SUCCESS_run_module, arg0));
         return this;
     }
 
@@ -758,17 +758,17 @@ public class FioneMessages extends FioneLabels {
     }
 
     /**
-     * Add the created action message for the key 'errors.failed_to_create_pivot_frame' with parameters.
+     * Add the created action message for the key 'errors.failed_to_run_module' with parameters.
      * <pre>
-     * message: Failed to create Frame {0}.
+     * message: Failed to run Module {0}.
      * </pre>
      * @param property The property name for the message. (NotNull)
      * @param arg0 The parameter arg0 for message. (NotNull)
      * @return this. (NotNull)
      */
-    public FioneMessages addErrorsFailedToCreatePivotFrame(String property, String arg0) {
+    public FioneMessages addErrorsFailedToRunModule(String property, String arg0) {
         assertPropertyNotNull(property);
-        add(property, new UserMessage(ERRORS_failed_to_create_pivot_frame, arg0));
+        add(property, new UserMessage(ERRORS_failed_to_run_module, arg0));
         return this;
     }
 }

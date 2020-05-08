@@ -61,6 +61,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
+import org.codelibs.fione.helper.PythonHelper.PythonModule;
 import org.codelibs.fione.taglib.FioneFunctions;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.json.simple.JSONObject;
@@ -72,6 +73,8 @@ import org.lastaflute.web.response.HtmlResponse;
 import org.lastaflute.web.response.next.HtmlNext;
 import org.lastaflute.web.ruts.process.ActionRuntime;
 import org.lastaflute.web.util.LaRequestUtil;
+
+import com.google.common.base.CaseFormat;
 
 /**
  * @author shinsuke
@@ -214,6 +217,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 if (leaderboard != null) {
                     RenderDataUtil.register(data, "leaderboard", leaderboard);
                 }
+                RenderDataUtil.register(data, "frameModules", pythonHelper.getFrameModules());
             });
         } catch (final Exception e) {
             logger.warn("Failed to read " + projectId, e);
@@ -305,6 +309,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 if (frameData != null) {
                     RenderDataUtil.register(data, "frameData", frameData);
                 }
+                RenderDataUtil.register(data, "frameModules", pythonHelper.getFrameModules());
             });
         } catch (final Exception e) {
             logger.warn("Failed to read " + projectId, e);
@@ -375,6 +380,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 if (columnData != null) {
                     RenderDataUtil.register(data, "columnData", columnData);
                 }
+                RenderDataUtil.register(data, "frameModules", pythonHelper.getFrameModules());
             });
         } catch (final Exception e) {
             logger.warn("Failed to read " + projectId, e);
@@ -641,14 +647,14 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     @Execute
     @Secured({ ROLE })
-    public HtmlResponse pivot(final String projectId, final String frameId) {
+    public HtmlResponse module(final String projectId, final String moduleId) {
         saveToken();
-        return asPivotHtml(projectId, frameId);
+        return asModuleHtml(projectId, moduleId);
     }
 
     @Execute
     @Secured({ ROLE })
-    public HtmlResponse pivotframe(final PivotForm form) {
+    public HtmlResponse runmodule(final ModuleForm form) {
         validate(form, messages -> {}, this::asNewProjectHtml);
         verifyToken(this::asNewProjectHtml);
 
@@ -657,22 +663,23 @@ public class AdminAutomlAction extends FioneAdminAction {
             throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, form.projectId), this::asListHtml);
         }
 
-        final String frameId = FioneFunctions.appendFrameId(form.frameId, form.frameName);
+        final PythonModule pythonModule = pythonHelper.findPythonModule(form.moduleId);
+        if (pythonModule == null) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml); // TODO
+        }
+
         try {
             final Map<String, Object> params = new HashMap<>();
-            final Map<String, Object> pivotParams = new HashMap<>();
-            pivotParams.put("id", form.frameId);
-            pivotParams.put("index", StringCodecUtil.decode(form.indexName));
-            pivotParams.put("column", StringCodecUtil.decode(form.columnName));
-            pivotParams.put("value", StringCodecUtil.decode(form.valueName));
-            pivotParams.put("destination", frameId);
-            params.put("name", frameId);
-            params.put("pivot", pivotParams);
-            projectHelper.pivot(form.projectId, params);
-            saveMessage(messages -> messages.addSuccessCreatingPivotFrame(GLOBAL, FioneFunctions.frameName(frameId)));
+            params.put("project_id", form.projectId);
+            params.put("frame_id", form.frameId);
+            params.put("model_id", form.modelId);
+            form.params.entrySet().stream()
+                    .forEach(e -> params.put(CaseFormat.UPPER_CAMEL.to(CaseFormat.LOWER_UNDERSCORE, e.getKey()), e.getValue()));
+            projectHelper.executeModule(form.projectId, pythonModule, params);
+            saveMessage(messages -> messages.addSuccessRunModule(GLOBAL, pythonModule.getId()));
         } catch (final Exception e) {
             logger.warn("Failed to pivot the frame.", e);
-            throw validationError(messages -> messages.addErrorsFailedToCreatePivotFrame(GLOBAL, FioneFunctions.frameName(frameId)),
+            throw validationError(messages -> messages.addErrorsFailedToRunModule(GLOBAL, pythonModule.getId()),
                     () -> asSetupMlHtml(form.projectId, form.frameId));
         }
         return redirectDetailsHtml(form.projectId, form.frameId, null);
@@ -964,26 +971,31 @@ public class AdminAutomlAction extends FioneAdminAction {
                 });
     }
 
-    private HtmlResponse asPivotHtml(final String projectId, final String frameId) {
-        return asHtml(path_AdminAutoml_AdminAutomlPivotJsp).useForm(PivotForm.class, setup -> setup.setup(form -> {
+    private HtmlResponse asModuleHtml(final String projectId, final String moduleId) {
+        final PythonModule pythonModule = pythonHelper.findPythonModule(moduleId);
+        if (pythonModule == null) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml); // TODO
+        }
+        final String frameId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID)).orElse(null);
+        final String modelId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(MODEL_ID)).orElse(null);
+
+        return asHtml(path_AdminAutoml_AdminAutomlModuleJsp).useForm(ModuleForm.class, setup -> setup.setup(form -> {
             form.projectId = projectId;
+            form.moduleId = moduleId;
             form.frameId = frameId;
-            String frameName = FioneFunctions.frameName(frameId);
-            final int pos = frameName.lastIndexOf('.');
-            if (pos != -1) {
-                frameName = frameName.substring(0, pos);
+            form.modelId = modelId;
+        })).renderWith(data -> {
+            final List<Map<String, String>> columnList = new ArrayList<>();
+            if (frameId != null) {
+                final FrameV3 frame = projectHelper.getColumnSummaries(projectId, frameId);
+                if (frame != null) {
+                    Arrays.stream(frame.columns).map(c -> c.label).forEach(s -> columnList.add(Maps.map("label", s).$("value", s).$()));
+                }
             }
-            form.frameName = "pivot";
-        })).renderWith(
-                data -> {
-                    final List<Map<String, String>> columnList = new ArrayList<>();
-                    final FrameV3 frame = projectHelper.getColumnSummaries(projectId, frameId);
-                    if (frame != null) {
-                        Arrays.stream(frame.columns).map(c -> c.label)
-                                .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
-                    }
-                    RenderDataUtil.register(data, "columnItems", columnList);
-                });
+            RenderDataUtil.register(data, "columnItems", columnList);
+            RenderDataUtil.register(data, "module", pythonModule);
+            RenderDataUtil.register(data, "frameModules", pythonHelper.getFrameModules());
+        });
     }
 
     private HtmlResponse redirectDetailsHtml(final String projectId, final String frameId, final String leaderboardId) {

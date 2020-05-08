@@ -44,6 +44,9 @@ public interface FioneHtmlPath {
     /** The path of the HTML: /admin/automl/admin_automl_modellist.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlModellistJsp = new HtmlNext("/admin/automl/admin_automl_modellist.jsp");
 
+    /** The path of the HTML: /admin/automl/admin_automl_module.jsp */
+    HtmlNext path_AdminAutoml_AdminAutomlModuleJsp = new HtmlNext("/admin/automl/admin_automl_module.jsp");
+
     /** The path of the HTML: /admin/automl/admin_automl_newdata.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlNewdataJsp = new HtmlNext("/admin/automl/admin_automl_newdata.jsp");
 
@@ -52,9 +55,6 @@ public interface FioneHtmlPath {
 
     /** The path of the HTML: /admin/automl/admin_automl_newproject.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlNewprojectJsp = new HtmlNext("/admin/automl/admin_automl_newproject.jsp");
-
-    /** The path of the HTML: /admin/automl/admin_automl_pivot.jsp */
-    HtmlNext path_AdminAutoml_AdminAutomlPivotJsp = new HtmlNext("/admin/automl/admin_automl_pivot.jsp");
 
     /** The path of the HTML: /admin/automl/admin_automl_predict.jsp */
     HtmlNext path_AdminAutoml_AdminAutomlPredictJsp = new HtmlNext("/admin/automl/admin_automl_predict.jsp");

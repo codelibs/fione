@@ -19,7 +19,7 @@
 				<div class="container-fluid">
 					<div class="row mb-2">
 						<div class="col-sm-6">
-							<h1><la:message key="labels.automl_pivot_frame" /></h1>
+							<h1><la:message key="labels.automl_moudule_configuration" /></h1>
 						</div>
 						<div class="col-sm-6">
 							<ol class="breadcrumb float-sm-right">
@@ -29,7 +29,7 @@
 								<li class="breadcrumb-item"><la:link href="/admin/automl/job/${f:u(projectId)}">
 									<la:message key="labels.automl_project" />
 								</la:link></li>
-								<li class="breadcrumb-item active"><la:message key="labels.automl_pivot_frame" /></li>
+								<li class="breadcrumb-item active"><la:message key="labels.automl_moudule_configuration" /></li>
 							</ol>
 						</div>
 					</div>
@@ -38,12 +38,14 @@
 			<section class="content">
 				<la:form action="/admin/automl" >
 					<la:hidden property="projectId" />
+					<la:hidden property="moduleId" />
 					<la:hidden property="frameId" />
+					<la:hidden property="modelId" />
 					<div class="row">
 						<div class="col-md-12">
 							<div class="card card-outline card-success">
 								<div class="card-header">
-									<h3 class="card-title"><la:message key="labels.automl_pivot_configuration" /></h3>
+									<h3 class="card-title">${f:h(module.name)}</h3>
 									<div class="card-tools">
 										<la:link href="/admin/automl/job/${f:u(projectId)}" styleClass="btn btn-primary btn-xs">
 											<em class="fas fa-project-diagram"></em>
@@ -58,46 +60,41 @@
 										</la:info>
 										<la:errors property="_global" />
 									</div>
+									<c:if test="${module.type eq 'FRAME'}">
 									<div class="form-group row">
-										<label for="frameName" class="col-sm-3 col-form-label"><la:message key="labels.automl_frame_name" /></label>
+										<label for="frameId" class="col-sm-3 col-form-label"><la:message key="labels.automl_module_frameid" /></label>
 										<div class="col-sm-9">
-											<la:errors property="frameName" />
-											<la:text property="frameName" styleId="frameName" styleClass="form-control"/>
+											${f:h(fi:jobName(frameId))}
 										</div>
 									</div>
+									</c:if>
+									<c:if test="${module.type eq 'TRAIN'}">
 									<div class="form-group row">
-										<label for="indexName" class="col-sm-3 col-form-label"><la:message key="labels.automl_pivot_column" /></label>
+										<label for="modelId" class="col-sm-3 col-form-label"><la:message key="labels.automl_module_modelid" /></label>
 										<div class="col-sm-9">
-											<la:errors property="indexName" />
-											<la:select property="indexName" styleId="indexName" styleClass="form-control">
+											${f:h(fi:jobName(modelId))}
+										</div>
+									</div>
+									</c:if>
+									<c:forEach var="c" items="${module.components}">
+									<div class="form-group row">
+										<label for="${f:u(c.id)}" class="col-sm-3 col-form-label">${f:h(c.name)}</label>
+										<div class="col-sm-9">
+											<c:choose>
+											<c:when test="${c.type == 'COLUMN'}">
+											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
 												<c:forEach var="item" items="${columnItems}">
-													<la:option value="${f:u(item.value)}">${f:h(item.label)}</la:option>
+													<option value="${f:u(item.value)}">${f:h(item.label)}</option>
 												</c:forEach>
-											</la:select>
+											</select>
+											</c:when>
+											<c:otherwise>
+											<input type="text" name="params.${f:u(c.id)}" value="${f:u(c.value)}" id="${f:u(c.id)}" class="form-control">
+											</c:otherwise>
+											</c:choose>
 										</div>
 									</div>
-									<div class="form-group row">
-										<label for="columnName" class="col-sm-3 col-form-label"><la:message key="labels.automl_pivot_index" /></label>
-										<div class="col-sm-9">
-											<la:errors property="columnName" />
-											<la:select property="columnName" styleId="columnName" styleClass="form-control">
-												<c:forEach var="item" items="${columnItems}">
-													<la:option value="${f:u(item.value)}">${f:h(item.label)}</la:option>
-												</c:forEach>
-											</la:select>
-										</div>
-									</div>
-									<div class="form-group row">
-										<label for="valueName" class="col-sm-3 col-form-label"><la:message key="labels.automl_pivot_value" /></label>
-										<div class="col-sm-9">
-											<la:errors property="valueName" />
-											<la:select property="valueName" styleId="valueName" styleClass="form-control">
-												<c:forEach var="item" items="${columnItems}">
-													<la:option value="${f:u(item.value)}">${f:h(item.label)}</la:option>
-												</c:forEach>
-											</la:select>
-										</div>
-									</div>
+									</c:forEach>
 								</div>
 								<div class="card-footer">
 									<la:link href="/admin/automl/job/${f:u(projectId)}" styleClass="btn btn-default">
@@ -105,8 +102,8 @@
 										<la:message key="labels.crud_button_back" />
 									</la:link>
 									<c:if test="${editable}">
-										<button type="submit" class="btn btn-success" name="pivotframe" value="Run">
-											<em class="fas fa-hammer"></em> <la:message key="labels.automl_pivot_create" />
+										<button type="submit" class="btn btn-success" name="runmodule" value="Run">
+											<em class="fas fa-hammer"></em> <la:message key="labels.automl_module_run" />
 										</button>
 									</c:if>
 								</div>

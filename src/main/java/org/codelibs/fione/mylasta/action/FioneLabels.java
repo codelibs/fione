@@ -410,26 +410,8 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Serving */
     public static final String LABELS_automl_serving = "{labels.automl_serving}";
 
-    /** The key of the message: Pivot Frame */
-    public static final String LABELS_automl_pivot_frame = "{labels.automl_pivot_frame}";
-
-    /** The key of the message: Configuration */
-    public static final String LABELS_automl_pivot_configuration = "{labels.automl_pivot_configuration}";
-
-    /** The key of the message: Frame Name */
-    public static final String LABELS_automl_frame_name = "{labels.automl_frame_name}";
-
-    /** The key of the message: Column */
-    public static final String LABELS_automl_pivot_column = "{labels.automl_pivot_column}";
-
-    /** The key of the message: Index */
-    public static final String LABELS_automl_pivot_index = "{labels.automl_pivot_index}";
-
-    /** The key of the message: Value */
-    public static final String LABELS_automl_pivot_value = "{labels.automl_pivot_value}";
-
-    /** The key of the message: Create */
-    public static final String LABELS_automl_pivot_create = "{labels.automl_pivot_create}";
+    /** The key of the message: Run */
+    public static final String LABELS_automl_module_run = "{labels.automl_module_run}";
 
     /** The key of the message: Data Set */
     public static final String LABELS_automl_menu_dataset = "{labels.automl_menu_dataset}";
@@ -440,8 +422,8 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Machine Learning */
     public static final String LABELS_automl_menu_machine_learning = "{labels.automl_menu_machine_learning}";
 
-    /** The key of the message: Pivot */
-    public static final String LABELS_automl_pivot = "{labels.automl_pivot}";
+    /** The key of the message: Module Configuration */
+    public static final String LABELS_automl_moudule_configuration = "{labels.automl_moudule_configuration}";
 
     /** The key of the message: Project Dashboard */
     public static final String LABELS_easyml_project_dashboard = "{labels.easyml_project_dashboard}";

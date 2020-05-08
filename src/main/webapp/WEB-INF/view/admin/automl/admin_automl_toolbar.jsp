@@ -1,4 +1,4 @@
-<%@page pageEncoding="UTF-8" contentType="text/html; charset=UTF-8"%><%@taglib prefix="fi" uri="http://fione.codelibs.org/functions" %><!DOCTYPE html>
+<%@page pageEncoding="UTF-8" contentType="text/html; charset=UTF-8"%><%@taglib prefix="fi" uri="http://fione.codelibs.org/functions" %>
 <form method="post" action="${contextPath}/admin/automl/">
 <input type="hidden" name="lastaflute.action.TRANSACTION_TOKEN" value="${f:h(token)}">
 <input type="hidden" name="projectId" value="${f:h(project.id)}">
@@ -27,9 +27,11 @@
 			<li><la:link href="/admin/automl/dataview/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-link btn-sm">
 				<la:message key="labels.automl_dataview" />
 			</la:link></li>
-			<li><la:link href="/admin/automl/pivot/${f:u(project.id)}/${f:u(frameId)}" styleClass="btn btn-link btn-sm">
-				<la:message key="labels.automl_pivot" />
+			<c:forEach var="module" items="${frameModules}">
+			<li><la:link href="/admin/automl/module/${f:u(project.id)}/${f:u(module.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-link btn-sm">
+				${f:h(module.name)}
 			</la:link></li>
+			</c:forEach>
 		</ul>
 	</div>
 	</c:if>

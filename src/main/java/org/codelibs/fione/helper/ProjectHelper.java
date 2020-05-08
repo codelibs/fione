@@ -50,6 +50,7 @@ import java.util.zip.ZipOutputStream;
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.codelibs.core.io.CopyUtil;
@@ -90,6 +91,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.RapidsSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.SchemaV3;
+import org.codelibs.fione.helper.PythonHelper.PythonModule;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.core.smartdeploy.ManagedHotdeploy;
 import org.lastaflute.di.exception.IORuntimeException;
@@ -117,9 +119,6 @@ public class ProjectHelper {
 
     @Resource
     protected H2oHelper h2oHelper;
-
-    @Resource
-    protected PythonHelper pythonHelper;
 
     protected String projectFolderName = "fione";
 
@@ -1258,16 +1257,26 @@ public class ProjectHelper {
         store(projectId, job);
     }
 
-    public void pivot(final String projectId, final Map<String, Object> params) {
-        final JobV3 workingJob = createWorkingJob((String) params.get("name"), "Pivot Frame", 0.2f);
+    public void executeModule(final String projectId, final PythonModule pythonModule, final Map<String, Object> params) {
+        final JobV3 workingJob = createWorkingJob(pythonModule.getId(), pythonModule.getName(), 0.1f);
         store(projectId, workingJob);
         try {
             new Thread(() -> {
                 try {
-                    pythonHelper.execute("pivot", params, progress -> {
-                        workingJob.progress = progress;
-                        store(projectId, workingJob);
-                    });
+                    pythonModule.execute(params, progress -> {
+                        // progress:[num]:[msg]
+                            if (StringUtil.isBlank(progress) || !progress.startsWith("progress:")) {
+                                return;
+                            }
+                            String[] values = StringUtils.split(progress, ":", 3);
+                            if (values.length > 2) {
+                                workingJob.progressMsg = values[2];
+                            }
+                            if (values.length > 1) {
+                                workingJob.progress = Float.parseFloat(values[1]);
+                                store(projectId, workingJob);
+                            }
+                        });
                     finish(projectId, workingJob, null);
                 } catch (final Exception e) {
                     logger.warn("Failed to pivot frame: projectId:{}, params:{}", projectId, params, e);

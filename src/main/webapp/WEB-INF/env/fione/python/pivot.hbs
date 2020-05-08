@@ -1,8 +1,0 @@
-import h2o
-
-h2o.init(url='{{h2o.url}}')
-
-df = h2o.get_frame('{{pivot.id}}')
-df_pivot = df.pivot(index='{{pivot.index}}', column='{{pivot.column}}', value='{{pivot.value}}')
-h2o.assign(df_pivot, '{{pivot.destination}}')
-

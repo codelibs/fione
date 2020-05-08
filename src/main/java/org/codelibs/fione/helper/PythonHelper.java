@@ -20,6 +20,8 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Writer;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,51 +43,95 @@ import org.codelibs.fess.util.InputStreamThread;
 import org.codelibs.fess.util.JobProcess;
 import org.codelibs.fess.util.ResourceUtil;
 import org.codelibs.fione.exception.PythonExecutionException;
+import org.elasticsearch.common.xcontent.LoggingDeprecationHandler;
+import org.elasticsearch.common.xcontent.NamedXContentRegistry;
+import org.elasticsearch.common.xcontent.json.JsonXContent;
 
-import com.github.jknack.handlebars.Context;
-import com.github.jknack.handlebars.Handlebars;
-import com.github.jknack.handlebars.Template;
-import com.github.jknack.handlebars.io.FileTemplateLoader;
 import com.google.common.collect.Lists;
 
 public class PythonHelper {
     private static final Logger logger = LogManager.getLogger(PythonHelper.class);
 
-    protected Handlebars handlebars;
+    private PythonModule[] frameModules;
 
     @PostConstruct
     public void init() {
-        final FileTemplateLoader loader = new FileTemplateLoader(ResourceUtil.getEnvPath("fione", "python").toFile());
-        handlebars = new Handlebars(loader);
+        try {
+            Class.forName("javax.servlet.ServletContext");
+        } catch (ClassNotFoundException e1) {
+            return;
+        }
+
+        final List<PythonModule> frameModuleList = new ArrayList<>();
+        for (File pyFile : ResourceUtil.getEnvPath("fione", "python").toFile().listFiles((dir, name) -> name.endsWith(".py"))) {
+            try {
+                final String jsonString = executePython(pyFile, null, null);
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Python Module: {} => {}", pyFile.getAbsolutePath(), jsonString);
+                }
+
+                final PythonModule pythonModule = new PythonModule(pyFile, jsonString);
+                switch (pythonModule.getType()) {
+                case FRAME:
+                    frameModuleList.add(pythonModule);
+                    break;
+                default:
+                    logger.warn("Unknown module: {} => {}", pyFile.getAbsolutePath(), jsonString);
+                    break;
+                }
+            } catch (IOException e) {
+                logger.warn("Failed to load {}", pyFile.getAbsolutePath(), e);
+            }
+
+        }
+
+        frameModuleList.sort((x, y) -> x.getPriority() - y.getPriority());
+        frameModules = frameModuleList.toArray(n -> new PythonModule[n]);
     }
 
-    public void execute(final String name, final Map<String, Object> params, final Consumer<Float> progress) {
-        final File pyFile = ComponentUtil.getSystemHelper().createTempFile("fione_", ".py");
+    public void execute(final String id, final Map<String, Object> params, final Consumer<String> progress) {
+        PythonModule module = findPythonModule(id);
+        if (module == null) {
+            throw new PythonExecutionException(id + " is not found.");
+        }
+        final File iniFile = ComponentUtil.getSystemHelper().createTempFile("fione_", ".ini");
         try {
-            writePythonFile(name, params, pyFile);
-            progress.accept(0.25f);
-            executePython(pyFile, progress);
+            writeIniFile(iniFile, params);
+            progress.accept("progress:0.2:");
+            executePython(module.getPyFile(), iniFile, progress);
         } finally {
-            if (pyFile != null && !pyFile.delete()) {
-                logger.warn("Failed to delete {}.", pyFile.getAbsolutePath());
+            if (iniFile != null && !iniFile.delete()) {
+                logger.warn("Failed to delete {}.", iniFile.getAbsolutePath());
             }
         }
     }
 
-    protected void executePython(final File pyFile, final Consumer<Float> progress) {
+    public PythonModule findPythonModule(String id) {
+        for (PythonModule module : frameModules) {
+            if (module.getId().equals(id)) {
+                return module;
+            }
+        }
+        return null;
+    }
+
+    protected String executePython(final File pyFile, final File iniFile, final Consumer<String> progress) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final ProcessHelper processHelper = ComponentUtil.getProcessHelper();
         final ServletContext servletContext = ComponentUtil.getComponent(ServletContext.class);
         final File baseDir = new File(servletContext.getRealPath("/WEB-INF")).getParentFile();
         final String pythonCommand = fessConfig.getSystemProperty("fione.python.path", "python3");
         final List<String> cmdList = Lists.newArrayList(pythonCommand, pyFile.getAbsolutePath());
+        if (iniFile != null) {
+            cmdList.add(iniFile.getAbsolutePath());
+        }
 
         final String sessionId = UUID.randomUUID().toString().replace("-", StringUtil.EMPTY);
         try {
             final JobProcess jobProcess = processHelper.startProcess(sessionId, cmdList, pb -> {
                 pb.directory(baseDir);
                 pb.redirectErrorStream(true);
-            });
+            }, 10000, progress);
 
             final InputStreamThread it = jobProcess.getInputStreamThread();
             it.start();
@@ -104,6 +150,7 @@ public class PythonHelper {
                 out.append("Exit Code: ").append(exitValue).append("\nOutput:\n").append(it.getOutput());
                 throw new PythonExecutionException(out.toString());
             }
+            return it.getOutput();
         } catch (final PythonExecutionException e) {
             throw e;
         } catch (final JobProcessingException e) {
@@ -115,18 +162,91 @@ public class PythonHelper {
         }
     }
 
-    protected void writePythonFile(final String name, final Map<String, Object> params, final File pyFile) {
+    protected void writeIniFile(final File iniFile, final Map<String, Object> params) {
         final Map<String, Object> h2oParams = new HashMap<>();
         final String endpoint = ((CustomSystemHelper) ComponentUtil.getSystemHelper()).getH2oEndpoint();
         h2oParams.put("url", endpoint);
         params.put("h2o", h2oParams);
-        try (final Writer writer = new BufferedWriter(new FileWriter(pyFile, Constants.UTF_8_CHARSET))) {
-            final Template template = handlebars.compile(name);
-            final Context hbsContext = Context.newContext(params);
-            template.apply(hbsContext, writer);
+        try (final Writer writer = new BufferedWriter(new FileWriter(iniFile, Constants.UTF_8_CHARSET))) {
+            writer.write("[h2o]\n");
+            writer.write("url = " + endpoint + "\n");
+            writer.write("[parameters]\n");
+            for (Map.Entry<String, Object> e : params.entrySet()) {
+                writer.write(e.getKey() + " = " + e.getValue() + "\n");
+            }
             writer.flush();
         } catch (final IOException e) {
-            throw new PythonExecutionException("Failed to write " + pyFile.getAbsolutePath(), e);
+            throw new PythonExecutionException("Failed to write " + iniFile.getAbsolutePath(), e);
         }
     }
+
+    public PythonModule[] getFrameModules() {
+        return frameModules;
+    }
+
+    public static class PythonModule {
+
+        private String id;
+
+        private String name;
+
+        private ModuleType type;
+
+        private List<Map<String, Object>> components;
+
+        private int priority;
+
+        private File pyFile;
+
+        @SuppressWarnings("unchecked")
+        public PythonModule(File pyFile, final String jsonString) throws IOException {
+            this.pyFile = pyFile;
+            final Map<String, Object> params =
+                    JsonXContent.jsonXContent.createParser(NamedXContentRegistry.EMPTY, LoggingDeprecationHandler.INSTANCE, jsonString)
+                            .map();
+            id = (String) params.get("id");
+            name = (String) params.get("name");
+            type =
+                    Arrays.stream(ModuleType.values())
+                            .filter(s -> s.name().equalsIgnoreCase((String) params.getOrDefault("type", "unknown"))).findFirst()
+                            .orElse(ModuleType.UNKNOWN);
+            priority = Integer.parseInt((String) params.getOrDefault("priority", "999"));
+            components = (List<Map<String, Object>>) params.get("components");
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public ModuleType getType() {
+            return type;
+        }
+
+        public List<Map<String, Object>> getComponents() {
+            return components;
+        }
+
+        public int getPriority() {
+            return priority;
+        }
+
+        public File getPyFile() {
+            return pyFile;
+        }
+
+        public void execute(Map<String, Object> params, Consumer<String> progress) {
+            final PythonHelper pythonHelper = ComponentUtil.getComponent(PythonHelper.class);
+            pythonHelper.execute(id, params, progress);
+        }
+
+    }
+
+    public enum ModuleType {
+        FRAME, TRAIN, UNKNOWN;
+    }
+
 }
