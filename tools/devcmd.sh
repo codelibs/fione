@@ -27,7 +27,7 @@ copy_to_fess() {
   cp src/main/webapp/WEB-INF/view/common/admin/sidebar_extra.jsp ../fess/src/main/webapp/WEB-INF/view/common/admin
   cp src/main/resources/fione_message*.properties ../fess/src/main/resources
   cp src/main/resources/fione_label*.properties ../fess/src/main/resources
-  cp src/main/resources/app++.xml ../fess/src/main/resources
+  cp src/main/resources/fess++.xml ../fess/src/main/resources
   cp src/main/resources/lastaflute_director+assistantDirector.xml ../fess/src/main/resources
   cp src/main/resources/fess+systemHelper.xml ../fess/src/main/resources
   echo "smart.package2 = org.codelibs.fione.app" >> ../fess/src/main/resources/lasta_di.properties
@@ -49,7 +49,7 @@ copy_from_fess() {
   cp ../fess/src/main/webapp/WEB-INF/view/common/admin/sidebar_extra.jsp src/main/webapp/WEB-INF/view/common/admin
   cp ../fess/src/main/resources/fione_message*.properties src/main/resources
   cp ../fess/src/main/resources/fione_label*.properties src/main/resources
-  cp ../fess/src/main/resources/app++.xml src/main/resources
+  cp ../fess/src/main/resources/fess++.xml src/main/resources
   cp ../fess/src/main/resources/lastaflute_director+assistantDirector.xml src/main/resources
   cp ../fess/src/main/resources/fess+systemHelper.xml src/main/resources
 }
@@ -69,7 +69,7 @@ clean() {
   rm -f ../fess/src/main/webapp/WEB-INF/view/common/admin/sidebar_extra.jsp
   rm -f ../fess/src/main/resources/fione_message*.properties
   rm -f ../fess/src/main/resources/fione_label*.properties
-  rm -f ../fess/src/main/resources/app++.xml
+  rm -f ../fess/src/main/resources/fess++.xml
   rm -f ../fess/src/main/resources/lastaflute_director+assistantDirector.xml
   rm -f ../fess/src/main/resources/fess+systemHelper.xml
   pushd ../fess
