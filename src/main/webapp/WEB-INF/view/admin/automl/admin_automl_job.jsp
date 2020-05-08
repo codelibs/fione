@@ -273,7 +273,7 @@
 																		<i class="fas fa-ban"></i>
 																	</c:when>
 																	<c:when test="${data.status == 'FAILED' }">
-																		<i class="fas fa-times"></i>
+																		<i class="fas fa-times text-danger"></i>
 																	</c:when>
 																	<c:when test="${data.status == 'RUNNING' }">
 																		<div class="progress" style="background-color:#999;">

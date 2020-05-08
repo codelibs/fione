@@ -68,7 +68,7 @@
 										</div>
 									</div>
 									</c:if>
-									<c:if test="${module.type eq 'TRAIN'}">
+									<c:if test="${module.type eq 'PREDICT'}">
 									<div class="form-group row">
 										<label for="modelId" class="col-sm-3 col-form-label"><la:message key="labels.automl_module_modelid" /></label>
 										<div class="col-sm-9">

@@ -246,7 +246,7 @@ public class PythonHelper {
     }
 
     public enum ModuleType {
-        FRAME, TRAIN, UNKNOWN;
+        FRAME, TRAIN, PREDICT, UNKNOWN;
     }
 
 }

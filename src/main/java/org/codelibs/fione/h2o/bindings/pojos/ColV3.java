@@ -171,7 +171,8 @@ public class ColV3 extends SchemaV3 {
     }
 
     public boolean isAvailableCharts() {
-        return getHistogramChart() != null || getLabelListChart() != null;
+        return getHistogramChart() != null || getLabelListChart() != null || getColumnSummaryChart() != null
+                || getColumnCharacteristicsChart() != null;
     }
 
     public ChartData getHistogramChart() {
