@@ -49,10 +49,30 @@
 			<li><la:link href="/admin/automl/modellist/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-link btn-sm">
 				<la:message key="labels.automl_modelview" />
 			</la:link></li>
+			</c:if>
+			<c:forEach var="module" items="${trainModules}">
+			<li><la:link href="/admin/automl/module/${f:u(project.id)}/${f:u(module.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-link btn-sm">
+				${f:h(module.name)}
+			</la:link></li>
+			</c:forEach>
+		</ul>
+	</div>
+	</c:if>
+	<c:if test="${not empty frameId and leaderboard != null}">
+	<div class="btn-group" role="group">
+		<button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+			<i class="fas fa-file-signature"></i>
+			<la:message key="labels.automl_predict" />
+		</button>
+		<ul class="dropdown-menu">
 			<li><la:link href="/admin/automl/prediction/${f:u(project.id)}/${f:u(frameId)}/${f:u(leaderboardId)}" styleClass="btn btn-link btn-sm">
 				<la:message key="labels.automl_predict_dataset" />
 			</la:link></li>
-			</c:if>
+			<c:forEach var="module" items="${predictModules}">
+			<li><la:link href="/admin/automl/module/${f:u(project.id)}/${f:u(module.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-link btn-sm">
+				${f:h(module.name)}
+			</la:link></li>
+			</c:forEach>
 		</ul>
 	</div>
 	</c:if>

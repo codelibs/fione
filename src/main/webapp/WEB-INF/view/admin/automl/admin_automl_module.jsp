@@ -92,6 +92,7 @@
 											<input type="text" name="params.${f:u(c.id)}" value="${f:u(c.value)}" id="${f:u(c.id)}" class="form-control">
 											</c:otherwise>
 											</c:choose>
+											<c:if test="${not empty c.description}"><small class="form-text text-muted">${f:h(c.description)}</small></c:if>
 										</div>
 									</div>
 									</c:forEach>

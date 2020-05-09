@@ -3,33 +3,37 @@ import sys
 
 def print_module():
     x = {
-	  'id': 'pivot',
-	  'name': 'Pivot Frame',
-	  'type': 'FRAME',
-	  'components': [
-	    {
-	      "id": "suffix",
-	      "name": "Suffix (Frame ID)",
-	      "type": "TEXT",
-	      "value": "pivot",
-	    },
-	    {
-	      "id": "index",
-	      "name": "Index",
-	      "type": "COLUMN",
-	    },
-	    {
-	      "id": "column",
-	      "name": "Column",
-	      "type": "COLUMN",
-	    },
-	    {
-	      "id": "value",
-	      "name": "Value",
-	      "type": "COLUMN",
-	    },
-	  ]
-	}
+          'id': 'pivot',
+          'name': 'Pivot Frame',
+          'type': 'FRAME',
+          'components': [
+            {
+              "id": "suffix",
+              "name": "Suffix (Frame ID)",
+              "description": "the suffix for the created frame id",
+              "type": "TEXT",
+              "value": "pivot",
+            },
+            {
+              "id": "index",
+              "name": "Index",
+              "description": "the column where pivoted rows should be aligned on",
+              "type": "COLUMN",
+            },
+            {
+              "id": "column",
+              "name": "Column",
+              "description": "the column to pivot",
+              "type": "COLUMN",
+            },
+            {
+              "id": "value",
+              "name": "Value",
+              "description": "values of the pivoted table",
+              "type": "COLUMN",
+            },
+          ]
+        }
     import json
     print(json.dumps(x))
     

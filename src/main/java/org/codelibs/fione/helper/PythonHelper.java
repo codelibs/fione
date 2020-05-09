@@ -228,6 +228,8 @@ public class PythonHelper {
 
         private final String name;
 
+        private final String description;
+
         private final ModuleType type;
 
         private final List<Map<String, Object>> components;
@@ -244,6 +246,7 @@ public class PythonHelper {
                             .map();
             id = (String) params.get("id");
             name = (String) params.get("name");
+            description = (String) params.get("description");
             type =
                     Arrays.stream(ModuleType.values())
                             .filter(s -> s.name().equalsIgnoreCase((String) params.getOrDefault("type", "unknown"))).findFirst()
@@ -258,6 +261,10 @@ public class PythonHelper {
 
         public String getName() {
             return name;
+        }
+
+        public String getDescription() {
+            return description;
         }
 
         public ModuleType getType() {
