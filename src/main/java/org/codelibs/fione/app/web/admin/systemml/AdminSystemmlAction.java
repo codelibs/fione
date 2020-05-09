@@ -85,6 +85,21 @@ public class AdminSystemmlAction extends FioneAdminAction {
         return redirect(getClass());
     }
 
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse reloadmodule(final SystemForm form) {
+        validate(form, messages -> {}, this::asListHtml);
+        verifyTokenKeep(this::asListHtml);
+        try {
+            pythonHelper.reload();
+            saveMessage(messages -> messages.addSuccessReloadModules(GLOBAL));
+        } catch (final Exception e) {
+            logger.warn("Failed to reload modules.", e);
+            throw validationError(messages -> messages.addErrorsFailedToReloadModules(GLOBAL), this::asListHtml);
+        }
+        return redirect(getClass());
+    }
+
     // ===================================================================================
     //                                                                              JSP
     //                                                                           =========

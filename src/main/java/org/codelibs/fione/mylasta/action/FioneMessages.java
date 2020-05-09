@@ -80,6 +80,9 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Running Module {0}. */
     public static final String SUCCESS_run_module = "{success.run_module}";
 
+    /** The key of the message: Reloading Modules. */
+    public static final String SUCCESS_reload_modules = "{success.reload_modules}";
+
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
 
@@ -151,6 +154,9 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Failed to run Module {0}. */
     public static final String ERRORS_failed_to_run_module = "{errors.failed_to_run_module}";
+
+    /** The key of the message: Failed to reload modules. */
+    public static final String ERRORS_failed_to_reload_modules = "{errors.failed_to_reload_modules}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -415,6 +421,20 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessRunModule(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_run_module, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.reload_modules' with parameters.
+     * <pre>
+     * message: Reloading Modules.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessReloadModules(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_reload_modules));
         return this;
     }
 
@@ -769,6 +789,20 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addErrorsFailedToRunModule(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(ERRORS_failed_to_run_module, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_reload_modules' with parameters.
+     * <pre>
+     * message: Failed to reload modules.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToReloadModules(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_reload_modules));
         return this;
     }
 }

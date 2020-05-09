@@ -54,16 +54,25 @@ public class PythonHelper {
 
     private PythonModule[] frameModules;
 
+    private PythonModule[] trainModules;
+
+    private PythonModule[] predictModules;
+
     @PostConstruct
     public void init() {
         try {
             Class.forName("javax.servlet.ServletContext");
-        } catch (ClassNotFoundException e1) {
+        } catch (final ClassNotFoundException e) {
             return;
         }
+        reload();
+    }
 
+    public void reload() {
         final List<PythonModule> frameModuleList = new ArrayList<>();
-        for (File pyFile : ResourceUtil.getEnvPath("fione", "python").toFile().listFiles((dir, name) -> name.endsWith(".py"))) {
+        final List<PythonModule> trainModuleList = new ArrayList<>();
+        final List<PythonModule> predictModuleList = new ArrayList<>();
+        for (final File pyFile : ResourceUtil.getEnvPath("fione", "python").toFile().listFiles((dir, name) -> name.endsWith(".py"))) {
             try {
                 final String jsonString = executePython(pyFile, null, null);
                 if (logger.isDebugEnabled()) {
@@ -71,26 +80,37 @@ public class PythonHelper {
                 }
 
                 final PythonModule pythonModule = new PythonModule(pyFile, jsonString);
+                logger.info("Load Module: {}", pythonModule.getId());
                 switch (pythonModule.getType()) {
                 case FRAME:
                     frameModuleList.add(pythonModule);
+                    break;
+                case TRAIN:
+                    trainModuleList.add(pythonModule);
+                    break;
+                case PREDICT:
+                    predictModuleList.add(pythonModule);
                     break;
                 default:
                     logger.warn("Unknown module: {} => {}", pyFile.getAbsolutePath(), jsonString);
                     break;
                 }
-            } catch (IOException e) {
+            } catch (final IOException e) {
                 logger.warn("Failed to load {}", pyFile.getAbsolutePath(), e);
             }
 
         }
 
         frameModuleList.sort((x, y) -> x.getPriority() - y.getPriority());
+        trainModuleList.sort((x, y) -> x.getPriority() - y.getPriority());
+        predictModuleList.sort((x, y) -> x.getPriority() - y.getPriority());
         frameModules = frameModuleList.toArray(n -> new PythonModule[n]);
+        trainModules = trainModuleList.toArray(n -> new PythonModule[n]);
+        predictModules = predictModuleList.toArray(n -> new PythonModule[n]);
     }
 
     public void execute(final String id, final Map<String, Object> params, final Consumer<String> progress) {
-        PythonModule module = findPythonModule(id);
+        final PythonModule module = findPythonModule(id);
         if (module == null) {
             throw new PythonExecutionException(id + " is not found.");
         }
@@ -106,8 +126,18 @@ public class PythonHelper {
         }
     }
 
-    public PythonModule findPythonModule(String id) {
-        for (PythonModule module : frameModules) {
+    public PythonModule findPythonModule(final String id) {
+        for (final PythonModule module : frameModules) {
+            if (module.getId().equals(id)) {
+                return module;
+            }
+        }
+        for (final PythonModule module : trainModules) {
+            if (module.getId().equals(id)) {
+                return module;
+            }
+        }
+        for (final PythonModule module : predictModules) {
             if (module.getId().equals(id)) {
                 return module;
             }
@@ -171,7 +201,7 @@ public class PythonHelper {
             writer.write("[h2o]\n");
             writer.write("url = " + endpoint + "\n");
             writer.write("[parameters]\n");
-            for (Map.Entry<String, Object> e : params.entrySet()) {
+            for (final Map.Entry<String, Object> e : params.entrySet()) {
                 writer.write(e.getKey() + " = " + e.getValue() + "\n");
             }
             writer.flush();
@@ -184,22 +214,30 @@ public class PythonHelper {
         return frameModules;
     }
 
+    public PythonModule[] getTrainModules() {
+        return trainModules;
+    }
+
+    public PythonModule[] getPredictModules() {
+        return predictModules;
+    }
+
     public static class PythonModule {
 
-        private String id;
+        private final String id;
 
-        private String name;
+        private final String name;
 
-        private ModuleType type;
+        private final ModuleType type;
 
-        private List<Map<String, Object>> components;
+        private final List<Map<String, Object>> components;
 
-        private int priority;
+        private final int priority;
 
-        private File pyFile;
+        private final File pyFile;
 
         @SuppressWarnings("unchecked")
-        public PythonModule(File pyFile, final String jsonString) throws IOException {
+        public PythonModule(final File pyFile, final String jsonString) throws IOException {
             this.pyFile = pyFile;
             final Map<String, Object> params =
                     JsonXContent.jsonXContent.createParser(NamedXContentRegistry.EMPTY, LoggingDeprecationHandler.INSTANCE, jsonString)
@@ -238,7 +276,7 @@ public class PythonHelper {
             return pyFile;
         }
 
-        public void execute(Map<String, Object> params, Consumer<String> progress) {
+        public void execute(final Map<String, Object> params, final Consumer<String> progress) {
             final PythonHelper pythonHelper = ComponentUtil.getComponent(PythonHelper.class);
             pythonHelper.execute(id, params, progress);
         }

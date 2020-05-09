@@ -446,7 +446,7 @@ public class ProjectHelper {
                 if (response.code() == 200) {
                     final FramesV3 data = response.body();
                     if (data.frames.length == 1) {
-                        FrameV3 frame = data.frames[0];
+                        final FrameV3 frame = data.frames[0];
                         if (frame == null || frame.byteSize == 0L) {
                             throw new CacheNotFoundException();
                         }
@@ -1268,7 +1268,7 @@ public class ProjectHelper {
                             if (StringUtil.isBlank(progress) || !progress.startsWith("progress:")) {
                                 return;
                             }
-                            String[] values = StringUtils.split(progress, ":", 3);
+                            final String[] values = StringUtils.split(progress, ":", 3);
                             if (values.length > 2) {
                                 workingJob.progressMsg = values[2];
                             }

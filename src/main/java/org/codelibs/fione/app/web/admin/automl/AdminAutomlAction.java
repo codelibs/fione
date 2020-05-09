@@ -71,6 +71,7 @@ import org.lastaflute.web.UrlChain;
 import org.lastaflute.web.response.ActionResponse;
 import org.lastaflute.web.response.HtmlResponse;
 import org.lastaflute.web.response.next.HtmlNext;
+import org.lastaflute.web.response.render.RenderData;
 import org.lastaflute.web.ruts.process.ActionRuntime;
 import org.lastaflute.web.util.LaRequestUtil;
 
@@ -217,7 +218,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 if (leaderboard != null) {
                     RenderDataUtil.register(data, "leaderboard", leaderboard);
                 }
-                RenderDataUtil.register(data, "frameModules", pythonHelper.getFrameModules());
+                registerPythonModule(data);
             });
         } catch (final Exception e) {
             logger.warn("Failed to read " + projectId, e);
@@ -309,7 +310,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 if (frameData != null) {
                     RenderDataUtil.register(data, "frameData", frameData);
                 }
-                RenderDataUtil.register(data, "frameModules", pythonHelper.getFrameModules());
+                registerPythonModule(data);
             });
         } catch (final Exception e) {
             logger.warn("Failed to read " + projectId, e);
@@ -380,7 +381,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 if (columnData != null) {
                     RenderDataUtil.register(data, "columnData", columnData);
                 }
-                RenderDataUtil.register(data, "frameModules", pythonHelper.getFrameModules());
+                registerPythonModule(data);
             });
         } catch (final Exception e) {
             logger.warn("Failed to read " + projectId, e);
@@ -994,7 +995,7 @@ public class AdminAutomlAction extends FioneAdminAction {
             }
             RenderDataUtil.register(data, "columnItems", columnList);
             RenderDataUtil.register(data, "module", pythonModule);
-            RenderDataUtil.register(data, "frameModules", pythonHelper.getFrameModules());
+            registerPythonModule(data);
         });
     }
 
@@ -1080,5 +1081,11 @@ public class AdminAutomlAction extends FioneAdminAction {
                 return defautValue;
             }
         }
+    }
+
+    private void registerPythonModule(final RenderData data) {
+        RenderDataUtil.register(data, "frameModules", pythonHelper.getFrameModules());
+        RenderDataUtil.register(data, "trainModules", pythonHelper.getTrainModules());
+        RenderDataUtil.register(data, "predictModules", pythonHelper.getPredictModules());
     }
 }
