@@ -96,7 +96,7 @@ public class PythonHelper {
                     logger.warn("Unknown module: {} => {}", pyFile.getAbsolutePath(), jsonString);
                     break;
                 }
-            } catch (final IOException e) {
+            } catch (final Exception e) {
                 logger.warn("Failed to load {}", pyFile.getAbsolutePath(), e);
             }
 
