@@ -88,4 +88,7 @@ public interface FioneHtmlPath {
 
     /** The path of the HTML: /admin/systemml/admin_systemml.jsp */
     HtmlNext path_AdminSystemml_AdminSystemmlJsp = new HtmlNext("/admin/systemml/admin_systemml.jsp");
+
+    /** The path of the HTML: /admin/systemml/admin_systemml_module.jsp */
+    HtmlNext path_AdminSystemml_AdminSystemmlModuleJsp = new HtmlNext("/admin/systemml/admin_systemml_module.jsp");
 }

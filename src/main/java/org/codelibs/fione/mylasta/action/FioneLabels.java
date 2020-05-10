@@ -722,6 +722,18 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Reload Modules */
     public static final String LABELS_systemml_reload_module = "{labels.systemml_reload_module}";
 
+    /** The key of the message: Modules */
+    public static final String LABELS_systemml_title_addmodule = "{labels.systemml_title_addmodule}";
+
+    /** The key of the message: Module File */
+    public static final String LABELS_systemml_module_file = "{labels.systemml_module_file}";
+
+    /** The key of the message: Upload */
+    public static final String LABELS_systemml_upload = "{labels.systemml_upload}";
+
+    /** The key of the message: Upload Module */
+    public static final String LABELS_systemml_add_module = "{labels.systemml_add_module}";
+
     /**
      * Assert the property is not null.
      * @param property The value of the property. (NotNull)

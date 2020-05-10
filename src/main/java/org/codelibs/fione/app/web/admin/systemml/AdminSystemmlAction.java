@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.app.web.admin.systemml;
 
+import java.io.InputStream;
+
 import javax.annotation.Resource;
 
 import org.apache.logging.log4j.LogManager;
@@ -100,6 +102,29 @@ public class AdminSystemmlAction extends FioneAdminAction {
         return redirect(getClass());
     }
 
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse addmodule() {
+        saveToken();
+        return asAddModuleHtml();
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse uploadmodule(final UploadModuleForm form) {
+        validate(form, messages -> {}, () -> asAddModuleHtml());
+        verifyToken(() -> asAddModuleHtml());
+        final String fileName = form.moduleFile.getFileName();
+        try (InputStream in = form.moduleFile.getInputStream()) {
+            pythonHelper.addModule(fileName, in);
+            saveMessage(messages -> messages.addSuccessUploadedModule(GLOBAL, fileName));
+        } catch (final Exception e) {
+            logger.warn("Failed to add " + form.moduleFile.getFileName(), e);
+            throw validationError(messages -> messages.addErrorsFailedToUploadModule(GLOBAL, fileName), () -> asAddModuleHtml());
+        }
+        return redirect(AdminSystemmlAction.class);
+    }
+
     // ===================================================================================
     //                                                                              JSP
     //                                                                           =========
@@ -121,5 +146,9 @@ public class AdminSystemmlAction extends FioneAdminAction {
                 logger.warn("Failed to get cloudStatus.", e);
             }
         });
+    }
+
+    private HtmlResponse asAddModuleHtml() {
+        return asHtml(path_AdminSystemml_AdminSystemmlModuleJsp).useForm(UploadModuleForm.class);
     }
 }

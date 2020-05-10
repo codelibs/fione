@@ -19,6 +19,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.Writer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -33,6 +34,7 @@ import javax.servlet.ServletContext;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.codelibs.core.io.CopyUtil;
 import org.codelibs.core.io.FileUtil;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fess.crawler.Constants;
@@ -217,6 +219,12 @@ public class PythonHelper {
         if (logger.isDebugEnabled()) {
             logger.debug("INI File:\n{}", FileUtil.readText(iniFile));
         }
+    }
+
+    public void addModule(final String fileName, final InputStream in) {
+        final String name = fileName.endsWith(".py") ? fileName : fileName + ".py";
+        CopyUtil.copy(in, ResourceUtil.getEnvPath("fione", "python", name).toFile());
+        reload();
     }
 
     public PythonModule[] getFrameModules() {

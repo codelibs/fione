@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.mylasta.action;
 
+import org.codelibs.fione.mylasta.action.FioneLabels;
 import org.lastaflute.core.message.UserMessage;
 
 /**
@@ -82,6 +83,9 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Reloading Modules. */
     public static final String SUCCESS_reload_modules = "{success.reload_modules}";
+
+    /** The key of the message: Uploaded Module {0}. */
+    public static final String SUCCESS_uploaded_module = "{success.uploaded_module}";
 
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
@@ -157,6 +161,9 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Failed to reload modules. */
     public static final String ERRORS_failed_to_reload_modules = "{errors.failed_to_reload_modules}";
+
+    /** The key of the message: Failed to upload Module {0}. */
+    public static final String ERRORS_failed_to_upload_module = "{errors.failed_to_upload_module}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -435,6 +442,21 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessReloadModules(String property) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_reload_modules));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.uploaded_module' with parameters.
+     * <pre>
+     * message: Uploaded Module {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessUploadedModule(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_uploaded_module, arg0));
         return this;
     }
 
@@ -803,6 +825,21 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addErrorsFailedToReloadModules(String property) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(ERRORS_failed_to_reload_modules));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_upload_module' with parameters.
+     * <pre>
+     * message: Failed to upload Module {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToUploadModule(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_upload_module, arg0));
         return this;
     }
 }

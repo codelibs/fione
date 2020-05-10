@@ -56,6 +56,7 @@
 											<la:message key="labels.systemml_options" />
 											</button>
 										<ul class="dropdown-menu">
+											<li><button type="submit" name="addmodule" value="Add Module" class="btn btn-link"><la:message key="labels.systemml_add_module" /></button></li>
 											<li><button type="submit" name="reloadmodule" value="Reload Modules" class="btn btn-link"><la:message key="labels.systemml_reload_module" /></button></li>
 											<li><button type="submit" name="shutdowncluster" value="Restart H2O" class="btn btn-link"><la:message key="labels.systemml_restart_h2o" /></button></li>
 										</ul>
