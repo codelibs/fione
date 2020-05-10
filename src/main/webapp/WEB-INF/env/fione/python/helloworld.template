@@ -1,0 +1,42 @@
+import h2o
+import sys
+
+def print_module():
+    x = {
+          'id': 'sample',
+          'name': 'Hello World',
+          'type': 'FRAME',
+          'components': [
+            {
+              "id": "name",
+              "name": "Your Name",
+              "description": "Type your name",
+              "type": "TEXT",
+              "value": "Taro",
+            },
+          ]
+        }
+    import json
+    print(json.dumps(x))
+    
+
+def main(config):
+    h2o_config = config['h2o']
+    params = config['parameters']
+
+    h2o.init(url=h2o_config.get('url'))
+
+    print(f'Hello {params.get("name")}')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 2:
+        print_module()
+        sys.exit()
+    config_file = sys.argv[1]
+    import configparser
+    config = configparser.ConfigParser()
+    config.read([config_file])
+    main(config)
+
+
