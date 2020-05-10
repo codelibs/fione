@@ -33,6 +33,7 @@ import javax.servlet.ServletContext;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.codelibs.core.io.FileUtil;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fess.exception.JobProcessingException;
@@ -156,6 +157,10 @@ public class PythonHelper {
             cmdList.add(iniFile.getAbsolutePath());
         }
 
+        if (logger.isDebugEnabled()) {
+            logger.debug("Execute Python: {}", cmdList);
+        }
+
         final String sessionId = UUID.randomUUID().toString().replace("-", StringUtil.EMPTY);
         try {
             final JobProcess jobProcess = processHelper.startProcess(sessionId, cmdList, pb -> {
@@ -173,7 +178,7 @@ public class PythonHelper {
             final int exitValue = currentProcess.exitValue();
 
             if (logger.isInfoEnabled()) {
-                logger.info("Crawler: Exit Code={} - Process Output:\n{}", exitValue, it.getOutput());
+                logger.info("Python: Exit Code={} - Process Output:\n{}", exitValue, it.getOutput());
             }
             if (exitValue != 0) {
                 final StringBuilder out = new StringBuilder();
@@ -207,6 +212,10 @@ public class PythonHelper {
             writer.flush();
         } catch (final IOException e) {
             throw new PythonExecutionException("Failed to write " + iniFile.getAbsolutePath(), e);
+        }
+
+        if (logger.isDebugEnabled()) {
+            logger.debug("INI File:\n{}", FileUtil.readText(iniFile));
         }
     }
 

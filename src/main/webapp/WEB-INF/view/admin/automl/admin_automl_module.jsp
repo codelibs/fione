@@ -60,7 +60,7 @@
 										</la:info>
 										<la:errors property="_global" />
 									</div>
-									<c:if test="${module.type eq 'FRAME'}">
+									<c:if test="${module.type eq 'FRAME' or module.type eq 'TRAIN' or module.type eq 'PREDICT'}">
 									<div class="form-group row">
 										<label for="frameId" class="col-sm-3 col-form-label"><la:message key="labels.automl_module_frameid" /></label>
 										<div class="col-sm-9">
@@ -85,6 +85,19 @@
 											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
 												<c:forEach var="item" items="${columnItems}">
 													<option value="${f:u(item.value)}">${f:h(item.label)}</option>
+												</c:forEach>
+											</select>
+											</c:when>
+											<c:when test="${c.type == 'BOOL'}">
+											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
+												<option value="true" <c:if test="${c.value eq 'true'}">selected</c:if>>True</option>
+												<option value="false" <c:if test="${c.value eq 'false'}">selected</c:if>>False</option>
+											</select>
+											</c:when>
+											<c:when test="${c.type == 'SELECT'}">
+											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
+												<c:forEach var="item" items="${c.options}">
+													<option value="${f:u(item)}" <c:if test="${c.value eq item}">selected</c:if>>${f:h(item)}</option>
 												</c:forEach>
 											</select>
 											</c:when>
