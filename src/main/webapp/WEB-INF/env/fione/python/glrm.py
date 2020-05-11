@@ -9,10 +9,10 @@ def print_module():
           'type': 'TRAIN',
           'components': [
             {
-              "id": "suffix",
-              "name": "Suffix (Frame ID)",
+              "id": "column_header",
+              "name": "Column Header",
+              "description": "Column number(s) to use as the row names",
               "type": "TEXT",
-              "value": "glrm",
             },
             {
               "id": "expand_user_y",
@@ -189,6 +189,9 @@ def main(config):
 
     frame_id = params.get('frame_id')
     df = h2o.get_frame(frame_id)
+    column_header = params.get('column_header')
+    if len(column_header) > 0:
+        df = df[int(column_header):]
     glrm_model = H2OGeneralizedLowRankEstimator(
         expand_user_y=bool(params.get('expand_user_y')),
         gamma_x=float(params.get('gamma_x')),
@@ -213,7 +216,6 @@ def main(config):
         svd_method=str(params.get('svd_method')))
     glrm_model.train(training_frame=df)
     glrm_model.show()
-    dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
 
 
 def append_frame_id(frame_id, name):
