@@ -53,6 +53,7 @@ import org.codelibs.fione.h2o.bindings.pojos.InitIDV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
+import org.codelibs.fione.h2o.bindings.pojos.LeaderboardsV99;
 import org.codelibs.fione.h2o.bindings.pojos.ModelExportV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
@@ -195,6 +196,10 @@ public class H2oHelper {
 
     public Callable<LeaderboardV99> getLeaderboard(final String projectName) {
         return new Callable<>(getH2oApi().leaderboard(projectName));
+    }
+
+    public Callable<LeaderboardsV99> getLeaderboards() {
+        return new Callable<>(getH2oApi().leaderboards());
     }
 
     public Callable<ModelsV3> getModel(final ModelKeyV3 model) {

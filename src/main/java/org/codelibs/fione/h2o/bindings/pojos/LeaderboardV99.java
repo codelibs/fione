@@ -119,4 +119,14 @@ public class LeaderboardV99 extends SchemaV3 {
         }
         return dataList;
     }
+
+    private transient boolean inLocal = false;
+
+    public boolean isInLocal() {
+        return inLocal;
+    }
+
+    public void setInLocal(boolean inLocal) {
+        this.inLocal = inLocal;
+    }
 }

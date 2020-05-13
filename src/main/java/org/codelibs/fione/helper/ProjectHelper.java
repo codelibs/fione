@@ -83,6 +83,7 @@ import org.codelibs.fione.h2o.bindings.pojos.JobV3.Kind;
 import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.KeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
+import org.codelibs.fione.h2o.bindings.pojos.LeaderboardsV99;
 import org.codelibs.fione.h2o.bindings.pojos.ModelExportV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
@@ -90,7 +91,6 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.RapidsSchemaV3;
-import org.codelibs.fione.h2o.bindings.pojos.SchemaV3;
 import org.codelibs.fione.helper.PythonHelper.PythonModule;
 import org.codelibs.fione.util.StringCodecUtil;
 import org.lastaflute.core.smartdeploy.ManagedHotdeploy;
@@ -131,7 +131,7 @@ public class ProjectHelper {
 
     protected ReadWriteLock jobLock = new ReentrantReadWriteLock();
 
-    protected Cache<Object, SchemaV3> responseCache;
+    protected Cache<String, Object> responseCache;
 
     @PostConstruct
     public void init() {
@@ -140,7 +140,7 @@ public class ProjectHelper {
         if (ManagedHotdeploy.isHotdeploy()) {
             cacheBuilder.expireAfterWrite(10, TimeUnit.SECONDS);
         } else {
-            cacheBuilder.expireAfterWrite(fessConfig.getSystemPropertyAsInt("fione.api.cache.expire", 5), TimeUnit.MINUTES);
+            cacheBuilder.expireAfterWrite(fessConfig.getSystemPropertyAsInt("fione.api.cache.expire", 1), TimeUnit.MINUTES);
         }
         responseCache = cacheBuilder.build();
     }
@@ -1338,6 +1338,40 @@ public class ProjectHelper {
         }
     }
 
+    public String[] getLeaderboards(final String projectId) {
+        try {
+            final String cacheKey = "leaderboads@" + projectId;
+            return (String[]) responseCache.get(cacheKey, () -> {
+                final List<String> idList = new ArrayList<>();
+                final Response<LeaderboardsV99> response = h2oHelper.getLeaderboards().execute();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("getLeaderboards: {}", response);
+                }
+                if (response.code() == 200) {
+                    final LeaderboardsV99 leaderboards = response.body();
+                    final String prefix = StringCodecUtil.decode(projectId);
+                    for (LeaderboardV99 leaderboard : leaderboards.leaderboards) {
+                        final String projectName = leaderboard.projectName;
+                        if (projectName.startsWith(prefix)) {
+                            idList.add(projectName);
+                        }
+                    }
+                }
+
+                stream(getLocalLeaderboardIds(projectId)).of(stream -> stream.filter(s -> !idList.contains(s)).forEach(idList::add));
+                return idList.toArray(n -> new String[n]);
+            });
+        } catch (final Exception e) {
+            if (e.getCause() instanceof CacheNotFoundException) {
+                return StringUtil.EMPTY_STRINGS;
+            }
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to get data from cache.", e);
+            }
+            return StringUtil.EMPTY_STRINGS;
+        }
+    }
+
     public String[] getLocalLeaderboardIds(final String projectId) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final String leaderboardDir = projectFolderName + "/" + projectId + "/model/";
@@ -1357,7 +1391,7 @@ public class ProjectHelper {
                     continue;
                 }
                 final String[] values = objectName.split("/");
-                list.add(values[values.length - 1].replaceFirst(".json$", StringUtil.EMPTY));
+                list.add(StringCodecUtil.decode(values[values.length - 1].replaceFirst(".json$", StringUtil.EMPTY)));
             }
         } catch (final Exception e) {
             if (logger.isDebugEnabled()) {
@@ -1373,7 +1407,9 @@ public class ProjectHelper {
         final String objectName = getLeaderboardConfigPath(projectId, leaderboardId);
         try (Reader reader =
                 new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
-            return gson.fromJson(reader, LeaderboardV99.class);
+            final LeaderboardV99 leaderboard = gson.fromJson(reader, LeaderboardV99.class);
+            leaderboard.setInLocal(true);
+            return leaderboard;
         } catch (final ErrorResponseException e) {
             final String code = e.errorResponse().code();
             if ("NoSuchKey".equals(code)) {

@@ -211,6 +211,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, "frameId", frameId);
                 RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+                RenderDataUtil.register(data, "leaderboardIds", projectHelper.getLeaderboards(projectId));
                 RenderDataUtil.register(data, "autoReload", project.hasRunningJobs());
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
@@ -304,6 +305,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, "frameId", frameId);
                 RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+                RenderDataUtil.register(data, "leaderboardIds", projectHelper.getLeaderboards(projectId));
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
                 }
@@ -374,6 +376,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, "frameId", frameId);
                 RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+                RenderDataUtil.register(data, "leaderboardIds", projectHelper.getLeaderboards(projectId));
                 RenderDataUtil.register(data, "columnName", columnName);
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
