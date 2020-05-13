@@ -1,0 +1,52 @@
+package org.codelibs.fione.helper;
+
+import java.io.Reader;
+
+import javax.annotation.PostConstruct;
+
+import org.codelibs.fione.exception.ModelIOException;
+import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
+
+import com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.annotation.PropertyAccessor;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator;
+
+public class ModelHelper {
+
+    private ObjectMapper objectMapper;
+
+    @PostConstruct
+    public void init() {
+        objectMapper = new ObjectMapper();
+        objectMapper.setVisibility(PropertyAccessor.ALL, Visibility.NONE);
+        objectMapper.setVisibility(PropertyAccessor.FIELD, Visibility.ANY);
+        objectMapper.setDefaultTyping(new ObjectMapper.DefaultTypeResolverBuilder(ObjectMapper.DefaultTyping.EVERYTHING,
+                LaissezFaireSubTypeValidator.instance)//
+                .init(JsonTypeInfo.Id.CLASS, null)//
+                .inclusion(JsonTypeInfo.As.PROPERTY)//
+                .typeProperty("classType"));
+        objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
+
+    public String serialize(ModelSchemaBaseV3 model) {
+        try {
+            return objectMapper.writeValueAsString(model);
+        } catch (JsonProcessingException e) {
+            throw new ModelIOException("Failed to serialize " + model, e);
+        }
+    }
+
+    public ModelSchemaBaseV3 deserialize(Reader reader) {
+        try {
+            return objectMapper.readValue(reader, ModelSchemaBaseV3.class);
+        } catch (Exception e) {
+            throw new ModelIOException("Failed to deserialize " + reader, e);
+        }
+    }
+}

@@ -23,7 +23,6 @@ import java.io.InputStream;
 import java.io.Writer;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -200,10 +199,7 @@ public class PythonHelper {
     }
 
     protected void writeIniFile(final File iniFile, final Map<String, Object> params) {
-        final Map<String, Object> h2oParams = new HashMap<>();
         final String endpoint = ((CustomSystemHelper) ComponentUtil.getSystemHelper()).getH2oEndpoint();
-        h2oParams.put("url", endpoint);
-        params.put("h2o", h2oParams);
         try (final Writer writer = new BufferedWriter(new FileWriter(iniFile, Constants.UTF_8_CHARSET))) {
             writer.write("[h2o]\n");
             writer.write("url = " + endpoint + "\n");

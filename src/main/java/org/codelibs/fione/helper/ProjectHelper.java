@@ -120,6 +120,9 @@ public class ProjectHelper {
     @Resource
     protected H2oHelper h2oHelper;
 
+    @Resource
+    protected ModelHelper modelHelper;
+
     protected String projectFolderName = "fione";
 
     protected long requestTimeout = 5000L;
@@ -716,6 +719,10 @@ public class ProjectHelper {
                 if (response.code() == 200) {
                     return response.body();
                 } else if (response.code() == 404) {
+                    final LeaderboardV99 localLeaderboard = getLocalLeaderboard(projectId, leaderboardId);
+                    if (localLeaderboard != null) {
+                        return localLeaderboard;
+                    }
                     throw new CacheNotFoundException();
                 }
                 logger.warn("Failed to read leaderboard: {}", response);
@@ -951,7 +958,7 @@ public class ProjectHelper {
         }
     }
 
-    public ModelSchemaBaseV3 getModel(final String projectId, final String modelId) {
+    public ModelSchemaBaseV3 getModel(final String projectId, final String leaderboardId, final String modelId) {
         if (StringUtil.isBlank(modelId)) {
             return null;
         }
@@ -970,6 +977,10 @@ public class ProjectHelper {
                         }
                     }
                 } else if (response.code() == 404) {
+                    final ModelSchemaBaseV3 model = getLocalModel(projectId, leaderboardId, modelId);
+                    if (model != null) {
+                        return model;
+                    }
                     throw new CacheNotFoundException();
                 }
                 logger.warn("Failed to read leaderboard: {}", response);
@@ -1050,18 +1061,19 @@ public class ProjectHelper {
     }
 
     public void exportModel(final String projectId, final String leaderboardId, final String modelId) {
-        final ModelSchemaBaseV3 model = getModel(projectId, modelId);
+        final ModelSchemaBaseV3 model = getModel(projectId, leaderboardId, modelId);
         if (model == null) {
             throw new H2oAccessException(modelId + " is not found in " + projectId);
         }
 
-        final String json = gson.toJson(model);
+        final String json = modelHelper.serialize(model);
         if (logger.isDebugEnabled()) {
             logger.debug("model: {}", json);
         }
 
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final MinioClient minioClient = createClient(fessConfig);
+
         final String objectName = getModelConfigPath(projectId, leaderboardId, modelId);
         try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
             final String bucketName = fessConfig.getStorageBucket();
@@ -1094,15 +1106,52 @@ public class ProjectHelper {
             throw new H2oAccessException(leaderboardId + " is not found in " + projectId);
         }
 
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+
         new Thread(() -> {
             final int size = leaderboard.models.length;
             final AtomicInteger counter = new AtomicInteger(0);
             final JobV3 workingJob = createWorkingJob(leaderboardId, "Export All Models", 0.0f);
             store(projectId, workingJob);
+
+            {
+                final String json = gson.toJson(leaderboard);
+                final String objectName = getLeaderboardConfigPath(projectId, leaderboardId);
+                try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
+                    final String bucketName = fessConfig.getStorageBucket();
+                    minioClient.putObject(bucketName, objectName, bais, null, null, null, "application/json");
+                } catch (final Exception e) {
+                    throw new StorageException("Failed to create " + objectName, e);
+                }
+            }
+
+            workingJob.progress = 0.2f;
+            store(projectId, workingJob);
+
             Arrays.stream(leaderboard.models)
                     .map(m -> m.name)
                     .forEach(
                             modelId -> {
+                                final ModelSchemaBaseV3 model = getModel(projectId, leaderboardId, modelId);
+                                if (model == null) {
+                                    logger.warn("{} is not found in {}", modelId, projectId);
+                                    return;
+                                }
+
+                                final String json = modelHelper.serialize(model);
+                                if (logger.isDebugEnabled()) {
+                                    logger.debug("model: {}", json);
+                                }
+                                final String objectName = getModelConfigPath(projectId, leaderboardId, modelId);
+                                try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
+                                    final String bucketName = fessConfig.getStorageBucket();
+                                    minioClient.putObject(bucketName, objectName, bais, null, null, null, "application/json");
+                                } catch (final Exception e) {
+                                    logger.warn("Failed to create {}", objectName, e);
+                                    return;
+                                }
+
                                 try {
                                     final Response<ModelExportV3> exportModelResponse =
                                             h2oHelper.exportModel(modelId, getS3ModelPath(projectId, leaderboardId, modelId)).execute();
@@ -1289,6 +1338,71 @@ public class ProjectHelper {
         }
     }
 
+    public String[] getLocalLeaderboardIds(final String projectId) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final String leaderboardDir = projectFolderName + "/" + projectId + "/model/";
+        final List<String> list = new ArrayList<>();
+        try {
+            final MinioClient minioClient = createClient(fessConfig);
+            for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), leaderboardDir, false)) {
+                final Item item = result.get();
+                final String objectName = item.objectName();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("objectName: {}", objectName);
+                }
+                if (!objectName.endsWith(".json")) {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Skipped: {}", objectName);
+                    }
+                    continue;
+                }
+                final String[] values = objectName.split("/");
+                list.add(values[values.length - 1].replaceFirst(".json$", StringUtil.EMPTY));
+            }
+        } catch (final Exception e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to access " + fessConfig.getStorageEndpoint(), e);
+            }
+        }
+        return list.toArray(n -> new String[n]);
+    }
+
+    protected LeaderboardV99 getLocalLeaderboard(final String projectId, final String leaderboardId) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+        final String objectName = getLeaderboardConfigPath(projectId, leaderboardId);
+        try (Reader reader =
+                new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
+            return gson.fromJson(reader, LeaderboardV99.class);
+        } catch (final ErrorResponseException e) {
+            final String code = e.errorResponse().code();
+            if ("NoSuchKey".equals(code)) {
+                return null;
+            }
+            throw new StorageException("Failed to read " + objectName, e);
+        } catch (final Exception e) {
+            throw new StorageException("Failed to read " + objectName, e);
+        }
+    }
+
+    protected ModelSchemaBaseV3 getLocalModel(final String projectId, final String leaderboardId, final String modelId) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+        final String objectName = getModelConfigPath(projectId, leaderboardId, modelId);
+        try (Reader reader =
+                new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
+            return modelHelper.deserialize(reader);
+        } catch (final ErrorResponseException e) {
+            final String code = e.errorResponse().code();
+            if ("NoSuchKey".equals(code)) {
+                return null;
+            }
+            throw new StorageException("Failed to read " + objectName, e);
+        } catch (final Exception e) {
+            throw new StorageException("Failed to read " + objectName, e);
+        }
+    }
+
     protected String getPredictCsvPath(final String projectId, final String name) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         return "s3a://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/data/" + name + ".csv";
@@ -1313,6 +1427,10 @@ public class ProjectHelper {
     protected String getS3Path(final String projectId, final String fileName) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         return "s3://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/data/" + fileName;
+    }
+
+    protected String getLeaderboardConfigPath(final String projectId, final String leaderboardId) {
+        return projectFolderName + "/" + projectId + "/model/" + StringCodecUtil.encodeUrlSafe(leaderboardId) + ".json";
     }
 
     protected String getModelConfigPath(final String projectId, final String leaderboardId, final String modelId) {

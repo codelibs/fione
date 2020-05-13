@@ -737,7 +737,12 @@ public class AdminAutomlAction extends FioneAdminAction {
     public HtmlResponse model(final String projectId, final String modelId) {
         final String token = doubleSubmitManager.saveToken(myTokenGroupType());
 
-        final ModelSchemaBaseV3 model = projectHelper.getModel(projectId, modelId);
+        final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null);
+        if (leaderboardId == null) {
+            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
+        }
+
+        final ModelSchemaBaseV3 model = projectHelper.getModel(projectId, leaderboardId, modelId);
         if (model == null) {
             throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
         }
@@ -747,8 +752,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                     RenderDataUtil.register(data, "projectId", projectId);
                     RenderDataUtil.register(data, "frameId", LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID))
                             .orElse(null));
-                    RenderDataUtil.register(data, "leaderboardId",
-                            LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null));
+                    RenderDataUtil.register(data, "leaderboardId", leaderboardId);
                     RenderDataUtil.register(data, "model", model);
                 });
     }
@@ -825,39 +829,38 @@ public class AdminAutomlAction extends FioneAdminAction {
     public HtmlResponse serving(final String projectId) {
         final String token = doubleSubmitManager.saveToken(myTokenGroupType());
 
+        final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null);
         final String modelId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(MODEL_ID)).orElse(null);
-        final ModelSchemaBaseV3 model = projectHelper.getModel(projectId, modelId);
+        final ModelSchemaBaseV3 model = projectHelper.getModel(projectId, leaderboardId, modelId);
         if (model == null) {
             throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
         }
         final String frameId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID)).orElse(null);
-        return asHtml(path_AdminAutoml_AdminAutomlServingJsp).renderWith(
-                data -> {
-                    RenderDataUtil.register(data, "token", token);
-                    RenderDataUtil.register(data, "projectId", projectId);
-                    RenderDataUtil.register(data, "frameId", frameId);
-                    RenderDataUtil.register(data, "leaderboardId",
-                            LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null));
-                    RenderDataUtil.register(data, "model", model);
-                    RenderDataUtil.register(data, "dockerZipName", getServingZipName(projectId, modelId));
-                    RenderDataUtil.register(data, "dockerTagName", getProjectNameId(projectId));
-                    if (model instanceof ModelSchemaV3) {
-                        final ModelOutputSchemaV3 outputSchema = ((ModelSchemaV3<?, ?>) model).output;
-                        final Map<String, Object> instanceMap = new HashMap<>();
-                        for (int i = 0; i < outputSchema.names.length; i++) {
-                            final String name = outputSchema.names[i];
-                            if (!model.responseColumnName.equals(name)) {
-                                final String convertColumnType = projectHelper.convertColumnType(outputSchema.columnTypes[i]);
-                                if ("numeric".equals(convertColumnType)) {
-                                    instanceMap.put(name, 0.0);
-                                } else {
-                                    instanceMap.put(name, "?");
-                                }
-                            }
+        return asHtml(path_AdminAutoml_AdminAutomlServingJsp).renderWith(data -> {
+            RenderDataUtil.register(data, "token", token);
+            RenderDataUtil.register(data, "projectId", projectId);
+            RenderDataUtil.register(data, "frameId", frameId);
+            RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+            RenderDataUtil.register(data, "model", model);
+            RenderDataUtil.register(data, "dockerZipName", getServingZipName(projectId, modelId));
+            RenderDataUtil.register(data, "dockerTagName", getProjectNameId(projectId));
+            if (model instanceof ModelSchemaV3) {
+                final ModelOutputSchemaV3 outputSchema = ((ModelSchemaV3<?, ?>) model).output;
+                final Map<String, Object> instanceMap = new HashMap<>();
+                for (int i = 0; i < outputSchema.names.length; i++) {
+                    final String name = outputSchema.names[i];
+                    if (!model.responseColumnName.equals(name)) {
+                        final String convertColumnType = projectHelper.convertColumnType(outputSchema.columnTypes[i]);
+                        if ("numeric".equals(convertColumnType)) {
+                            instanceMap.put(name, 0.0);
+                        } else {
+                            instanceMap.put(name, "?");
                         }
-                        RenderDataUtil.register(data, "instance", new JSONObject(instanceMap).toString());
                     }
-                });
+                }
+                RenderDataUtil.register(data, "instance", new JSONObject(instanceMap).toString());
+            }
+        });
     }
 
     @Execute
