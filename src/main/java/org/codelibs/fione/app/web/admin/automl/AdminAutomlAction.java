@@ -491,13 +491,28 @@ public class AdminAutomlAction extends FioneAdminAction {
         validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         try {
-            projectHelper.deleteFrame(form.frameId);
+            projectHelper.deleteFrame(form.projectId, form.frameId);
             saveMessage(messages -> messages.addSuccessDeletedFrame(GLOBAL, form.frameId));
         } catch (final Exception e) {
             logger.warn("Failed to delete frame: {}", form.frameId, e);
             throw validationError(messages -> messages.addErrorsFailedToDeleteFrame(GLOBAL, form.frameId), this::asListHtml);
         }
         return redirectDetailsHtml(form.projectId, null, form.leaderboardId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse deleteleaderboard(final LeaderboardForm form) {
+        validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
+        try {
+            projectHelper.deleteLeaderboard(form.projectId, form.leaderboardId);
+            saveMessage(messages -> messages.addSuccessDeletedLeaderboard(GLOBAL, form.leaderboardId));
+        } catch (final Exception e) {
+            logger.warn("Failed to delete frame: {}", form.frameId, e);
+            throw validationError(messages -> messages.addErrorsFailedToDeleteLeaderboard(GLOBAL, form.leaderboardId), this::asListHtml);
+        }
+        return redirectDetailsHtml(form.projectId, form.frameId, null);
     }
 
     @Execute

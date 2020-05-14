@@ -87,6 +87,9 @@ public class FioneMessages extends FioneLabels {
     /** The key of the message: Uploaded Module {0}. */
     public static final String SUCCESS_uploaded_module = "{success.uploaded_module}";
 
+    /** The key of the message: Deleted Model Set {0}. */
+    public static final String SUCCESS_deleted_leaderboard = "{success.deleted_leaderboard}";
+
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
 
@@ -164,6 +167,9 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Failed to upload Module {0}. */
     public static final String ERRORS_failed_to_upload_module = "{errors.failed_to_upload_module}";
+
+    /** The key of the message: Failed to delete Model Set {0}. */
+    public static final String ERRORS_failed_to_delete_leaderboard = "{errors.failed_to_delete_leaderboard}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -457,6 +463,21 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessUploadedModule(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_uploaded_module, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.deleted_leaderboard' with parameters.
+     * <pre>
+     * message: Deleted Model Set {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessDeletedLeaderboard(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_deleted_leaderboard, arg0));
         return this;
     }
 
@@ -840,6 +861,21 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addErrorsFailedToUploadModule(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(ERRORS_failed_to_upload_module, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_delete_leaderboard' with parameters.
+     * <pre>
+     * message: Failed to delete Model Set {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToDeleteLeaderboard(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_delete_leaderboard, arg0));
         return this;
     }
 }

@@ -191,6 +191,9 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Export All */
     public static final String LABELS_automl_export_all = "{labels.automl_export_all}";
 
+    /** The key of the message: Delete Models */
+    public static final String LABELS_automl_delete_models = "{labels.automl_delete_models}";
+
     /** The key of the message: Project */
     public static final String LABELS_automl_project = "{labels.automl_project}";
 
@@ -424,6 +427,9 @@ public class FioneLabels extends FessMessages {
 
     /** The key of the message: Module Configuration */
     public static final String LABELS_automl_moudule_configuration = "{labels.automl_moudule_configuration}";
+
+    /** The key of the message: Model Set */
+    public static final String LABELS_automl_modelset = "{labels.automl_modelset}";
 
     /** The key of the message: Project Dashboard */
     public static final String LABELS_easyml_project_dashboard = "{labels.easyml_project_dashboard}";

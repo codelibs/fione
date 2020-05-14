@@ -68,7 +68,12 @@
 											<input type="hidden" name="projectId" value="${f:h(project.id)}">
 											<input type="hidden" name="frameId" value="${f:h(frameId)}">
 											<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
-											<button type="submit" name="exportallmodels" value="Export All" class="btn btn-link"><la:message key="labels.automl_export_all" /></button>
+											<c:if test="${leaderboard.inLocal}">
+												<button type="submit" name="deleteleaderboard" value="Delete Models" class="btn btn-link"><la:message key="labels.automl_delete_models" /></button>
+											</c:if>
+											<c:if test="${not leaderboard.inLocal}">
+												<button type="submit" name="exportallmodels" value="Export All" class="btn btn-link"><la:message key="labels.automl_export_all" /></button>
+											</c:if>
 											</form></li>
 										</ul>
 									</div>

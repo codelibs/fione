@@ -440,7 +440,7 @@ public class ProjectHelper {
 
     public FrameV3 getColumnSummaries(final String projectId, final String frameId) {
         try {
-            final String cacheKey = "frameSummary@" + projectId + "," + frameId;
+            final String cacheKey = getFrameSummaryCacheKey(projectId, frameId);
             return (FrameV3) responseCache.get(cacheKey, () -> {
                 final Response<FramesV3> response = h2oHelper.getFrameSummary(frameId).execute();
                 if (logger.isDebugEnabled()) {
@@ -504,7 +504,7 @@ public class ProjectHelper {
         });
     }
 
-    public void deleteFrame(final String frameId) {
+    public void deleteFrame(final String projectId, final String frameId) {
         final Response<FramesV3> response = h2oHelper.deleteFrame(frameId).execute();
         if (logger.isDebugEnabled()) {
             logger.debug("deleteFrame: {}", response);
@@ -514,6 +514,7 @@ public class ProjectHelper {
         } else {
             throw new H2oAccessException("Failed to delete frame " + frameId + " : " + response);
         }
+        responseCache.invalidate(getFrameSummaryCacheKey(projectId, frameId));
     }
 
     protected void deleteFrameQuietly(final String frameId) {
@@ -659,6 +660,8 @@ public class ProjectHelper {
                 logger.warn("Failed to get job: {}", getJobResponse);
             }
         }, t -> logger.warn("Failed to get job: {}", jobId, t));
+
+        responseCache.invalidate(getLeaderboardsCacheKey(projectId));
     }
 
     public synchronized void deleteAllJobs(final String projectId) {
@@ -691,6 +694,8 @@ public class ProjectHelper {
         } finally {
             jobLock.writeLock().unlock();
         }
+
+        responseCache.invalidate(getLeaderboardsCacheKey(projectId));
     }
 
     protected void store(final String projectId, final JobV3[] jobs) {
@@ -710,7 +715,7 @@ public class ProjectHelper {
 
     public LeaderboardV99 getLeaderboard(final String projectId, final String leaderboardId) {
         try {
-            final String cacheKey = "leaderboard@" + projectId + "," + leaderboardId;
+            final String cacheKey = getLeaderboardCacheKey(projectId, leaderboardId);
             return (LeaderboardV99) responseCache.get(cacheKey, () -> {
                 final Response<LeaderboardV99> response = h2oHelper.getLeaderboard(leaderboardId).execute();
                 if (logger.isDebugEnabled()) {
@@ -963,7 +968,7 @@ public class ProjectHelper {
             return null;
         }
         try {
-            final String cacheKey = "model@" + projectId + "," + modelId;
+            final String cacheKey = getModelCacheKey(projectId, modelId);
             return (ModelSchemaBaseV3) responseCache.get(cacheKey, () -> {
                 final Response<ModelsV3> response = h2oHelper.getModel(new ModelKeyV3(modelId)).execute();
                 if (logger.isDebugEnabled()) {
@@ -1058,6 +1063,9 @@ public class ProjectHelper {
         } else {
             throw new H2oAccessException("Failed to delete model " + modelId + " : " + response);
         }
+
+        responseCache.invalidate(getLeaderboardsCacheKey(projectId));
+        responseCache.invalidate(getModelCacheKey(projectId, modelId));
     }
 
     public void exportModel(final String projectId, final String leaderboardId, final String modelId) {
@@ -1338,9 +1346,33 @@ public class ProjectHelper {
         }
     }
 
+    public void deleteLeaderboard(final String projectId, final String leaderboardId) {
+        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final MinioClient minioClient = createClient(fessConfig);
+        final String leaderboardDir = projectFolderName + "/" + projectId + "/model/" + StringCodecUtil.encodeUrlSafe(leaderboardId) + "/";
+        final List<String> objectNameList = new ArrayList<>();
+        try {
+            for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), leaderboardDir, true)) {
+                final Item item = result.get();
+                final String objectName = item.objectName();
+                objectNameList.add(objectName);
+            }
+            objectNameList.add(getLeaderboardConfigPath(projectId, leaderboardId));
+            final Iterable<Result<DeleteError>> results = minioClient.removeObjects(fessConfig.getStorageBucket(), objectNameList);
+            for (final Result<DeleteError> result : results) {
+                logger.warn("Failed to delete {}", result.get());
+            }
+        } catch (final Exception e) {
+            throw new StorageException("Failed to delete " + leaderboardDir, e);
+        }
+
+        responseCache.invalidate(getLeaderboardsCacheKey(projectId));
+        responseCache.invalidate(getLeaderboardCacheKey(projectId, leaderboardId));
+    }
+
     public String[] getLeaderboards(final String projectId) {
         try {
-            final String cacheKey = "leaderboads@" + projectId;
+            final String cacheKey = getLeaderboardsCacheKey(projectId);
             return (String[]) responseCache.get(cacheKey, () -> {
                 final List<String> idList = new ArrayList<>();
                 final Response<LeaderboardsV99> response = h2oHelper.getLeaderboards().execute();
@@ -1477,6 +1509,22 @@ public class ProjectHelper {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         return "s3a://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/model/"
                 + StringCodecUtil.encodeUrlSafe(leaderboardId) + "/" + modelId;
+    }
+
+    private String getFrameSummaryCacheKey(final String projectId, final String frameId) {
+        return "frameSummary@" + projectId + "," + frameId;
+    }
+
+    private String getLeaderboardCacheKey(final String projectId, final String leaderboardId) {
+        return "leaderboard@" + projectId + "," + leaderboardId;
+    }
+
+    private String getModelCacheKey(final String projectId, final String modelId) {
+        return "model@" + projectId + "," + modelId;
+    }
+
+    private String getLeaderboardsCacheKey(final String projectId) {
+        return "leaderboads@" + projectId;
     }
 
 }

@@ -175,7 +175,7 @@
 		</c:if>
 	</div>
 </div>
-<c:if test="${fn:length(leaderboardIds) gt 0}">
+<c:if test="${fn:length(leaderboardIds) gt 0 and fn:length(project.frameIds) gt 0}">
 	<div class="card card-outline card-primary">
 		<div class="card-header">
 			<h3 class="card-title">
