@@ -15,7 +15,6 @@
  */
 package org.codelibs.fione.mylasta.action;
 
-import org.codelibs.fione.mylasta.action.FioneLabels;
 import org.lastaflute.core.message.UserMessage;
 
 /**
@@ -89,6 +88,9 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Deleted Model Set {0}. */
     public static final String SUCCESS_deleted_leaderboard = "{success.deleted_leaderboard}";
+
+    /** The key of the message: Importing Model {0}. */
+    public static final String SUCCESS_importing_model = "{success.importing_model}";
 
     /** The key of the message: Project {0} is not found. */
     public static final String ERRORS_project_is_not_found = "{errors.project_is_not_found}";
@@ -170,6 +172,12 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Failed to delete Model Set {0}. */
     public static final String ERRORS_failed_to_delete_leaderboard = "{errors.failed_to_delete_leaderboard}";
+
+    /** The key of the message: Failed to import Model {0}. */
+    public static final String ERRORS_failed_to_import_model = "{errors.failed_to_import_model}";
+
+    /** The key of the message: Module is not found. */
+    public static final String ERRORS_module_is_not_found = "{errors.module_is_not_found}";
 
     /**
      * Add the created action message for the key 'success.created_project' with parameters.
@@ -478,6 +486,21 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessDeletedLeaderboard(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_deleted_leaderboard, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.importing_model' with parameters.
+     * <pre>
+     * message: Importing Model {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessImportingModel(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_importing_model, arg0));
         return this;
     }
 
@@ -876,6 +899,35 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addErrorsFailedToDeleteLeaderboard(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(ERRORS_failed_to_delete_leaderboard, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.failed_to_import_model' with parameters.
+     * <pre>
+     * message: Failed to import Model {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsFailedToImportModel(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_failed_to_import_model, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'errors.module_is_not_found' with parameters.
+     * <pre>
+     * message: Module is not found.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addErrorsModuleIsNotFound(String property) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(ERRORS_module_is_not_found));
         return this;
     }
 }

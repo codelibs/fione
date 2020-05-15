@@ -51,6 +51,12 @@
 								<input type="hidden" name="frameId" value="${f:h(frameId)}">
 								<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 								<div class="btn-group" role="toolbar" aria-label="Toolbar">
+									<c:if test="${model.inLocal}">
+									<button type="submit" name="importmodel" value="import" class="btn btn-default">
+										<i class="fas fa-file-import"></i>
+										<la:message key="labels.automl_model_import" />
+									</button>
+									</c:if><c:if test="${not model.inLocal}">
 									<a href="${contextPath}/admin/automl/prediction/${f:u(projectId)}/${f:u(frameId)}/${f:u(leaderboardId)}/?mid=${f:u(model.modelId.name)}" class="btn btn-default">
 										<i class="fas fa-file-signature"></i>
 										<la:message key="labels.automl_predict_dataset" />
@@ -59,24 +65,27 @@
 										<i class="fas fa-server"></i>
 										<la:message key="labels.automl_serving" />
 									</la:link>
-									<button type="submit" name="downloadmojo" value="load" class="btn btn-default">
+									<button type="submit" name="downloadmojo" value="download" class="btn btn-default">
 										<i class="fas fa-download"></i>
 										<la:message key="labels.automl_model_mojo" />
 									</button>
-									<button type="submit" name="exportmodel" value="load" class="btn btn-default">
+									<button type="submit" name="exportmodel" value="export" class="btn btn-default">
 										<i class="fas fa-file-export"></i>
 										<la:message key="labels.automl_model_export" />
 									</button>
+									</c:if>
 									<la:link href="/admin/automl/job/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
 										<i class="fas fa-tasks"></i>
 										<la:message key="labels.automl_job" />
 									</la:link>
 								</div>
 								<div class="float-right">
+									<c:if test="${not model.inLocal}">
 									<button type="submit" name="deletemodel" value="load" class="btn btn-outline-danger">
 										<i class="fas fa-trash-alt"></i>
 										<la:message key="labels.automl_delete" />
 									</button>
+									</c:if>
 								</div>
 								</form>
 							</div>

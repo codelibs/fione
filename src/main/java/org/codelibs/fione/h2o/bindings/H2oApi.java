@@ -2595,14 +2595,14 @@ public class H2oApi {
     /**
      * Import given binary model into H2O.
      */
-    public ModelsV3 importModel(final ModelKeyV3 modelId) throws IOException {
+    public Call<ModelsV3> importModel(final ModelKeyV3 modelId) {
         final Models s = getService(Models.class);
-        return s.importModel(keyToString(modelId)).execute().body();
+        return s.importModel(keyToString(modelId));
     }
 
-    public ModelsV3 importModel(final ModelImportV3 params) throws IOException {
+    public Call<ModelsV3> importModel(final ModelImportV3 params) {
         final Models s = getService(Models.class);
-        return s.importModel(keyToString(params.modelId), params.dir, params.force, params._excludeFields).execute().body();
+        return s.importModel(keyToString(params.modelId), params.dir, params.force, params._excludeFields);
     }
 
     /**

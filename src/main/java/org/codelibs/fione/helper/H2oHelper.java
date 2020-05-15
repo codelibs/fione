@@ -55,6 +55,7 @@ import org.codelibs.fione.h2o.bindings.pojos.JobsV3;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardV99;
 import org.codelibs.fione.h2o.bindings.pojos.LeaderboardsV99;
 import org.codelibs.fione.h2o.bindings.pojos.ModelExportV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelImportV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
@@ -311,6 +312,14 @@ public class H2oHelper {
         params.dir = path;
         params.force = true;
         return new Callable<>(getH2oApi().exportModel(params));
+    }
+
+    public Callable<ModelsV3> importModel(final String modelId, final String path) {
+        final ModelImportV3 params = new ModelImportV3();
+        params.modelId = new ModelKeyV3(modelId);
+        params.dir = path;
+        params.force = true;
+        return new Callable<>(getH2oApi().importModel(params));
     }
 
     public Callable<RapidsSchemaV3> changeColumnType(final FrameKeyV3 targetFrame, final String columnType, final int index,

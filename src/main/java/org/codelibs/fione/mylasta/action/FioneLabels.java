@@ -347,6 +347,9 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Export */
     public static final String LABELS_automl_model_export = "{labels.automl_model_export}";
 
+    /** The key of the message: Import */
+    public static final String LABELS_automl_model_import = "{labels.automl_model_import}";
+
     /** The key of the message: Gen Model */
     public static final String LABELS_automl_model_genmodel = "{labels.automl_model_genmodel}";
 

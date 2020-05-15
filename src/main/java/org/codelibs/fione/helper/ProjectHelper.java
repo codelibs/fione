@@ -87,7 +87,9 @@ import org.codelibs.fione.h2o.bindings.pojos.LeaderboardsV99;
 import org.codelibs.fione.h2o.bindings.pojos.ModelExportV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelKeyV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelOutputSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.RapidsSchemaV3;
@@ -1070,6 +1072,26 @@ public class ProjectHelper {
         responseCache.invalidate(getModelCacheKey(projectId, modelId));
     }
 
+    public void importModel(final String projectId, final String leaderboardId, final String modelId) {
+        final JobV3 workingJob = createWorkingJob(modelId, "Import Model", 0.5f);
+        store(projectId, workingJob);
+        h2oHelper.importModel(modelId, getS3ModelPath(projectId, leaderboardId, modelId)).execute(importModelResponse -> {
+            if (logger.isDebugEnabled()) {
+                logger.debug("importModel: {}", importModelResponse);
+            }
+            if (importModelResponse.code() == 200) {
+                finish(projectId, workingJob, null);
+            } else {
+                logger.warn("Failed to import frame: {}", importModelResponse);
+                finish(projectId, workingJob, new H2oAccessException("Failed to access " + importModelResponse));
+            }
+            responseCache.invalidate(getModelCacheKey(projectId, modelId));
+        }, t -> {
+            logger.warn("Failed to import model: {}", modelId, t);
+            finish(projectId, workingJob, t);
+        });
+    }
+
     public void exportModel(final String projectId, final String leaderboardId, final String modelId) {
         final ModelSchemaBaseV3 model = getModel(projectId, leaderboardId, modelId);
         if (model == null) {
@@ -1081,33 +1103,15 @@ public class ProjectHelper {
             logger.debug("model: {}", json);
         }
 
-        final FessConfig fessConfig = ComponentUtil.getFessConfig();
-        final MinioClient minioClient = createClient(fessConfig);
-
-        final String objectName = getModelConfigPath(projectId, leaderboardId, modelId);
-        try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
-            final String bucketName = fessConfig.getStorageBucket();
-            minioClient.putObject(bucketName, objectName, bais, null, null, null, "application/json");
-        } catch (final Exception e) {
-            throw new StorageException("Failed to create " + objectName, e);
-        }
-
-        final JobV3 workingJob = createWorkingJob(modelId, "Export Model", 0.5f);
+        final JobV3 workingJob = createWorkingJob(modelId, "Export Model", 0.2f);
         store(projectId, workingJob);
-        h2oHelper.exportModel(modelId, getS3ModelPath(projectId, leaderboardId, modelId)).execute(exportModelResponse -> {
-            if (logger.isDebugEnabled()) {
-                logger.debug("exportModel: {}", exportModelResponse);
-            }
-            if (exportModelResponse.code() == 200) {
-                finish(projectId, workingJob, null);
-            } else {
-                logger.warn("Failed to export frame: {}", exportModelResponse);
-                finish(projectId, workingJob, new H2oAccessException("Failed to access " + exportModelResponse));
-            }
-        }, t -> {
-            logger.warn("Failed to export model: {}", modelId, t);
-            finish(projectId, workingJob, t);
-        });
+        try {
+            store(projectId, leaderboardId, model);
+            finish(projectId, workingJob, null);
+        } catch (Exception e) {
+            logger.warn("Failed to export frame: {}/{}/{}", projectId, leaderboardId, modelId, e);
+            finish(projectId, workingJob, new H2oAccessException("Failed to access " + modelId));
+        }
     }
 
     public void exportAllModels(final String projectId, final String leaderboardId) {
@@ -1117,16 +1121,16 @@ public class ProjectHelper {
         }
 
         new Thread(() -> {
-            final int size = leaderboard.models.length;
             final AtomicInteger counter = new AtomicInteger(0);
             final JobV3 workingJob = createWorkingJob(leaderboardId, "Export All Models", 0.0f);
             store(projectId, workingJob);
 
             store(projectId, leaderboard);
 
-            workingJob.progress = 0.2f;
+            workingJob.progress = 0.1f;
             store(projectId, workingJob);
 
+            final int size = leaderboard.models.length;
             Arrays.stream(leaderboard.models).map(m -> m.name).forEach(modelId -> {
                 final ModelSchemaBaseV3 model = getModel(projectId, leaderboardId, modelId);
                 if (model == null) {
@@ -1141,12 +1145,11 @@ public class ProjectHelper {
                 }
 
                 final int current = counter.addAndGet(1);
-                if (current == size) {
-                    workingJob.progress = 1.0f;
-                } else {
-                    workingJob.progress = (float) current / (float) size;
-                }
+                workingJob.progress = (float) current / (float) size * 0.9f + 0.1f;
+                store(projectId, workingJob);
             });
+
+            workingJob.progress = 1.0f;
             if (counter.get() == size) {
                 finish(projectId, workingJob, null);
             } else {
@@ -1198,6 +1201,24 @@ public class ProjectHelper {
             }
         } catch (final Exception e) {
             throw new StorageException("Failed to export model: " + modelId, e);
+        }
+
+        if (model instanceof ModelSchemaV3) {
+            @SuppressWarnings("rawtypes")
+            final ModelOutputSchemaV3 output = ((ModelSchemaV3) model).output;
+            if (output != null && output.crossValidationModels != null) {
+                for (final ModelKeyV3 key : output.crossValidationModels) {
+                    try {
+                        ModelSchemaBaseV3 subModel = getLocalModel(projectId, leaderboardId, keyToString(key));
+                        if (subModel == null) {
+                            subModel = getModel(projectId, leaderboardId, keyToString(key));
+                            store(projectId, leaderboardId, subModel);
+                        }
+                    } catch (Exception e) {
+                        logger.warn("Failed to store sub-model: {}", key, e);
+                    }
+                }
+            }
         }
     }
 
@@ -1461,7 +1482,7 @@ public class ProjectHelper {
         responseCache.invalidate(getLeaderboardCacheKey(projectId, leaderboardId));
     }
 
-    public String[] getLeaderboards(final String projectId) {
+    public String[] getLeaderboardIds(final String projectId) {
         try {
             final String cacheKey = getLeaderboardsCacheKey(projectId);
             return (String[]) responseCache.get(cacheKey, () -> {

@@ -187,20 +187,16 @@ public class AdminAutomlAction extends FioneAdminAction {
             }).orElse(null);
             final FrameV3 columnSummaries = frameId != null ? projectHelper.getColumnSummaries(projectId, frameId) : null;
 
+            final String[] leaderboardIds = projectHelper.getLeaderboardIds(projectId);
             final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> {
-                final String mid = req.getParameter(LEADERBOARD_ID);
-                String lastId = null;
-                for (final JobV3 id : project.getJobs()) {
-                    if (id.getKind() == Kind.AUTO_ML && JobV3.DONE.equals(id.status)) {
-                        final String destId = keyToString(id.dest);
-                        if (mid != null && mid.equals(destId)) {
-                            return destId;
-                        }
-                        lastId = destId;
+                final String rid = req.getParameter(LEADERBOARD_ID);
+                for (final String lid : leaderboardIds) {
+                    if (lid.equals(rid)) {
+                        return rid;
                     }
                 }
-                if (lastId != null) {
-                    return lastId;
+                if (leaderboardIds.length > 0) {
+                    return leaderboardIds[0];
                 }
                 return null;
             }).orElse(null);
@@ -211,7 +207,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, "frameId", frameId);
                 RenderDataUtil.register(data, "leaderboardId", leaderboardId);
-                RenderDataUtil.register(data, "leaderboardIds", projectHelper.getLeaderboards(projectId));
+                RenderDataUtil.register(data, "leaderboardIds", leaderboardIds);
                 RenderDataUtil.register(data, "autoReload", project.hasRunningJobs());
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
@@ -305,7 +301,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, "frameId", frameId);
                 RenderDataUtil.register(data, "leaderboardId", leaderboardId);
-                RenderDataUtil.register(data, "leaderboardIds", projectHelper.getLeaderboards(projectId));
+                RenderDataUtil.register(data, "leaderboardIds", projectHelper.getLeaderboardIds(projectId));
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
                 }
@@ -376,7 +372,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                 RenderDataUtil.register(data, "project", project);
                 RenderDataUtil.register(data, "frameId", frameId);
                 RenderDataUtil.register(data, "leaderboardId", leaderboardId);
-                RenderDataUtil.register(data, "leaderboardIds", projectHelper.getLeaderboards(projectId));
+                RenderDataUtil.register(data, "leaderboardIds", projectHelper.getLeaderboardIds(projectId));
                 RenderDataUtil.register(data, "columnName", columnName);
                 if (columnSummaries != null) {
                     RenderDataUtil.register(data, "columnSummaries", columnSummaries);
@@ -684,7 +680,7 @@ public class AdminAutomlAction extends FioneAdminAction {
 
         final PythonModule pythonModule = pythonHelper.findPythonModule(form.moduleId);
         if (pythonModule == null) {
-            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml); // TODO
+            throw validationError(messages -> messages.addErrorsModuleIsNotFound(GLOBAL), this::asListHtml);
         }
 
         try {
@@ -822,6 +818,22 @@ public class AdminAutomlAction extends FioneAdminAction {
         } catch (final Exception e) {
             logger.warn("Failed to export model: {}", form.modelId, e);
             throw validationError(messages -> messages.addErrorsFailedToExportModel(GLOBAL, form.modelId), this::asListHtml);
+        }
+        return redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public ActionResponse importmodel(final ModelForm form) {
+        validate(form, messages -> {}, () -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+        verifyTokenKeep(() -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
+
+        try {
+            projectHelper.importModel(form.projectId, form.leaderboardId, form.modelId);
+            saveMessage(messages -> messages.addSuccessImportingModel(GLOBAL, form.modelId));
+        } catch (final Exception e) {
+            logger.warn("Failed to export model: {}", form.modelId, e);
+            throw validationError(messages -> messages.addErrorsFailedToImportModel(GLOBAL, form.modelId), this::asListHtml);
         }
         return redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId);
     }
@@ -996,7 +1008,7 @@ public class AdminAutomlAction extends FioneAdminAction {
     private HtmlResponse asModuleHtml(final String projectId, final String moduleId) {
         final PythonModule pythonModule = pythonHelper.findPythonModule(moduleId);
         if (pythonModule == null) {
-            throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml); // TODO
+            throw validationError(messages -> messages.addErrorsModuleIsNotFound(GLOBAL), this::asListHtml);
         }
         final String frameId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID)).orElse(null);
         final String modelId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(MODEL_ID)).orElse(null);
