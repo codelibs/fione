@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
@@ -86,4 +87,14 @@ public class ModelSchemaBaseV3 extends SchemaV3 {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
+    @JsonIgnore
+    private transient boolean inLocal = false;
+
+    public boolean isInLocal() {
+        return inLocal;
+    }
+
+    public void setInLocal(boolean inLocal) {
+        this.inLocal = inLocal;
+    }
 }
