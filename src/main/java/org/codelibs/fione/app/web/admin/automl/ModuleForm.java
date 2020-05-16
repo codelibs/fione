@@ -31,6 +31,6 @@ public class ModuleForm {
 
     public String modelId;
 
-    public Map<String, String> params = new HashMap<>();
+    public Map<String, String[]> params = new HashMap<>();
 
 }

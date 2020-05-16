@@ -689,8 +689,24 @@ public class AdminAutomlAction extends FioneAdminAction {
             params.put("project_name", StringCodecUtil.decode(form.projectId));
             params.put("frame_id", form.frameId);
             params.put("model_id", form.modelId);
-            form.params.entrySet().stream()
-                    .forEach(e -> params.put(CaseFormat.UPPER_CAMEL.to(CaseFormat.LOWER_UNDERSCORE, e.getKey()), e.getValue()));
+            form.params
+                    .entrySet()
+                    .stream()
+                    .forEach(
+                            e -> {
+                                final String key = CaseFormat.UPPER_CAMEL.to(CaseFormat.LOWER_UNDERSCORE, e.getKey());
+                                Object value = e.getValue();
+                                final boolean isArray =
+                                        pythonModule.getComponents().stream().filter(c -> key.equals(c.get("id")))
+                                                .map(c -> (String) c.get("type")).anyMatch(s -> s.startsWith("MULTI"));
+                                if (!isArray && value instanceof String[]) {
+                                    String[] values = (String[]) value;
+                                    if (values.length > 0) {
+                                        value = values[0];
+                                    }
+                                }
+                                params.put(key, value);
+                            });
             projectHelper.executeModule(form.projectId, pythonModule, params);
             saveMessage(messages -> messages.addSuccessRunModule(GLOBAL, pythonModule.getId()));
         } catch (final Exception e) {

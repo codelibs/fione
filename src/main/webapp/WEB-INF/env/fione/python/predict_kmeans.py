@@ -1,28 +1,35 @@
+import json
 import h2o
 import sys
 
+
 def print_module():
     x = {
-          'id': 'predict_glrm',
-          'name': 'Predict (GLRM)',
+          'id': 'predict_kmeans',
+          'name': 'Predict (KMeans)',
           'type': 'PREDICT',
           'components': [
             {
               "id": "suffix",
               "name": "Suffix (Frame ID)",
-              "description": "the suffix for the predicted frame id",
+              "description": "the suffix for the created frame id",
               "type": "TEXT",
-              "value": "glrm",
+              "value": "kmeans",
             },
             {
-              "id": "column_header",
-              "name": "Column Header",
-              "description": "Column number(s) to use as the row names",
-              "type": "TEXT",
+              "id": "input_columns",
+              "name": "Input Columns",
+              "description": "the columns for the input frame",
+              "type": "MULTICOLUMN",
+            },
+            {
+              "id": "output_columns",
+              "name": "Output Columns",
+              "description": "the column to append them to the output frame",
+              "type": "MULTICOLUMN",
             },
           ]
         }
-    import json
     print(json.dumps(x))
     
 
@@ -34,15 +41,25 @@ def main(config):
 
     frame_id = params.get('frame_id')
     df = h2o.get_frame(frame_id)
-    column_header = params.get('column_header')
-    if len(column_header) > 0:
-        df = df[int(column_header):]
+
+    input_columns=params.get("input_columns")
+    if input_columns is None or len(input_columns) <= 2:
+        input_columns = df.col_names
+    else:
+        input_columns = json.loads(input_columns)
+
+    output_columns=params.get("output_columns")
+    if output_columns is None or len(output_columns) <= 2:
+        output_columns = []
+    else:
+        output_columns = json.loads(output_columns)
 
     model_id = params.get('model_id')
     pred_model = h2o.get_model(model_id)
 
-    df_pred = pred_model.predict(df)
-    df_pred.columns = [x[len('reconstr_'):] for x in df_pred.columns]
+    df_pred = pred_model.predict(df[input_columns])
+    for col_name in output_columns:
+        df_pred[col_name] = df[col_name]
 
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
     h2o.assign(df_pred, dest_frame_id)

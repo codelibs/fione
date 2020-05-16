@@ -92,6 +92,13 @@
 												</c:forEach>
 											</select>
 											</c:when>
+											<c:when test="${c.type == 'MULTICOLUMN'}">
+											<select multiple name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
+												<c:forEach var="item" items="${columnItems}">
+													<option value="${f:u(item.value)}">${f:h(item.label)}</option>
+												</c:forEach>
+											</select>
+											</c:when>
 											<c:when test="${c.type == 'BOOL'}">
 											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
 												<option value="true" <c:if test="${c.value eq 'true'}">selected</c:if>>True</option>

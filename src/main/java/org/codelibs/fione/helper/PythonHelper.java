@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import javax.annotation.PostConstruct;
 import javax.servlet.ServletContext;
@@ -205,7 +206,12 @@ public class PythonHelper {
             writer.write("url = " + endpoint + "\n");
             writer.write("[parameters]\n");
             for (final Map.Entry<String, Object> e : params.entrySet()) {
-                writer.write(e.getKey() + " = " + e.getValue() + "\n");
+                Object value = e.getValue();
+                if (value instanceof String[]) {
+                    final String[] values = (String[]) value;
+                    value = "[" + Arrays.stream(values).map(s -> "\"" + s + "\"").collect(Collectors.joining(",")) + "]";
+                }
+                writer.write(e.getKey() + " = " + value + "\n");
             }
             writer.flush();
         } catch (final IOException e) {
