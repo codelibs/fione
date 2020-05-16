@@ -37,6 +37,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -1352,38 +1354,58 @@ public class ProjectHelper {
     public void executeModule(final String projectId, final PythonModule pythonModule, final Map<String, Object> params) {
         final JobV3 workingJob = createWorkingJob(pythonModule.getId(), pythonModule.getName(), 0.1f);
         store(projectId, workingJob);
+        final BlockingQueue<String> queue = new LinkedBlockingQueue<>(10);
         try {
             new Thread(() -> {
-                final ObjectMapper objectMapper = new ObjectMapper();
                 try {
-                    pythonModule.execute(
-                            params,
-                            progress -> {
-                                // progress:[num]:[msg]
-                                if (StringUtil.isBlank(progress) || !progress.startsWith("FIONE:")) {
-                                    return;
-                                }
-                                final String[] values = StringUtils.split(progress, ":", 2);
-                                if (values.length != 2) {
-                                    return;
-                                }
-                                try {
-                                    final Map<String, Object> response =
-                                            objectMapper.readValue(values[1], new TypeReference<Map<String, Object>>() {
-                                            });
-                                    processModuleResponse(projectId, workingJob, response);
-                                } catch (Exception e) {
-                                    logger.warn("Failed to process {}", values[1], e);
-                                }
-                            });
+                    pythonModule.execute(params, progress -> {
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("MODULE OUTPUT: {}", progress);
+                        }
+                        if (StringUtil.isBlank(progress) || !progress.startsWith("FIONE:")) {
+                            return;
+                        }
+                        queue.add(progress);
+                    });
                     finish(projectId, workingJob, null);
                 } catch (final Exception e) {
-                    logger.warn("Failed to pivot frame: projectId:{}, params:{}", projectId, params, e);
+                    logger.warn("Failed to execute module: projectId:{}, params:{}", projectId, params, e);
                     finish(projectId, workingJob, e);
+                } finally {
+                    queue.add("END:{}");
                 }
-            }, "PivotFrame").start();
+            }, "ExecuteModule").start();
+            new Thread(() -> {
+                final ObjectMapper objectMapper = new ObjectMapper();
+                while (true) {
+                    final String progress;
+                    try {
+                        progress = queue.take();
+                    } catch (InterruptedException e) {
+                        logger.debug("Interrupted.", e);
+                        break;
+                    }
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Module Response: {}", progress);
+                    }
+                    if (progress.startsWith("END:")) {
+                        break;
+                    }
+                    final String[] values = StringUtils.split(progress, ":", 2);
+                    if (values.length != 2) {
+                        continue;
+                    }
+                    try {
+                        final Map<String, Object> response = objectMapper.readValue(values[1], new TypeReference<Map<String, Object>>() {
+                        });
+                        processModuleResponse(projectId, workingJob, response);
+                    } catch (Exception e) {
+                        logger.warn("Failed to process {}", values[1], e);
+                    }
+                }
+            }, "ExecuteModuleReceiver").start();
         } catch (final Exception e) {
-            logger.warn("Failed to pivot frame: projectId:{}, params:{}", projectId, params, e);
+            logger.warn("Failed to execute module: projectId:{}, params:{}", projectId, params, e);
             finish(projectId, workingJob, e);
         }
     }
@@ -1420,7 +1442,7 @@ public class ProjectHelper {
     }
 
     protected void processLeaderboardModuleResponse(String projectId, JobV3 workingJob, Map<String, Object> params) {
-        final String leaderboardId = (String) params.get("project_name");
+        final String leaderboardId = (String) params.get("leaderboard_id");
         LeaderboardV99 leaderboard = getLocalLeaderboard(projectId, leaderboardId);
         if (leaderboard != null) {
             deleteLeaderboard(projectId, leaderboardId);
@@ -1432,7 +1454,7 @@ public class ProjectHelper {
     }
 
     protected void processModelModuleResponse(String projectId, JobV3 workingJob, Map<String, Object> params) {
-        final String leaderboardId = (String) params.get("project_name");
+        final String leaderboardId = (String) params.get("leaderboard_id");
         LeaderboardV99 leaderboard = getLocalLeaderboard(projectId, leaderboardId);
         if (leaderboard == null) {
             leaderboard = new LeaderboardV99();
@@ -1454,6 +1476,7 @@ public class ProjectHelper {
             i++;
         }
         newModels[i] = model.modelId;
+        leaderboard.models = newModels;
         store(projectId, leaderboard);
         store(projectId, leaderboardId, model);
     }

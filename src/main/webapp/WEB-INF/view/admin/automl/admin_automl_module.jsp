@@ -40,7 +40,6 @@
 					<la:hidden property="projectId" />
 					<la:hidden property="moduleId" />
 					<la:hidden property="frameId" />
-					<la:hidden property="modelId" />
 					<div class="row">
 						<div class="col-md-12">
 							<div class="card card-outline card-success">
@@ -72,7 +71,12 @@
 									<div class="form-group row">
 										<label for="modelId" class="col-sm-3 col-form-label"><la:message key="labels.automl_module_modelid" /></label>
 										<div class="col-sm-9">
-											${f:h(fi:jobName(modelId))}
+											<la:errors property="modelId" />
+											<la:select property="modelId" styleId="modelId" styleClass="form-control">
+												<c:forEach var="item" items="${modelIdItems}">
+													<la:option value="${f:u(item)}">${f:h(item)}</la:option>
+												</c:forEach>
+											</la:select>
 										</div>
 									</div>
 									</c:if>

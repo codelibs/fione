@@ -686,6 +686,7 @@ public class AdminAutomlAction extends FioneAdminAction {
         try {
             final Map<String, Object> params = new HashMap<>();
             params.put("project_id", form.projectId);
+            params.put("project_name", StringCodecUtil.decode(form.projectId));
             params.put("frame_id", form.frameId);
             params.put("model_id", form.modelId);
             form.params.entrySet().stream()
@@ -1012,6 +1013,14 @@ public class AdminAutomlAction extends FioneAdminAction {
         }
         final String frameId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID)).orElse(null);
         final String modelId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(MODEL_ID)).orElse(null);
+        final String[] modelIdItems =
+                LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).map(leaderboardId -> {
+                    final LeaderboardV99 leaderboard = projectHelper.getLeaderboard(projectId, leaderboardId);
+                    if (leaderboard == null) {
+                        return StringUtil.EMPTY_STRINGS;
+                    }
+                    return Arrays.stream(leaderboard.models).map(m -> m.name).toArray(n -> new String[n]);
+                }).orElse(StringUtil.EMPTY_STRINGS);
 
         return asHtml(path_AdminAutoml_AdminAutomlModuleJsp).useForm(ModuleForm.class, setup -> setup.setup(form -> {
             form.projectId = projectId;
@@ -1028,6 +1037,7 @@ public class AdminAutomlAction extends FioneAdminAction {
             }
             RenderDataUtil.register(data, "columnItems", columnList);
             RenderDataUtil.register(data, "module", pythonModule);
+            RenderDataUtil.register(data, "modelIdItems", modelIdItems);
             registerPythonModule(data);
         });
     }

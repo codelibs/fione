@@ -3,34 +3,22 @@ import sys
 
 def print_module():
     x = {
-          'id': 'pivot',
-          'name': 'Pivot Frame',
-          'type': 'FRAME',
+          'id': 'predict_glrm',
+          'name': 'Predict (GLRM)',
+          'type': 'PREDICT',
           'components': [
             {
               "id": "suffix",
               "name": "Suffix (Frame ID)",
-              "description": "the suffix for the created frame id",
+              "description": "the suffix for the predicted frame id",
               "type": "TEXT",
-              "value": "pivot",
+              "value": "glrm",
             },
             {
-              "id": "index",
-              "name": "Index",
-              "description": "the column where pivoted rows should be aligned on",
-              "type": "COLUMN",
-            },
-            {
-              "id": "column",
-              "name": "Column",
-              "description": "the column to pivot",
-              "type": "COLUMN",
-            },
-            {
-              "id": "value",
-              "name": "Value",
-              "description": "values of the pivoted table",
-              "type": "COLUMN",
+              "id": "column_header",
+              "name": "Column Header",
+              "description": "Column number(s) to use as the row names",
+              "type": "TEXT",
             },
           ]
         }
@@ -46,9 +34,20 @@ def main(config):
 
     frame_id = params.get('frame_id')
     df = h2o.get_frame(frame_id)
-    df_pivot = df.pivot(index=params.get('index'), column=params.get('column'), value=params.get('value'))
+    column_header = params.get('column_header')
+    if len(column_header) > 0:
+        df = df[int(column_header):]
+
+    model_id = params.get('model_id')
+    print(f'frame_id: {frame_id}')
+    print(f'model_id: {model_id}')
+    pred_model = h2o.get_model(model_id)
+
+    df_pred = pred_model.predict(df)
+    df_pred.columns = [x[len('reconstr_'):] for x in df_pred.columns]
+
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
-    h2o.assign(df_pivot, dest_frame_id)
+    h2o.assign(df_pred, dest_frame_id)
 
 
 def append_frame_id(frame_id, name):

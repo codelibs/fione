@@ -91,6 +91,9 @@ public class LeaderboardV99 extends SchemaV3 {
     }
 
     public String[] getColumnNames() {
+        if (table == null) {
+            return new String[] { "model_id" };
+        }
         return Arrays.stream(table.columns).filter(c -> StringUtil.isNotBlank(c.name)).map(c -> c.name).toArray(n -> new String[n]);
     }
 
@@ -98,20 +101,24 @@ public class LeaderboardV99 extends SchemaV3 {
         final List<List<String>> dataList = new ArrayList<>(100);
         for (int index = 0; index < models.length; index++) {
             final List<String> list = new ArrayList<>();
-            for (int i = 0; i < table.columns.length; i++) {
-                final ColumnSpecsBase column = table.columns[i];
-                if (StringUtil.isBlank(column.name)) {
-                    continue;
-                }
-                final Object value = table.data[i][index];
-                try {
-                    final String formattedValue = String.format(column.format, value);
-                    list.add(formattedValue);
-                } catch (final Exception e) {
-                    if (value != null) {
-                        list.add(value.toString());
-                    } else {
-                        list.add(StringUtil.EMPTY);
+            if (table == null) {
+                list.add(models[index].name);
+            } else {
+                for (int i = 0; i < table.columns.length; i++) {
+                    final ColumnSpecsBase column = table.columns[i];
+                    if (StringUtil.isBlank(column.name)) {
+                        continue;
+                    }
+                    final Object value = table.data[i][index];
+                    try {
+                        final String formattedValue = String.format(column.format, value);
+                        list.add(formattedValue);
+                    } catch (final Exception e) {
+                        if (value != null) {
+                            list.add(value.toString());
+                        } else {
+                            list.add(StringUtil.EMPTY);
+                        }
                     }
                 }
             }

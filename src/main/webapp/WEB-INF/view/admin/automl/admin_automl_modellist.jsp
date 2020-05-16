@@ -103,8 +103,8 @@
 														<c:forEach var="row" varStatus="s" items="${leaderboard.dataRows}">
 															<tr>
 																<c:forEach var="data" varStatus="x" items="${row}">
-																	<c:if test="${fn:contains(data, 'AutoML')}"><td><a href="${contextPath}/admin/automl/model/${f:u(project.id)}/${f:u(data)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(data)}</a></td></c:if>
-																	<c:if test="${not fn:contains(data, 'AutoML')}"><td>${f:h(data)}</td></c:if>
+																	<c:if test="${x.index == 0}"><td><a href="${contextPath}/admin/automl/model/${f:u(project.id)}/${f:u(data)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}">${f:h(data)}</a></td></c:if>
+																	<c:if test="${x.index != 0}"><td>${f:h(data)}</td></c:if>
 																</c:forEach>
 															</tr>
 														</c:forEach>

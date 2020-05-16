@@ -4,10 +4,17 @@ import sys
 
 def print_module():
     x = {
-          'id': 'glrm',
+          'id': 'train_glrm',
           'name': 'Run GLRM',
           'type': 'TRAIN',
           'components': [
+            {
+              "id": "suffix",
+              "name": "Suffix (Model Set)",
+              "description": "the suffix for the created model set",
+              "type": "TEXT",
+              "value": "glrm",
+            },
             {
               "id": "column_header",
               "name": "Column Header",
@@ -192,6 +199,7 @@ def main(config):
     column_header = params.get('column_header')
     if len(column_header) > 0:
         df = df[int(column_header):]
+
     glrm_model = H2OGeneralizedLowRankEstimator(
         expand_user_y=bool(params.get('expand_user_y')),
         gamma_x=float(params.get('gamma_x')),
@@ -216,25 +224,17 @@ def main(config):
         svd_method=str(params.get('svd_method')))
     glrm_model.train(training_frame=df)
     glrm_model.show()
+    save_model(params, glrm_model.model_id)
 
 
-def append_frame_id(frame_id, name):
-    if frame_id is None:
-        return frame_id
-    pos = frame_id.rfind('.')
-    if pos != -1:
-        prefix = frame_id[0:pos]
-        suffix = frame_id[pos:]
-    else:
-        prefix = frame_id
-        suffix = ''
-    values = prefix.split('_')
-    def b64encode(s):
-        import base64
-        return base64.urlsafe_b64encode(s.encode('utf-8')).decode('utf-8').rstrip('=')
-    if len(values) >= 2:
-        return values[0] + '_' + values[1] + '_' + b64encode(name) + suffix
-    return prefix + '_' + b64encode(name) + suffix
+def save_model(params, model_id):
+    import json
+    x = json.dumps({
+        'type': 'model',
+        'leaderboard_id': params.get('project_name') + '@@' + params.get('suffix'),
+        'model_id': model_id
+      })
+    print(f'FIONE:{x}')
 
 
 if __name__ == '__main__':
