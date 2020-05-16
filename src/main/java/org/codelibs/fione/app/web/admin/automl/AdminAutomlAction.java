@@ -495,10 +495,10 @@ public class AdminAutomlAction extends FioneAdminAction {
         verifyToken(() -> asExportFrameHtml(form.projectId));
         try {
             projectHelper.exportFrame(form.projectId, form.frameId, form.filename);
-            saveMessage(messages -> messages.addSuccessExportingFrame(GLOBAL, StringCodecUtil.encodeUrlSafe(form.frameId), form.filename));
+            saveMessage(messages -> messages.addSuccessExportingFrame(GLOBAL, FioneFunctions.frameName(form.frameId), form.filename));
         } catch (final Exception e) {
             logger.warn("Failed to create frame: {}", form.frameId, e);
-            throw validationError(messages -> messages.addErrorsFailedToExportFrame(GLOBAL, StringCodecUtil.encodeUrlSafe(form.frameId)),
+            throw validationError(messages -> messages.addErrorsFailedToExportFrame(GLOBAL, FioneFunctions.frameName(form.frameId)),
                     () -> asExportFrameHtml(form.projectId));
         }
         return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
