@@ -180,8 +180,10 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
         for (int i = 0; i < scoringHistory.columns.length; i++) {
             columnIndexMap.put(scoringHistory.columns[i].name, i);
         }
-        final String[] xNames = new String[] { "number_of_trees", "epochs", "iteration" };
-        final String[] yNames = new String[] { "training_deviance", "training_classification_error", "deviance_train" };
+        final String[] xNames = new String[] { "number_of_trees", "epochs", "iteration", "iterations" };
+        final String[] yNames =
+                new String[] { "training_deviance", "training_classification_error", "deviance_train", "within_cluster_sum_of_squares",
+                        "objective" };
         for (final String xName : xNames) {
             for (final String yName : yNames) {
                 final ChartData chart = getScoringHistoryChart(columnIndexMap, xName, yName);
