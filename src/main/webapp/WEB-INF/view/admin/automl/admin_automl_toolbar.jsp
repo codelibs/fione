@@ -27,6 +27,9 @@
 			<li><la:link href="/admin/automl/dataview/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-link btn-sm">
 				<la:message key="labels.automl_dataview" />
 			</la:link></li>
+			<li><la:link href="/admin/automl/exportframe/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-link btn-sm">
+				<la:message key="labels.automl_export_frame" />
+			</la:link></li>
 			<c:forEach var="module" items="${frameModules}">
 			<li><la:link href="/admin/automl/module/${f:u(project.id)}/${f:u(module.id)}/?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-link btn-sm">
 				${f:h(module.name)}

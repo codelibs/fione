@@ -783,7 +783,7 @@ public class ProjectHelper {
                                                             if (logger.isDebugEnabled()) {
                                                                 logger.debug("exportFrame: {}", exportFrameResponse);
                                                             }
-                                                            if (bindFramesResponse.code() == 200) {
+                                                            if (exportFrameResponse.code() == 200) {
                                                                 final DataSet dataSet =
                                                                         createDataSet(projectId,
                                                                                 StringCodecUtil.encodeUrlSafe(name + ".csv"));
@@ -833,6 +833,29 @@ public class ProjectHelper {
         } catch (final Exception e) {
             throw new StorageException("Failed to write " + objectName, e);
         }
+    }
+
+    public void exportFrame(final String projectId, final String frameId, final String name) {
+        final String filename = name.toLowerCase().endsWith(".csv") ? name : name + ".csv";
+        final JobV3 workingJob = createWorkingJob(filename, "Export Frame", 0.25f);
+        store(projectId, workingJob);
+        h2oHelper.exportFrame(new FrameKeyV3(frameId), getPredictCsvPath(projectId, filename), true).execute(exportFrameResponse -> {
+            if (logger.isDebugEnabled()) {
+                logger.debug("exportFrame: {}", exportFrameResponse);
+            }
+            if (exportFrameResponse.code() == 200) {
+                final DataSet dataSet = createDataSet(projectId, StringCodecUtil.encodeUrlSafe(filename));
+                dataSet.setType(DataSet.PREDICT);
+                store(projectId, dataSet);
+                finish(projectId, workingJob, null);
+            } else {
+                logger.warn("Failed to export frame: {}", exportFrameResponse);
+                finish(projectId, workingJob, new H2oAccessException("Failed to access " + exportFrameResponse));
+            }
+        }, t -> {
+            logger.warn("Failed to export frame: {}", name, t);
+            finish(projectId, workingJob, t);
+        });
     }
 
     public void renewSession(final String projectId) {
@@ -1610,7 +1633,8 @@ public class ProjectHelper {
 
     protected String getPredictCsvPath(final String projectId, final String name) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
-        return "s3a://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/data/" + name + ".csv";
+        return "s3a://" + fessConfig.getStorageBucket() + "/" + projectFolderName + "/" + projectId + "/data/" + name
+                + (name.endsWith(".csv") ? StringUtil.EMPTY : ".csv");
     }
 
     protected String getDataPath(final String projectId, final String fileName) {

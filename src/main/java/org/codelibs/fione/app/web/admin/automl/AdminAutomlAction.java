@@ -483,6 +483,29 @@ public class AdminAutomlAction extends FioneAdminAction {
 
     @Execute
     @Secured({ ROLE })
+    public HtmlResponse exportframe(final String projectId) {
+        saveToken();
+        return asExportFrameHtml(projectId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
+    public HtmlResponse saveframe(final ExportFrameForm form) {
+        validate(form, messages -> {}, () -> asExportFrameHtml(form.projectId));
+        verifyToken(() -> asExportFrameHtml(form.projectId));
+        try {
+            projectHelper.exportFrame(form.projectId, form.frameId, form.filename);
+            saveMessage(messages -> messages.addSuccessExportingFrame(GLOBAL, StringCodecUtil.encodeUrlSafe(form.frameId), form.filename));
+        } catch (final Exception e) {
+            logger.warn("Failed to create frame: {}", form.frameId, e);
+            throw validationError(messages -> messages.addErrorsFailedToExportFrame(GLOBAL, StringCodecUtil.encodeUrlSafe(form.frameId)),
+                    () -> asExportFrameHtml(form.projectId));
+        }
+        return redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId);
+    }
+
+    @Execute
+    @Secured({ ROLE })
     public HtmlResponse deleteframe(final FrameForm form) {
         validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
@@ -973,6 +996,16 @@ public class AdminAutomlAction extends FioneAdminAction {
             registerColumnItems(schema, data, (maps, i) -> maps);
             registerColumnTypeItems(data);
         });
+    }
+
+    private HtmlResponse asExportFrameHtml(final String projectId) {
+        final String frameId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID)).orElse(null);
+        final String leaderboardId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(LEADERBOARD_ID)).orElse(null);
+        return asHtml(path_AdminAutoml_AdminAutomlExportframeJsp).useForm(ExportFrameForm.class, setup -> setup.setup(form -> {
+            form.projectId = projectId;
+            form.frameId = frameId;
+            form.leaderboardId = leaderboardId;
+        }));
     }
 
     private HtmlResponse asSetupMlHtml(final String projectId, final String frameId) {
