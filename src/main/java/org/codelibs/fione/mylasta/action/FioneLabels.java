@@ -434,6 +434,21 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Model Set */
     public static final String LABELS_automl_modelset = "{labels.automl_modelset}";
 
+    /** The key of the message: Export Frame */
+    public static final String LABELS_automl_export_frame = "{labels.automl_export_frame}";
+
+    /** The key of the message: Save Frame As File */
+    public static final String LABELS_automl_save_frame_to_storage = "{labels.automl_save_frame_to_storage}";
+
+    /** The key of the message: Frame ID */
+    public static final String LABELS_automl_frame_id = "{labels.automl_frame_id}";
+
+    /** The key of the message: File Name */
+    public static final String LABELS_automl_filename = "{labels.automl_filename}";
+
+    /** The key of the message: Export */
+    public static final String LABELS_automl_frame_export = "{labels.automl_frame_export}";
+
     /** The key of the message: Project Dashboard */
     public static final String LABELS_easyml_project_dashboard = "{labels.easyml_project_dashboard}";
 
