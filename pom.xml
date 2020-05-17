@@ -35,7 +35,7 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<fess.version>13.6.4-SNAPSHOT</fess.version>
+		<fess.version>13.6.4</fess.version>
 		<retrofit.version>2.7.0</retrofit.version>
 
 		<!-- Main Framework -->
