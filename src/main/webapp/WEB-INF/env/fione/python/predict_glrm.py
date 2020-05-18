@@ -20,6 +20,20 @@ def print_module():
               "description": "Column number(s) to use as the row names",
               "type": "TEXT",
             },
+            {
+              "id": "topn_output",
+              "name": "Top N Output",
+              "description": "Create the frame of top N columns",
+              "type": "BOOL",
+              "value": "false",
+            },
+            {
+              "id": "topn_percent",
+              "name": "Top N Percent",
+              "description": "a top percentage of the column values to return",
+              "type": "TEXT",
+              "value": "10",
+            },
           ]
         }
     import json
@@ -45,7 +59,13 @@ def main(config):
     df_pred.columns = [x[len('reconstr_'):] for x in df_pred.columns]
 
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
-    h2o.assign(df_pred, dest_frame_id)
+
+    if bool(params.get('topn_output')):
+        df_topn = get_topN(df_pred, int(params.get('topn_percent')))
+        h2o.assign(df_topn, dest_frame_id)
+        h2o.remove(str(df_pred.frame_id))
+    else:
+        h2o.assign(df_pred, dest_frame_id)
 
 
 def append_frame_id(frame_id, name):
@@ -65,6 +85,34 @@ def append_frame_id(frame_id, name):
     if len(values) >= 2:
         return values[0] + '_' + values[1] + '_' + b64encode(name) + suffix
     return prefix + '_' + b64encode(name) + suffix
+
+
+def get_topN(df, nPercent=10):
+    df_transpose = df.transpose()
+    i = 0
+    c = 'Original_Row_Indices'
+    data = [df.columns[x] for x in df_transpose.topN(column=i, nPercent=nPercent).as_data_frame()[c].values]
+    df_new = h2o.H2OFrame(data,
+                          column_names=[f'{i}'])
+
+    size = df.shape[0]
+    for i in range(1, df.shape[0]):
+        data = [df.columns[x] for x in df_transpose.topN(column=i, nPercent=nPercent).as_data_frame()[c].values]
+        df_new[f'{i}'] = h2o.H2OFrame(data)
+        if i % 100 == 0:
+            send_progress(i/size, f'Process top N rows ({i}/{size})')
+
+    return df_new.transpose()
+
+
+def send_progress(progress, message):
+    import json
+    x = json.dumps({
+        'type': 'progress',
+        'progress': progress,
+        'message': message
+      })
+    print(f'FIONE:{x}')
 
 
 if __name__ == '__main__':

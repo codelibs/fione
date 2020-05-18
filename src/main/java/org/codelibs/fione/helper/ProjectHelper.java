@@ -268,7 +268,12 @@ public class ProjectHelper {
                     logger.warn("Failed to get frames: {}", response);
                 }
             } catch (final Exception e) {
-                logger.warn("Failed to get frames.", e);
+                final String msg = e.getMessage();
+                if (msg != null && msg.toLowerCase().contains("timeout")) {
+                    logger.debug("Failed to get frames.", e);
+                } else {
+                    logger.warn("Failed to get frames.", e);
+                }
             }
         });
         return frameIdList.stream().distinct().toArray(n -> new String[n]);
@@ -1465,7 +1470,7 @@ public class ProjectHelper {
             workingJob.progressMsg = (String) params.get("message");
         }
         if (params.containsKey("progress")) {
-            workingJob.progress = Float.parseFloat((String) params.get("progress"));
+            workingJob.progress = (float) Double.parseDouble((String) params.get("progress"));
             store(projectId, workingJob);
         }
     }

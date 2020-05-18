@@ -75,7 +75,7 @@
 									</c:forEach>
 								</div>
 								<div class="card-footer">
-									<la:link href="/admin/automl/job/${f:u(projectId)}" styleClass="btn btn-default">
+									<la:link href="/admin/automl/job/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">
 										<em class="fa fa-arrow-circle-left"></em>
 										<la:message key="labels.crud_button_back" />
 									</la:link>
