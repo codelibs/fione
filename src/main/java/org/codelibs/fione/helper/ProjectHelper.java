@@ -113,6 +113,7 @@ import com.orangesignal.csv.CsvWriter;
 
 import io.minio.ErrorCode;
 import io.minio.MinioClient;
+import io.minio.PutObjectOptions;
 import io.minio.Result;
 import io.minio.errors.ErrorResponseException;
 import io.minio.messages.DeleteError;
@@ -201,7 +202,7 @@ public class ProjectHelper {
                 minioClient.makeBucket(bucketName);
                 logger.info("Create bucket {}.", bucketName);
             }
-            minioClient.putObject(bucketName, objectName, bais, null, null, null, "application/json");
+            minioClient.putObject(bucketName, objectName, bais, new PutObjectOptions(-1, PutObjectOptions.MIN_MULTIPART_SIZE));
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -323,7 +324,8 @@ public class ProjectHelper {
         final MinioClient minioClient = createClient(fessConfig);
         final String objectName = getDataPath(projectId, fileName);
         try {
-            minioClient.putObject(fessConfig.getStorageBucket(), objectName, in, null, null, null, "application/octet-stream");
+            minioClient.putObject(fessConfig.getStorageBucket(), objectName, in, new PutObjectOptions(-1,
+                    PutObjectOptions.MIN_MULTIPART_SIZE));
         } catch (final Exception e) {
             throw new StorageException("Failed to store " + objectName, e);
         }
@@ -438,7 +440,8 @@ public class ProjectHelper {
         }
         final String objectName = getDataSetConfigPath(projectId, dataSet.getId());
         try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
-            minioClient.putObject(fessConfig.getStorageBucket(), objectName, bais, null, null, null, "application/json");
+            minioClient.putObject(fessConfig.getStorageBucket(), objectName, bais, new PutObjectOptions(-1,
+                    PutObjectOptions.MIN_MULTIPART_SIZE));
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -602,8 +605,8 @@ public class ProjectHelper {
             }
             return jobs;
         } catch (final ErrorResponseException e) {
-            final String code = e.errorResponse().code();
-            if ("NoSuchKey".equals(code)) {
+            final ErrorCode code = e.errorResponse().errorCode();
+            if (code == ErrorCode.NO_SUCH_KEY || code == ErrorCode.NO_SUCH_OBJECT) {
                 return new JobV3[0];
             }
             throw new StorageException("Failed to read " + objectName, e);
@@ -713,7 +716,8 @@ public class ProjectHelper {
         }
         final String objectName = getJobsConfigPath(projectId);
         try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
-            minioClient.putObject(fessConfig.getStorageBucket(), objectName, bais, null, null, null, "application/json");
+            minioClient.putObject(fessConfig.getStorageBucket(), objectName, bais, new PutObjectOptions(-1,
+                    PutObjectOptions.MIN_MULTIPART_SIZE));
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -1193,7 +1197,7 @@ public class ProjectHelper {
         final String objectName = getLeaderboardConfigPath(projectId, leaderboard.projectName);
         try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
             final String bucketName = fessConfig.getStorageBucket();
-            minioClient.putObject(bucketName, objectName, bais, null, null, null, "application/json");
+            minioClient.putObject(bucketName, objectName, bais, new PutObjectOptions(-1, PutObjectOptions.MIN_MULTIPART_SIZE));
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -1210,7 +1214,7 @@ public class ProjectHelper {
         final String objectName = getModelConfigPath(projectId, leaderboardId, modelId);
         try (ByteArrayInputStream bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
             final String bucketName = fessConfig.getStorageBucket();
-            minioClient.putObject(bucketName, objectName, bais, null, null, null, "application/json");
+            minioClient.putObject(bucketName, objectName, bais, new PutObjectOptions(-1, PutObjectOptions.MIN_MULTIPART_SIZE));
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -1289,13 +1293,15 @@ public class ProjectHelper {
             }
 
             try (final PipedOutputStream pipedOut = new PipedOutputStream(); final PipedInputStream pipedIn = new PipedInputStream()) {
-                final Thread pipeWriter = new Thread(() -> {
-                    try {
-                        minioClient.putObject(fessConfig.getStorageBucket(), tempObjectName, pipedIn, null, null, null, null);
-                    } catch (final Exception e) {
-                        logger.warn("Failed to write {}.", tempObjectName, e);
-                    }
-                }, "Filtercolumns");
+                final Thread pipeWriter =
+                        new Thread(() -> {
+                            try {
+                                minioClient.putObject(fessConfig.getStorageBucket(), tempObjectName, pipedIn, new PutObjectOptions(-1,
+                                        PutObjectOptions.MIN_MULTIPART_SIZE));
+                            } catch (final Exception e) {
+                                logger.warn("Failed to write {}.", tempObjectName, e);
+                            }
+                        }, "Filtercolumns");
 
                 pipedIn.connect(pipedOut);
                 pipeWriter.start();
@@ -1601,8 +1607,8 @@ public class ProjectHelper {
             leaderboard.setInLocal(true);
             return leaderboard;
         } catch (final ErrorResponseException e) {
-            final String code = e.errorResponse().code();
-            if ("NoSuchKey".equals(code)) {
+            final ErrorCode code = e.errorResponse().errorCode();
+            if (code == ErrorCode.NO_SUCH_KEY || code == ErrorCode.NO_SUCH_OBJECT) {
                 return null;
             }
             throw new StorageException("Failed to read " + objectName, e);
@@ -1621,8 +1627,8 @@ public class ProjectHelper {
             model.setInLocal(true);
             return model;
         } catch (final ErrorResponseException e) {
-            final String code = e.errorResponse().code();
-            if ("NoSuchKey".equals(code)) {
+            final ErrorCode code = e.errorResponse().errorCode();
+            if (code == ErrorCode.NO_SUCH_KEY || code == ErrorCode.NO_SUCH_OBJECT) {
                 return null;
             }
             throw new StorageException("Failed to read " + objectName, e);
