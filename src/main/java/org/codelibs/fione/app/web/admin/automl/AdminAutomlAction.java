@@ -514,7 +514,8 @@ public class AdminAutomlAction extends FioneAdminAction {
             saveMessage(messages -> messages.addSuccessDeletedFrame(GLOBAL, form.frameId));
         } catch (final Exception e) {
             logger.warn("Failed to delete frame: {}", form.frameId, e);
-            throw validationError(messages -> messages.addErrorsFailedToDeleteFrame(GLOBAL, form.frameId), this::asListHtml);
+            throw validationError(messages -> messages.addErrorsFailedToDeleteFrame(GLOBAL, FioneFunctions.frameName(form.frameId)),
+                    this::asListHtml);
         }
         return redirectDetailsHtml(form.projectId, null, form.leaderboardId);
     }
@@ -1060,6 +1061,7 @@ public class AdminAutomlAction extends FioneAdminAction {
         if (pythonModule == null) {
             throw validationError(messages -> messages.addErrorsModuleIsNotFound(GLOBAL), this::asListHtml);
         }
+        final Project project = projectHelper.getProject(projectId);
         final String frameId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID)).orElse(null);
         final String modelId = LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(MODEL_ID)).orElse(null);
         final String[] modelIdItems =
@@ -1084,6 +1086,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                     Arrays.stream(frame.columns).map(c -> c.label).forEach(s -> columnList.add(Maps.map("label", s).$("value", s).$()));
                 }
             }
+            RenderDataUtil.register(data, "project", project);
             RenderDataUtil.register(data, "columnItems", columnList);
             RenderDataUtil.register(data, "module", pythonModule);
             RenderDataUtil.register(data, "modelIdItems", modelIdItems);

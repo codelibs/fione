@@ -1,33 +1,26 @@
-import json
 import h2o
+import json
 import sys
-
 
 def print_module():
     x = {
-          'id': 'predict_kmeans',
-          'name': 'Predict (KMeans)',
-          'type': 'PREDICT',
-          'priority': '100',
+          'id': 'frame_cbind',
+          'name': 'Bind Frame',
+          'type': 'FRAME',
+          'priority': '111',
           'components': [
             {
               "id": "suffix",
               "name": "Suffix (Frame ID)",
               "description": "the suffix for the created frame id",
               "type": "TEXT",
-              "value": "kmeans",
+              "value": "bind",
             },
             {
-              "id": "input_columns",
-              "name": "Input Columns",
-              "description": "the columns for the input frame",
-              "type": "MULTICOLUMN",
-            },
-            {
-              "id": "output_columns",
-              "name": "Output Columns",
-              "description": "the column to append them to the output frame",
-              "type": "MULTICOLUMN",
+              "id": "bind_frame_id",
+              "name": "Frame ID",
+              "description": "Append data to this frame column-wise.",
+              "type": "FRAME",
             },
           ]
         }
@@ -43,27 +36,13 @@ def main(config):
     frame_id = params.get('frame_id')
     df = h2o.get_frame(frame_id)
 
-    input_columns=params.get("input_columns")
-    if input_columns is None or len(input_columns) <= 2:
-        input_columns = df.col_names
-    else:
-        input_columns = json.loads(input_columns)
+    bind_frame_id = params.get('bind_frame_id')
+    df_2 = h2o.get_frame(bind_frame_id)
 
-    output_columns=params.get("output_columns")
-    if output_columns is None or len(output_columns) <= 2:
-        output_columns = []
-    else:
-        output_columns = json.loads(output_columns)
-
-    model_id = params.get('model_id')
-    pred_model = h2o.get_model(model_id)
-
-    df_pred = pred_model.predict(df[input_columns])
-    for col_name in output_columns:
-        df_pred[col_name] = df[col_name]
+    df_bind = df.cbind(df_2)
 
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
-    h2o.assign(df_pred, dest_frame_id)
+    h2o.assign(df_bind, dest_frame_id)
 
 
 def append_frame_id(frame_id, name):

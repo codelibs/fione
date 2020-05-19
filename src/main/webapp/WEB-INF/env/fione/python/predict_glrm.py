@@ -6,6 +6,7 @@ def print_module():
           'id': 'predict_glrm',
           'name': 'Predict (GLRM)',
           'type': 'PREDICT',
+          'priority': '300',
           'components': [
             {
               "id": "suffix",
@@ -50,6 +51,7 @@ def main(config):
     df = h2o.get_frame(frame_id)
     column_header = params.get('column_header')
     if len(column_header) > 0:
+        df_head = df[:int(column_header)]
         df = df[int(column_header):]
 
     model_id = params.get('model_id')
@@ -62,6 +64,8 @@ def main(config):
 
     if bool(params.get('topn_output')):
         df_topn = get_topN(df_pred, int(params.get('topn_percent')))
+        if df_head is not None:
+            df_topn = df_head.cbind(df_topn)
         h2o.assign(df_topn, dest_frame_id)
         h2o.remove(str(df_pred.frame_id))
     else:

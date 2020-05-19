@@ -1470,7 +1470,7 @@ public class ProjectHelper {
             workingJob.progressMsg = (String) params.get("message");
         }
         if (params.containsKey("progress")) {
-            workingJob.progress = (float) Double.parseDouble((String) params.get("progress"));
+            workingJob.progress = ((Double) params.get("progress")).floatValue();
             store(projectId, workingJob);
         }
     }

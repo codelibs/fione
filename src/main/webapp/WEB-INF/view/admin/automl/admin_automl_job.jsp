@@ -109,7 +109,7 @@
 														<input type="hidden" name="frameId" value="${f:h(frameId)}">
 														<input type="hidden" name="leaderboardId" value="${f:h(leaderboardId)}">
 															<td><i class="fas fa-${f:u(data.iconType)}"></i> <c:choose>
-																	<c:when test="${data.iconType == 'hammer'}">
+																	<c:when test="${data.iconType == 'hammer' and fn:contains(data.dest.name, '@@')}">
 																		<la:link
 																			href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
 																		>${f:h(fi:jobName(data.dest.name))}</la:link>

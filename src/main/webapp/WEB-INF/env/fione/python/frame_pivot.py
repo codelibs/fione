@@ -6,6 +6,7 @@ def print_module():
           'id': 'frame_pivot',
           'name': 'Pivot Frame',
           'type': 'FRAME',
+          'priority': '200',
           'components': [
             {
               "id": "suffix",

@@ -99,6 +99,20 @@
 												</c:forEach>
 											</select>
 											</c:when>
+											<c:when test="${c.type == 'FRAME'}">
+											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
+												<c:forEach var="item" items="${project.frameIds}">
+													<option value="${f:u(item)}">${f:h(fi:jobName(item))}</option>
+												</c:forEach>
+											</select>
+											</c:when>
+											<c:when test="${c.type == 'MULTIFRAME'}">
+											<select multiple name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
+												<c:forEach var="item" items="${project.frameIds}">
+													<option value="${f:u(item)}">${f:h(fi:jobName(item))}</option>
+												</c:forEach>
+											</select>
+											</c:when>
 											<c:when test="${c.type == 'BOOL'}">
 											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
 												<option value="true" <c:if test="${c.value eq 'true'}">selected</c:if>>True</option>

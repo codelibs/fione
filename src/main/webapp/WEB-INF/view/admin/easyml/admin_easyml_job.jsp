@@ -80,7 +80,7 @@
 													<c:forEach var="data" varStatus="s" items="${project.jobs}">
 														<tr>
 															<td><i class="fas fa-${f:u(data.iconType)}"></i> <c:choose>
-																	<c:when test="${data.iconType == 'hammer'}">
+																	<c:when test="${data.iconType == 'hammer' and fn:contains(data.dest.name, '@@')}">
 																		<la:link
 																			href="/admin/automl/job/${f:u(project.id)}?fid=${f:u(frameId)}&lid=${f:u(data.dest.name)}"
 																		>${f:h(fi:jobName(data.dest.name))}</la:link>

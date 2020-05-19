@@ -7,6 +7,7 @@ def print_module():
           'id': 'train_kmeans',
           'name': 'Run KMeans',
           'type': 'TRAIN',
+          'priority': '100',
           'components': [
             {
               "id": "suffix",

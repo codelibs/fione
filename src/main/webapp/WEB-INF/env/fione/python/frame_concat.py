@@ -1,33 +1,34 @@
-import json
 import h2o
+import json
 import sys
-
 
 def print_module():
     x = {
-          'id': 'predict_kmeans',
-          'name': 'Predict (KMeans)',
-          'type': 'PREDICT',
-          'priority': '100',
+          'id': 'frame_concat',
+          'name': 'Concat Frames',
+          'type': 'FRAME',
+          'priority': '110',
           'components': [
             {
               "id": "suffix",
               "name": "Suffix (Frame ID)",
               "description": "the suffix for the created frame id",
               "type": "TEXT",
-              "value": "kmeans",
+              "value": "concat",
             },
             {
-              "id": "input_columns",
-              "name": "Input Columns",
-              "description": "the columns for the input frame",
-              "type": "MULTICOLUMN",
+              "id": "frames",
+              "name": "Frame IDs",
+              "description": "list of frames that should be appended to the current frame.",
+              "type": "MULTIFRAME",
             },
             {
-              "id": "output_columns",
-              "name": "Output Columns",
-              "description": "the column to append them to the output frame",
-              "type": "MULTICOLUMN",
+              "id": "axis",
+              "name": "Axis",
+              "description": "if 1 then append column-wise, if 0 then append row-wise.",
+              "type": "SELECT",
+              "options": ["0", "1"],
+              "value": "1",
             },
           ]
         }
@@ -43,27 +44,16 @@ def main(config):
     frame_id = params.get('frame_id')
     df = h2o.get_frame(frame_id)
 
-    input_columns=params.get("input_columns")
-    if input_columns is None or len(input_columns) <= 2:
-        input_columns = df.col_names
-    else:
-        input_columns = json.loads(input_columns)
+    frames = params.get('frames')
+    if frames is None or len(frames) <= 2:
+        print("frames are empty.")
+        sys.exit(1)
+    frames = json.loads(frames)
 
-    output_columns=params.get("output_columns")
-    if output_columns is None or len(output_columns) <= 2:
-        output_columns = []
-    else:
-        output_columns = json.loads(output_columns)
-
-    model_id = params.get('model_id')
-    pred_model = h2o.get_model(model_id)
-
-    df_pred = pred_model.predict(df[input_columns])
-    for col_name in output_columns:
-        df_pred[col_name] = df[col_name]
+    df_concat = df.concat([h2o.get_frame(x) for x in frames], axis=int(params.get('axis')))
 
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
-    h2o.assign(df_pred, dest_frame_id)
+    h2o.assign(df_concat, dest_frame_id)
 
 
 def append_frame_id(frame_id, name):

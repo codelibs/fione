@@ -7,6 +7,7 @@ def print_module():
           'id': 'train_glrm',
           'name': 'Run GLRM',
           'type': 'TRAIN',
+          'priority': '300',
           'components': [
             {
               "id": "suffix",
