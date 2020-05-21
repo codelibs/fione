@@ -25,8 +25,13 @@ def main(config):
     params = config['parameters']
 
     h2o.init(url=h2o_config.get('url'))
+    frame_id = params.get('frame_id')
+    execute(h2o, params, frame_id)
 
+
+def execute(h2o, params, frame_id):
     print(f'Hello {params.get("name")}')
+    return frame_id
 
 
 if __name__ == '__main__':

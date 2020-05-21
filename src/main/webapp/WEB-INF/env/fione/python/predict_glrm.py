@@ -1,5 +1,7 @@
 import h2o
 import sys
+from utils import append_frame_id, send_progress
+
 
 def print_module():
     x = {
@@ -48,13 +50,20 @@ def main(config):
     h2o.init(url=h2o_config.get('url'))
 
     frame_id = params.get('frame_id')
+    model_id = params.get('model_id')
+    execute(h2o, params, {'frame_id':frame_id, 'model_id':model_id})
+
+
+def execute(h2o, params, config):
+    frame_id = config.get('frame_id')
+    model_id = config.get('model_id')
+
     df = h2o.get_frame(frame_id)
     column_header = params.get('column_header')
     if len(column_header) > 0:
         df_head = df[:int(column_header)]
         df = df[int(column_header):]
 
-    model_id = params.get('model_id')
     pred_model = h2o.get_model(model_id)
 
     df_pred = pred_model.predict(df)
@@ -71,24 +80,7 @@ def main(config):
     else:
         h2o.assign(df_pred, dest_frame_id)
 
-
-def append_frame_id(frame_id, name):
-    if frame_id is None:
-        return frame_id
-    pos = frame_id.rfind('.')
-    if pos != -1:
-        prefix = frame_id[0:pos]
-        suffix = frame_id[pos:]
-    else:
-        prefix = frame_id
-        suffix = ''
-    values = prefix.split('_')
-    def b64encode(s):
-        import base64
-        return base64.urlsafe_b64encode(s.encode('utf-8')).decode('utf-8').rstrip('=')
-    if len(values) >= 2:
-        return values[0] + '_' + values[1] + '_' + b64encode(name) + suffix
-    return prefix + '_' + b64encode(name) + suffix
+    return {'frame_id': dest_frame_id}
 
 
 def get_topN(df, nPercent=10):
@@ -107,16 +99,6 @@ def get_topN(df, nPercent=10):
             send_progress(i/size, f'Process top N rows ({i}/{size})')
 
     return df_new.transpose()
-
-
-def send_progress(progress, message):
-    import json
-    x = json.dumps({
-        'type': 'progress',
-        'progress': progress,
-        'message': message
-      })
-    print(f'FIONE:{x}')
 
 
 if __name__ == '__main__':

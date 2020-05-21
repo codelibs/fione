@@ -30,7 +30,6 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import javax.annotation.PostConstruct;
-import javax.servlet.ServletContext;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -94,6 +93,9 @@ public class PythonHelper {
                 case PREDICT:
                     predictModuleList.add(pythonModule);
                     break;
+                case LIBRARY:
+                    // no op
+                    break;
                 default:
                     logger.warn("Unknown module: {} => {}", pyFile.getAbsolutePath(), jsonString);
                     break;
@@ -151,8 +153,7 @@ public class PythonHelper {
     protected String executePython(final File pyFile, final File iniFile, final Consumer<String> progress) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final ProcessHelper processHelper = ComponentUtil.getProcessHelper();
-        final ServletContext servletContext = ComponentUtil.getComponent(ServletContext.class);
-        final File baseDir = new File(servletContext.getRealPath("/WEB-INF")).getParentFile();
+        final File baseDir = ResourceUtil.getEnvPath("fione", "python").toFile();
         final String pythonCommand = fessConfig.getSystemProperty("fione.python.path", "python3");
         final List<String> cmdList = Lists.newArrayList(pythonCommand, pyFile.getAbsolutePath());
         if (iniFile != null) {
@@ -310,7 +311,7 @@ public class PythonHelper {
     }
 
     public enum ModuleType {
-        FRAME, TRAIN, PREDICT, UNKNOWN;
+        FRAME, TRAIN, PREDICT, LIBRARY, UNKNOWN;
     }
 
 }

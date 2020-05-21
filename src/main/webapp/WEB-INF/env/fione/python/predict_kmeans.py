@@ -1,6 +1,7 @@
 import json
 import h2o
 import sys
+from utils import append_frame_id
 
 
 def print_module():
@@ -39,8 +40,15 @@ def main(config):
     params = config['parameters']
 
     h2o.init(url=h2o_config.get('url'))
-
     frame_id = params.get('frame_id')
+    model_id = params.get('model_id')
+    execute(h2o, params, {'frame_id':frame_id, 'model_id':model_id})
+
+
+def execute(h2o, params, config):
+    frame_id = config.get('frame_id')
+    model_id = config.get('model_id')
+    
     df = h2o.get_frame(frame_id)
 
     input_columns=params.get("input_columns")
@@ -55,7 +63,6 @@ def main(config):
     else:
         output_columns = json.loads(output_columns)
 
-    model_id = params.get('model_id')
     pred_model = h2o.get_model(model_id)
 
     df_pred = pred_model.predict(df[input_columns])
@@ -65,24 +72,7 @@ def main(config):
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
     h2o.assign(df_pred, dest_frame_id)
 
-
-def append_frame_id(frame_id, name):
-    if frame_id is None:
-        return frame_id
-    pos = frame_id.rfind('.')
-    if pos != -1:
-        prefix = frame_id[0:pos]
-        suffix = frame_id[pos:]
-    else:
-        prefix = frame_id
-        suffix = ''
-    values = prefix.split('_')
-    def b64encode(s):
-        import base64
-        return base64.urlsafe_b64encode(s.encode('utf-8')).decode('utf-8').rstrip('=')
-    if len(values) >= 2:
-        return values[0] + '_' + values[1] + '_' + b64encode(name) + suffix
-    return prefix + '_' + b64encode(name) + suffix
+    return {'frame_id': dest_frame_id}
 
 
 if __name__ == '__main__':

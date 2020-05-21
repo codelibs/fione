@@ -1,5 +1,7 @@
 import h2o
 import sys
+from utils import append_frame_id
+
 
 def print_module():
     x = {
@@ -44,8 +46,13 @@ def main(config):
     params = config['parameters']
 
     h2o.init(url=h2o_config.get('url'))
-
     frame_id = params.get('frame_id')
+    execute(h2o, params, {'frame_id': frame_id})
+
+
+def execute(h2o, params, config):
+    frame_id = config.get('frame_id')
+
     df = h2o.get_frame(frame_id)
 
     df_pivot = df.pivot(index=params.get('index'), column=params.get('column'), value=params.get('value'))
@@ -53,24 +60,7 @@ def main(config):
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
     h2o.assign(df_pivot, dest_frame_id)
 
-
-def append_frame_id(frame_id, name):
-    if frame_id is None:
-        return frame_id
-    pos = frame_id.rfind('.')
-    if pos != -1:
-        prefix = frame_id[0:pos]
-        suffix = frame_id[pos:]
-    else:
-        prefix = frame_id
-        suffix = ''
-    values = prefix.split('_')
-    def b64encode(s):
-        import base64
-        return base64.urlsafe_b64encode(s.encode('utf-8')).decode('utf-8').rstrip('=')
-    if len(values) >= 2:
-        return values[0] + '_' + values[1] + '_' + b64encode(name) + suffix
-    return prefix + '_' + b64encode(name) + suffix
+    return {'frame_id': dest_frame_id}
 
 
 if __name__ == '__main__':

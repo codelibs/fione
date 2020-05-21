@@ -1,5 +1,6 @@
 import h2o
 import sys
+from utils import save_model
 
 
 def print_module():
@@ -196,6 +197,12 @@ def main(config):
     h2o.init(url=h2o_config.get('url'))
 
     frame_id = params.get('frame_id')
+    execute(h2o, params, {'frame_id': frame_id})
+
+
+def execute(h2o, params, config):
+    frame_id = config.get('frame_id')
+
     df = h2o.get_frame(frame_id)
     column_header = params.get('column_header')
     if len(column_header) > 0:
@@ -227,15 +234,7 @@ def main(config):
     glrm_model.show()
     save_model(params, glrm_model.model_id)
 
-
-def save_model(params, model_id):
-    import json
-    x = json.dumps({
-        'type': 'model',
-        'leaderboard_id': params.get('project_name') + '@@' + params.get('suffix'),
-        'model_id': model_id
-      })
-    print(f'FIONE:{x}')
+    return {'frame_id': frame_id, 'model_id': glrm_model.model_id}
 
 
 if __name__ == '__main__':
