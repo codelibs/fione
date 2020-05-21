@@ -88,7 +88,7 @@
 											<c:when test="${c.type == 'COLUMN'}">
 											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
 												<c:forEach var="item" items="${columnItems}">
-													<c:if test="${empty c.value}"><option></option></c:if>
+													<c:if test="${c.value == ''}"><option></option></c:if>
 													<option value="${f:u(item.value)}">${f:h(item.label)}</option>
 												</c:forEach>
 											</select>
@@ -103,7 +103,7 @@
 											<c:when test="${c.type == 'FRAME'}">
 											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
 												<c:forEach var="item" items="${project.frameIds}">
-													<c:if test="${empty c.value}"><option></option></c:if>
+													<c:if test="${c.value == ''}"><option></option></c:if>
 													<option value="${f:u(item)}">${f:h(fi:jobName(item))}</option>
 												</c:forEach>
 											</select>
@@ -124,7 +124,7 @@
 											<c:when test="${c.type == 'SELECT'}">
 											<select name="params.${f:u(c.id)}" id="${f:u(c.id)}" class="form-control">
 												<c:forEach var="item" items="${c.options}">
-													<c:if test="${empty c.value}"><option></option></c:if>
+													<c:if test="${c.value == ''}"><option></option></c:if>
 													<option value="${f:u(item)}" <c:if test="${c.value eq item}">selected</c:if>>${f:h(item)}</option>
 												</c:forEach>
 											</select>

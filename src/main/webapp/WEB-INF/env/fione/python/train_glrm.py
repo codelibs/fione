@@ -189,8 +189,6 @@ def print_module():
     
 
 def main(config):
-    from h2o.estimators.glrm import H2OGeneralizedLowRankEstimator
-
     h2o_config = config['h2o']
     params = config['parameters']
 
@@ -208,6 +206,7 @@ def execute(h2o, params, config):
     if len(column_header) > 0:
         df = df[int(column_header):]
 
+    from h2o.estimators.glrm import H2OGeneralizedLowRankEstimator
     glrm_model = H2OGeneralizedLowRankEstimator(
         expand_user_y=bool(params.get('expand_user_y')),
         gamma_x=float(params.get('gamma_x')),

@@ -138,8 +138,6 @@ def print_module():
     
 
 def main(config):
-    from h2o.estimators import H2OKMeansEstimator
-
     h2o_config = config['h2o']
     params = config['parameters']
 
@@ -160,6 +158,7 @@ def execute(h2o, params, config):
         import json
         input_columns = json.loads(input_columns)
 
+    from h2o.estimators import H2OKMeansEstimator
     kmeans_model = H2OKMeansEstimator(
         categorical_encoding=params.get("categorical_encoding"),
         estimate_k=bool(params.get("estimate_k")),
