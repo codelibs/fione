@@ -9,7 +9,7 @@ def print_module():
           'id': 'frame_floor',
           'name': 'Apply Floor Func',
           'type': 'FRAME',
-          'priority': '150',
+          'priority': '800',
           'components': [
             {
               "id": "suffix",

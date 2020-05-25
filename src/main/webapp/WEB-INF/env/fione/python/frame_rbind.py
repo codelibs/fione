@@ -6,31 +6,23 @@ from utils import append_frame_id
 
 def print_module():
     x = {
-          'id': 'frame_concat',
-          'name': 'Concat Frames',
+          'id': 'frame_rbind',
+          'name': 'Combine Rows',
           'type': 'FRAME',
-          'priority': '132',
+          'priority': '131',
           'components': [
             {
               "id": "suffix",
               "name": "Suffix (Frame ID)",
               "description": "the suffix for the created frame id",
               "type": "TEXT",
-              "value": "concat",
+              "value": "rbind",
             },
             {
-              "id": "frames",
-              "name": "Frame IDs",
-              "description": "list of frames that should be appended to the current frame.",
-              "type": "MULTIFRAME",
-            },
-            {
-              "id": "axis",
-              "name": "Axis",
-              "description": "if 1 then append column-wise, if 0 then append row-wise.",
-              "type": "SELECT",
-              "options": ["0", "1"],
-              "value": "1",
+              "id": "bind_frame_id",
+              "name": "Frame ID",
+              "description": "Append data to this frame row-wise.",
+              "type": "FRAME",
             },
           ]
         }
@@ -51,16 +43,13 @@ def execute(h2o, params, config):
 
     df = h2o.get_frame(frame_id)
 
-    frames = params.get('frames')
-    if frames is None or len(frames) <= 2:
-        print("frames are empty.")
-        sys.exit(1)
-    frames = json.loads(frames)
+    bind_frame_id = params.get('bind_frame_id')
+    df_2 = h2o.get_frame(bind_frame_id)
 
-    df_concat = df.concat([h2o.get_frame(x) for x in frames], axis=int(params.get('axis')))
+    df_bind = df.rbind(df_2)
 
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
-    h2o.assign(df_concat, dest_frame_id)
+    h2o.assign(df_bind, dest_frame_id)
 
     return {'frame_id': dest_frame_id}
 

@@ -7,9 +7,9 @@ from utils import append_frame_id
 def print_module():
     x = {
           'id': 'frame_fillna',
-          'name': 'Fill NA',
+          'name': 'Fill NAs',
           'type': 'FRAME',
-          'priority': '120',
+          'priority': '140',
           'components': [
             {
               "id": "suffix",

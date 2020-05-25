@@ -9,7 +9,7 @@ def print_module():
           'id': 'frame_cor',
           'name': 'Compute Correlation',
           'type': 'FRAME',
-          'priority': '300',
+          'priority': '900',
           'components': [
             {
               "id": "suffix",

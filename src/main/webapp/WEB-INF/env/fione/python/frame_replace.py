@@ -9,7 +9,7 @@ def print_module():
           'id': 'frame_replace',
           'name': 'Replace Values',
           'type': 'FRAME',
-          'priority': '101',
+          'priority': '190',
           'components': [
             {
               "id": "suffix",
@@ -58,23 +58,18 @@ def execute(h2o, params, config):
     column = params.get('column')
     value = params.get('value')
     c_type = df.types[column]
-    print(f'{c_type}')
 
     if c_type == 'real':
         value = float(value)
     elif c_type == 'int':
         value = int(value)
     elif c_type == 'enum':
-        print(f'{df[column].categories()}')
         for c in df[column].categories():
-            print(f'{value} == {c}')
             if value == c:
                 value = c
-                print(f'{value}')
                 break
 
     row_conditions = params.get('row_conditions')
-    print(f'{row_conditions}')
     if row_conditions is not None and len(row_conditions) > 0:
         mask = parse_row_condition(df, row_conditions)
         df[mask, column] = value

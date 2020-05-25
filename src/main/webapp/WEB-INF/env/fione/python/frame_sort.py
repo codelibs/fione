@@ -1,41 +1,39 @@
 import h2o
 import json
 import sys
-from utils import append_frame_id
+from utils import append_frame_id, parse_row_condition
 
 
 def print_module():
     x = {
-          'id': 'frame_concat',
-          'name': 'Concat Frames',
+          'id': 'frame_sort',
+          'name': 'Sort Column',
           'type': 'FRAME',
-          'priority': '132',
+          'priority': '210',
           'components': [
             {
               "id": "suffix",
               "name": "Suffix (Frame ID)",
               "description": "the suffix for the created frame id",
               "type": "TEXT",
-              "value": "concat",
+              "value": "sort",
             },
             {
-              "id": "frames",
-              "name": "Frame IDs",
-              "description": "list of frames that should be appended to the current frame.",
-              "type": "MULTIFRAME",
+              "id": "column",
+              "name": "Column",
+              "description": "the target column to sort values",
+              "type": "COLUMN",
             },
             {
-              "id": "axis",
-              "name": "Axis",
-              "description": "if 1 then append column-wise, if 0 then append row-wise.",
-              "type": "SELECT",
-              "options": ["0", "1"],
-              "value": "1",
+              "id": "ascending",
+              "name": "Ascending",
+              "description": "True for ascending sort and False for descending sort.",
+              "type": "BOOL",
             },
           ]
         }
     print(json.dumps(x))
-    
+
 
 def main(config):
     h2o_config = config['h2o']
@@ -51,16 +49,13 @@ def execute(h2o, params, config):
 
     df = h2o.get_frame(frame_id)
 
-    frames = params.get('frames')
-    if frames is None or len(frames) <= 2:
-        print("frames are empty.")
-        sys.exit(1)
-    frames = json.loads(frames)
+    column = params.get('column')
+    ascending = bool(params.get('ascending'))
 
-    df_concat = df.concat([h2o.get_frame(x) for x in frames], axis=int(params.get('axis')))
+    df_sort = df.sort(by=[column], ascending=[ascending])
 
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
-    h2o.assign(df_concat, dest_frame_id)
+    h2o.assign(df_sort, dest_frame_id)
 
     return {'frame_id': dest_frame_id}
 
@@ -74,5 +69,4 @@ if __name__ == '__main__':
     config = configparser.ConfigParser()
     config.read([config_file])
     main(config)
-
 

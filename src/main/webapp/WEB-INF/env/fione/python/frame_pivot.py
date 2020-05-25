@@ -6,9 +6,9 @@ from utils import append_frame_id
 def print_module():
     x = {
           'id': 'frame_pivot',
-          'name': 'Pivot Frame',
+          'name': 'Pivot Tables',
           'type': 'FRAME',
-          'priority': '200',
+          'priority': '180',
           'components': [
             {
               "id": "suffix",

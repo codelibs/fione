@@ -1,28 +1,28 @@
 import h2o
 import json
 import sys
-from utils import append_frame_id
+from utils import append_frame_id, parse_row_condition
 
 
 def print_module():
     x = {
-          'id': 'frame_cbind',
-          'name': 'Bind Frame',
+          'id': 'frame_cslice',
+          'name': 'Slice Columns',
           'type': 'FRAME',
-          'priority': '111',
+          'priority': '200',
           'components': [
             {
               "id": "suffix",
               "name": "Suffix (Frame ID)",
               "description": "the suffix for the created frame id",
               "type": "TEXT",
-              "value": "bind",
+              "value": "cslice",
             },
             {
-              "id": "bind_frame_id",
-              "name": "Frame ID",
-              "description": "Append data to this frame column-wise.",
-              "type": "FRAME",
+              "id": "columns",
+              "name": "Columns",
+              "description": "the columns included in the created frame",
+              "type": "MULTICOLUMN",
             },
           ]
         }
@@ -43,13 +43,16 @@ def execute(h2o, params, config):
 
     df = h2o.get_frame(frame_id)
 
-    bind_frame_id = params.get('bind_frame_id')
-    df_2 = h2o.get_frame(bind_frame_id)
+    columns = params.get('columns')
+    if columns is None or len(columns) <= 2:
+        columns = df.columns
+    else:
+        columns = json.loads(columns)
 
-    df_bind = df.cbind(df_2)
+    df_filtered = df[columns]
 
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
-    h2o.assign(df_bind, dest_frame_id)
+    h2o.assign(df_filtered, dest_frame_id)
 
     return {'frame_id': dest_frame_id}
 
