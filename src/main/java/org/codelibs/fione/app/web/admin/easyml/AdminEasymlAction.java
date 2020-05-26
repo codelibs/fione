@@ -337,17 +337,19 @@ public class AdminEasymlAction extends FioneAdminAction {
             throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
         }
         final Map<String, String> columnTypeMap = new HashMap<>();
-        for (int i = 0; i < schema.columnNames.length; i++) {
-            columnTypeMap.put(schema.columnNames[i], schema.columnTypes[i]);
+        final String[] columnNames = schema.getAvailableColumnNames();
+        for (int i = 0; i < columnNames.length; i++) {
+            columnTypeMap.put(columnNames[i], schema.columnTypes[i]);
         }
         final String fileName = StringCodecUtil.normalize(form.file.getFileName());
         try (InputStream in = form.file.getInputStream()) {
             final DataSet predictDataSet = projectHelper.addDataSet(form.projectId, fileName, in);
             projectHelper.loadDataSetSchema(form.projectId, predictDataSet, () -> {
                 final ParseV3 predictSchema = predictDataSet.getSchema();
-                for (int i = 0; i < predictSchema.columnNames.length; i++) {
-                    if (columnTypeMap.containsKey(predictSchema.columnNames[i])) {
-                        final String columnType = columnTypeMap.get(predictSchema.columnNames[i]);
+                final String[] predictColumnNames = predictSchema.getAvailableColumnNames();
+                for (int i = 0; i < predictColumnNames.length; i++) {
+                    if (columnTypeMap.containsKey(predictColumnNames[i])) {
+                        final String columnType = columnTypeMap.get(predictColumnNames[i]);
                         if (!predictSchema.columnTypes[i].equals(columnType)) {
                             predictSchema.columnTypes[i] = columnType;
                         }
@@ -646,7 +648,7 @@ public class AdminEasymlAction extends FioneAdminAction {
                     if (dataSet != null) {
                         final ParseV3 schema = dataSet.getSchema();
                         if (schema != null) {
-                            Arrays.stream(schema.columnNames).filter(s -> !s.equals(responseColumn))
+                            Arrays.stream(schema.getAvailableColumnNames()).filter(s -> !s.equals(responseColumn))
                                     .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
                         }
                     }

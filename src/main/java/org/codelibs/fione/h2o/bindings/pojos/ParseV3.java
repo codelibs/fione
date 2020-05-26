@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
+import org.codelibs.core.lang.StringUtil;
+
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
@@ -163,4 +165,17 @@ public class ParseV3 extends RequestSchemaV3 {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
+    public String[] getAvailableColumnNames() {
+        if (columnNames != null) {
+            return columnNames;
+        }
+        if (columnTypes != null) {
+            final String[] names = new String[columnTypes.length];
+            for (int i = 0; i < columnTypes.length; i++) {
+                names[i] = "C" + (i + 1);
+            }
+            return names;
+        }
+        return StringUtil.EMPTY_STRINGS;
+    }
 }

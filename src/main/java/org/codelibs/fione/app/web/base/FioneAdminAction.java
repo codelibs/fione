@@ -127,10 +127,12 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
     protected void registerColumnItems(final ParseV3 schema, final RenderData data,
             final BiFunction<Maps<String, String>, Integer, Maps<String, String>> maps) {
         final List<Map<String, String>> columnItems = new ArrayList<>();
-        for (int i = 0; i < schema.columnNames.length; i++) {
+        final String[] columnNames = schema.getAvailableColumnNames();
+        for (int i = 0; i < columnNames.length; i++) {
+            final String columnName = columnNames[i];
             columnItems.add(maps.apply(
-                    Maps.map("id", StringCodecUtil.encodeUrlSafe(schema.columnNames[i])).$("name", schema.columnNames[i])
-                            .$("value", schema.columnTypes[i]), i).$());
+                    Maps.map("id", StringCodecUtil.encodeUrlSafe(columnName)).$("name", columnName).$("value", schema.columnTypes[i]), i)
+                    .$());
         }
         RenderDataUtil.register(data, "columnItems", columnItems);
     }

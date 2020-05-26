@@ -464,8 +464,9 @@ public class AdminAutomlAction extends FioneAdminAction {
         if (schema == null) {
             throw validationError(messages -> messages.addErrorsDatasetSchemaIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
         }
-        for (int i = 0; i < schema.columnNames.length; i++) {
-            final String value = form.columns.get(StringCodecUtil.encodeUrlSafe(schema.columnNames[i]));
+        final String[] columnNames = schema.getAvailableColumnNames();
+        for (int i = 0; i < columnNames.length; i++) {
+            final String value = form.columns.get(StringCodecUtil.encodeUrlSafe(columnNames[i]));
             if (StringUtil.isNotBlank(value)) {
                 schema.columnTypes[i] = value;
             }
