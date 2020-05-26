@@ -1934,12 +1934,12 @@ public class H2oApi {
         return s.guessSetup(sourceFrames);
     }
 
-    public ParseSetupV3 guessParseSetup(final ParseSetupV3 params) throws IOException {
+    public Call<ParseSetupV3> guessParseSetup(final ParseSetupV3 params) {
         final ParseSetup s = getService(ParseSetup.class);
         return s.guessSetup(keyArrayToStringArray(params.sourceFrames), params.parseType, params.separator, params.singleQuotes,
                 params.checkHeader, params.columnNames, params.skippedColumns, params.columnTypes, params.naStrings,
                 params.columnNameFilter, params.columnOffset, params.columnCount, params.totalFilteredColumnCount,
-                params.customNonDataLineMarkers, keyToString(params.decryptTool), params._excludeFields).execute().body();
+                params.customNonDataLineMarkers, keyToString(params.decryptTool), params._excludeFields);
     }
 
     /**

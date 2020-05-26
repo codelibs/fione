@@ -166,8 +166,8 @@ public class ParseSetupV3 extends RequestSchemaV3 {
         columnCount = 0;
         destinationFrame = "";
         headerLines = 0L;
-        numberColumns = 0;
-        chunkSize = 4194304;
+        numberColumns = -1;
+        chunkSize = 4194304; // 1 << 22
         totalFilteredColumnCount = 0;
         customNonDataLineMarkers = "";
         _excludeFields = "";

@@ -165,7 +165,9 @@ public class H2oHelper {
     }
 
     public Callable<ParseSetupV3> setupParse(final String[] sourceFrames) {
-        return new Callable<>(getH2oApi().guessParseSetup(sourceFrames));
+        ParseSetupV3 parseSetup = new ParseSetupV3();
+        parseSetup.sourceFrames = Arrays.stream(sourceFrames).map(FrameKeyV3::new).toArray(n -> new FrameKeyV3[n]);
+        return new Callable<>(getH2oApi().guessParseSetup(parseSetup));
     }
 
     public Callable<ParseV3> parseFiles(final ParseV3 params) {
