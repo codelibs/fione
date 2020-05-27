@@ -112,7 +112,7 @@ public class AdminEasymlAction extends FioneAdminAction {
         try (InputStream in = form.file.getInputStream()) {
             projectHelper.store(project);
             final String fileName = StringCodecUtil.normalize(form.file.getFileName());
-            final DataSet dataSet = projectHelper.addDataSet(project.getId(), fileName, in);
+            final DataSet dataSet = projectHelper.addDataSet(project.getId(), fileName, in, 0);
             projectHelper.loadDataSetSchema(projectId, dataSet);
             saveMessage(messages -> messages.addSuccessCreatedProject(GLOBAL, form.name));
         } catch (final Exception e) {
@@ -343,7 +343,7 @@ public class AdminEasymlAction extends FioneAdminAction {
         }
         final String fileName = StringCodecUtil.normalize(form.file.getFileName());
         try (InputStream in = form.file.getInputStream()) {
-            final DataSet predictDataSet = projectHelper.addDataSet(form.projectId, fileName, in);
+            final DataSet predictDataSet = projectHelper.addDataSet(form.projectId, fileName, in, 0);
             projectHelper.loadDataSetSchema(form.projectId, predictDataSet, () -> {
                 final ParseV3 predictSchema = predictDataSet.getSchema();
                 final String[] predictColumnNames = predictSchema.getAvailableColumnNames();

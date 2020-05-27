@@ -302,6 +302,18 @@ public class FioneLabels extends FessMessages {
     /** The key of the message: Data File */
     public static final String LABELS_automl_data_file = "{labels.automl_data_file}";
 
+    /** The key of the message: Header */
+    public static final String LABELS_automl_check_header = "{labels.automl_check_header}";
+
+    /** The key of the message: Guess */
+    public static final String LABELS_automl_check_header_guess = "{labels.automl_check_header_guess}";
+
+    /** The key of the message: 1st Line */
+    public static final String LABELS_automl_check_header_true = "{labels.automl_check_header_true}";
+
+    /** The key of the message: None */
+    public static final String LABELS_automl_check_header_false = "{labels.automl_check_header_false}";
+
     /** The key of the message: Upload */
     public static final String LABELS_automl_upload = "{labels.automl_upload}";
 

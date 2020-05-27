@@ -93,6 +93,7 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelOutputSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ModelsV3;
+import org.codelibs.fione.h2o.bindings.pojos.ParseSetupV3;
 import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.RapidsSchemaV3;
 import org.codelibs.fione.helper.PythonHelper.PythonModule;
@@ -324,7 +325,7 @@ public class ProjectHelper {
         return createDataSet(projectId, dataSetId);
     }
 
-    public DataSet addDataSet(final String projectId, final String fileName, final InputStream in) {
+    public DataSet addDataSet(final String projectId, final String fileName, final InputStream in, int checkHeader) {
         final FessConfig fessConfig = ComponentUtil.getFessConfig();
         final MinioClient minioClient = createClient(fessConfig);
         final String objectName = getDataPath(projectId, fileName);
@@ -336,6 +337,7 @@ public class ProjectHelper {
         }
 
         final DataSet dataSet = createDataSet(projectId, StringCodecUtil.encodeUrlSafe(fileName));
+        dataSet.setCheckHeader(checkHeader);
         if (fileName.toLowerCase(Locale.ROOT).contains("test")) {
             dataSet.setType(DataSet.TEST);
         }
@@ -390,47 +392,55 @@ public class ProjectHelper {
     public void loadDataSetSchema(final String projectId, final DataSet dataSet, final Runnable chain) {
         final JobV3 workingJob = createWorkingJob(dataSet.getName(), "Parse Schema", 0.2f);
         store(projectId, workingJob);
-        h2oHelper.importFiles(dataSet.getPath()).execute(importResponse -> {
-            if (logger.isDebugEnabled()) {
-                logger.debug("importFiles: {}", importResponse);
-            }
-            if (importResponse.code() == 200) {
-                final String[] frames = importResponse.body().destinationFrames;
-                h2oHelper.setupParse(frames).execute(setupResponse -> {
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("setupParse: {}", setupResponse);
-                    }
-                    if (setupResponse.code() == 200) {
-                        final ParseV3 meta = h2oHelper.convert(setupResponse.body());
-                        meta.destinationFrame = new FrameKeyV3(getFrameName(projectId, dataSet.getId()) + ".hex");
-                        dataSet.setSchema(meta);
-                        store(projectId, dataSet);
-                        h2oHelper.deleteFrame(frames[0]).execute(deleteResponse -> {
+        h2oHelper.importFiles(dataSet.getPath())
+                .execute(
+                        importResponse -> {
                             if (logger.isDebugEnabled()) {
-                                logger.debug("deleteFrame: {}", deleteResponse);
+                                logger.debug("importFiles: {}", importResponse);
                             }
-                            chain.run();
-                            finish(projectId, workingJob, null);
+                            if (importResponse.code() == 200) {
+                                final ParseSetupV3 parseSetup = new ParseSetupV3();
+                                parseSetup.sourceFrames =
+                                        Arrays.stream(importResponse.body().destinationFrames).map(FrameKeyV3::new)
+                                                .toArray(n -> new FrameKeyV3[n]);
+                                parseSetup.checkHeader = dataSet.getCheckHeader();
+                                h2oHelper.setupParse(parseSetup).execute(setupResponse -> {
+                                    if (logger.isDebugEnabled()) {
+                                        logger.debug("setupParse: {}", setupResponse);
+                                    }
+                                    if (setupResponse.code() == 200) {
+                                        final ParseV3 meta = h2oHelper.convert(setupResponse.body());
+                                        meta.destinationFrame = new FrameKeyV3(getFrameName(projectId, dataSet.getId()) + ".hex");
+                                        dataSet.setSchema(meta);
+                                        store(projectId, dataSet);
+                                        Arrays.stream(parseSetup.sourceFrames).map(k -> keyToString(k)).forEach(s -> {
+                                            h2oHelper.deleteFrame(s).execute(deleteResponse -> {
+                                                if (logger.isDebugEnabled()) {
+                                                    logger.debug("deleteFrame: {}", deleteResponse);
+                                                }
+                                                chain.run();
+                                                finish(projectId, workingJob, null);
+                                            }, t -> {
+                                                logger.warn("Failed to delete frame: {}", s, t);
+                                                finish(projectId, workingJob, t);
+                                            });
+                                        });
+                                    } else {
+                                        logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet);
+                                        finish(projectId, workingJob, new H2oAccessException("Failed to access " + setupResponse));
+                                    }
+                                }, t -> {
+                                    logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t);
+                                    finish(projectId, workingJob, t);
+                                });
+                            } else {
+                                logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet);
+                                finish(projectId, workingJob, new H2oAccessException("Failed to access " + importResponse));
+                            }
                         }, t -> {
-                            logger.warn("Failed to delete frame: {}", frames[0], t);
+                            logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t);
                             finish(projectId, workingJob, t);
                         });
-                    } else {
-                        logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet);
-                        finish(projectId, workingJob, new H2oAccessException("Failed to access " + setupResponse));
-                    }
-                }, t -> {
-                    logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t);
-                    finish(projectId, workingJob, t);
-                });
-            } else {
-                logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet);
-                finish(projectId, workingJob, new H2oAccessException("Failed to access " + importResponse));
-            }
-        }, t -> {
-            logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t);
-            finish(projectId, workingJob, t);
-        });
     }
 
     public void store(final String projectId, final DataSet dataSet) {

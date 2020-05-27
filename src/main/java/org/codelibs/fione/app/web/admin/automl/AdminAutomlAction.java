@@ -403,7 +403,7 @@ public class AdminAutomlAction extends FioneAdminAction {
         verifyToken(() -> asNewDataHtml(form.projectId));
         final String fileName = StringCodecUtil.normalize(form.dataFile.getFileName());
         try (InputStream in = form.dataFile.getInputStream()) {
-            final DataSet dataSet = projectHelper.addDataSet(form.projectId, fileName, in);
+            final DataSet dataSet = projectHelper.addDataSet(form.projectId, fileName, in, form.checkHeader);
             projectHelper.loadDataSetSchema(form.projectId, dataSet);
             saveMessage(messages -> messages.addSuccessUploadedDataset(GLOBAL, fileName));
         } catch (final Exception e) {

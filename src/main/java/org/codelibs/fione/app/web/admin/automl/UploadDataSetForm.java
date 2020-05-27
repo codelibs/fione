@@ -17,6 +17,7 @@ package org.codelibs.fione.app.web.admin.automl;
 
 import org.lastaflute.web.ruts.multipart.MultipartFormFile;
 import org.lastaflute.web.validation.Required;
+import org.lastaflute.web.validation.theme.conversion.ValidateTypeFailure;
 
 public class UploadDataSetForm {
     @Required
@@ -25,4 +26,7 @@ public class UploadDataSetForm {
     @Required
     public MultipartFormFile dataFile;
 
+    @Required
+    @ValidateTypeFailure
+    public Integer checkHeader;
 }

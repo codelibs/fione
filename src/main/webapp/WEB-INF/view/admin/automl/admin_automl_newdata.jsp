@@ -64,6 +64,17 @@
 											<input type="file" name="dataFile" class="form-control-file"/>
 										</div>
 									</div>
+									<div class="form-group row">
+										<label for="checkHeader" class="col-sm-3 col-form-label"><la:message key="labels.automl_check_header" /></label>
+										<div class="col-sm-9">
+											<la:errors property="checkHeader" />
+											<la:select property="checkHeader" styleClass="custom-select">
+												<la:option value="0"><la:message key="labels.automl_check_header_guess" /></la:option>
+												<la:option value="1"><la:message key="labels.automl_check_header_true" /></la:option>
+												<la:option value="-1"><la:message key="labels.automl_check_header_false" /></la:option>
+											</la:select>
+										</div>
+									</div>
 								</div>
 								<div class="card-footer">
 									<la:link href="/admin/automl/job/${f:u(projectId)}?fid=${f:u(frameId)}&lid=${f:u(leaderboardId)}" styleClass="btn btn-default">

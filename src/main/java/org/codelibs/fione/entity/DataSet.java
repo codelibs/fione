@@ -37,6 +37,8 @@ public class DataSet {
 
     private String type = TRAIN;
 
+    private int checkHeader;
+
     private ParseV3 schema;
 
     public DataSet() {
@@ -88,9 +90,16 @@ public class DataSet {
         this.type = type;
     }
 
+    public int getCheckHeader() {
+        return checkHeader;
+    }
+
+    public void setCheckHeader(int checkHeader) {
+        this.checkHeader = checkHeader;
+    }
+
     @Override
     public String toString() {
         return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
-
 }

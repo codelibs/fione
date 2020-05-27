@@ -17,6 +17,7 @@ package org.codelibs.fione.helper;
 
 import static org.junit.Assert.assertArrayEquals;
 
+import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 
 import org.codelibs.fione.h2o.bindings.builder.AutoMLBuildControlBuilder;
@@ -114,7 +115,9 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_parseSetup(final CountDownLatch latch, final ImportFilesV3 data) {
-        h2oHelper.setupParse(data.destinationFrames).execute((call, res) -> {
+        final ParseSetupV3 parseSetup = new ParseSetupV3();
+        parseSetup.sourceFrames = Arrays.stream(data.destinationFrames).map(FrameKeyV3::new).toArray(n -> new FrameKeyV3[n]);
+        h2oHelper.setupParse(parseSetup).execute((call, res) -> {
             final ParseSetupV3 result = res.body();
             assertEquals(1, result.checkHeader);
             assertEquals(4194304, result.chunkSize);
