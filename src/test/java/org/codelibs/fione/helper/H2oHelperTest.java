@@ -122,7 +122,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
             assertEquals(1, result.checkHeader);
             assertEquals(4194304, result.chunkSize);
             assertEquals(0, result.columnCount);
-            assertNull(result.columnNameFilter);
+            assertEquals("", result.columnNameFilter);
             assertArrayEquals(new String[] { "SepalLength", "SepalWidth", "PetalLength", "PetalWidth", "Name" }, result.columnNames);
             assertEquals(0, result.columnOffset);
             assertArrayEquals(new String[] { "Numeric", "Numeric", "Numeric", "Numeric", "Enum" }, result.columnTypes);
