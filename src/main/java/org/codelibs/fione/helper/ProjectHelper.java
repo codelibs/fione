@@ -125,6 +125,8 @@ public class ProjectHelper {
 
     private static final Logger logger = LogManager.getLogger(ProjectHelper.class);
 
+    private static final String FIONE_END = "FIONE:END";
+
     @Resource
     protected H2oHelper h2oHelper;
 
@@ -1416,7 +1418,7 @@ public class ProjectHelper {
                     logger.warn("Failed to execute module: projectId:{}, params:{}", projectId, params, e);
                     finish(projectId, workingJob, e);
                 } finally {
-                    queue.add("END:{}");
+                    queue.add(FIONE_END);
                 }
             }, "ExecuteModule").start();
             new Thread(() -> {
@@ -1432,7 +1434,7 @@ public class ProjectHelper {
                     if (logger.isDebugEnabled()) {
                         logger.debug("Module Response: {}", progress);
                     }
-                    if (progress.startsWith("END:")) {
+                    if (FIONE_END.equals(progress)) {
                         break;
                     }
                     final String[] values = StringUtils.split(progress, ":", 2);
@@ -1469,9 +1471,22 @@ public class ProjectHelper {
         case "model":
             processModelModuleResponse(projectId, workingJob, params);
             break;
+        case "ini_file":
+            processIniFileModuleResponse(projectId, workingJob, params);
+            break;
         default:
             logger.warn("Unknown type: {} = {}", responseType, params);
             break;
+        }
+    }
+
+    protected void processIniFileModuleResponse(String projectId, JobV3 workingJob, Map<String, Object> params) {
+        if (params.containsKey("progress")) {
+            workingJob.progress = ((Double) params.get("progress")).floatValue();
+        }
+        if (params.containsKey("content")) {
+            workingJob.iniData = (String) params.get("content");
+            store(projectId, workingJob);
         }
     }
 

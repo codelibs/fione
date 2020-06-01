@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 
 import javax.annotation.PostConstruct;
 
+import org.apache.commons.text.StringEscapeUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.codelibs.core.io.CopyUtil;
@@ -122,7 +123,8 @@ public class PythonHelper {
         final File iniFile = ComponentUtil.getSystemHelper().createTempFile("fione_", ".ini");
         try {
             writeIniFile(iniFile, params);
-            progress.accept("progress:0.2:");
+            progress.accept("FIONE:{\"type\":\"ini_file\",\"content\":\""
+                    + StringEscapeUtils.escapeJson(FileUtil.readText(iniFile, Constants.UTF_8)) + "\",\"progress\":0.2}");
             executePython(module.getPyFile(), iniFile, progress);
         } finally {
             if (iniFile != null && !iniFile.delete()) {

@@ -85,6 +85,9 @@ public class JobV3 extends SchemaV3 {
     @SerializedName("ready_for_view")
     public boolean readyForView;
 
+    @SerializedName("ini_data")
+    public String iniData;
+
     public static final String RUNNING = "RUNNING";
 
     public static final String DONE = "DONE";

@@ -28,7 +28,7 @@ def print_module():
               "name": "Regex",
               "description": "the regular expression to tokenize on.",
               "type": "TEXT",
-              "value": "\\W",
+              "value": "\\W+",
             },
             {
               "id": "analyzer",
