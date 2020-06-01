@@ -131,7 +131,23 @@
 																		<i class="fas fa-ban"></i>
 																	</c:when>
 																	<c:when test="${data.status == 'FAILED' }">
-																		<i class="fas fa-times text-danger"></i>
+																		<button type="button" class="btn btn-link" data-toggle="modal"
+																			data-target="#error${f:h(data.key.name)}">
+																			<i class="fas fa-times text-danger"></i>
+																		</button>
+																		<div class="modal fade" id="error${f:h(data.key.name)}" tabindex="-1" role="dialog"
+																			aria-labelledby="error${f:h(data.key.name)}Label" aria-hidden="true">
+																			<div class="modal-dialog modal-dialog-scrollable">
+																				<div class="modal-content">
+																					<div class="modal-body text-left">
+																						<pre>${f:h(data.exception)}</pre>
+																					</div>
+																					<div class="modal-footer">
+																						<button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+																					</div>
+																				</div>
+																			</div>
+																		</div>
 																	</c:when>
 																	<c:when test="${data.status == 'RUNNING' }">
 																		<div class="progress" style="background-color:#999;">
