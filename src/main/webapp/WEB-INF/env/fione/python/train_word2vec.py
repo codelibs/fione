@@ -1,6 +1,6 @@
 import h2o
 import sys
-from utils import save_model, append_frame_id
+from utils import save_model, append_frame_id, to_bool
 
 
 def print_module():
@@ -30,12 +30,6 @@ def print_module():
               "description": "the suffix for the created frame",
               "type": "TEXT",
               "value": "word2vec",
-            },
-            {
-              "id": "target_column",
-              "name": "Column",
-              "description": "the columns to apply word2vec",
-              "type": "COLUMN",
             },
             {
               "id": "epochs",
@@ -116,9 +110,6 @@ def execute(h2o, params, config):
 
     df = h2o.get_frame(frame_id)
 
-    target_column = params.get("target_column")
-    df_words = tokenize(df[target_column])
-
     from h2o.estimators import H2OWord2vecEstimator
     w2v_model = H2OWord2vecEstimator(epochs=int(params.get('epochs')),
                                      init_learning_rate=float(params.get('init_learning_rate')),
@@ -128,38 +119,19 @@ def execute(h2o, params, config):
                                      vec_size=int(params.get('vec_size')),
                                      window_size=int(params.get('window_size')))
 
-    w2v_model.train(training_frame=df_words)
+    w2v_model.train(training_frame=df)
 
     save_model(params, w2v_model.model_id)
 
     is_transform = params.get("is_transform")
-    if is_transform is not None and bool(is_transform):
-        df_vecs = w2v_model.transform(df_words, aggregate_method=params.get('aggregate_method'))
+    if is_transform is not None and to_bool(is_transform):
+        df_vecs = w2v_model.transform(df, aggregate_method=params.get('aggregate_method'))
         dest_frame_id = append_frame_id(frame_id, params.get('transform_suffix'))
         h2o.assign(df_vecs, dest_frame_id)
     else:
         dest_frame_id = frame_id
 
     return {'frame_id': dest_frame_id, 'model_id': w2v_model.model_id}
-
-
-STOP_WORDS = ["ax","i","you","edu","s","t","m","subject","can",
-              "lines","re","what","there","all","we","one","the",
-              "a","an","of","or","in","for","by","on","but","is",
-              "in","a","not","with","as","was","if","they","are",
-              "this","and","it","have","from","at","my","be","by",
-              "not","that","to","from","com","org","like","likes",
-              "so"]
-
-
-# Make the 'tokenize' function:
-def tokenize(sentences, stop_word = STOP_WORDS):
-    tokenized = sentences.tokenize("\\W+")
-    tokenized_lower = tokenized.tolower()
-    tokenized_filtered = tokenized_lower[(tokenized_lower.nchar() >= 2) | (tokenized_lower.isna()),:]
-    tokenized_words = tokenized_filtered[tokenized_filtered.grep("[0-9]",invert=True,output_logical=True),:]
-    tokenized_words = tokenized_words[(tokenized_words.isna()) | (~ tokenized_words.isin(STOP_WORDS)),:]
-    return tokenized_words
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 import h2o
 import sys
-from utils import append_frame_id, send_progress
+from utils import append_frame_id, send_progress, to_bool
 
 
 def print_module():
@@ -71,7 +71,7 @@ def execute(h2o, params, config):
 
     dest_frame_id = append_frame_id(frame_id, params.get('suffix'))
 
-    if bool(params.get('topn_output')):
+    if to_bool(params.get('topn_output')):
         df_topn = get_topN(df_pred, int(params.get('topn_percent')))
         if df_head is not None:
             df_topn = df_head.cbind(df_topn)

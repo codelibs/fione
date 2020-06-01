@@ -1,6 +1,6 @@
 import h2o
 import sys
-from utils import save_model
+from utils import save_model, to_bool
 
 
 def print_module():
@@ -208,11 +208,11 @@ def execute(h2o, params, config):
 
     from h2o.estimators.glrm import H2OGeneralizedLowRankEstimator
     glrm_model = H2OGeneralizedLowRankEstimator(
-        expand_user_y=bool(params.get('expand_user_y')),
+        expand_user_y=to_bool(params.get('expand_user_y')),
         gamma_x=float(params.get('gamma_x')),
         gamma_y=float(params.get('gamma_y')),
-        ignore_const_cols=bool(params.get('ignore_const_cols')),
-        impute_original=bool(params.get('impute_original')),
+        ignore_const_cols=to_bool(params.get('ignore_const_cols')),
+        impute_original=to_bool(params.get('impute_original')),
         init=str(params.get('init')),
         init_step_size=float(params.get('init_step_size')),
         k=int(params.get('k')),
@@ -223,10 +223,10 @@ def execute(h2o, params, config):
         min_step_size=float(params.get('min_step_size')),
         multi_loss=str(params.get('multi_loss')),
         period=int(params.get('period')),
-        recover_svd=bool(params.get('recover_svd')),
+        recover_svd=to_bool(params.get('recover_svd')),
         regularization_x=str(params.get('regularization_x')),
         regularization_y=str(params.get('regularization_y')),
-        score_each_iteration=bool(params.get('score_each_iteration')),
+        score_each_iteration=to_bool(params.get('score_each_iteration')),
         seed=int(params.get('seed')),
         svd_method=str(params.get('svd_method')))
     glrm_model.train(training_frame=df)

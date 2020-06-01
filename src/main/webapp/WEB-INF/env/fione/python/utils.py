@@ -107,6 +107,15 @@ def send_progress(progress, message):
     print(f'FIONE:{x}')
 
 
+def to_bool(value):
+    if value is None:
+        return False
+    if value == 'true':
+        return True
+    else:
+        return False
+
+
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         print_module()

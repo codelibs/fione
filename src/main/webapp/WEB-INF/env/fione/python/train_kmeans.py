@@ -1,6 +1,6 @@
 import h2o
 import sys
-from utils import save_model
+from utils import save_model, to_bool
 
 
 def print_module():
@@ -161,20 +161,20 @@ def execute(h2o, params, config):
     from h2o.estimators import H2OKMeansEstimator
     kmeans_model = H2OKMeansEstimator(
         categorical_encoding=params.get("categorical_encoding"),
-        estimate_k=bool(params.get("estimate_k")),
+        estimate_k=to_bool(params.get("estimate_k")),
         fold_assignment=params.get("fold_assignment"),
-        ignore_const_cols=bool(params.get("ignore_const_cols")),
+        ignore_const_cols=to_bool(params.get("ignore_const_cols")),
         init=params.get("init"),
         k=int(params.get("k")),
-        keep_cross_validation_fold_assignment=bool(params.get("keep_cross_validation_fold_assignment")),
-        keep_cross_validation_models=bool(params.get("keep_cross_validation_models")),
-        keep_cross_validation_predictions=bool(params.get("keep_cross_validation_predictions")),
+        keep_cross_validation_fold_assignment=to_bool(params.get("keep_cross_validation_fold_assignment")),
+        keep_cross_validation_models=to_bool(params.get("keep_cross_validation_models")),
+        keep_cross_validation_predictions=to_bool(params.get("keep_cross_validation_predictions")),
         max_iterations=int(params.get("max_iterations")),
         max_runtime_secs=float(params.get("max_runtime_secs")),
         nfolds=int(params.get("nfolds")),
-        score_each_iteration=bool(params.get("score_each_iteration")),
+        score_each_iteration=to_bool(params.get("score_each_iteration")),
         seed=int(params.get("seed")),
-        standardize=bool(params.get("standardize")))
+        standardize=to_bool(params.get("standardize")))
     kmeans_model.train(x=input_columns, training_frame=df)
     kmeans_model.show()
 

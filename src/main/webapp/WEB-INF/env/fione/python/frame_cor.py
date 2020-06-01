@@ -1,7 +1,7 @@
 import h2o
 import json
 import sys
-from utils import append_frame_id
+from utils import append_frame_id, to_bool
 
 
 def print_module():
@@ -74,7 +74,7 @@ def execute(h2o, params, config):
     use_value = params.get('use')
     if use_value is not None and len(use_value) == 0:
         use_value = None
-    df_cor = df.cor(na_rm=bool(params.get('na_rm')),
+    df_cor = df.cor(na_rm=to_bool(params.get('na_rm')),
                     use=use_value,
                     method=params.get('method'))
 

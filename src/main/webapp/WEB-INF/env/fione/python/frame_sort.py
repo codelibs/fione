@@ -1,7 +1,7 @@
 import h2o
 import json
 import sys
-from utils import append_frame_id, parse_row_condition
+from utils import append_frame_id, parse_row_condition, to_bool
 
 
 def print_module():
@@ -50,7 +50,7 @@ def execute(h2o, params, config):
     df = h2o.get_frame(frame_id)
 
     column = params.get('column')
-    ascending = bool(params.get('ascending'))
+    ascending = to_bool(params.get('ascending'))
 
     df_sort = df.sort(by=[column], ascending=[ascending])
 
