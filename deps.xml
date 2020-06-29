@@ -13,11 +13,11 @@
 		<mkdir dir="${fione.dir}/lib" />
 		<!-- fione-serving -->
 		<antcall target="install.env.jar">
-			<param name="repo.url" value="${maven.release.repo.url}" />
+			<param name="repo.url" value="${maven.snapshot.repo.url}" />
 			<param name="jar.groupId" value="org/codelibs/fione" />
 			<param name="jar.artifactId" value="fione-serving" />
-			<param name="jar.version" value="3.30.0.1" />
-			<param name="file.version" value="3.30.0.1" />
+			<param name="jar.version" value="3.30.0.2-SNAPSHOT" />
+			<param name="file.version" value="3.30.0.2-20200629.220204-2" />
 		</antcall>
 	</target>
 

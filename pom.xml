@@ -5,7 +5,7 @@
 	<artifactId>fione</artifactId>
 	<packaging>war</packaging>
 	<name>Fione</name>
-	<version>13.7.1-SNAPSHOT</version>
+	<version>13.8.0-SNAPSHOT</version>
 	<url>https://fione.codelibs.org/</url>
 	<inceptionYear>2009</inceptionYear>
 	<licenses>
@@ -35,16 +35,16 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<fess.version>13.7.0</fess.version>
+		<fess.version>13.8.0</fess.version>
 		<retrofit.version>2.7.0</retrofit.version>
 
 		<!-- Main Framework -->
-		<dbflute.version>1.2.2</dbflute.version>
-		<lastaflute.version>1.1.6</lastaflute.version>
+		<dbflute.version>1.2.3</dbflute.version>
+		<lastaflute.version>1.1.7</lastaflute.version>
 		<lasta.di.version>0.8.2</lasta.di.version>
 		<lasta.taglib.version>0.7.3</lasta.taglib.version>
 		<lasta.job.version>0.5.4</lasta.job.version>
-		<mailflute.version>0.6.1</mailflute.version>
+		<mailflute.version>0.6.3</mailflute.version>
 
 		<!-- Partner Library -->
 		<slf4j.version>1.7.30</slf4j.version>
@@ -53,24 +53,24 @@
 		<commons.fileupload.version>1.4</commons.fileupload.version>
 		<asm.version>8.0.1</asm.version>
 		<tika.version>1.24.1</tika.version>
-		<groovy.version>3.0.3</groovy.version>
+		<groovy.version>3.0.4</groovy.version>
 		<minio.version>7.0.2</minio.version>
-		<okhttp.version>3.14.8</okhttp.version>
+		<okhttp.version>3.14.9</okhttp.version>
 
 		<!-- Crawler -->
-		<crawler.version>3.7.0</crawler.version>
+		<crawler.version>3.8.1-SNAPSHOT</crawler.version>
 
 		<!-- Suggest -->
-		<suggest.version>7.7.0</suggest.version>
+		<suggest.version>7.8.0</suggest.version>
 
 		<!-- Elasticsearch -->
-		<elasticsearch.version>7.7.0</elasticsearch.version>
-		<elasticsearch.httpclient.version>7.7.0</elasticsearch.httpclient.version>
+		<elasticsearch.version>7.8.0</elasticsearch.version>
+		<elasticsearch.httpclient.version>7.8.0</elasticsearch.httpclient.version>
 		<cluster.runner.version>${elasticsearch.version}.0</cluster.runner.version>
 
 		<!-- Tomcat -->
-		<tomcat.version>9.0.35</tomcat.version>
-		<tomcat.boot.version>0.7.4</tomcat.boot.version>
+		<tomcat.version>9.0.36</tomcat.version>
+		<tomcat.boot.version>0.7.5</tomcat.boot.version>
 
 		<!-- Testing -->
 		<utflute.version>0.9.1</utflute.version>
@@ -472,7 +472,7 @@
 		<dependency>
 			<groupId>org.codelibs</groupId>
 			<artifactId>corelib</artifactId>
-			<version>0.5.2</version>
+			<version>0.5.4</version>
 		</dependency>
 		<dependency>
 			<groupId>org.lastaflute</groupId>
