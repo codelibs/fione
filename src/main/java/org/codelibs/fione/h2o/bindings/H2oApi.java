@@ -2267,8 +2267,7 @@ public class H2oApi {
      * Cancel a running job.
      */
     public Call<JobsV3> cancelJob(final JobKeyV3 jobId) {
-        final Jobs s = getService(Jobs.class);
-        return s.cancel(keyToString(jobId));
+        return cancelJob(jobId, null);
     }
 
     public Call<JobsV3> cancelJob(final JobKeyV3 jobId, final String _excludeFields) {

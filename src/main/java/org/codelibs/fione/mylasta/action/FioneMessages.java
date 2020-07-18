@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.mylasta.action;
 
+import org.codelibs.fione.mylasta.action.FioneLabels;
 import org.lastaflute.core.message.UserMessage;
 
 /**
@@ -43,6 +44,9 @@ public class FioneMessages extends FioneLabels {
 
     /** The key of the message: Deleted Job {0}. */
     public static final String SUCCESS_deleted_job = "{success.deleted_job}";
+
+    /** The key of the message: Stopped Job {0}. */
+    public static final String SUCCESS_stopped_job = "{success.stopped_job}";
 
     /** The key of the message: Loaded DataSet {0}. */
     public static final String SUCCESS_load_dataset = "{success.load_dataset}";
@@ -266,6 +270,21 @@ public class FioneMessages extends FioneLabels {
     public FioneMessages addSuccessDeletedJob(String property, String arg0) {
         assertPropertyNotNull(property);
         add(property, new UserMessage(SUCCESS_deleted_job, arg0));
+        return this;
+    }
+
+    /**
+     * Add the created action message for the key 'success.stopped_job' with parameters.
+     * <pre>
+     * message: Stopped Job {0}.
+     * </pre>
+     * @param property The property name for the message. (NotNull)
+     * @param arg0 The parameter arg0 for message. (NotNull)
+     * @return this. (NotNull)
+     */
+    public FioneMessages addSuccessStoppedJob(String property, String arg0) {
+        assertPropertyNotNull(property);
+        add(property, new UserMessage(SUCCESS_stopped_job, arg0));
         return this;
     }
 

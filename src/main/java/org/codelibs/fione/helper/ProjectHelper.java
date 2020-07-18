@@ -660,7 +660,25 @@ public class ProjectHelper {
         }
     }
 
-    public void deleteJob(final String projectId, final String jobId) {
+    public boolean deleteJob(final String projectId, final String jobId) {
+        final JobKeyV3 jobKey = new JobKeyV3(jobId);
+        final Response<JobsV3> getJobResponse = h2oHelper.getJobs(jobKey).execute();
+        if (logger.isDebugEnabled()) {
+            logger.debug("getJobs: {}", getJobResponse);
+        }
+        if (getJobResponse.code() == 200) {
+            final JobV3 job = getJobResponse.body().findJob(jobId);
+            if (job != null && JobV3.RUNNING.equals(job.status)) {
+                final Response<JobsV3> cancelJobResponse = h2oHelper.cancelJob(jobKey).execute();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("cancelJob: {}", cancelJobResponse);
+                }
+                return false;
+            }
+        } else {
+            logger.warn("Failed to get job: {}", getJobResponse);
+        }
+
         jobLock.writeLock().lock();
         try {
             store(projectId,
@@ -669,25 +687,8 @@ public class ProjectHelper {
             jobLock.writeLock().unlock();
         }
 
-        final JobKeyV3 jobKey = new JobKeyV3(jobId);
-        h2oHelper.getJobs(jobKey).execute(getJobResponse -> {
-            if (logger.isDebugEnabled()) {
-                logger.debug("getJobs: {}", getJobResponse);
-            }
-            if (getJobResponse.code() == 200) {
-                final JobV3 job = getJobResponse.body().findJob(jobId);
-                if (job != null && JobV3.RUNNING.equals(job.status)) {
-                    final Response<JobsV3> cancelJobResponse = h2oHelper.cancelJob(jobKey).execute();
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("cancelJob: {}", cancelJobResponse);
-                    }
-                }
-            } else {
-                logger.warn("Failed to get job: {}", getJobResponse);
-            }
-        }, t -> logger.warn("Failed to get job: {}", jobId, t));
-
         responseCache.invalidate(getLeaderboardsCacheKey(projectId));
+        return true;
     }
 
     public synchronized void deleteAllJobs(final String projectId) {

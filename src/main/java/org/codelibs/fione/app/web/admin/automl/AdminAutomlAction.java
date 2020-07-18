@@ -542,8 +542,12 @@ public class AdminAutomlAction extends FioneAdminAction {
         validate(form, messages -> {}, () -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         verifyTokenKeep(() -> redirectDetailsHtml(form.projectId, form.frameId, form.leaderboardId));
         try {
-            projectHelper.deleteJob(form.projectId, form.jobId);
-            saveMessage(messages -> messages.addSuccessDeletedJob(GLOBAL, form.jobId));
+            final boolean deleted = projectHelper.deleteJob(form.projectId, form.jobId);
+            if (deleted) {
+                saveMessage(messages -> messages.addSuccessDeletedJob(GLOBAL, form.jobId));
+            } else {
+                saveMessage(messages -> messages.addSuccessStoppedJob(GLOBAL, form.jobId));
+            }
         } catch (final Exception e) {
             logger.warn("Failed to delete frame: {}", form.jobId, e);
             throw validationError(messages -> messages.addErrorsFailedToDeleteJob(GLOBAL, form.jobId), this::asListHtml);

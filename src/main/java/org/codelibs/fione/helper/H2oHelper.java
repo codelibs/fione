@@ -224,7 +224,7 @@ public class H2oHelper {
     }
 
     public Callable<JobsV3> cancelJob(final JobKeyV3 jobId) {
-        return new Callable<>(getH2oApi().cancelJob(jobId));
+        return new Callable<>(getH2oApi().cancelJob(jobId, null));
     }
 
     public Callable<JobsV3> getJobs(final String jobId) {
