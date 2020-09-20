@@ -16,8 +16,8 @@
 			<param name="repo.url" value="${maven.snapshot.repo.url}" />
 			<param name="jar.groupId" value="org/codelibs/fione" />
 			<param name="jar.artifactId" value="fione-serving" />
-			<param name="jar.version" value="3.30.0.3-SNAPSHOT" />
-			<param name="file.version" value="3.30.0.3-20200724.045752-2" />
+			<param name="jar.version" value="3.30.1.0-SNAPSHOT" />
+			<param name="file.version" value="3.30.1.0-20200914.120519-2" />
 		</antcall>
 	</target>
 
