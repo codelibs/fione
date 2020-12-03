@@ -88,6 +88,10 @@ public class H2oHelperTest extends LastaFluteTestCase {
         System.out.println("Endpoint: " + getEndpoint());
     }
 
+    private String getSessionKey() {
+        return "guest";
+    }
+
     private String getEndpoint() {
         return "http://" + h2o.getContainerIpAddress() + ":" + h2o.getMappedPort(54321);
     }
@@ -100,7 +104,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
 
     public void test_iris() throws Throwable {
         final CountDownLatch latch = new CountDownLatch(1);
-        h2oHelper.importFiles("/data/iris.csv").execute((call, res) -> {
+        h2oHelper.importFiles(getSessionKey(), "/data/iris.csv").execute((call, res) -> {
             final ImportFilesV3 result = res.body();
             assertEquals("/data/iris.csv", result.path);
             assertArrayEquals(new String[] { "nfs://data/iris.csv" }, result.destinationFrames);
@@ -117,7 +121,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     private void test_iris_parseSetup(final CountDownLatch latch, final ImportFilesV3 data) {
         final ParseSetupV3 parseSetup = new ParseSetupV3();
         parseSetup.sourceFrames = Arrays.stream(data.destinationFrames).map(FrameKeyV3::new).toArray(n -> new FrameKeyV3[n]);
-        h2oHelper.setupParse(parseSetup).execute((call, res) -> {
+        h2oHelper.setupParse(getSessionKey(), parseSetup).execute((call, res) -> {
             final ParseSetupV3 result = res.body();
             assertEquals(1, result.checkHeader);
             assertEquals(4194304, result.chunkSize);
@@ -144,7 +148,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
 
     private void test_iris_parse(final CountDownLatch latch, final ParseSetupV3 data) {
         final ParseV3 params = h2oHelper.convert(data);
-        h2oHelper.parseFiles(params).execute((call, res) -> {
+        h2oHelper.parseFiles(getSessionKey(), params).execute((call, res) -> {
             final ParseV3 result = res.body();
             assertEquals(1, result.checkHeader);
             assertEquals(4194304, result.chunkSize);
@@ -168,7 +172,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
 
     private void test_iris_summary(final CountDownLatch latch, final ParseV3 data, final JobV3 job) {
         if ("DONE".equals(job.status)) {
-            h2oHelper.getFrameSummary(data.destinationFrame.name).execute((call, res) -> {
+            h2oHelper.getFrameSummary(getSessionKey(), data.destinationFrame.name).execute((call, res) -> {
                 final FramesV3 result = res.body();
                 assertEquals(1, result.frames.length);
                 final FrameV3 frame = result.frames[0];
@@ -214,7 +218,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
         } else if ("CANCELLED".equals(job.status) || "FAILED".equals(job.status)) {
             fail(new AssertionFailedError("job.status: " + job.status), latch);
         } else {
-            h2oHelper.fetchJobs(job.key.name).execute((call, res) -> {
+            h2oHelper.fetchJobs(getSessionKey(), job.key.name).execute((call, res) -> {
                 final JobsV3 result = res.body();
                 for (final JobV3 j : result.jobs) {
                     if (j.key.name.equals(job.key.name)) {
@@ -230,7 +234,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_columnSummary(final CountDownLatch latch, final ParseV3 data) {
-        h2oHelper.getFrameColumnSummary(data.destinationFrame.name, "SepalLength").execute((call, res) -> {
+        h2oHelper.getFrameColumnSummary(getSessionKey(), data.destinationFrame.name, "SepalLength").execute((call, res) -> {
             final FramesV3 result = res.body();
             assertEquals(1, result.frames.length);
             final FrameV3 frame = result.frames[0];
@@ -260,6 +264,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
 
     private void test_iris_runAutoML(final CountDownLatch latch, final ParseV3 data) {
         h2oHelper.runAutoML(
+                getSessionKey(),
                 AutoMLBuildControlBuilder
                         .create()
                         .projectName("iris")
@@ -322,7 +327,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
 
     private void test_iris_leaderboard(final CountDownLatch latch, final AutoMLBuildSpecV99 data, final JobV3 job) {
         if ("DONE".equals(job.status)) {
-            h2oHelper.getLeaderboard(job.dest.name).execute((call, res) -> {
+            h2oHelper.getLeaderboard(getSessionKey(), job.dest.name).execute((call, res) -> {
                 final LeaderboardV99 result = res.body();
                 assertNull(result.leaderboardFrame);
                 assertEquals(0, result.leaderboardFrameChecksum);
@@ -347,7 +352,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
             fail(new AssertionFailedError("job.status: " + job.status), latch);
         } else {
             sleep(1000L);
-            h2oHelper.fetchJobs(job.key.name).execute((call, res) -> {
+            h2oHelper.fetchJobs(getSessionKey(), job.key.name).execute((call, res) -> {
                 final JobsV3 result = res.body();
                 for (final JobV3 j : result.jobs) {
                     if (j.key.name.equals(job.key.name)) {
@@ -363,7 +368,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_getModel(final CountDownLatch latch, final ModelKeyV3 modelKey) {
-        h2oHelper.getModel(modelKey).execute((call, res) -> {
+        h2oHelper.getModel(getSessionKey(), modelKey).execute((call, res) -> {
             final ModelsV3 result = res.body();
             assertEquals("", result._excludeFields);
             assertNull(result.compatibleFrames);
@@ -381,7 +386,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     private void test_iris_predict(final CountDownLatch latch, final ModelKeyV3 modelKey) {
         final FrameKeyV3 frameKey = new FrameKeyV3();
         frameKey.name = "iris.hex";
-        h2oHelper.predict(modelKey, frameKey).execute((call, res) -> {
+        h2oHelper.predict(getSessionKey(), modelKey, frameKey).execute((call, res) -> {
             final ModelMetricsListSchemaV3 result = res.body();
             assertEquals("", result._excludeFields);
             assertEquals("", result.customMetricFunc);

@@ -15,8 +15,6 @@
  */
 package org.codelibs.fione.app.web.admin.systemml;
 
-import java.io.InputStream;
-
 import javax.annotation.Resource;
 
 import org.apache.logging.log4j.LogManager;
@@ -24,14 +22,10 @@ import org.apache.logging.log4j.Logger;
 import org.codelibs.fess.annotation.Secured;
 import org.codelibs.fess.util.RenderDataUtil;
 import org.codelibs.fione.app.web.base.FioneAdminAction;
-import org.codelibs.fione.h2o.bindings.pojos.CloudV3;
-import org.codelibs.fione.h2o.bindings.pojos.ShutdownV3;
 import org.codelibs.fione.helper.H2oHelper;
 import org.lastaflute.web.Execute;
 import org.lastaflute.web.response.HtmlResponse;
 import org.lastaflute.web.ruts.process.ActionRuntime;
-
-import retrofit2.Response;
 
 public class AdminSystemmlAction extends FioneAdminAction {
 
@@ -71,7 +65,7 @@ public class AdminSystemmlAction extends FioneAdminAction {
         validate(form, messages -> {}, this::asListHtml);
         verifyTokenKeep(this::asListHtml);
         try {
-            final Response<ShutdownV3> shutdownClusterResponse = h2oHelper.shutdownCluster().execute();
+            final var shutdownClusterResponse = h2oHelper.shutdownCluster(getSessionKey()).execute();
             if (logger.isDebugEnabled()) {
                 logger.debug("shutdownClusterResponse: {}", shutdownClusterResponse);
             }
@@ -112,15 +106,15 @@ public class AdminSystemmlAction extends FioneAdminAction {
     @Execute
     @Secured({ ROLE })
     public HtmlResponse uploadmodule(final UploadModuleForm form) {
-        validate(form, messages -> {}, () -> asAddModuleHtml());
-        verifyToken(() -> asAddModuleHtml());
-        final String fileName = form.moduleFile.getFileName();
-        try (InputStream in = form.moduleFile.getInputStream()) {
+        validate(form, messages -> {}, this::asAddModuleHtml);
+        verifyToken(this::asAddModuleHtml);
+        final var fileName = form.moduleFile.getFileName();
+        try (var in = form.moduleFile.getInputStream()) {
             pythonHelper.addModule(fileName, in);
             saveMessage(messages -> messages.addSuccessUploadedModule(GLOBAL, fileName));
         } catch (final Exception e) {
             logger.warn("Failed to add " + form.moduleFile.getFileName(), e);
-            throw validationError(messages -> messages.addErrorsFailedToUploadModule(GLOBAL, fileName), () -> asAddModuleHtml());
+            throw validationError(messages -> messages.addErrorsFailedToUploadModule(GLOBAL, fileName), this::asAddModuleHtml);
         }
         return redirect(AdminSystemmlAction.class);
     }
@@ -130,16 +124,16 @@ public class AdminSystemmlAction extends FioneAdminAction {
     //                                                                           =========
 
     private HtmlResponse asListHtml() {
-        final String token = doubleSubmitManager.saveToken(myTokenGroupType());
+        final var token = doubleSubmitManager.saveToken(myTokenGroupType());
         return asHtml(path_AdminSystemml_AdminSystemmlJsp).renderWith(data -> {
             RenderDataUtil.register(data, "token", token);
             try {
-                final Response<CloudV3> cloudStatusResponse = h2oHelper.getCloudStatus().execute();
+                final var cloudStatusResponse = h2oHelper.getCloudStatus(getSessionKey()).execute();
                 if (logger.isDebugEnabled()) {
                     logger.debug("cloudStatusResponse: {}", cloudStatusResponse);
                 }
                 if (cloudStatusResponse.code() == 200) {
-                    final CloudV3 cloudStatus = cloudStatusResponse.body();
+                    final var cloudStatus = cloudStatusResponse.body();
                     RenderDataUtil.register(data, "cloudStatus", cloudStatus);
                 }
             } catch (final Exception e) {

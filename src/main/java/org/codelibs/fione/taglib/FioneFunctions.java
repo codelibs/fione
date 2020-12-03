@@ -37,12 +37,12 @@ public class FioneFunctions {
         if (frameId == null) {
             return null;
         }
-        String name = frameId;
-        final int pos = frameId.lastIndexOf('.');
+        var name = frameId;
+        final var pos = frameId.lastIndexOf('.');
         if (pos != -1) {
             name = frameId.substring(0, pos);
         }
-        final String[] values = name.split("_");
+        final var values = name.split("_");
         if (values.length == 2) {
             return StringCodecUtil.decode(values[1]);
         } else if (values.length == 3) {
@@ -55,14 +55,14 @@ public class FioneFunctions {
         if (frameId == null) {
             return null;
         }
-        String name = frameId;
-        String suffix = StringUtil.EMPTY;
-        final int pos = frameId.lastIndexOf('.');
+        var name = frameId;
+        var suffix = StringUtil.EMPTY;
+        final var pos = frameId.lastIndexOf('.');
         if (pos != -1) {
             name = frameId.substring(0, pos);
             suffix = frameId.substring(pos);
         }
-        final String[] values = name.split("_");
+        final var values = name.split("_");
         if (values.length >= 2) {
             return values[0] + "_" + values[1] + "_" + StringCodecUtil.encodeUrlSafe(newName) + suffix;
         }
@@ -76,7 +76,7 @@ public class FioneFunctions {
         if (StringUtil.isBlank(format)) {
             return value.toString();
         }
-        final String lf = format.toLowerCase(Locale.ROOT);
+        final var lf = format.toLowerCase(Locale.ROOT);
         final Object arg;
         try {
             if (lf.endsWith("e") || lf.endsWith("f") || lf.endsWith("g") || lf.endsWith("a")) {

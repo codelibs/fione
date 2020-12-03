@@ -63,7 +63,7 @@ public class ChartData {
     }
 
     protected void addAxisInfo(final String axis, final String name, final String value) {
-        Map<String, Object> params = axisMap.get(axis);
+        var params = axisMap.get(axis);
         if (params == null) {
             params = new HashMap<>();
             axisMap.put(axis, params);
@@ -76,7 +76,7 @@ public class ChartData {
     }
 
     public int getHeight() {
-        final Object value = sizeMap.get("height");
+        final var value = sizeMap.get("height");
         if (value instanceof Number) {
             return ((Number) value).intValue() + 100;
         }
@@ -84,9 +84,9 @@ public class ChartData {
     }
 
     public List<Map<String, Object>> getXAxis() {
-        final StringBuilder buf = new StringBuilder(1000);
+        final var buf = new StringBuilder(1000);
         buf.append('[');
-        final Object[] values = columnMap.get(axisName);
+        final var values = columnMap.get(axisName);
         if (values != null) {
             for (final Object value : values) {
                 toJsonString(buf, value, ",");
@@ -109,7 +109,7 @@ public class ChartData {
 
     public List<Map<String, Object>> getSeries() {
         return columnMap.entrySet().stream().filter(e -> !e.getKey().equals(axisName)).map(e -> {
-            final StringBuilder buf = new StringBuilder(1000);
+            final var buf = new StringBuilder(1000);
             buf.append('[');
             for (final Object value : e.getValue()) {
                 toJsonString(buf, value, ",");
@@ -127,7 +127,7 @@ public class ChartData {
         } else if (value instanceof Map) {
             buf.append('{');
             @SuppressWarnings("unchecked")
-            final Map<String, Object> map = (Map<String, Object>) value;
+            final var map = (Map<String, Object>) value;
             map.entrySet().forEach(e -> {
                 toJsonString(buf, e.getKey(), ":");
                 toJsonString(buf, e.getValue(), ",");

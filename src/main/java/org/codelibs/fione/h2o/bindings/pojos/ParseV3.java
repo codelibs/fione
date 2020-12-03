@@ -170,8 +170,8 @@ public class ParseV3 extends RequestSchemaV3 {
             return columnNames;
         }
         if (columnTypes != null) {
-            final String[] names = new String[columnTypes.length];
-            for (int i = 0; i < columnTypes.length; i++) {
+            final var names = new String[columnTypes.length];
+            for (var i = 0; i < columnTypes.length; i++) {
                 names[i] = "C" + (i + 1);
             }
             return names;

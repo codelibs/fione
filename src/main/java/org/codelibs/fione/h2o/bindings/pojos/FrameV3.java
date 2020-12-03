@@ -171,8 +171,8 @@ public class FrameV3 extends FrameBaseV3 {
 
     public List<List<String>> getDataRows() {
         final List<List<String>> dataList = new ArrayList<>(20);
-        final int rowSize = getRowSize();
-        for (int i = 0; i < rowSize; i++) {
+        final var rowSize = getRowSize();
+        for (var i = 0; i < rowSize; i++) {
             final List<String> list = new ArrayList<>();
             for (final ColV3 column : columns) {
                 if (column.data != null) {

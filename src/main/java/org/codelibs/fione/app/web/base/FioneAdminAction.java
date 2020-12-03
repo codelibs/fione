@@ -23,9 +23,12 @@ import java.util.function.BiFunction;
 
 import javax.annotation.Resource;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.codelibs.core.collection.Maps;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fess.app.web.base.FessAdminAction;
+import org.codelibs.fess.mylasta.action.FessUserBean;
 import org.codelibs.fess.util.RenderDataUtil;
 import org.codelibs.fione.exception.FioneSystemException;
 import org.codelibs.fione.h2o.bindings.pojos.Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider;
@@ -46,6 +49,8 @@ import org.lastaflute.web.validation.VaMessenger;
  */
 public abstract class FioneAdminAction extends FessAdminAction implements FioneHtmlPath {
 
+    private static final Logger logger = LogManager.getLogger(FioneAdminAction.class);
+
     protected static final String DATASET_ID = "did";
 
     protected static final String FRAME_ID = "fid";
@@ -64,7 +69,7 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
     protected DoubleSubmitManager doubleSubmitManager;
 
     protected void saveMessage(final VaMessenger<FioneMessages> validationMessagesLambda) {
-        final FioneMessages messages = createMessages();
+        final var messages = createMessages();
         validationMessagesLambda.message(messages);
         sessionManager.info().saveMessages(messages);
     }
@@ -72,7 +77,7 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
     protected FioneSystemException validationError(final VaMessenger<FioneMessages> validationMessagesLambda,
             final VaErrorHook validationErrorLambda) {
         createValidator().throwValidationError(() -> {
-            final FioneMessages messages = createMessages();
+            final var messages = createMessages();
             validationMessagesLambda.message(messages);
             return messages;
         }, validationErrorLambda);
@@ -127,9 +132,9 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
     protected void registerColumnItems(final ParseV3 schema, final RenderData data,
             final BiFunction<Maps<String, String>, Integer, Maps<String, String>> maps) {
         final List<Map<String, String>> columnItems = new ArrayList<>();
-        final String[] columnNames = schema.getAvailableColumnNames();
-        for (int i = 0; i < columnNames.length; i++) {
-            final String columnName = columnNames[i];
+        final var columnNames = schema.getAvailableColumnNames();
+        for (var i = 0; i < columnNames.length; i++) {
+            final var columnName = columnNames[i];
             columnItems.add(maps.apply(
                     Maps.map("id", StringCodecUtil.encodeUrlSafe(columnName)).$("name", columnName).$("value", schema.columnTypes[i]), i)
                     .$());
@@ -154,10 +159,24 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
         if (projectName == null) {
             return StringUtil.EMPTY;
         }
-        final int pos = projectName.indexOf("@@");
+        final var pos = projectName.indexOf("@@");
         if (pos == -1) {
             return projectName;
         }
         return projectName.split("@@", 2)[1];
     }
+
+    protected String getSessionKey() {
+        String sessionKey;
+        try {
+            sessionKey = fessLoginAssist.getSavedUserBean().map(FessUserBean::getUserId).orElse("guest");
+        } catch (final Exception e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to get sessionKey.", e);
+            }
+            sessionKey = "guest";
+        }
+        return StringCodecUtil.encodeUrlSafe(sessionKey);
+    }
+
 }

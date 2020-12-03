@@ -39,11 +39,7 @@ import org.codelibs.core.io.FileUtil;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fess.exception.JobProcessingException;
-import org.codelibs.fess.helper.ProcessHelper;
-import org.codelibs.fess.mylasta.direction.FessConfig;
 import org.codelibs.fess.util.ComponentUtil;
-import org.codelibs.fess.util.InputStreamThread;
-import org.codelibs.fess.util.JobProcess;
 import org.codelibs.fess.util.ResourceUtil;
 import org.codelibs.fione.exception.PythonExecutionException;
 import org.elasticsearch.common.xcontent.LoggingDeprecationHandler;
@@ -77,12 +73,12 @@ public class PythonHelper {
         final List<PythonModule> predictModuleList = new ArrayList<>();
         for (final File pyFile : ResourceUtil.getEnvPath("fione", "python").toFile().listFiles((dir, name) -> name.endsWith(".py"))) {
             try {
-                final String jsonString = executePython(pyFile, null, null);
+                final var jsonString = executePython(pyFile, null, null);
                 if (logger.isDebugEnabled()) {
                     logger.debug("Python Module: {} => {}", pyFile.getAbsolutePath(), jsonString);
                 }
 
-                final PythonModule pythonModule = new PythonModule(pyFile, jsonString);
+                final var pythonModule = new PythonModule(pyFile, jsonString);
                 logger.info("Load Module: {}", pythonModule.getId());
                 switch (pythonModule.getType()) {
                 case FRAME:
@@ -116,11 +112,11 @@ public class PythonHelper {
     }
 
     public void execute(final String id, final Map<String, Object> params, final Consumer<String> progress) {
-        final PythonModule module = findPythonModule(id);
+        final var module = findPythonModule(id);
         if (module == null) {
             throw new PythonExecutionException(id + " is not found.");
         }
-        final File iniFile = ComponentUtil.getSystemHelper().createTempFile("fione_", ".ini");
+        final var iniFile = ComponentUtil.getSystemHelper().createTempFile("fione_", ".ini");
         try {
             writeIniFile(iniFile, params);
             progress.accept("FIONE:{\"type\":\"ini_file\",\"content\":\""
@@ -153,10 +149,10 @@ public class PythonHelper {
     }
 
     protected String executePython(final File pyFile, final File iniFile, final Consumer<String> progress) {
-        final FessConfig fessConfig = ComponentUtil.getFessConfig();
-        final ProcessHelper processHelper = ComponentUtil.getProcessHelper();
-        final File baseDir = ResourceUtil.getEnvPath("fione", "python").toFile();
-        final String pythonCommand = fessConfig.getSystemProperty("fione.python.path", "python3");
+        final var fessConfig = ComponentUtil.getFessConfig();
+        final var processHelper = ComponentUtil.getProcessHelper();
+        final var baseDir = ResourceUtil.getEnvPath("fione", "python").toFile();
+        final var pythonCommand = fessConfig.getSystemProperty("fione.python.path", "python3");
         final List<String> cmdList = Lists.newArrayList(pythonCommand, pyFile.getAbsolutePath());
         if (iniFile != null) {
             cmdList.add(iniFile.getAbsolutePath());
@@ -166,27 +162,27 @@ public class PythonHelper {
             logger.debug("Execute Python: {}", cmdList);
         }
 
-        final String sessionId = UUID.randomUUID().toString().replace("-", StringUtil.EMPTY);
+        final var sessionId = UUID.randomUUID().toString().replace("-", StringUtil.EMPTY);
         try {
-            final JobProcess jobProcess = processHelper.startProcess(sessionId, cmdList, pb -> {
+            final var jobProcess = processHelper.startProcess(sessionId, cmdList, pb -> {
                 pb.directory(baseDir);
                 pb.redirectErrorStream(true);
             }, 10000, progress);
 
-            final InputStreamThread it = jobProcess.getInputStreamThread();
+            final var it = jobProcess.getInputStreamThread();
             it.start();
 
-            final Process currentProcess = jobProcess.getProcess();
+            final var currentProcess = jobProcess.getProcess();
             currentProcess.waitFor();
             it.join(5000);
 
-            final int exitValue = currentProcess.exitValue();
+            final var exitValue = currentProcess.exitValue();
 
             if (logger.isInfoEnabled()) {
                 logger.info("Python: Exit Code={} - Process Output:\n{}", exitValue, it.getOutput());
             }
             if (exitValue != 0) {
-                final StringBuilder out = new StringBuilder();
+                final var out = new StringBuilder();
                 out.append("Exit Code: ").append(exitValue).append("\nOutput:\n").append(it.getOutput());
                 throw new PythonExecutionException(out.toString());
             }
@@ -203,15 +199,15 @@ public class PythonHelper {
     }
 
     protected void writeIniFile(final File iniFile, final Map<String, Object> params) {
-        final String endpoint = ((CustomSystemHelper) ComponentUtil.getSystemHelper()).getH2oEndpoint();
+        final var endpoint = ((CustomSystemHelper) ComponentUtil.getSystemHelper()).getH2oEndpoint();
         try (final Writer writer = new BufferedWriter(new FileWriter(iniFile, Constants.UTF_8_CHARSET))) {
             writer.write("[h2o]\n");
             writer.write("url = " + endpoint + "\n");
             writer.write("[parameters]\n");
             for (final Map.Entry<String, Object> e : params.entrySet()) {
-                Object value = e.getValue();
+                var value = e.getValue();
                 if (value instanceof String[]) {
-                    final String[] values = (String[]) value;
+                    final var values = (String[]) value;
                     value = "[" + Arrays.stream(values).map(s -> "\"" + s + "\"").collect(Collectors.joining(",")) + "]";
                 }
                 writer.write(e.getKey() + " = " + value + "\n");
@@ -227,7 +223,7 @@ public class PythonHelper {
     }
 
     public void addModule(final String fileName, final InputStream in) {
-        final String name = fileName.endsWith(".py") ? fileName : fileName + ".py";
+        final var name = fileName.endsWith(".py") ? fileName : fileName + ".py";
         CopyUtil.copy(in, ResourceUtil.getEnvPath("fione", "python", name).toFile());
         reload();
     }
@@ -263,7 +259,7 @@ public class PythonHelper {
         @SuppressWarnings("unchecked")
         public PythonModule(final File pyFile, final String jsonString) throws IOException {
             this.pyFile = pyFile;
-            final Map<String, Object> params =
+            final var params =
                     JsonXContent.jsonXContent.createParser(NamedXContentRegistry.EMPTY, LoggingDeprecationHandler.INSTANCE, jsonString)
                             .map();
             id = (String) params.get("id");
@@ -306,7 +302,7 @@ public class PythonHelper {
         }
 
         public void execute(final Map<String, Object> params, final Consumer<String> progress) {
-            final PythonHelper pythonHelper = ComponentUtil.getComponent(PythonHelper.class);
+            final var pythonHelper = ComponentUtil.getComponent(PythonHelper.class);
             pythonHelper.execute(id, params, progress);
         }
 

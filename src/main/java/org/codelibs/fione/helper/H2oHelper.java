@@ -33,10 +33,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.codelibs.core.exception.IORuntimeException;
 import org.codelibs.curl.Curl;
-import org.codelibs.curl.CurlResponse;
-import org.codelibs.fess.app.web.base.login.FessLoginAssist;
-import org.codelibs.fess.mylasta.action.FessUserBean;
-import org.codelibs.fess.util.ComponentUtil;
 import org.codelibs.fione.exception.FioneSystemException;
 import org.codelibs.fione.exception.H2oAccessException;
 import org.codelibs.fione.h2o.bindings.H2oApi;
@@ -66,7 +62,6 @@ import org.codelibs.fione.h2o.bindings.pojos.ShutdownV3;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.AutoMLBuilder;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.Frames;
 import org.codelibs.fione.h2o.bindings.proxies.retrofit.Jobs;
-import org.codelibs.fione.util.StringCodecUtil;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -110,7 +105,7 @@ public class H2oHelper {
                 .build(new CacheLoader<String, H2oApi>() {
                     @Override
                     public H2oApi load(final String key) throws IOException {
-                        final H2oApi h2o =
+                        final var h2o =
                                 new H2oApi(endpoint).connectTimeout(connectTimeout).readTimeout(readTimeout).writeTimeout(writeTimeout);
                         httpInterceptorList.stream().forEach(h2o::addInterceptor);
                         h2o.newSession(key).execute();
@@ -123,8 +118,7 @@ public class H2oHelper {
         h2oApiCache.invalidateAll();
     }
 
-    protected H2oApi getH2oApi() {
-        final String sessionKey = getSessionKey();
+    protected H2oApi getH2oApi(final String sessionKey) {
         try {
             return h2oApiCache.get(sessionKey);
         } catch (final ExecutionException e) {
@@ -136,203 +130,190 @@ public class H2oHelper {
         this.endpoint = endpoint;
     }
 
-    public Callable<CloudV3> getCloudStatus() {
-        return new Callable<>(getH2oApi().cloudStatus());
+    public Callable<CloudV3> getCloudStatus(final String sessionKey) {
+        return new Callable<>(getH2oApi(sessionKey).cloudStatus());
     }
 
-    public Callable<ShutdownV3> shutdownCluster() {
-        return new Callable<>(getH2oApi().shutdownCluster());
+    public Callable<ShutdownV3> shutdownCluster(final String sessionKey) {
+        return new Callable<>(getH2oApi(sessionKey).shutdownCluster());
     }
 
-    public Callable<ImportFilesV3> importFiles(final String path) {
-        return new Callable<>(getH2oApi().importFiles(path));
+    public Callable<ImportFilesV3> importFiles(final String sessionKey, final String path) {
+        return new Callable<>(getH2oApi(sessionKey).importFiles(path));
     }
 
-    public Callable<FramesListV3> getFrames(final FrameKeyV3 frameId) {
-        return new Callable<>(getH2oApi().frames(frameId));
+    public Callable<FramesListV3> getFrames(final String sessionKey, final FrameKeyV3 frameId) {
+        return new Callable<>(getH2oApi(sessionKey).frames(frameId));
     }
 
-    public Callable<FramesListV3> getFrames(final String frameId) {
-        return getFrames(new FrameKeyV3(frameId));
+    public Callable<FramesListV3> getFrames(final String sessionKey, final String frameId) {
+        return getFrames(sessionKey, new FrameKeyV3(frameId));
     }
 
-    public Callable<FramesV3> deleteFrame(final FrameKeyV3 frameId) {
-        return new Callable<>(getH2oApi().deleteFrame(frameId));
+    public Callable<FramesV3> deleteFrame(final String sessionKey, final FrameKeyV3 frameId) {
+        return new Callable<>(getH2oApi(sessionKey).deleteFrame(frameId));
     }
 
-    public Callable<FramesV3> deleteFrame(final String frameId) {
-        return deleteFrame(new FrameKeyV3(frameId));
+    public Callable<FramesV3> deleteFrame(final String sessionKey, final String frameId) {
+        return deleteFrame(sessionKey, new FrameKeyV3(frameId));
     }
 
-    public Callable<ParseSetupV3> setupParse(final ParseSetupV3 parseSetup) {
-        return new Callable<>(getH2oApi().guessParseSetup(parseSetup));
+    public Callable<ParseSetupV3> setupParse(final String sessionKey, final ParseSetupV3 parseSetup) {
+        return new Callable<>(getH2oApi(sessionKey).guessParseSetup(parseSetup));
     }
 
-    public Callable<ParseV3> parseFiles(final ParseV3 params) {
-        return new Callable<>(getH2oApi().parse(params));
+    public Callable<ParseV3> parseFiles(final String sessionKey, final ParseV3 params) {
+        return new Callable<>(getH2oApi(sessionKey).parse(params));
     }
 
-    public Callable<JobsV3> fetchJobs(final String jobId) {
-        final Jobs service = getH2oApi().getService(Jobs.class);
-        final Call<JobsV3> call = service.fetch(jobId);
+    public Callable<JobsV3> fetchJobs(final String sessionKey, final String jobId) {
+        final var service = getH2oApi(sessionKey).getService(Jobs.class);
+        final var call = service.fetch(jobId);
         return new Callable<>(call);
     }
 
-    public Callable<FramesV3> getFrameSummary(final String frameId) {
-        return new Callable<>(getH2oApi().frameSummary(frameId));
+    public Callable<FramesV3> getFrameSummary(final String sessionKey, final String frameId) {
+        return new Callable<>(getH2oApi(sessionKey).frameSummary(frameId));
     }
 
-    public Callable<FramesV3> getFrameColumnSummary(final String frameId, final String column) {
-        final Frames service = getH2oApi().getService(Frames.class);
-        final Call<FramesV3> call = service.columnSummary(frameId, column);
+    public Callable<FramesV3> getFrameColumnSummary(final String sessionKey, final String frameId, final String column) {
+        final var service = getH2oApi(sessionKey).getService(Frames.class);
+        final var call = service.columnSummary(frameId, column);
         return new Callable<>(call);
     }
 
-    public Callable<AutoMLBuildSpecV99> runAutoML(final AutoMLBuildControlV99 buildControl, final AutoMLInputV99 inputSpec,
-            final AutoMLBuildModelsV99 buildModels) {
-        final AutoMLBuilder service = getH2oApi().getService(AutoMLBuilder.class);
-        final Call<AutoMLBuildSpecV99> call = service.build(buildControl, inputSpec, buildModels);
+    public Callable<AutoMLBuildSpecV99> runAutoML(final String sessionKey, final AutoMLBuildControlV99 buildControl,
+            final AutoMLInputV99 inputSpec, final AutoMLBuildModelsV99 buildModels) {
+        final var service = getH2oApi(sessionKey).getService(AutoMLBuilder.class);
+        final var call = service.build(buildControl, inputSpec, buildModels);
         return new Callable<>(call);
     }
 
-    public Callable<LeaderboardV99> getLeaderboard(final String projectName) {
-        return new Callable<>(getH2oApi().leaderboard(projectName));
+    public Callable<LeaderboardV99> getLeaderboard(final String sessionKey, final String projectName) {
+        return new Callable<>(getH2oApi(sessionKey).leaderboard(projectName));
     }
 
-    public Callable<LeaderboardsV99> getLeaderboards() {
-        return new Callable<>(getH2oApi().leaderboards());
+    public Callable<LeaderboardsV99> getLeaderboards(final String sessionKey) {
+        return new Callable<>(getH2oApi(sessionKey).leaderboards());
     }
 
-    public Callable<ModelsV3> getModel(final ModelKeyV3 model) {
-        return new Callable<>(getH2oApi().model(model));
+    public Callable<ModelsV3> getModel(final String sessionKey, final ModelKeyV3 model) {
+        return new Callable<>(getH2oApi(sessionKey).model(model));
     }
 
-    public Callable<ModelsV3> deleteModel(final ModelKeyV3 model) {
-        return new Callable<>(getH2oApi().deleteModel(model));
+    public Callable<ModelsV3> deleteModel(final String sessionKey, final ModelKeyV3 model) {
+        return new Callable<>(getH2oApi(sessionKey).deleteModel(model));
     }
 
-    public Callable<ModelMetricsListSchemaV3> predict(final ModelKeyV3 model, final FrameKeyV3 frame) {
-        return new Callable<>(getH2oApi().predict(model, frame));
+    public Callable<ModelMetricsListSchemaV3> predict(final String sessionKey, final ModelKeyV3 model, final FrameKeyV3 frame) {
+        return new Callable<>(getH2oApi(sessionKey).predict(model, frame));
     }
 
-    public Callable<ModelMetricsListSchemaV3> predict(final String modelId, final String frameId) {
-        return predict(new ModelKeyV3(modelId), new FrameKeyV3(frameId));
+    public Callable<ModelMetricsListSchemaV3> predict(final String sessionKey, final String modelId, final String frameId) {
+        return predict(sessionKey, new ModelKeyV3(modelId), new FrameKeyV3(frameId));
     }
 
-    public Callable<JobsV3> getJobs(final JobKeyV3 jobId) {
-        return new Callable<>(getH2oApi().jobs(jobId));
+    public Callable<JobsV3> getJobs(final String sessionKey, final JobKeyV3 jobId) {
+        return new Callable<>(getH2oApi(sessionKey).jobs(jobId));
     }
 
-    public Callable<JobsV3> cancelJob(final JobKeyV3 jobId) {
-        return new Callable<>(getH2oApi().cancelJob(jobId, null));
+    public Callable<JobsV3> cancelJob(final String sessionKey, final JobKeyV3 jobId) {
+        return new Callable<>(getH2oApi(sessionKey).cancelJob(jobId, null));
     }
 
-    public Callable<JobsV3> getJobs(final String jobId) {
-        return getJobs(new JobKeyV3(jobId));
+    public Callable<JobsV3> getJobs(final String sessionKey, final String jobId) {
+        return getJobs(sessionKey, new JobKeyV3(jobId));
     }
 
-    public Callable<RapidsSchemaV3> bindFrames(final FrameKeyV3 destinationFrame, final FrameKeyV3[] sourceFrames) {
-        final StringBuilder buf = new StringBuilder(100);
+    public Callable<RapidsSchemaV3> bindFrames(final String sessionKey, final FrameKeyV3 destinationFrame, final FrameKeyV3[] sourceFrames) {
+        final var buf = new StringBuilder(100);
         buf.append("(assign ").append(H2oApi.keyToString(destinationFrame)).append(" (cbind");
         Arrays.stream(sourceFrames).map(H2oApi::keyToString).forEach(s -> buf.append(' ').append(s));
         buf.append("))");
-        return new Callable<>(getH2oApi().rapidsExec(buf.toString()));
+        return new Callable<>(getH2oApi(sessionKey).rapidsExec(buf.toString()));
     }
 
-    public Callable<RapidsSchemaV3> bindFrames(final String destinationFrame, final String[] sourceFrames) {
-        return bindFrames(new FrameKeyV3(destinationFrame), Arrays.stream(sourceFrames).map(FrameKeyV3::new)
-                .toArray(n -> new FrameKeyV3[n]));
+    public Callable<RapidsSchemaV3> bindFrames(final String sessionKey, final String destinationFrame, final String[] sourceFrames) {
+        return bindFrames(sessionKey, new FrameKeyV3(destinationFrame),
+                Arrays.stream(sourceFrames).map(FrameKeyV3::new).toArray(n -> new FrameKeyV3[n]));
     }
 
-    public Callable<FramesV3> exportFrame(final FrameKeyV3 frame, final String path, final boolean overwrite) {
-        final FramesV3 params = new FramesV3();
+    public Callable<FramesV3> exportFrame(final String sessionKey, final FrameKeyV3 frame, final String path, final boolean overwrite) {
+        final var params = new FramesV3();
         params.frameId = frame;
         params.path = path;
         params.force = overwrite;
         params.compression = null;
-        return new Callable<>(getH2oApi().exportFrame(params));
+        return new Callable<>(getH2oApi(sessionKey).exportFrame(params));
     }
 
-    public Callable<FramesV3> getFrameData(final FramesV3 params) {
-        return new Callable<>(getH2oApi().frame(params));
+    public Callable<FramesV3> getFrameData(final String sessionKey, final FramesV3 params) {
+        return new Callable<>(getH2oApi(sessionKey).frame(params));
     }
 
-    public Callable<FramesV3> getFrameColumnData(final FramesV3 params) {
-        return new Callable<>(getH2oApi().frameColumnSummary(params.frameId, params.column));
+    public Callable<FramesV3> getFrameColumnData(final String sessionKey, final FramesV3 params) {
+        return new Callable<>(getH2oApi(sessionKey).frameColumnSummary(params.frameId, params.column));
     }
 
-    public Callable<InitIDV3> newSession() {
-        return new Callable<>(getH2oApi().newSession(getSessionKey()));
+    public Callable<InitIDV3> newSession(final String sessionKey) {
+        return new Callable<>(getH2oApi(sessionKey).newSession(sessionKey));
     }
 
-    public void closeSession() {
-        h2oApiCache.invalidate(getSessionKey());
+    public void closeSession(final String sessionKey) {
+        h2oApiCache.invalidate(sessionKey);
     }
 
-    protected String getSessionKey() {
-        String sessionKey;
-        try {
-            sessionKey = ComponentUtil.getComponent(FessLoginAssist.class).getSavedUserBean().map(FessUserBean::getUserId).orElse("guest");
-        } catch (final Exception e) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Failed to get sessionKey.", e);
-            }
-            sessionKey = "guest";
-        }
-        return StringCodecUtil.encodeUrlSafe(sessionKey);
-    }
-
-    public void writeMojo(final String modelId, final Consumer<InputStream> in, final Consumer<Exception> e) {
-        String url = getH2oApi().getUrl();
+    public void writeMojo(final String sessionKey, final String modelId, final Consumer<InputStream> in, final Consumer<Exception> e) {
+        var url = getH2oApi(sessionKey).getUrl();
         if (!url.endsWith("/")) {
             url = url + "/";
         }
-        try (CurlResponse response = Curl.get(url + "3/Models/" + modelId + "/mojo").execute()) {
+        try (var response = Curl.get(url + "3/Models/" + modelId + "/mojo").execute()) {
             in.accept(response.getContentAsStream());
         } catch (final Exception e1) {
             e.accept(e1);
         }
     }
 
-    public void writeGenModel(final String modelId, final Consumer<InputStream> in, final Consumer<Exception> e) {
-        String url = getH2oApi().getUrl();
+    public void writeGenModel(final String sessionKey, final String modelId, final Consumer<InputStream> in, final Consumer<Exception> e) {
+        var url = getH2oApi(sessionKey).getUrl();
         if (!url.endsWith("/")) {
             url = url + "/";
         }
-        try (CurlResponse response = Curl.get(url + "3/h2o-genmodel.jar").execute()) {
+        try (var response = Curl.get(url + "3/h2o-genmodel.jar").execute()) {
             in.accept(response.getContentAsStream());
         } catch (final Exception e1) {
             e.accept(e1);
         }
     }
 
-    public Callable<ModelExportV3> exportModel(final String modelId, final String path) {
-        final ModelExportV3 params = new ModelExportV3();
+    public Callable<ModelExportV3> exportModel(final String sessionKey, final String modelId, final String path) {
+        final var params = new ModelExportV3();
         params.modelId = new ModelKeyV3(modelId);
         params.dir = path;
         params.force = true;
-        return new Callable<>(getH2oApi().exportModel(params));
+        return new Callable<>(getH2oApi(sessionKey).exportModel(params));
     }
 
-    public Callable<ModelsV3> importModel(final String modelId, final String path) {
-        final ModelImportV3 params = new ModelImportV3();
+    public Callable<ModelsV3> importModel(final String sessionKey, final String modelId, final String path) {
+        final var params = new ModelImportV3();
         params.modelId = new ModelKeyV3(modelId);
         params.dir = path;
         params.force = true;
-        return new Callable<>(getH2oApi().importModel(params));
+        return new Callable<>(getH2oApi(sessionKey).importModel(params));
     }
 
-    public Callable<RapidsSchemaV3> changeColumnType(final FrameKeyV3 targetFrame, final String columnType, final int index,
-            final long from, final long to) {
-        final StringBuilder buf = new StringBuilder(100);
+    public Callable<RapidsSchemaV3> changeColumnType(final String sessionKey, final FrameKeyV3 targetFrame, final String columnType,
+            final int index, final long from, final long to) {
+        final var buf = new StringBuilder(100);
         buf.append("(assign ").append(H2oApi.keyToString(targetFrame)).append(" (:= ").append(H2oApi.keyToString(targetFrame))
                 .append(" (as.").append(columnType).append(" (cols ").append(H2oApi.keyToString(targetFrame)).append(' ').append(index)
                 .append(")) ").append(index).append(" [").append(from).append(':').append(to).append("]))");
-        return new Callable<>(getH2oApi().rapidsExec(buf.toString()));
+        return new Callable<>(getH2oApi(sessionKey).rapidsExec(buf.toString()));
     }
 
     public ParseV3 convert(final ParseSetupV3 params) {
-        final ParseV3 newParams = new ParseV3();
+        final var newParams = new ParseV3();
         newParams._excludeFields = params._excludeFields;
         newParams.checkHeader = params.checkHeader;
         newParams.chunkSize = params.chunkSize;
@@ -392,9 +373,9 @@ public class H2oHelper {
         }
 
         public Response<T> execute(final long timeout) {
-            final CountDownLatch latch = new CountDownLatch(1);
-            final AtomicReference<Response<T>> result = new AtomicReference<>();
-            final AtomicReference<Throwable> failure = new AtomicReference<>();
+            final var latch = new CountDownLatch(1);
+            final var result = new AtomicReference<Response<T>>();
+            final var failure = new AtomicReference<Throwable>();
             execute(res -> {
                 result.set(res);
                 latch.countDown();
@@ -407,11 +388,11 @@ public class H2oHelper {
             } catch (final InterruptedException e) {
                 throw new H2oAccessException("Interrupted.", e);
             }
-            final Response<T> response = result.get();
+            final var response = result.get();
             if (response != null) {
                 return response;
             }
-            final Throwable t = failure.get();
+            final var t = failure.get();
             if (t != null) {
                 throw new H2oAccessException("Execution exception.", t);
             }

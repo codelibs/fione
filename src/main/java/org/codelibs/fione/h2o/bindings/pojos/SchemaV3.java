@@ -61,7 +61,7 @@ public class SchemaV3 {
                     Arrays.stream(getFieldNames())
                             .map(s -> {
                                 try {
-                                    final Object value = getClass().getField(s).get(this);
+                                    final var value = getClass().getField(s).get(this);
                                     if (value instanceof Number) {
                                         if (s.equals("runTime")) {
                                             return FessFunctions.formatDuration(((Number) value).longValue());

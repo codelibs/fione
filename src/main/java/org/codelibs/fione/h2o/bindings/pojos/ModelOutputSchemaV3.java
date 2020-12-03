@@ -177,16 +177,16 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
 
     public ChartData getScoringHistoryChart() {
         final Map<String, Integer> columnIndexMap = new HashMap<>();
-        for (int i = 0; i < scoringHistory.columns.length; i++) {
+        for (var i = 0; i < scoringHistory.columns.length; i++) {
             columnIndexMap.put(scoringHistory.columns[i].name, i);
         }
-        final String[] xNames = new String[] { "number_of_trees", "epochs", "iteration", "iterations" };
-        final String[] yNames =
+        final var xNames = new String[] { "number_of_trees", "epochs", "iteration", "iterations" };
+        final var yNames =
                 new String[] { "training_deviance", "training_classification_error", "deviance_train", "within_cluster_sum_of_squares",
                         "objective" };
         for (final String xName : xNames) {
             for (final String yName : yNames) {
-                final ChartData chart = getScoringHistoryChart(columnIndexMap, xName, yName);
+                final var chart = getScoringHistoryChart(columnIndexMap, xName, yName);
                 if (chart != null) {
                     return chart;
                 }
@@ -197,7 +197,7 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
 
     private ChartData getScoringHistoryChart(final Map<String, Integer> columnIndexMap, final String xName, final String yName) {
         if (columnIndexMap.containsKey(xName) && columnIndexMap.containsKey(yName)) {
-            final ChartData chartData = new ChartData();
+            final var chartData = new ChartData();
             chartData.addColumn(xName, scoringHistory.data[columnIndexMap.get(xName)]);
             chartData.addColumn(yName, scoringHistory.data[columnIndexMap.get(yName)]);
             chartData.setAxisName(xName);
@@ -214,16 +214,16 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
 
     protected ChartData getVariableImportancesChart(final TwoDimTableV3 dimTable) {
         final Map<String, Integer> columnIndexMap = new HashMap<>();
-        for (int i = 0; i < dimTable.columns.length; i++) {
+        for (var i = 0; i < dimTable.columns.length; i++) {
             columnIndexMap.put(dimTable.columns[i].name, i);
         }
         if (columnIndexMap.containsKey("variable") && columnIndexMap.containsKey("scaled_importance")) {
-            final ChartData chartData = new ChartData();
-            Object[] variables = dimTable.data[columnIndexMap.get("variable")];
+            final var chartData = new ChartData();
+            var variables = dimTable.data[columnIndexMap.get("variable")];
             variables = Arrays.copyOf(variables, variables.length);
             ArrayUtils.reverse(variables);
             chartData.addColumn("variable", variables);
-            Object[] importances = dimTable.data[columnIndexMap.get("scaled_importance")];
+            var importances = dimTable.data[columnIndexMap.get("scaled_importance")];
             importances = Arrays.copyOf(importances, importances.length);
             ArrayUtils.reverse(importances);
             chartData.addColumn("scaled_importance", importances, "bar");

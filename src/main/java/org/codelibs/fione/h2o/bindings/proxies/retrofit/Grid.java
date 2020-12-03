@@ -2656,8 +2656,8 @@ public interface Grid {
             if (keys == null) {
                 return null;
             }
-            final String[] ids = new String[keys.length];
-            int i = 0;
+            final var ids = new String[keys.length];
+            var i = 0;
             for (final KeyV3 key : keys) {
                 ids[i++] = key.name;
             }

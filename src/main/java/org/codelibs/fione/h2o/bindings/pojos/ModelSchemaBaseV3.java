@@ -94,7 +94,7 @@ public class ModelSchemaBaseV3 extends SchemaV3 {
         return inLocal;
     }
 
-    public void setInLocal(boolean inLocal) {
+    public void setInLocal(final boolean inLocal) {
         this.inLocal = inLocal;
     }
 }

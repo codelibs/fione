@@ -774,9 +774,10 @@ public class FioneLabels extends FessMessages {
      * Assert the property is not null.
      * @param property The value of the property. (NotNull)
      */
-    protected void assertPropertyNotNull(String property) {
+    @Override
+    protected void assertPropertyNotNull(final String property) {
         if (property == null) {
-            String msg = "The argument 'property' for message should not be null.";
+            final var msg = "The argument 'property' for message should not be null.";
             throw new IllegalArgumentException(msg);
         }
     }

@@ -182,13 +182,13 @@ public class ColV3 extends SchemaV3 {
         if (histogramBins != null) {
             if ("real".equals(type) || "int".equals(type)) {
                 histogramChart = new ChartData();
-                final String yName = "count";
-                final int range = histogramBins.length / 50 + 1;
-                double pos = histogramBase;
+                final var yName = "count";
+                final var range = histogramBins.length / 50 + 1;
+                var pos = histogramBase;
                 final List<Double> xList = new ArrayList<>();
                 final List<Long> yList = new ArrayList<>();
-                long sum = 0;
-                for (int i = 0; i < histogramBins.length; i++) {
+                var sum = 0L;
+                for (var i = 0; i < histogramBins.length; i++) {
                     if (i % range == 0) {
                         xList.add(pos);
                         if (i != 0) {
@@ -218,17 +218,17 @@ public class ColV3 extends SchemaV3 {
         }
         if (histogramBins != null && domain != null) {
             if ("enum".equals(type)) {
-                final String xName = "label";
-                final String yName = "count";
-                final int maxLength = Integer.parseInt(System.getProperty(Constants.CHART_MAX_ITEM_SIZE, "1000"));
+                final var xName = "label";
+                final var yName = "count";
+                final var maxLength = Integer.parseInt(System.getProperty(Constants.CHART_MAX_ITEM_SIZE, "1000"));
                 labelListChart = new ChartData();
-                String[] domains = Arrays.copyOf(domain, domain.length);
+                var domains = Arrays.copyOf(domain, domain.length);
                 ArrayUtils.reverse(domains);
                 if (domains.length > maxLength) {
                     domains = Arrays.copyOfRange(domains, 0, maxLength);
                 }
                 labelListChart.addColumn(xName, domains);
-                Long[] bins = Arrays.stream(histogramBins).mapToObj(Long::valueOf).toArray(n -> new Long[n]);
+                var bins = Arrays.stream(histogramBins).mapToObj(Long::valueOf).toArray(n -> new Long[n]);
                 bins = Arrays.copyOf(bins, bins.length);
                 ArrayUtils.reverse(bins);
                 if (domains.length > maxLength) {
@@ -239,7 +239,7 @@ public class ColV3 extends SchemaV3 {
                 labelListChart.addAxisLabel("x", xName);
                 labelListChart.addAxisType("x", "category");
                 labelListChart.addAxisLabel("y", yName);
-                int height = domain.length * 30;
+                var height = domain.length * 30;
                 if (height < 200) {
                     height = 200;
                 }
@@ -266,7 +266,7 @@ public class ColV3 extends SchemaV3 {
         if (columnCharacteristicsChart != null) {
             return columnCharacteristicsChart;
         }
-        final long others = rows - missingCount - zeroCount - negativeInfinityCount - positiveInfinityCount;
+        final var others = rows - missingCount - zeroCount - negativeInfinityCount - positiveInfinityCount;
         if (others > 0) {
             columnCharacteristicsChart = new ChartData();
             final List<Map<String, Object>> list = new ArrayList<>();

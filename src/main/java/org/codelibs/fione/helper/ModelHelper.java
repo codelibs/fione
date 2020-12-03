@@ -49,18 +49,18 @@ public class ModelHelper {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
-    public String serialize(ModelSchemaBaseV3 model) {
+    public String serialize(final ModelSchemaBaseV3 model) {
         try {
             return objectMapper.writeValueAsString(model);
-        } catch (JsonProcessingException e) {
+        } catch (final JsonProcessingException e) {
             throw new ModelIOException("Failed to serialize " + model, e);
         }
     }
 
-    public ModelSchemaBaseV3 deserialize(Reader reader) {
+    public ModelSchemaBaseV3 deserialize(final Reader reader) {
         try {
             return objectMapper.readValue(reader, ModelSchemaBaseV3.class);
-        } catch (Exception e) {
+        } catch (final Exception e) {
             throw new ModelIOException("Failed to deserialize " + reader, e);
         }
     }

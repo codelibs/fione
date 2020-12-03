@@ -94,7 +94,7 @@ public class DataSet {
         return checkHeader;
     }
 
-    public void setCheckHeader(int checkHeader) {
+    public void setCheckHeader(final int checkHeader) {
         this.checkHeader = checkHeader;
     }
 

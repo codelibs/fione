@@ -99,19 +99,19 @@ public class LeaderboardV99 extends SchemaV3 {
 
     public List<List<String>> getDataRows() {
         final List<List<String>> dataList = new ArrayList<>(100);
-        for (int index = 0; index < models.length; index++) {
+        for (var index = 0; index < models.length; index++) {
             final List<String> list = new ArrayList<>();
             if (table == null) {
                 list.add(models[index].name);
             } else {
-                for (int i = 0; i < table.columns.length; i++) {
-                    final ColumnSpecsBase column = table.columns[i];
+                for (var i = 0; i < table.columns.length; i++) {
+                    final var column = table.columns[i];
                     if (StringUtil.isBlank(column.name)) {
                         continue;
                     }
-                    final Object value = table.data[i][index];
+                    final var value = table.data[i][index];
                     try {
-                        final String formattedValue = String.format(column.format, value);
+                        final var formattedValue = String.format(column.format, value);
                         list.add(formattedValue);
                     } catch (final Exception e) {
                         if (value != null) {
@@ -133,7 +133,7 @@ public class LeaderboardV99 extends SchemaV3 {
         return inLocal;
     }
 
-    public void setInLocal(boolean inLocal) {
+    public void setInLocal(final boolean inLocal) {
         this.inLocal = inLocal;
     }
 }

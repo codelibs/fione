@@ -50,7 +50,7 @@ public class AutoMLInputBuilder {
         }
 
         public Context foldColumn(final String columnName, final String[] isMemberOfFrames) {
-            final ColSpecifierV3 colSpecifier = new ColSpecifierV3();
+            final var colSpecifier = new ColSpecifierV3();
             colSpecifier.columnName = columnName;
             colSpecifier.isMemberOfFrames = isMemberOfFrames;
             data.foldColumn = colSpecifier;
@@ -78,7 +78,7 @@ public class AutoMLInputBuilder {
         }
 
         public Context responseColumn(final String columnName, final String[] isMemberOfFrames) {
-            final ColSpecifierV3 colSpecifier = new ColSpecifierV3();
+            final var colSpecifier = new ColSpecifierV3();
             colSpecifier.columnName = columnName;
             colSpecifier.isMemberOfFrames = isMemberOfFrames == null ? StringUtil.EMPTY_STRINGS : isMemberOfFrames;
             data.responseColumn = colSpecifier;
@@ -116,7 +116,7 @@ public class AutoMLInputBuilder {
         }
 
         public Context weightsColumn(final String columnName, final String[] isMemberOfFrames) {
-            final ColSpecifierV3 colSpecifier = new ColSpecifierV3();
+            final var colSpecifier = new ColSpecifierV3();
             colSpecifier.columnName = columnName;
             colSpecifier.isMemberOfFrames = isMemberOfFrames;
             data.weightsColumn = colSpecifier;
@@ -124,7 +124,7 @@ public class AutoMLInputBuilder {
         }
 
         private FrameKeyV3 newFrameKey(final String name) {
-            final FrameKeyV3 frameKey = new FrameKeyV3();
+            final var frameKey = new FrameKeyV3();
             frameKey.name = name;
             frameKey.type = "Key<Frame>";
             frameKey.url = "/3/Frames/" + name;

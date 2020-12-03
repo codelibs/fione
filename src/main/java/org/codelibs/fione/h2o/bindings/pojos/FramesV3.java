@@ -16,6 +16,7 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
@@ -156,8 +157,8 @@ public class FramesV3 extends RequestSchemaV3 {
 
     @Override
     public int hashCode() {
-        final int prime = 31;
-        int result = 1;
+        final var prime = 31;
+        var result = 1;
         result = prime * result + ((column == null) ? 0 : column.hashCode());
         result = prime * result + columnCount;
         result = prime * result + columnOffset;
@@ -189,12 +190,8 @@ public class FramesV3 extends RequestSchemaV3 {
         if (getClass() != obj.getClass()) {
             return false;
         }
-        final FramesV3 other = (FramesV3) obj;
-        if (column == null) {
-            if (other.column != null) {
-                return false;
-            }
-        } else if (!column.equals(other.column)) {
+        final var other = (FramesV3) obj;
+        if (!Objects.equals(column, other.column)) {
             return false;
         }
         if (columnCount != other.columnCount) {
@@ -206,11 +203,7 @@ public class FramesV3 extends RequestSchemaV3 {
         if (!Arrays.equals(compatibleModels, other.compatibleModels)) {
             return false;
         }
-        if (compression == null) {
-            if (other.compression != null) {
-                return false;
-            }
-        } else if (!compression.equals(other.compression)) {
+        if (!Objects.equals(compression, other.compression)) {
             return false;
         }
         if (!Arrays.deepEquals(domain, other.domain)) {
@@ -222,11 +215,7 @@ public class FramesV3 extends RequestSchemaV3 {
         if (force != other.force) {
             return false;
         }
-        if (frameId == null) {
-            if (other.frameId != null) {
-                return false;
-            }
-        } else if (!frameId.equals(other.frameId)) {
+        if (!Objects.equals(frameId, other.frameId)) {
             return false;
         }
         if (!Arrays.equals(frames, other.frames)) {
@@ -235,21 +224,13 @@ public class FramesV3 extends RequestSchemaV3 {
         if (fullColumnCount != other.fullColumnCount) {
             return false;
         }
-        if (job == null) {
-            if (other.job != null) {
-                return false;
-            }
-        } else if (!job.equals(other.job)) {
+        if (!Objects.equals(job, other.job)) {
             return false;
         }
         if (numParts != other.numParts) {
             return false;
         }
-        if (path == null) {
-            if (other.path != null) {
-                return false;
-            }
-        } else if (!path.equals(other.path)) {
+        if (!Objects.equals(path, other.path)) {
             return false;
         }
         if (rowCount != other.rowCount) {

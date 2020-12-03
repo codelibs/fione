@@ -18,7 +18,6 @@ package org.codelibs.fione.helper;
 import javax.annotation.PostConstruct;
 
 import org.codelibs.fess.helper.SystemHelper;
-import org.codelibs.fess.mylasta.direction.FessConfig;
 import org.codelibs.fess.util.ComponentUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,8 +44,8 @@ public class CustomSystemHelper extends SystemHelper {
         if (logger.isDebugEnabled()) {
             logger.debug("Update credentials for H2O.");
         }
-        final FessConfig fessConfig = ComponentUtil.getFessConfig();
-        final H2oHelper h2oHelper = ComponentUtil.getComponent(H2oHelper.class);
+        final var fessConfig = ComponentUtil.getFessConfig();
+        final var h2oHelper = ComponentUtil.getComponent(H2oHelper.class);
         h2oHelper.setEndpoint(getH2oEndpoint());
         h2oHelper.setSecretAccessKey(fessConfig.getStorageAccessKey());
         h2oHelper.setSecretKeyId(fessConfig.getStorageSecretKey());
@@ -59,7 +58,7 @@ public class CustomSystemHelper extends SystemHelper {
     }
 
     public String getH2oEndpoint() {
-        final FessConfig fessConfig = ComponentUtil.getFessConfig();
+        final var fessConfig = ComponentUtil.getFessConfig();
         return fessConfig.getSystemProperty("h2o.endpoint", "http://localhost:54321");
     }
 }
