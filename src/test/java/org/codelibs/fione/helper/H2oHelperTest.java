@@ -61,6 +61,8 @@ public class H2oHelperTest extends LastaFluteTestCase {
 
     private Throwable throwable;
 
+    private String h2oVersion = "3.32.0.3";
+
     @Override
     protected String prepareConfigFile() {
         return "test_app.xml";
@@ -71,7 +73,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     public void setUp() throws Exception {
         super.setUp();
         h2o =
-                new GenericContainer<>("codelibs/h2o:3.28.0.3").withExposedPorts(54321)
+                new GenericContainer<>("ghcr.io/codelibs/h2o:" + h2oVersion).withExposedPorts(54321)
                         .withClasspathResourceMapping("data/iris.csv", "/data/iris.csv", BindMode.READ_ONLY)
                         .withClasspathResourceMapping("data/tips.csv", "/data/tips.csv", BindMode.READ_ONLY)
                         .waitingFor(Wait.forHttp("/flow/index.html").forStatusCode(200));
