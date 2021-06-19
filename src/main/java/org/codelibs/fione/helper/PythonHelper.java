@@ -37,14 +37,14 @@ import org.apache.logging.log4j.Logger;
 import org.codelibs.core.io.CopyUtil;
 import org.codelibs.core.io.FileUtil;
 import org.codelibs.core.lang.StringUtil;
+import org.codelibs.fesen.common.xcontent.LoggingDeprecationHandler;
+import org.codelibs.fesen.common.xcontent.NamedXContentRegistry;
+import org.codelibs.fesen.common.xcontent.json.JsonXContent;
 import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fess.exception.JobProcessingException;
 import org.codelibs.fess.util.ComponentUtil;
 import org.codelibs.fess.util.ResourceUtil;
 import org.codelibs.fione.exception.PythonExecutionException;
-import org.elasticsearch.common.xcontent.LoggingDeprecationHandler;
-import org.elasticsearch.common.xcontent.NamedXContentRegistry;
-import org.elasticsearch.common.xcontent.json.JsonXContent;
 
 import com.google.common.collect.Lists;
 

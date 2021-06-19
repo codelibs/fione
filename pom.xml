@@ -5,7 +5,7 @@
 	<artifactId>fione</artifactId>
 	<packaging>war</packaging>
 	<name>Fione</name>
-	<version>13.10.1-SNAPSHOT</version>
+	<version>13.12.0-SNAPSHOT</version>
 	<url>https://fione.codelibs.org/</url>
 	<inceptionYear>2009</inceptionYear>
 	<licenses>
@@ -35,12 +35,12 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<fess.version>13.10.1</fess.version>
+		<fess.version>13.12.0</fess.version>
 		<retrofit.version>2.7.0</retrofit.version>
 
 		<!-- Main Framework -->
-		<dbflute.version>1.2.3</dbflute.version>
-		<lastaflute.version>1.1.8</lastaflute.version>
+		<dbflute.version>1.2.4</dbflute.version>
+		<lastaflute.version>1.2.0</lastaflute.version>
 		<lasta.di.version>0.8.3</lasta.di.version>
 		<lasta.taglib.version>0.7.3</lasta.taglib.version>
 		<lasta.job.version>0.5.4</lasta.job.version>
@@ -48,33 +48,33 @@
 
 		<!-- Partner Library -->
 		<slf4j.version>1.7.30</slf4j.version>
-		<log4j.version>2.14.0</log4j.version>
-		<jackson.version>2.11.3</jackson.version>
+		<log4j.version>2.14.1</log4j.version>
+		<jackson.version>2.12.2</jackson.version>
 		<commons.fileupload.version>1.4</commons.fileupload.version>
-		<asm.version>9.0</asm.version>
-		<tika.version>1.24.1</tika.version>
+		<asm.version>9.1</asm.version>
+		<tika.version>1.26</tika.version>
 		<groovy.version>3.0.7</groovy.version>
-		<minio.version>7.1.4</minio.version>
+		<minio.version>8.1.0</minio.version>
 		<okhttp.version>3.14.9</okhttp.version>
 
 		<!-- Crawler -->
-		<crawler.version>3.10.1</crawler.version>
+		<crawler.version>3.12.0</crawler.version>
 
 		<!-- Suggest -->
-		<suggest.version>7.10.0</suggest.version>
+		<suggest.version>7.12.0</suggest.version>
 
-		<!-- Elasticsearch -->
-		<elasticsearch.version>7.10.1</elasticsearch.version>
-		<elasticsearch.httpclient.version>7.10.0</elasticsearch.httpclient.version>
-		<cluster.runner.version>${elasticsearch.version}.0</cluster.runner.version>
+		<!-- Fesen -->
+		<fesen.version>0.12.0</fesen.version>
+		<fesen.httpclient.version>0.12.0</fesen.httpclient.version>
+		<fesen.runner.version>0.12.0</fesen.runner.version>
 
 		<!-- Tomcat -->
-		<tomcat.version>9.0.41</tomcat.version>
-		<tomcat.boot.version>0.7.6</tomcat.boot.version>
+		<tomcat.version>9.0.44</tomcat.version>
+		<tomcat.boot.version>0.7.7</tomcat.boot.version>
 
 		<!-- Testing -->
 		<utflute.version>0.9.1</utflute.version>
-		<junit.version>4.13.1</junit.version>
+		<junit.version>4.13.2</junit.version>
 
 		<!-- DEB & RPM build -->
 		<packaging.fess.home.dir>/usr/share/fess</packaging.fess.home.dir>
@@ -111,7 +111,7 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-source-plugin</artifactId>
-				<version>3.1.0</version>
+				<version>3.2.1</version>
 				<executions>
 					<execution>
 						<id>source-jar</id>
@@ -124,7 +124,7 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-war-plugin</artifactId>
-				<version>3.2.3</version>
+				<version>3.3.1</version>
 				<configuration>
 					<archive>
 						<manifest>
@@ -135,7 +135,7 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-dependency-plugin</artifactId>
-				<version>3.1.1</version>
+				<version>3.1.2</version>
 				<executions>
 					<execution>
 						<id>unpack-provided</id>
@@ -162,7 +162,7 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-javadoc-plugin</artifactId>
-				<version>3.1.1</version>
+				<version>3.2.0</version>
 				<configuration>
 					<encoding>UTF-8</encoding>
 					<docencoding>UTF-8</docencoding>
@@ -185,7 +185,7 @@
 			<plugin>
 				<groupId>com.mycila</groupId>
 				<artifactId>license-maven-plugin</artifactId>
-				<version>3.0</version>
+				<version>4.0</version>
 				<configuration>
 					<header>https://www.codelibs.org/assets/license/header.txt</header>
 					<properties>
@@ -235,7 +235,7 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-antrun-plugin</artifactId>
-				<version>1.8</version>
+				<version>3.0.0</version>
 				<dependencies>
 					<dependency>
 						<groupId>org.apache.ant</groupId>
@@ -255,7 +255,7 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-resources-plugin</artifactId>
-				<version>3.1.0</version>
+				<version>3.2.0</version>
 				<executions>
 					<execution>
 						<id>copy-resources-deb</id>
@@ -505,11 +505,6 @@
 			<version>${fess.version}</version>
 		</dependency>
 		<dependency>
-			<groupId>org.elasticsearch</groupId>
-			<artifactId>elasticsearch</artifactId>
-			<version>${elasticsearch.version}</version>
-		</dependency>
-		<dependency>
 			<groupId>org.apache.logging.log4j</groupId>
 			<artifactId>log4j-api</artifactId>
 			<version>${log4j.version}</version>
@@ -533,7 +528,7 @@
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>testcontainers</artifactId>
-			<version>1.12.4</version>
+			<version>1.15.3</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>

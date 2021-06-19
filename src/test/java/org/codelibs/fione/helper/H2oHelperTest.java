@@ -61,7 +61,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
 
     private Throwable throwable;
 
-    private String h2oVersion = "3.32.0.4";
+    private String h2oVersion = "3.32.1.1";
 
     @Override
     protected String prepareConfigFile() {

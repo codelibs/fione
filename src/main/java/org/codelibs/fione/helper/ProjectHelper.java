@@ -104,12 +104,20 @@ import com.orangesignal.csv.CsvConfig;
 import com.orangesignal.csv.CsvReader;
 import com.orangesignal.csv.CsvWriter;
 
-import io.minio.ErrorCode;
+import io.minio.BucketExistsArgs;
+import io.minio.CopyObjectArgs;
+import io.minio.CopySource;
+import io.minio.GetObjectArgs;
+import io.minio.ListObjectsArgs;
+import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
-import io.minio.PutObjectOptions;
+import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
+import io.minio.RemoveObjectsArgs;
 import io.minio.Result;
 import io.minio.errors.ErrorResponseException;
 import io.minio.messages.DeleteError;
+import io.minio.messages.DeleteObject;
 import io.minio.messages.Item;
 import retrofit2.Response;
 
@@ -118,6 +126,10 @@ public class ProjectHelper {
     private static final Logger logger = LogManager.getLogger(ProjectHelper.class);
 
     private static final String FIONE_END = "FIONE:END";
+
+    private static final String NO_SUCH_KEY = "NoSuchKey";
+
+    private static final String NO_SUCH_OBJECT = "NoSuchObject";
 
     @Resource
     protected H2oHelper h2oHelper;
@@ -152,7 +164,8 @@ public class ProjectHelper {
         final List<Project> list = new ArrayList<>();
         try {
             final var minioClient = createClient(fessConfig);
-            for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), projectFolderName + "/", false)) {
+            for (final Result<Item> result : minioClient.listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
+                    .prefix(projectFolderName + "/").recursive(false).build())) {
                 final var item = result.get();
                 final var objectName = item.objectName();
                 if (logger.isDebugEnabled()) {
@@ -174,7 +187,8 @@ public class ProjectHelper {
 
     protected MinioClient createClient(final FessConfig fessConfig) {
         try {
-            return new MinioClient(fessConfig.getStorageEndpoint(), fessConfig.getStorageAccessKey(), fessConfig.getStorageSecretKey());
+            return MinioClient.builder().endpoint(fessConfig.getStorageEndpoint())
+                    .credentials(fessConfig.getStorageAccessKey(), fessConfig.getStorageSecretKey()).build();
         } catch (final Exception e) {
             throw new StorageException("Failed to create MinioClient: " + fessConfig.getStorageEndpoint(), e);
         }
@@ -193,11 +207,12 @@ public class ProjectHelper {
         final var objectName = getProjectConfigPath(project.getId());
         try (var bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
             final var bucketName = fessConfig.getStorageBucket();
-            if (!minioClient.bucketExists(bucketName)) {
-                minioClient.makeBucket(bucketName);
+            if (!minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucketName).build())) {
+                minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucketName).build());
                 logger.info("Create bucket {}.", bucketName);
             }
-            minioClient.putObject(bucketName, objectName, bais, new PutObjectOptions(-1, PutObjectOptions.MIN_MULTIPART_SIZE));
+            minioClient.putObject(PutObjectArgs.builder().bucket(bucketName).object(objectName)
+                    .stream(bais, -1, PutObjectArgs.MIN_MULTIPART_SIZE).build());
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -212,7 +227,8 @@ public class ProjectHelper {
         final var minioClient = createClient(fessConfig);
         final var objectName = getProjectConfigPath(projectId);
         try (Reader reader =
-                new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
+                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
+                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
             final var project = gson.fromJson(reader, Project.class);
             if (loadParams) {
                 project.setDataSets(getDataSets(fessConfig, minioClient, projectId));
@@ -283,7 +299,8 @@ public class ProjectHelper {
     protected DataSet[] getDataSets(final FessConfig fessConfig, final MinioClient minioClient, final String projectId) {
         final var prefix = projectFolderName + "/" + projectId + "/data/";
         final List<DataSet> list = new ArrayList<>();
-        for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), prefix, false)) {
+        for (final Result<Item> result : minioClient.listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
+                .prefix(prefix).recursive(false).build())) {
             try {
                 final var item = result.get();
                 final var objectName = item.objectName();
@@ -309,7 +326,8 @@ public class ProjectHelper {
     protected DataSet getDataSet(final FessConfig fessConfig, final MinioClient minioClient, final String projectId, final String dataSetId) {
         final var objectName = getDataSetConfigPath(projectId, dataSetId);
         try (Reader reader =
-                new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
+                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
+                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
             return gson.fromJson(reader, DataSet.class);
         } catch (final Exception e) {
             if (logger.isDebugEnabled()) {
@@ -325,8 +343,8 @@ public class ProjectHelper {
         final var minioClient = createClient(fessConfig);
         final var objectName = getDataPath(projectId, fileName);
         try {
-            minioClient.putObject(fessConfig.getStorageBucket(), objectName, in, new PutObjectOptions(-1,
-                    PutObjectOptions.MIN_MULTIPART_SIZE));
+            minioClient.putObject(PutObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName)
+                    .stream(in, -1, PutObjectArgs.MIN_MULTIPART_SIZE).build());
         } catch (final Exception e) {
             throw new StorageException("Failed to store " + objectName, e);
         }
@@ -367,10 +385,12 @@ public class ProjectHelper {
         }
 
         final var name = StringCodecUtil.decode(dataSetId);
-        final var dataPath = getDataPath(projectId, name);
-        final var configPath = getDataSetConfigPath(projectId, dataSetId);
+        final var dataPath = new DeleteObject(getDataPath(projectId, name));
+        final var configPath = new DeleteObject(getDataSetConfigPath(projectId, dataSetId));
         try {
-            final var results = minioClient.removeObjects(fessConfig.getStorageBucket(), Lists.newArrayList(dataPath, configPath));
+            final var results =
+                    minioClient.removeObjects(RemoveObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
+                            .objects(Lists.newArrayList(dataPath, configPath)).build());
             for (final Result<DeleteError> result : results) {
                 logger.warn("Failed to delete {}", result.get());
             }
@@ -451,8 +471,8 @@ public class ProjectHelper {
         }
         final var objectName = getDataSetConfigPath(projectId, dataSet.getId());
         try (var bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
-            minioClient.putObject(fessConfig.getStorageBucket(), objectName, bais, new PutObjectOptions(-1,
-                    PutObjectOptions.MIN_MULTIPART_SIZE));
+            minioClient.putObject(PutObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName)
+                    .stream(bais, -1, PutObjectArgs.MIN_MULTIPART_SIZE).build());
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -574,7 +594,8 @@ public class ProjectHelper {
         final var minioClient = createClient(fessConfig);
         final var objectName = getJobsConfigPath(projectId);
         try (Reader reader =
-                new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
+                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
+                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
             final var jobs = gson.fromJson(reader, JobV3[].class);
             if (update) {
                 jobLock.writeLock().lock();
@@ -616,8 +637,8 @@ public class ProjectHelper {
             }
             return jobs;
         } catch (final ErrorResponseException e) {
-            final var code = e.errorResponse().errorCode();
-            if (code == ErrorCode.NO_SUCH_KEY || code == ErrorCode.NO_SUCH_OBJECT) {
+            final var code = e.errorResponse().code();
+            if (NO_SUCH_KEY.equalsIgnoreCase(code) || NO_SUCH_OBJECT.equalsIgnoreCase(code)) {
                 return new JobV3[0];
             }
             throw new StorageException("Failed to read " + objectName, e);
@@ -730,8 +751,8 @@ public class ProjectHelper {
         }
         final var objectName = getJobsConfigPath(projectId);
         try (var bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
-            minioClient.putObject(fessConfig.getStorageBucket(), objectName, bais, new PutObjectOptions(-1,
-                    PutObjectOptions.MIN_MULTIPART_SIZE));
+            minioClient.putObject(PutObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName)
+                    .stream(bais, -1, PutObjectArgs.MIN_MULTIPART_SIZE).build());
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -846,7 +867,7 @@ public class ProjectHelper {
         final var fessConfig = ComponentUtil.getFessConfig();
         final var minioClient = createClient(fessConfig);
         final var objectName = getDataPath(projectId, dataSet.getName());
-        try (var in = minioClient.getObject(fessConfig.getStorageBucket(), objectName)) {
+        try (var in = minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build())) {
             out.write(in);
         } catch (final Exception e) {
             throw new StorageException("Failed to write " + objectName, e);
@@ -903,14 +924,15 @@ public class ProjectHelper {
         final var fessConfig = ComponentUtil.getFessConfig();
         final var minioClient = createClient(fessConfig);
         final var path = projectFolderName + "/" + projectId + "/";
-        for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), path, true)) {
+        for (final Result<Item> result : minioClient.listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
+                .prefix(path).recursive(true).build())) {
             try {
                 final var item = result.get();
                 final var objectName = item.objectName();
                 if (logger.isDebugEnabled()) {
                     logger.debug("objectName: {}", objectName);
                 }
-                minioClient.removeObject(fessConfig.getStorageBucket(), objectName);
+                minioClient.removeObject(RemoveObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build());
             } catch (final Exception e) {
                 logger.warn("Failed to remove an object from {}.", path, e);
             }
@@ -1214,7 +1236,8 @@ public class ProjectHelper {
         final var objectName = getLeaderboardConfigPath(projectId, leaderboard.projectName);
         try (var bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
             final var bucketName = fessConfig.getStorageBucket();
-            minioClient.putObject(bucketName, objectName, bais, new PutObjectOptions(-1, PutObjectOptions.MIN_MULTIPART_SIZE));
+            minioClient.putObject(PutObjectArgs.builder().bucket(bucketName).object(objectName)
+                    .stream(bais, -1, PutObjectArgs.MIN_MULTIPART_SIZE).build());
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -1231,7 +1254,8 @@ public class ProjectHelper {
         final var objectName = getModelConfigPath(projectId, leaderboardId, modelId);
         try (var bais = new ByteArrayInputStream(json.getBytes(Constants.UTF_8_CHARSET))) {
             final var bucketName = fessConfig.getStorageBucket();
-            minioClient.putObject(bucketName, objectName, bais, new PutObjectOptions(-1, PutObjectOptions.MIN_MULTIPART_SIZE));
+            minioClient.putObject(PutObjectArgs.builder().bucket(bucketName).object(objectName)
+                    .stream(bais, -1, PutObjectArgs.MIN_MULTIPART_SIZE).build());
         } catch (final Exception e) {
             throw new StorageException("Failed to create " + objectName, e);
         }
@@ -1271,9 +1295,9 @@ public class ProjectHelper {
     protected InputStream openStorageObject(final MinioClient minioClient, final String bucketName, final String objectName) {
         for (var i = 0; i < 60; i++) {
             try {
-                return minioClient.getObject(bucketName, objectName);
+                return minioClient.getObject(GetObjectArgs.builder().bucket(bucketName).object(objectName).build());
             } catch (final ErrorResponseException e) {
-                if (e.errorResponse().errorCode() != ErrorCode.NO_SUCH_OBJECT) {
+                if (!NO_SUCH_OBJECT.equalsIgnoreCase(e.errorResponse().code())) {
                     throw new StorageException("Failed to access " + objectName, e);
                 }
             } catch (final Exception e) {
@@ -1313,8 +1337,8 @@ public class ProjectHelper {
                 final var pipeWriter =
                         new Thread(() -> {
                             try {
-                                minioClient.putObject(fessConfig.getStorageBucket(), tempObjectName, pipedIn, new PutObjectOptions(-1,
-                                        PutObjectOptions.MIN_MULTIPART_SIZE));
+                                minioClient.putObject(PutObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(tempObjectName)
+                                        .stream(pipedIn, -1, PutObjectArgs.MIN_MULTIPART_SIZE).build());
                             } catch (final Exception e) {
                                 logger.warn("Failed to write {}.", tempObjectName, e);
                             }
@@ -1351,12 +1375,13 @@ public class ProjectHelper {
             if (logger.isDebugEnabled()) {
                 logger.debug("copying {} to {}.", tempObjectName, objectName);
             }
-            minioClient.copyObject(fessConfig.getStorageBucket(), objectName, null, null, fessConfig.getStorageBucket(), tempObjectName,
-                    null, null);
+            minioClient.copyObject(CopyObjectArgs.builder()
+                    .source(CopySource.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build())
+                    .bucket(fessConfig.getStorageBucket()).object(tempObjectName).build());
             if (logger.isDebugEnabled()) {
                 logger.debug("removing {}.", tempObjectName);
             }
-            minioClient.removeObject(fessConfig.getStorageBucket(), tempObjectName);
+            minioClient.removeObject(RemoveObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(tempObjectName).build());
         } catch (final Exception e) {
             throw new StorageException("Failed to update " + objectName, e);
         }
@@ -1550,15 +1575,18 @@ public class ProjectHelper {
         final var fessConfig = ComponentUtil.getFessConfig();
         final var minioClient = createClient(fessConfig);
         final var leaderboardDir = projectFolderName + "/" + projectId + "/model/" + StringCodecUtil.encodeUrlSafe(leaderboardId) + "/";
-        final List<String> objectNameList = new ArrayList<>();
+        final List<DeleteObject> objectNameList = new ArrayList<>();
         try {
-            for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), leaderboardDir, true)) {
+            for (final Result<Item> result : minioClient.listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
+                    .prefix(leaderboardDir).recursive(true).build())) {
                 final var item = result.get();
                 final var objectName = item.objectName();
-                objectNameList.add(objectName);
+                objectNameList.add(new DeleteObject(objectName));
             }
-            objectNameList.add(getLeaderboardConfigPath(projectId, leaderboardId));
-            final var results = minioClient.removeObjects(fessConfig.getStorageBucket(), objectNameList);
+            objectNameList.add(new DeleteObject(getLeaderboardConfigPath(projectId, leaderboardId)));
+            final var results =
+                    minioClient.removeObjects(RemoveObjectsArgs.builder().bucket(fessConfig.getStorageBucket()).objects(objectNameList)
+                            .build());
             for (final Result<DeleteError> result : results) {
                 logger.warn("Failed to delete {}", result.get());
             }
@@ -1610,7 +1638,8 @@ public class ProjectHelper {
         final List<String> list = new ArrayList<>();
         try {
             final var minioClient = createClient(fessConfig);
-            for (final Result<Item> result : minioClient.listObjects(fessConfig.getStorageBucket(), leaderboardDir, false)) {
+            for (final Result<Item> result : minioClient.listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
+                    .prefix(leaderboardDir).recursive(false).build())) {
                 final var item = result.get();
                 final var objectName = item.objectName();
                 if (logger.isDebugEnabled()) {
@@ -1638,13 +1667,14 @@ public class ProjectHelper {
         final var minioClient = createClient(fessConfig);
         final var objectName = getLeaderboardConfigPath(projectId, leaderboardId);
         try (Reader reader =
-                new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
+                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
+                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
             final var leaderboard = gson.fromJson(reader, LeaderboardV99.class);
             leaderboard.setInLocal(true);
             return leaderboard;
         } catch (final ErrorResponseException e) {
-            final var code = e.errorResponse().errorCode();
-            if (code == ErrorCode.NO_SUCH_KEY || code == ErrorCode.NO_SUCH_OBJECT) {
+            final var code = e.errorResponse().code();
+            if (NO_SUCH_KEY.equalsIgnoreCase(code) || NO_SUCH_OBJECT.equalsIgnoreCase(code)) {
                 return null;
             }
             throw new StorageException("Failed to read " + objectName, e);
@@ -1659,13 +1689,14 @@ public class ProjectHelper {
         final var minioClient = createClient(fessConfig);
         final var objectName = getModelConfigPath(projectId, leaderboardId, modelId);
         try (Reader reader =
-                new InputStreamReader(minioClient.getObject(fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET)) {
+                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
+                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
             final var model = modelHelper.deserialize(reader);
             model.setInLocal(true);
             return model;
         } catch (final ErrorResponseException e) {
-            final var code = e.errorResponse().errorCode();
-            if (code == ErrorCode.NO_SUCH_KEY || code == ErrorCode.NO_SUCH_OBJECT) {
+            final var code = e.errorResponse().code();
+            if (NO_SUCH_KEY.equalsIgnoreCase(code) || NO_SUCH_OBJECT.equalsIgnoreCase(code)) {
                 return null;
             }
             throw new StorageException("Failed to read " + objectName, e);
