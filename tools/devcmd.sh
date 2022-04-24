@@ -31,7 +31,7 @@ copy_to_fess() {
   cp src/main/resources/lastaflute_director+assistantDirector.xml ../fess/src/main/resources
   cp src/main/resources/fess+systemHelper.xml ../fess/src/main/resources
   echo "smart.package2 = org.codelibs.fione.app" >> ../fess/src/main/resources/lasta_di.properties
-  sed -i "s|Main Framework -->|Main Framework --><retrofit.version>2.7.0</retrofit.version>|" ../fess/pom.xml
+  sed -i "s|RPM build -->|RPM build --><retrofit.version>2.9.0</retrofit.version>|" ../fess/pom.xml
   sed -i 's|common library -->|common library --><dependency><groupId>com.squareup.retrofit2</groupId><artifactId>retrofit</artifactId><version>${retrofit.version}</version></dependency><dependency><groupId>com.squareup.retrofit2</groupId><artifactId>converter-gson</artifactId><version>${retrofit.version}</version></dependency>|' ../fess/pom.xml
 }
 
@@ -79,12 +79,12 @@ clean() {
 
 start_docker() {
   cd $BASE_DIR/tools/docker
-  docker-compose up &
+  docker compose up &
 }
 
 stop_docker() {
   cd $BASE_DIR/tools/docker
-  docker-compose down
+  docker compose down
 }
 
 if [[ $subcommand = "copy" ]] ; then
