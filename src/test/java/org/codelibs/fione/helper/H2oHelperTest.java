@@ -61,7 +61,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
 
     private Throwable throwable;
 
-    private String h2oVersion = "3.32.1.1";
+    private String h2oVersion = "3.36.1.1";
 
     @Override
     protected String prepareConfigFile() {
@@ -72,11 +72,10 @@ public class H2oHelperTest extends LastaFluteTestCase {
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        h2o =
-                new GenericContainer<>("ghcr.io/codelibs/h2o:" + h2oVersion).withExposedPorts(54321)
-                        .withClasspathResourceMapping("data/iris.csv", "/data/iris.csv", BindMode.READ_ONLY)
-                        .withClasspathResourceMapping("data/tips.csv", "/data/tips.csv", BindMode.READ_ONLY)
-                        .waitingFor(Wait.forHttp("/flow/index.html").forStatusCode(200));
+        h2o = new GenericContainer<>("ghcr.io/codelibs/h2o:" + h2oVersion).withExposedPorts(54321)
+                .withClasspathResourceMapping("data/iris.csv", "/data/iris.csv", BindMode.READ_ONLY)
+                .withClasspathResourceMapping("data/tips.csv", "/data/tips.csv", BindMode.READ_ONLY)
+                .waitingFor(Wait.forHttp("/flow/index.html").forStatusCode(200));
         h2o.start();
         h2o.followOutput(o -> System.out.print(o.getUtf8String()));
 
@@ -265,66 +264,58 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_runAutoML(final CountDownLatch latch, final ParseV3 data) {
-        h2oHelper.runAutoML(
-                getSessionKey(),
-                AutoMLBuildControlBuilder
-                        .create()
-                        .projectName("iris")
-                        .nfolds(5)
-                        .balanceClasses(false)
-                        .stoppingCriteria(
-                                AutoMLStoppingCriteriaBuilder.create().seed(-1).maxModels(0).maxRuntimeSecs(60).maxRuntimeSecsPerModel(0)
-                                        .stoppingRounds(3).stoppingMetric(ScoreKeeperStoppingMetric.AUTO).stoppingTolerance(0.001).build())
-                        .keepCrossValidationPredictions(true).keepCrossValidationModels(true).keepCrossValidationFoldAssignment(false)
-                        .build(),
+        h2oHelper.runAutoML(getSessionKey(), AutoMLBuildControlBuilder.create().projectName("iris").nfolds(5).balanceClasses(false)
+                .stoppingCriteria(AutoMLStoppingCriteriaBuilder.create().seed(-1).maxModels(0).maxRuntimeSecs(60).maxRuntimeSecsPerModel(0)
+                        .stoppingRounds(3).stoppingMetric(ScoreKeeperStoppingMetric.AUTO).stoppingTolerance(0.001).build())
+                .keepCrossValidationPredictions(true).keepCrossValidationModels(true).keepCrossValidationFoldAssignment(false).build(),
                 AutoMLInputBuilder.create().trainingFrame(data.destinationFrame).responseColumn("Name", null)
                         .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.AUTO).build(),
                 AutoMLBuildModelsBuilder.create().build()).execute((call, res) -> {
-            final AutoMLBuildSpecV99 result = res.body();
-            final AutoMLBuildControlV99 buildControl = result.buildControl;
-            assertFalse(buildControl.balanceClasses);
-            assertNull(buildControl.classSamplingFactors);
-            assertEquals("", buildControl.exportCheckpointsDir);
-            assertFalse(buildControl.keepCrossValidationFoldAssignment);
-            assertTrue(buildControl.keepCrossValidationModels);
-            assertTrue(buildControl.keepCrossValidationPredictions);
-            assertEquals(5.0f, buildControl.maxAfterBalanceSize);
-            assertEquals(5, buildControl.nfolds);
-            assertEquals("iris", buildControl.projectName);
-            final AutoMLStoppingCriteriaV99 stoppingCriteria = buildControl.stoppingCriteria;
-            assertEquals(0, stoppingCriteria.maxModels);
-            assertEquals(0, Double.compare(60.0, stoppingCriteria.maxRuntimeSecs));
-            assertEquals(0, Double.compare(0.0f, stoppingCriteria.maxRuntimeSecsPerModel));
-            assertEquals(-1, stoppingCriteria.seed);
-            assertEquals(ScoreKeeperStoppingMetric.AUTO, stoppingCriteria.stoppingMetric);
-            assertEquals(3, stoppingCriteria.stoppingRounds);
-            assertEquals(0, Double.compare(0.001, stoppingCriteria.stoppingTolerance));
-            final AutoMLBuildModelsV99 buildModels = result.buildModels;
-            assertNull(buildModels.algoParameters);
-            assertNull(buildModels.includeAlgos);
-            assertNull(buildModels.monotoneConstraints);
-            assertEquals(0, buildModels.excludeAlgos.length);
-            final AutoMLInputV99 inputSpec = result.inputSpec;
-            assertNull(inputSpec.blendingFrame);
-            assertNull(inputSpec.foldColumn);
-            assertNull(inputSpec.ignoredColumns);
-            assertNull(inputSpec.leaderboardFrame);
-            assertEquals("Name", inputSpec.responseColumn.columnName);
-            assertEquals(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.AUTO, inputSpec.sortMetric);
-            assertEquals("iris.hex", inputSpec.trainingFrame.name);
-            assertNull(inputSpec.validationFrame);
-            assertNull(inputSpec.weightsColumn);
-            final JobV3 job = result.job;
-            assertEquals("AutoML build", job.description);
-            assertEquals("iris@@Name", job.dest.name);
-            assertNotNull(job.key.name);
-            assertTrue(job.progress < 1.0f);
-            assertEquals("RUNNING", job.status);
+                    final AutoMLBuildSpecV99 result = res.body();
+                    final AutoMLBuildControlV99 buildControl = result.buildControl;
+                    assertFalse(buildControl.balanceClasses);
+                    assertNull(buildControl.classSamplingFactors);
+                    assertEquals("", buildControl.exportCheckpointsDir);
+                    assertFalse(buildControl.keepCrossValidationFoldAssignment);
+                    assertTrue(buildControl.keepCrossValidationModels);
+                    assertTrue(buildControl.keepCrossValidationPredictions);
+                    assertEquals(5.0f, buildControl.maxAfterBalanceSize);
+                    assertEquals(5, buildControl.nfolds);
+                    assertEquals("iris", buildControl.projectName);
+                    final AutoMLStoppingCriteriaV99 stoppingCriteria = buildControl.stoppingCriteria;
+                    assertEquals(0, stoppingCriteria.maxModels);
+                    assertEquals(0, Double.compare(60.0, stoppingCriteria.maxRuntimeSecs));
+                    assertEquals(0, Double.compare(0.0f, stoppingCriteria.maxRuntimeSecsPerModel));
+                    assertEquals(-1, stoppingCriteria.seed);
+                    assertEquals(ScoreKeeperStoppingMetric.AUTO, stoppingCriteria.stoppingMetric);
+                    assertEquals(3, stoppingCriteria.stoppingRounds);
+                    assertEquals(0, Double.compare(0.001, stoppingCriteria.stoppingTolerance));
+                    final AutoMLBuildModelsV99 buildModels = result.buildModels;
+                    assertNull(buildModels.algoParameters);
+                    assertNull(buildModels.includeAlgos);
+                    assertNull(buildModels.monotoneConstraints);
+                    assertEquals(0, buildModels.excludeAlgos.length);
+                    final AutoMLInputV99 inputSpec = result.inputSpec;
+                    assertNull(inputSpec.blendingFrame);
+                    assertNull(inputSpec.foldColumn);
+                    assertNull(inputSpec.ignoredColumns);
+                    assertNull(inputSpec.leaderboardFrame);
+                    assertEquals("Name", inputSpec.responseColumn.columnName);
+                    assertEquals(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.AUTO, inputSpec.sortMetric);
+                    assertEquals("iris.hex", inputSpec.trainingFrame.name);
+                    assertNull(inputSpec.validationFrame);
+                    assertNull(inputSpec.weightsColumn);
+                    final JobV3 job = result.job;
+                    assertEquals("AutoML build", job.description);
+                    assertEquals("iris@@Name", job.dest.name);
+                    assertNotNull(job.key.name);
+                    assertTrue(job.progress < 1.0f);
+                    assertEquals("RUNNING", job.status);
 
-            test_iris_leaderboard(latch, result, job);
-        }, (call, t) -> {
-            fail(t, latch);
-        });
+                    test_iris_leaderboard(latch, result, job);
+                }, (call, t) -> {
+                    fail(t, latch);
+                });
     }
 
     private void test_iris_leaderboard(final CountDownLatch latch, final AutoMLBuildSpecV99 data, final JobV3 job) {

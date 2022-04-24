@@ -140,7 +140,8 @@ public class JobV3 extends SchemaV3 {
     public Kind getKind() {
         if (StringUtil.isBlank(description)) {
             return Kind.UNKNOWN;
-        } else if (description.contains("AutoML build") || description.contains("AutoML starting")) {
+        }
+        if (description.contains("AutoML build") || description.contains("AutoML starting")) {
             return Kind.AUTO_ML;
         } else if (description.contains("Parse") || description.contains("Export dataset") || description.contains("Pivot")) {
             return Kind.FRAME;

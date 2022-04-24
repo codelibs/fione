@@ -175,8 +175,7 @@ public class FramesV3 extends RequestSchemaV3 {
         result = prime * result + ((path == null) ? 0 : path.hashCode());
         result = prime * result + rowCount;
         result = prime * result + (int) (rowOffset ^ (rowOffset >>> 32));
-        result = prime * result + separator;
-        return result;
+        return prime * result + separator;
     }
 
     @Override
@@ -184,10 +183,7 @@ public class FramesV3 extends RequestSchemaV3 {
         if (this == obj) {
             return true;
         }
-        if (obj == null) {
-            return false;
-        }
-        if (getClass() != obj.getClass()) {
+        if ((obj == null) || (getClass() != obj.getClass())) {
             return false;
         }
         final var other = (FramesV3) obj;

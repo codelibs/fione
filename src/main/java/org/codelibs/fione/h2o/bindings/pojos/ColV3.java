@@ -21,7 +21,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.lang3.ArrayUtils;
-import org.apache.groovy.util.Maps;
 import org.codelibs.fione.Constants;
 import org.codelibs.fione.entity.ChartData;
 
@@ -179,35 +178,33 @@ public class ColV3 extends SchemaV3 {
         if (histogramChart != null) {
             return histogramChart;
         }
-        if (histogramBins != null) {
-            if ("real".equals(type) || "int".equals(type)) {
-                histogramChart = new ChartData();
-                final var yName = "count";
-                final var range = histogramBins.length / 50 + 1;
-                var pos = histogramBase;
-                final List<Double> xList = new ArrayList<>();
-                final List<Long> yList = new ArrayList<>();
-                var sum = 0L;
-                for (var i = 0; i < histogramBins.length; i++) {
-                    if (i % range == 0) {
-                        xList.add(pos);
-                        if (i != 0) {
-                            yList.add(sum);
-                            sum = 0;
-                        }
+        if ((histogramBins != null) && ("real".equals(type) || "int".equals(type))) {
+            histogramChart = new ChartData();
+            final var yName = "count";
+            final var range = histogramBins.length / 50 + 1;
+            var pos = histogramBase;
+            final List<Double> xList = new ArrayList<>();
+            final List<Long> yList = new ArrayList<>();
+            var sum = 0L;
+            for (var i = 0; i < histogramBins.length; i++) {
+                if (i % range == 0) {
+                    xList.add(pos);
+                    if (i != 0) {
+                        yList.add(sum);
+                        sum = 0;
                     }
-                    pos += histogramStride;
-                    sum += histogramBins[i];
                 }
-                yList.add(sum);
-                histogramChart.addColumn(label, xList.toArray(n -> new Double[n]));
-                histogramChart.addColumn(yName, yList.toArray(n -> new Long[n]));
-                histogramChart.setAxisName(label);
-                histogramChart.addAxisLabel("x", label);
-                histogramChart.addAxisLabel("y", yName);
-                return histogramChart;
-
+                pos += histogramStride;
+                sum += histogramBins[i];
             }
+            yList.add(sum);
+            histogramChart.addColumn(label, xList.toArray(n -> new Double[n]));
+            histogramChart.addColumn(yName, yList.toArray(n -> new Long[n]));
+            histogramChart.setAxisName(label);
+            histogramChart.addAxisLabel("x", label);
+            histogramChart.addAxisLabel("y", yName);
+            return histogramChart;
+
         }
         return null;
     }
@@ -216,36 +213,34 @@ public class ColV3 extends SchemaV3 {
         if (labelListChart != null) {
             return labelListChart;
         }
-        if (histogramBins != null && domain != null) {
-            if ("enum".equals(type)) {
-                final var xName = "label";
-                final var yName = "count";
-                final var maxLength = Integer.parseInt(System.getProperty(Constants.CHART_MAX_ITEM_SIZE, "1000"));
-                labelListChart = new ChartData();
-                var domains = Arrays.copyOf(domain, domain.length);
-                ArrayUtils.reverse(domains);
-                if (domains.length > maxLength) {
-                    domains = Arrays.copyOfRange(domains, 0, maxLength);
-                }
-                labelListChart.addColumn(xName, domains);
-                var bins = Arrays.stream(histogramBins).mapToObj(Long::valueOf).toArray(n -> new Long[n]);
-                bins = Arrays.copyOf(bins, bins.length);
-                ArrayUtils.reverse(bins);
-                if (domains.length > maxLength) {
-                    bins = Arrays.copyOfRange(bins, 0, maxLength);
-                }
-                labelListChart.addColumn(yName, bins, "bar");
-                labelListChart.setAxisName(xName);
-                labelListChart.addAxisLabel("x", xName);
-                labelListChart.addAxisType("x", "category");
-                labelListChart.addAxisLabel("y", yName);
-                var height = domain.length * 30;
-                if (height < 200) {
-                    height = 200;
-                }
-                labelListChart.setHeight(height);
-                return labelListChart;
+        if ((histogramBins != null && domain != null) && "enum".equals(type)) {
+            final var xName = "label";
+            final var yName = "count";
+            final var maxLength = Integer.parseInt(System.getProperty(Constants.CHART_MAX_ITEM_SIZE, "1000"));
+            labelListChart = new ChartData();
+            var domains = Arrays.copyOf(domain, domain.length);
+            ArrayUtils.reverse(domains);
+            if (domains.length > maxLength) {
+                domains = Arrays.copyOfRange(domains, 0, maxLength);
             }
+            labelListChart.addColumn(xName, domains);
+            var bins = Arrays.stream(histogramBins).mapToObj(Long::valueOf).toArray(n -> new Long[n]);
+            bins = Arrays.copyOf(bins, bins.length);
+            ArrayUtils.reverse(bins);
+            if (domains.length > maxLength) {
+                bins = Arrays.copyOfRange(bins, 0, maxLength);
+            }
+            labelListChart.addColumn(yName, bins, "bar");
+            labelListChart.setAxisName(xName);
+            labelListChart.addAxisLabel("x", xName);
+            labelListChart.addAxisType("x", "category");
+            labelListChart.addAxisLabel("y", yName);
+            var height = domain.length * 30;
+            if (height < 200) {
+                height = 200;
+            }
+            labelListChart.setHeight(height);
+            return labelListChart;
         }
         return null;
     }
@@ -270,11 +265,11 @@ public class ColV3 extends SchemaV3 {
         if (others > 0) {
             columnCharacteristicsChart = new ChartData();
             final List<Map<String, Object>> list = new ArrayList<>();
-            list.add(Maps.of("name", "Values", "value", others));
-            list.add(Maps.of("name", "Zeros", "value", zeroCount));
-            list.add(Maps.of("name", "Missing", "value", missingCount));
-            list.add(Maps.of("name", "-Infinity", "value", negativeInfinityCount));
-            list.add(Maps.of("name", "+Infinity", "value", positiveInfinityCount));
+            list.add(Map.of("name", "Values", "value", others));
+            list.add(Map.of("name", "Zeros", "value", zeroCount));
+            list.add(Map.of("name", "Missing", "value", missingCount));
+            list.add(Map.of("name", "-Infinity", "value", negativeInfinityCount));
+            list.add(Map.of("name", "+Infinity", "value", positiveInfinityCount));
             columnCharacteristicsChart.addColumn(label, list.toArray(n -> new Map[n]));
             return columnCharacteristicsChart;
         }

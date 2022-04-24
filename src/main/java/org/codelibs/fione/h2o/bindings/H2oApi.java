@@ -191,15 +191,14 @@ public class H2oApi {
             if (jobsResponse == null || !jobsResponse.isSuccessful()) {
                 if (retries-- > 0) {
                     continue;
-                } else {
-                    throw new H2oAccessException("/3/Jobs/" + jobId + " failed 3 times.");
                 }
+                throw new H2oAccessException("/3/Jobs/" + jobId + " failed 3 times.");
             }
             jobs = jobsResponse.body();
             if (jobs.jobs == null || jobs.jobs.length != 1) {
                 throw new H2oAccessException("Failed to find Job: " + jobId);
             }
-        } while (jobs != null && jobs.jobs[0].status.equals("RUNNING"));
+        } while (jobs != null && "RUNNING".equals(jobs.jobs[0].status));
         return jobs == null ? null : jobs.jobs[0];
     }
 
@@ -258,21 +257,21 @@ public class H2oApi {
     public XGBoostV3 train_xgboost(final XGBoostParametersV3 params) throws IOException {
         final var s = getService(ModelBuilders.class);
         return s.trainXgboost(params.ntrees, params.nEstimators, params.maxDepth, params.minRows, params.minChildWeight, params.learnRate,
-                params.eta, params.sampleRate, params.subsample, params.colSampleRate, params.colsampleBylevel,
-                params.colSampleRatePerTree, params.colsampleBytree, params.monotoneConstraints, params.maxAbsLeafnodePred,
-                params.maxDeltaStep, params.scoreTreeInterval, params.seed, params.minSplitImprovement, params.gamma, params.nthread,
-                params.saveMatrixDirectory, params.calibrateModel, keyToString(params.calibrationFrame), params.maxBins, params.maxLeaves,
-                params.minSumHessianInLeaf, params.minDataInLeaf, params.treeMethod, params.growPolicy, params.booster, params.regLambda,
-                params.regAlpha, params.quietMode, params.sampleType, params.normalizeType, params.rateDrop, params.oneDrop,
-                params.skipDrop, params.dmatrixType, params.backend, params.gpuId, keyToString(params.modelId),
-                keyToString(params.trainingFrame), keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                params.eta, params.sampleRate, params.subsample, params.colSampleRate, params.colsampleBylevel, params.colSampleRatePerTree,
+                params.colsampleBytree, params.monotoneConstraints, params.maxAbsLeafnodePred, params.maxDeltaStep,
+                params.scoreTreeInterval, params.seed, params.minSplitImprovement, params.gamma, params.nthread, params.saveMatrixDirectory,
+                params.calibrateModel, keyToString(params.calibrationFrame), params.maxBins, params.maxLeaves, params.minSumHessianInLeaf,
+                params.minDataInLeaf, params.treeMethod, params.growPolicy, params.booster, params.regLambda, params.regAlpha,
+                params.quietMode, params.sampleType, params.normalizeType, params.rateDrop, params.oneDrop, params.skipDrop,
+                params.dmatrixType, params.backend, params.gpuId, keyToString(params.modelId), keyToString(params.trainingFrame),
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -314,21 +313,21 @@ public class H2oApi {
     public XGBoostV3 grid_search_xgboost(final XGBoostParametersV3 params) throws IOException {
         final var s = getService(Grid.class);
         return s.trainXgboost(params.ntrees, params.nEstimators, params.maxDepth, params.minRows, params.minChildWeight, params.learnRate,
-                params.eta, params.sampleRate, params.subsample, params.colSampleRate, params.colsampleBylevel,
-                params.colSampleRatePerTree, params.colsampleBytree, params.monotoneConstraints, params.maxAbsLeafnodePred,
-                params.maxDeltaStep, params.scoreTreeInterval, params.seed, params.minSplitImprovement, params.gamma, params.nthread,
-                params.saveMatrixDirectory, params.calibrateModel, keyToString(params.calibrationFrame), params.maxBins, params.maxLeaves,
-                params.minSumHessianInLeaf, params.minDataInLeaf, params.treeMethod, params.growPolicy, params.booster, params.regLambda,
-                params.regAlpha, params.quietMode, params.sampleType, params.normalizeType, params.rateDrop, params.oneDrop,
-                params.skipDrop, params.dmatrixType, params.backend, params.gpuId, keyToString(params.modelId),
-                keyToString(params.trainingFrame), keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                params.eta, params.sampleRate, params.subsample, params.colSampleRate, params.colsampleBylevel, params.colSampleRatePerTree,
+                params.colsampleBytree, params.monotoneConstraints, params.maxAbsLeafnodePred, params.maxDeltaStep,
+                params.scoreTreeInterval, params.seed, params.minSplitImprovement, params.gamma, params.nthread, params.saveMatrixDirectory,
+                params.calibrateModel, keyToString(params.calibrationFrame), params.maxBins, params.maxLeaves, params.minSumHessianInLeaf,
+                params.minDataInLeaf, params.treeMethod, params.growPolicy, params.booster, params.regLambda, params.regAlpha,
+                params.quietMode, params.sampleType, params.normalizeType, params.rateDrop, params.oneDrop, params.skipDrop,
+                params.dmatrixType, params.backend, params.gpuId, keyToString(params.modelId), keyToString(params.trainingFrame),
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -421,27 +420,26 @@ public class H2oApi {
         final var s = getService(ModelBuilders.class);
         return s.trainDeeplearning(params.balanceClasses, params.classSamplingFactors, params.maxAfterBalanceSize,
                 params.maxConfusionMatrixSize, params.maxHitRatioK, params.activation, params.hidden, params.epochs,
-                params.trainSamplesPerIteration, params.targetRatioCommToComp, params.seed, params.adaptiveRate, params.rho,
-                params.epsilon, params.rate, params.rateAnnealing, params.rateDecay, params.momentumStart, params.momentumRamp,
-                params.momentumStable, params.nesterovAcceleratedGradient, params.inputDropoutRatio, params.hiddenDropoutRatios, params.l1,
-                params.l2, params.maxW2, params.initialWeightDistribution, params.initialWeightScale,
-                keyArrayToStringArray(params.initialWeights), keyArrayToStringArray(params.initialBiases), params.loss,
-                params.scoreInterval, params.scoreTrainingSamples, params.scoreValidationSamples, params.scoreDutyCycle,
-                params.classificationStop, params.regressionStop, params.quietMode, params.scoreValidationSampling,
-                params.overwriteWithBestModel, params.autoencoder, params.useAllFactorLevels, params.standardize, params.diagnostics,
-                params.variableImportances, params.fastMode, params.forceLoadBalance, params.replicateTrainingData, params.singleNodeMode,
-                params.shuffleTrainingData, params.missingValuesHandling, params.sparse, params.colMajor, params.averageActivation,
-                params.sparsityBeta, params.maxCategoricalFeatures, params.reproducible, params.exportWeightsAndBiases,
-                params.miniBatchSize, params.elasticAveraging, params.elasticAveragingMovingRate, params.elasticAveragingRegularization,
-                keyToString(params.pretrainedAutoencoder), keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                params.trainSamplesPerIteration, params.targetRatioCommToComp, params.seed, params.adaptiveRate, params.rho, params.epsilon,
+                params.rate, params.rateAnnealing, params.rateDecay, params.momentumStart, params.momentumRamp, params.momentumStable,
+                params.nesterovAcceleratedGradient, params.inputDropoutRatio, params.hiddenDropoutRatios, params.l1, params.l2,
+                params.maxW2, params.initialWeightDistribution, params.initialWeightScale, keyArrayToStringArray(params.initialWeights),
+                keyArrayToStringArray(params.initialBiases), params.loss, params.scoreInterval, params.scoreTrainingSamples,
+                params.scoreValidationSamples, params.scoreDutyCycle, params.classificationStop, params.regressionStop, params.quietMode,
+                params.scoreValidationSampling, params.overwriteWithBestModel, params.autoencoder, params.useAllFactorLevels,
+                params.standardize, params.diagnostics, params.variableImportances, params.fastMode, params.forceLoadBalance,
+                params.replicateTrainingData, params.singleNodeMode, params.shuffleTrainingData, params.missingValuesHandling,
+                params.sparse, params.colMajor, params.averageActivation, params.sparsityBeta, params.maxCategoricalFeatures,
+                params.reproducible, params.exportWeightsAndBiases, params.miniBatchSize, params.elasticAveraging,
+                params.elasticAveragingMovingRate, params.elasticAveragingRegularization, keyToString(params.pretrainedAutoencoder),
+                keyToString(params.modelId), keyToString(params.trainingFrame), keyToString(params.validationFrame), params.nfolds,
+                params.keepCrossValidationModels, params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment,
+                params.parallelizeCrossValidation, params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha,
+                colToString(params.responseColumn), colToString(params.weightsColumn), colToString(params.offsetColumn),
+                colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding, params.maxCategoricalLevels,
+                params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration, keyToString(params.checkpoint),
+                params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc,
+                params.customDistributionFunc, params.exportCheckpointsDir).execute().body();
     }
 
     /**
@@ -456,27 +454,26 @@ public class H2oApi {
         final var s = getService(ModelBuilders.class);
         return s.validate_parametersDeeplearning(params.balanceClasses, params.classSamplingFactors, params.maxAfterBalanceSize,
                 params.maxConfusionMatrixSize, params.maxHitRatioK, params.activation, params.hidden, params.epochs,
-                params.trainSamplesPerIteration, params.targetRatioCommToComp, params.seed, params.adaptiveRate, params.rho,
-                params.epsilon, params.rate, params.rateAnnealing, params.rateDecay, params.momentumStart, params.momentumRamp,
-                params.momentumStable, params.nesterovAcceleratedGradient, params.inputDropoutRatio, params.hiddenDropoutRatios, params.l1,
-                params.l2, params.maxW2, params.initialWeightDistribution, params.initialWeightScale,
-                keyArrayToStringArray(params.initialWeights), keyArrayToStringArray(params.initialBiases), params.loss,
-                params.scoreInterval, params.scoreTrainingSamples, params.scoreValidationSamples, params.scoreDutyCycle,
-                params.classificationStop, params.regressionStop, params.quietMode, params.scoreValidationSampling,
-                params.overwriteWithBestModel, params.autoencoder, params.useAllFactorLevels, params.standardize, params.diagnostics,
-                params.variableImportances, params.fastMode, params.forceLoadBalance, params.replicateTrainingData, params.singleNodeMode,
-                params.shuffleTrainingData, params.missingValuesHandling, params.sparse, params.colMajor, params.averageActivation,
-                params.sparsityBeta, params.maxCategoricalFeatures, params.reproducible, params.exportWeightsAndBiases,
-                params.miniBatchSize, params.elasticAveraging, params.elasticAveragingMovingRate, params.elasticAveragingRegularization,
-                keyToString(params.pretrainedAutoencoder), keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                params.trainSamplesPerIteration, params.targetRatioCommToComp, params.seed, params.adaptiveRate, params.rho, params.epsilon,
+                params.rate, params.rateAnnealing, params.rateDecay, params.momentumStart, params.momentumRamp, params.momentumStable,
+                params.nesterovAcceleratedGradient, params.inputDropoutRatio, params.hiddenDropoutRatios, params.l1, params.l2,
+                params.maxW2, params.initialWeightDistribution, params.initialWeightScale, keyArrayToStringArray(params.initialWeights),
+                keyArrayToStringArray(params.initialBiases), params.loss, params.scoreInterval, params.scoreTrainingSamples,
+                params.scoreValidationSamples, params.scoreDutyCycle, params.classificationStop, params.regressionStop, params.quietMode,
+                params.scoreValidationSampling, params.overwriteWithBestModel, params.autoencoder, params.useAllFactorLevels,
+                params.standardize, params.diagnostics, params.variableImportances, params.fastMode, params.forceLoadBalance,
+                params.replicateTrainingData, params.singleNodeMode, params.shuffleTrainingData, params.missingValuesHandling,
+                params.sparse, params.colMajor, params.averageActivation, params.sparsityBeta, params.maxCategoricalFeatures,
+                params.reproducible, params.exportWeightsAndBiases, params.miniBatchSize, params.elasticAveraging,
+                params.elasticAveragingMovingRate, params.elasticAveragingRegularization, keyToString(params.pretrainedAutoencoder),
+                keyToString(params.modelId), keyToString(params.trainingFrame), keyToString(params.validationFrame), params.nfolds,
+                params.keepCrossValidationModels, params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment,
+                params.parallelizeCrossValidation, params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha,
+                colToString(params.responseColumn), colToString(params.weightsColumn), colToString(params.offsetColumn),
+                colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding, params.maxCategoricalLevels,
+                params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration, keyToString(params.checkpoint),
+                params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc,
+                params.customDistributionFunc, params.exportCheckpointsDir).execute().body();
     }
 
     /**
@@ -491,27 +488,26 @@ public class H2oApi {
         final var s = getService(Grid.class);
         return s.trainDeeplearning(params.balanceClasses, params.classSamplingFactors, params.maxAfterBalanceSize,
                 params.maxConfusionMatrixSize, params.maxHitRatioK, params.activation, params.hidden, params.epochs,
-                params.trainSamplesPerIteration, params.targetRatioCommToComp, params.seed, params.adaptiveRate, params.rho,
-                params.epsilon, params.rate, params.rateAnnealing, params.rateDecay, params.momentumStart, params.momentumRamp,
-                params.momentumStable, params.nesterovAcceleratedGradient, params.inputDropoutRatio, params.hiddenDropoutRatios, params.l1,
-                params.l2, params.maxW2, params.initialWeightDistribution, params.initialWeightScale,
-                keyArrayToStringArray(params.initialWeights), keyArrayToStringArray(params.initialBiases), params.loss,
-                params.scoreInterval, params.scoreTrainingSamples, params.scoreValidationSamples, params.scoreDutyCycle,
-                params.classificationStop, params.regressionStop, params.quietMode, params.scoreValidationSampling,
-                params.overwriteWithBestModel, params.autoencoder, params.useAllFactorLevels, params.standardize, params.diagnostics,
-                params.variableImportances, params.fastMode, params.forceLoadBalance, params.replicateTrainingData, params.singleNodeMode,
-                params.shuffleTrainingData, params.missingValuesHandling, params.sparse, params.colMajor, params.averageActivation,
-                params.sparsityBeta, params.maxCategoricalFeatures, params.reproducible, params.exportWeightsAndBiases,
-                params.miniBatchSize, params.elasticAveraging, params.elasticAveragingMovingRate, params.elasticAveragingRegularization,
-                keyToString(params.pretrainedAutoencoder), keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                params.trainSamplesPerIteration, params.targetRatioCommToComp, params.seed, params.adaptiveRate, params.rho, params.epsilon,
+                params.rate, params.rateAnnealing, params.rateDecay, params.momentumStart, params.momentumRamp, params.momentumStable,
+                params.nesterovAcceleratedGradient, params.inputDropoutRatio, params.hiddenDropoutRatios, params.l1, params.l2,
+                params.maxW2, params.initialWeightDistribution, params.initialWeightScale, keyArrayToStringArray(params.initialWeights),
+                keyArrayToStringArray(params.initialBiases), params.loss, params.scoreInterval, params.scoreTrainingSamples,
+                params.scoreValidationSamples, params.scoreDutyCycle, params.classificationStop, params.regressionStop, params.quietMode,
+                params.scoreValidationSampling, params.overwriteWithBestModel, params.autoencoder, params.useAllFactorLevels,
+                params.standardize, params.diagnostics, params.variableImportances, params.fastMode, params.forceLoadBalance,
+                params.replicateTrainingData, params.singleNodeMode, params.shuffleTrainingData, params.missingValuesHandling,
+                params.sparse, params.colMajor, params.averageActivation, params.sparsityBeta, params.maxCategoricalFeatures,
+                params.reproducible, params.exportWeightsAndBiases, params.miniBatchSize, params.elasticAveraging,
+                params.elasticAveragingMovingRate, params.elasticAveragingRegularization, keyToString(params.pretrainedAutoencoder),
+                keyToString(params.modelId), keyToString(params.trainingFrame), keyToString(params.validationFrame), params.nfolds,
+                params.keepCrossValidationModels, params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment,
+                params.parallelizeCrossValidation, params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha,
+                colToString(params.responseColumn), colToString(params.weightsColumn), colToString(params.offsetColumn),
+                colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding, params.maxCategoricalLevels,
+                params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration, keyToString(params.checkpoint),
+                params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc,
+                params.customDistributionFunc, params.exportCheckpointsDir).execute().body();
     }
 
     /**
@@ -524,11 +520,11 @@ public class H2oApi {
 
     public GLMV3 train_glm(final GLMParametersV3 params) throws IOException {
         final var s = getService(ModelBuilders.class);
-        return s.trainGlm(params.seed, params.family, params.randFamily, params.tweedieVariancePower, params.tweedieLinkPower,
-                params.theta, params.solver, params.alpha, params.lambda, params.lambdaSearch, params.earlyStopping, params.nlambdas,
-                params.standardize, params.missingValuesHandling, keyToString(params.plugValues), params.nonNegative, params.maxIterations,
-                params.betaEpsilon, params.objectiveEpsilon, params.gradientEpsilon, params.objReg, params.link, params.randLink,
-                params.startval, params.randomColumns, params.calcLike, params.intercept, params.hglm, params.prior, params.lambdaMinRatio,
+        return s.trainGlm(params.seed, params.family, params.randFamily, params.tweedieVariancePower, params.tweedieLinkPower, params.theta,
+                params.solver, params.alpha, params.lambda, params.lambdaSearch, params.earlyStopping, params.nlambdas, params.standardize,
+                params.missingValuesHandling, keyToString(params.plugValues), params.nonNegative, params.maxIterations, params.betaEpsilon,
+                params.objectiveEpsilon, params.gradientEpsilon, params.objReg, params.link, params.randLink, params.startval,
+                params.randomColumns, params.calcLike, params.intercept, params.hglm, params.prior, params.lambdaMinRatio,
                 keyToString(params.betaConstraints), params.maxActivePredictors, params.interactions, params.interactionPairs,
                 params.balanceClasses, params.classSamplingFactors, params.maxAfterBalanceSize, params.maxConfusionMatrixSize,
                 params.maxHitRatioK, params.computePValues, params.removeCollinearColumns, keyToString(params.modelId),
@@ -552,16 +548,15 @@ public class H2oApi {
 
     public GLMV3 validate_glm(final GLMParametersV3 params) throws IOException {
         final var s = getService(ModelBuilders.class);
-        return s.validate_parametersGlm(params.seed, params.family, params.randFamily, params.tweedieVariancePower,
-                params.tweedieLinkPower, params.theta, params.solver, params.alpha, params.lambda, params.lambdaSearch,
-                params.earlyStopping, params.nlambdas, params.standardize, params.missingValuesHandling, keyToString(params.plugValues),
-                params.nonNegative, params.maxIterations, params.betaEpsilon, params.objectiveEpsilon, params.gradientEpsilon,
-                params.objReg, params.link, params.randLink, params.startval, params.randomColumns, params.calcLike, params.intercept,
-                params.hglm, params.prior, params.lambdaMinRatio, keyToString(params.betaConstraints), params.maxActivePredictors,
-                params.interactions, params.interactionPairs, params.balanceClasses, params.classSamplingFactors,
-                params.maxAfterBalanceSize, params.maxConfusionMatrixSize, params.maxHitRatioK, params.computePValues,
-                params.removeCollinearColumns, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
+        return s.validate_parametersGlm(params.seed, params.family, params.randFamily, params.tweedieVariancePower, params.tweedieLinkPower,
+                params.theta, params.solver, params.alpha, params.lambda, params.lambdaSearch, params.earlyStopping, params.nlambdas,
+                params.standardize, params.missingValuesHandling, keyToString(params.plugValues), params.nonNegative, params.maxIterations,
+                params.betaEpsilon, params.objectiveEpsilon, params.gradientEpsilon, params.objReg, params.link, params.randLink,
+                params.startval, params.randomColumns, params.calcLike, params.intercept, params.hglm, params.prior, params.lambdaMinRatio,
+                keyToString(params.betaConstraints), params.maxActivePredictors, params.interactions, params.interactionPairs,
+                params.balanceClasses, params.classSamplingFactors, params.maxAfterBalanceSize, params.maxConfusionMatrixSize,
+                params.maxHitRatioK, params.computePValues, params.removeCollinearColumns, keyToString(params.modelId),
+                keyToString(params.trainingFrame), keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
                 params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
                 params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
                 colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
@@ -581,11 +576,11 @@ public class H2oApi {
 
     public GLMV3 grid_search_glm(final GLMParametersV3 params) throws IOException {
         final var s = getService(Grid.class);
-        return s.trainGlm(params.seed, params.family, params.randFamily, params.tweedieVariancePower, params.tweedieLinkPower,
-                params.theta, params.solver, params.alpha, params.lambda, params.lambdaSearch, params.earlyStopping, params.nlambdas,
-                params.standardize, params.missingValuesHandling, keyToString(params.plugValues), params.nonNegative, params.maxIterations,
-                params.betaEpsilon, params.objectiveEpsilon, params.gradientEpsilon, params.objReg, params.link, params.randLink,
-                params.startval, params.randomColumns, params.calcLike, params.intercept, params.hglm, params.prior, params.lambdaMinRatio,
+        return s.trainGlm(params.seed, params.family, params.randFamily, params.tweedieVariancePower, params.tweedieLinkPower, params.theta,
+                params.solver, params.alpha, params.lambda, params.lambdaSearch, params.earlyStopping, params.nlambdas, params.standardize,
+                params.missingValuesHandling, keyToString(params.plugValues), params.nonNegative, params.maxIterations, params.betaEpsilon,
+                params.objectiveEpsilon, params.gradientEpsilon, params.objReg, params.link, params.randLink, params.startval,
+                params.randomColumns, params.calcLike, params.intercept, params.hglm, params.prior, params.lambdaMinRatio,
                 keyToString(params.betaConstraints), params.maxActivePredictors, params.interactions, params.interactionPairs,
                 params.balanceClasses, params.classSamplingFactors, params.maxAfterBalanceSize, params.maxConfusionMatrixSize,
                 params.maxHitRatioK, params.computePValues, params.removeCollinearColumns, keyToString(params.modelId),
@@ -684,14 +679,14 @@ public class H2oApi {
         final var s = getService(ModelBuilders.class);
         return s.trainKmeans(keyToString(params.userPoints), params.maxIterations, params.standardize, params.seed, params.init,
                 params.estimateK, params.k, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -706,14 +701,14 @@ public class H2oApi {
         final var s = getService(ModelBuilders.class);
         return s.validate_parametersKmeans(keyToString(params.userPoints), params.maxIterations, params.standardize, params.seed,
                 params.init, params.estimateK, params.k, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -728,14 +723,14 @@ public class H2oApi {
         final var s = getService(Grid.class);
         return s.trainKmeans(keyToString(params.userPoints), params.maxIterations, params.standardize, params.seed, params.init,
                 params.estimateK, params.k, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -751,14 +746,14 @@ public class H2oApi {
         return s.trainNaivebayes(params.balanceClasses, params.classSamplingFactors, params.maxAfterBalanceSize,
                 params.maxConfusionMatrixSize, params.maxHitRatioK, params.laplace, params.minSdev, params.epsSdev, params.minProb,
                 params.epsProb, params.computeMetrics, params.seed, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -774,14 +769,14 @@ public class H2oApi {
         return s.validate_parametersNaivebayes(params.balanceClasses, params.classSamplingFactors, params.maxAfterBalanceSize,
                 params.maxConfusionMatrixSize, params.maxHitRatioK, params.laplace, params.minSdev, params.epsSdev, params.minProb,
                 params.epsProb, params.computeMetrics, params.seed, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -797,14 +792,14 @@ public class H2oApi {
         return s.trainNaivebayes(params.balanceClasses, params.classSamplingFactors, params.maxAfterBalanceSize,
                 params.maxConfusionMatrixSize, params.maxHitRatioK, params.laplace, params.minSdev, params.epsSdev, params.minProb,
                 params.epsProb, params.computeMetrics, params.seed, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -885,14 +880,14 @@ public class H2oApi {
         final var s = getService(ModelBuilders.class);
         return s.trainSvd(params.transform, params.svdMethod, params.nv, params.maxIterations, params.seed, params.keepU, params.uName,
                 params.useAllFactorLevels, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -907,14 +902,14 @@ public class H2oApi {
         final var s = getService(ModelBuilders.class);
         return s.validate_parametersSvd(params.transform, params.svdMethod, params.nv, params.maxIterations, params.seed, params.keepU,
                 params.uName, params.useAllFactorLevels, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -929,14 +924,14 @@ public class H2oApi {
         final var s = getService(Grid.class);
         return s.trainSvd(params.transform, params.svdMethod, params.nv, params.maxIterations, params.seed, params.keepU, params.uName,
                 params.useAllFactorLevels, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1189,14 +1184,14 @@ public class H2oApi {
         return s.trainAggregator(params.transform, params.pcaMethod, params.k, params.maxIterations, params.targetNumExemplars,
                 params.relTolNumExemplars, params.seed, params.useAllFactorLevels, params.saveMappingFrame,
                 params.numIterationWithoutNewExemplar, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1212,14 +1207,14 @@ public class H2oApi {
         return s.validate_parametersAggregator(params.transform, params.pcaMethod, params.k, params.maxIterations,
                 params.targetNumExemplars, params.relTolNumExemplars, params.seed, params.useAllFactorLevels, params.saveMappingFrame,
                 params.numIterationWithoutNewExemplar, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1235,14 +1230,14 @@ public class H2oApi {
         return s.trainAggregator(params.transform, params.pcaMethod, params.k, params.maxIterations, params.targetNumExemplars,
                 params.relTolNumExemplars, params.seed, params.useAllFactorLevels, params.saveMappingFrame,
                 params.numIterationWithoutNewExemplar, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1296,14 +1291,14 @@ public class H2oApi {
                 params.deviceId, params.cacheData, params.networkDefinitionFile, params.networkParametersFile, params.meanImageFile,
                 params.exportNativeParametersPrefix, params.standardize, params.balanceClasses, params.classSamplingFactors,
                 params.maxAfterBalanceSize, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1484,14 +1479,14 @@ public class H2oApi {
         return s.trainCoxph(colToString(params.startColumn), colToString(params.stopColumn), params.stratifyBy, params.ties, params.init,
                 params.lreMin, params.maxIterations, params.interactionsOnly, params.interactions, params.interactionPairs,
                 params.useAllFactorLevels, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1507,14 +1502,14 @@ public class H2oApi {
         return s.validate_parametersCoxph(colToString(params.startColumn), colToString(params.stopColumn), params.stratifyBy, params.ties,
                 params.init, params.lreMin, params.maxIterations, params.interactionsOnly, params.interactions, params.interactionPairs,
                 params.useAllFactorLevels, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1530,14 +1525,14 @@ public class H2oApi {
         return s.trainCoxph(colToString(params.startColumn), colToString(params.stopColumn), params.stratifyBy, params.ties, params.init,
                 params.lreMin, params.maxIterations, params.interactionsOnly, params.interactions, params.interactionPairs,
                 params.useAllFactorLevels, keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1551,14 +1546,14 @@ public class H2oApi {
     public GenericV3 train_generic(final GenericParametersV3 params) throws IOException {
         final var s = getService(ModelBuilders.class);
         return s.trainGeneric(params.path, keyToString(params.modelKey), keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1593,14 +1588,14 @@ public class H2oApi {
     public GenericV3 grid_search_generic(final GenericParametersV3 params) throws IOException {
         final var s = getService(Grid.class);
         return s.trainGeneric(params.path, keyToString(params.modelKey), keyToString(params.modelId), keyToString(params.trainingFrame),
-                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels,
-                params.keepCrossValidationPredictions, params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation,
-                params.distribution, params.tweediePower, params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn),
-                colToString(params.weightsColumn), colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment,
-                params.categoricalEncoding, params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols,
-                params.scoreEachIteration, keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs,
-                params.stoppingMetric, params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc,
-                params.exportCheckpointsDir).execute().body();
+                keyToString(params.validationFrame), params.nfolds, params.keepCrossValidationModels, params.keepCrossValidationPredictions,
+                params.keepCrossValidationFoldAssignment, params.parallelizeCrossValidation, params.distribution, params.tweediePower,
+                params.quantileAlpha, params.huberAlpha, colToString(params.responseColumn), colToString(params.weightsColumn),
+                colToString(params.offsetColumn), colToString(params.foldColumn), params.foldAssignment, params.categoricalEncoding,
+                params.maxCategoricalLevels, params.ignoredColumns, params.ignoreConstCols, params.scoreEachIteration,
+                keyToString(params.checkpoint), params.stoppingRounds, params.maxRuntimeSecs, params.stoppingMetric,
+                params.stoppingTolerance, params.customMetricFunc, params.customDistributionFunc, params.exportCheckpointsDir).execute()
+                .body();
     }
 
     /**
@@ -1916,8 +1911,8 @@ public class H2oApi {
 
     public JobV3 importHiveTable(final ImportHiveTableV3 params) throws IOException {
         final var s = getService(ImportHiveTable.class);
-        return s.importHiveTable(params.database, params.table, params.partitions, params.allowMultiFormat, params._excludeFields)
-                .execute().body();
+        return s.importHiveTable(params.database, params.table, params.partitions, params.allowMultiFormat, params._excludeFields).execute()
+                .body();
     }
 
     /**
@@ -1945,8 +1940,8 @@ public class H2oApi {
      */
     public Call<ParseV3> parse(final ParseV3 params) {
         final var s = getService(Parse.class);
-        return s.parse(keyToString(params.destinationFrame), keyArrayToStringArray(params.sourceFrames), params.parseType,
-                params.separator, params.singleQuotes, params.checkHeader, params.numberColumns, params.columnNames, params.columnTypes,
+        return s.parse(keyToString(params.destinationFrame), keyArrayToStringArray(params.sourceFrames), params.parseType, params.separator,
+                params.singleQuotes, params.checkHeader, params.numberColumns, params.columnNames, params.columnTypes,
                 params.skippedColumns, params.domains, params.naStrings, params.chunkSize, params.deleteOnDone, params.blocking,
                 keyToString(params.decryptTool), params.customNonDataLineMarkers, params._excludeFields);
     }
@@ -1961,8 +1956,8 @@ public class H2oApi {
 
     public DecryptionSetupV3 setupDecryption(final DecryptionSetupV3 params) throws IOException {
         final var s = getService(DecryptionSetup.class);
-        return s.setupDecryption(keyToString(params.decryptToolId), params.decryptImpl, keyToString(params.keystoreId),
-                params.keystoreType, params.keyAlias, params.password, params.cipherSpec, params._excludeFields).execute().body();
+        return s.setupDecryption(keyToString(params.decryptToolId), params.decryptImpl, keyToString(params.keystoreId), params.keystoreType,
+                params.keyAlias, params.password, params.cipherSpec, params._excludeFields).execute().body();
     }
 
     /**
@@ -3310,9 +3305,9 @@ public class H2oApi {
 
     public JobV4 createSimpleFrame(final CreateFrameSimpleIV4 params) throws IOException {
         final var s = getService(Frames.class);
-        return s.createSimpleFrame(keyToString(params.dest), params.seed, params.nrows, params.ncolsReal, params.ncolsInt,
-                params.ncolsEnum, params.ncolsBool, params.ncolsStr, params.ncolsTime, params.realLb, params.realUb, params.intLb,
-                params.intUb, params.enumNlevels, params.boolP, params.timeLb, params.timeUb, params.strLength, params.missingFraction,
+        return s.createSimpleFrame(keyToString(params.dest), params.seed, params.nrows, params.ncolsReal, params.ncolsInt, params.ncolsEnum,
+                params.ncolsBool, params.ncolsStr, params.ncolsTime, params.realLb, params.realUb, params.intLb, params.intUb,
+                params.enumNlevels, params.boolP, params.timeLb, params.timeUb, params.strLength, params.missingFraction,
                 params.responseType, params.responseLb, params.responseUb, params.responseP, params.responseNlevels, params._fields)
                 .execute().body();
     }
@@ -3347,9 +3342,8 @@ public class H2oApi {
     private void initializeRetrofit() {
         final var gson = createGson();
 
-        final var builder =
-                new OkHttpClient.Builder().connectTimeout(connectTimeout, TimeUnit.SECONDS).writeTimeout(writeTimeout, TimeUnit.SECONDS)
-                        .readTimeout(readTimeout, TimeUnit.SECONDS);
+        final var builder = new OkHttpClient.Builder().connectTimeout(connectTimeout, TimeUnit.SECONDS)
+                .writeTimeout(writeTimeout, TimeUnit.SECONDS).readTimeout(readTimeout, TimeUnit.SECONDS);
         interceptorList.stream().forEach(builder::addInterceptor);
         final var client = builder.build();
 
@@ -3716,7 +3710,8 @@ public class H2oApi {
         final var ids = new String[keys.length];
         var i = 0;
         for (final KeyV3 key : keys) {
-            ids[i++] = key.name;
+            ids[i] = key.name;
+            i++;
         }
         return ids;
     }

@@ -226,9 +226,9 @@ public class ProjectHelper {
         final var fessConfig = ComponentUtil.getFessConfig();
         final var minioClient = createClient(fessConfig);
         final var objectName = getProjectConfigPath(projectId);
-        try (Reader reader =
-                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
-                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
+        try (Reader reader = new InputStreamReader(
+                minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build()),
+                Constants.UTF_8_CHARSET)) {
             final var project = gson.fromJson(reader, Project.class);
             if (loadParams) {
                 project.setDataSets(getDataSets(fessConfig, minioClient, projectId));
@@ -299,8 +299,8 @@ public class ProjectHelper {
     protected DataSet[] getDataSets(final FessConfig fessConfig, final MinioClient minioClient, final String projectId) {
         final var prefix = projectFolderName + "/" + projectId + "/data/";
         final List<DataSet> list = new ArrayList<>();
-        for (final Result<Item> result : minioClient.listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
-                .prefix(prefix).recursive(false).build())) {
+        for (final Result<Item> result : minioClient
+                .listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket()).prefix(prefix).recursive(false).build())) {
             try {
                 final var item = result.get();
                 final var objectName = item.objectName();
@@ -323,11 +323,12 @@ public class ProjectHelper {
         return getDataSet(fessConfig, minioClient, projectId, dataSetId);
     }
 
-    protected DataSet getDataSet(final FessConfig fessConfig, final MinioClient minioClient, final String projectId, final String dataSetId) {
+    protected DataSet getDataSet(final FessConfig fessConfig, final MinioClient minioClient, final String projectId,
+            final String dataSetId) {
         final var objectName = getDataSetConfigPath(projectId, dataSetId);
-        try (Reader reader =
-                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
-                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
+        try (Reader reader = new InputStreamReader(
+                minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build()),
+                Constants.UTF_8_CHARSET)) {
             return gson.fromJson(reader, DataSet.class);
         } catch (final Exception e) {
             if (logger.isDebugEnabled()) {
@@ -388,9 +389,8 @@ public class ProjectHelper {
         final var dataPath = new DeleteObject(getDataPath(projectId, name));
         final var configPath = new DeleteObject(getDataSetConfigPath(projectId, dataSetId));
         try {
-            final var results =
-                    minioClient.removeObjects(RemoveObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
-                            .objects(Lists.newArrayList(dataPath, configPath)).build());
+            final var results = minioClient.removeObjects(RemoveObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
+                    .objects(Lists.newArrayList(dataPath, configPath)).build());
             for (final Result<DeleteError> result : results) {
                 logger.warn("Failed to delete {}", result.get());
             }
@@ -406,57 +406,52 @@ public class ProjectHelper {
     public void loadDataSetSchema(final String sessionKey, final String projectId, final DataSet dataSet, final Runnable chain) {
         final var workingJob = createWorkingJob(dataSet.getName(), "Parse Schema", 0.2f);
         store(sessionKey, projectId, workingJob);
-        h2oHelper.importFiles(sessionKey, dataSet.getPath())
-                .execute(
-                        importResponse -> {
-                            if (logger.isDebugEnabled()) {
-                                logger.debug("importFiles: {}", importResponse);
-                            }
-                            if (importResponse.code() == 200) {
-                                final var parseSetup = new ParseSetupV3();
-                                parseSetup.sourceFrames =
-                                        Arrays.stream(importResponse.body().destinationFrames).map(FrameKeyV3::new)
-                                                .toArray(n -> new FrameKeyV3[n]);
-                                parseSetup.checkHeader = dataSet.getCheckHeader();
-                                h2oHelper.setupParse(sessionKey, parseSetup).execute(
-                                        setupResponse -> {
-                                            if (logger.isDebugEnabled()) {
-                                                logger.debug("setupParse: {}", setupResponse);
-                                            }
-                                            if (setupResponse.code() == 200) {
-                                                final var meta = h2oHelper.convert(setupResponse.body());
-                                                meta.destinationFrame = new FrameKeyV3(getFrameName(projectId, dataSet.getId()) + ".hex");
-                                                dataSet.setSchema(meta);
-                                                store(projectId, dataSet);
-                                                Arrays.stream(parseSetup.sourceFrames).map(H2oApi::keyToString).forEach(s -> {
-                                                    h2oHelper.deleteFrame(sessionKey, s).execute(deleteResponse -> {
-                                                        if (logger.isDebugEnabled()) {
-                                                            logger.debug("deleteFrame: {}", deleteResponse);
-                                                        }
-                                                        chain.run();
-                                                        finish(sessionKey, projectId, workingJob, null);
-                                                    }, t -> {
-                                                        logger.warn("Failed to delete frame: {}", s, t);
-                                                        finish(sessionKey, projectId, workingJob, t);
-                                                    });
-                                                });
-                                            } else {
-                                                logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet);
-                                                finish(sessionKey, projectId, workingJob, new H2oAccessException("Failed to access "
-                                                        + setupResponse));
-                                            }
-                                        }, t -> {
-                                            logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t);
-                                            finish(sessionKey, projectId, workingJob, t);
-                                        });
-                            } else {
-                                logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet);
-                                finish(sessionKey, projectId, workingJob, new H2oAccessException("Failed to access " + importResponse));
-                            }
-                        }, t -> {
-                            logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t);
-                            finish(sessionKey, projectId, workingJob, t);
+        h2oHelper.importFiles(sessionKey, dataSet.getPath()).execute(importResponse -> {
+            if (logger.isDebugEnabled()) {
+                logger.debug("importFiles: {}", importResponse);
+            }
+            if (importResponse.code() == 200) {
+                final var parseSetup = new ParseSetupV3();
+                parseSetup.sourceFrames =
+                        Arrays.stream(importResponse.body().destinationFrames).map(FrameKeyV3::new).toArray(n -> new FrameKeyV3[n]);
+                parseSetup.checkHeader = dataSet.getCheckHeader();
+                h2oHelper.setupParse(sessionKey, parseSetup).execute(setupResponse -> {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("setupParse: {}", setupResponse);
+                    }
+                    if (setupResponse.code() == 200) {
+                        final var meta = h2oHelper.convert(setupResponse.body());
+                        meta.destinationFrame = new FrameKeyV3(getFrameName(projectId, dataSet.getId()) + ".hex");
+                        dataSet.setSchema(meta);
+                        store(projectId, dataSet);
+                        Arrays.stream(parseSetup.sourceFrames).map(H2oApi::keyToString).forEach(s -> {
+                            h2oHelper.deleteFrame(sessionKey, s).execute(deleteResponse -> {
+                                if (logger.isDebugEnabled()) {
+                                    logger.debug("deleteFrame: {}", deleteResponse);
+                                }
+                                chain.run();
+                                finish(sessionKey, projectId, workingJob, null);
+                            }, t -> {
+                                logger.warn("Failed to delete frame: {}", s, t);
+                                finish(sessionKey, projectId, workingJob, t);
+                            });
                         });
+                    } else {
+                        logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet);
+                        finish(sessionKey, projectId, workingJob, new H2oAccessException("Failed to access " + setupResponse));
+                    }
+                }, t -> {
+                    logger.warn("Failed to parse data: projectId:{}, dataSet:{}", projectId, dataSet, t);
+                    finish(sessionKey, projectId, workingJob, t);
+                });
+            } else {
+                logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet);
+                finish(sessionKey, projectId, workingJob, new H2oAccessException("Failed to access " + importResponse));
+            }
+        }, t -> {
+            logger.warn("Failed to import data: projectId:{}, dataSet:{}", projectId, dataSet, t);
+            finish(sessionKey, projectId, workingJob, t);
+        });
     }
 
     public void store(final String projectId, final DataSet dataSet) {
@@ -509,7 +504,8 @@ public class ProjectHelper {
         }
     }
 
-    public void createFrame(final String sessionKey, final String projectId, final DataSet dataSet, final Consumer<Response<ParseV3>> result) {
+    public void createFrame(final String sessionKey, final String projectId, final DataSet dataSet,
+            final Consumer<Response<ParseV3>> result) {
         final var workingJob = createWorkingJob(dataSet.getName(), "Parse Frame", 0.2f);
         store(sessionKey, projectId, workingJob);
         h2oHelper.importFiles(sessionKey, dataSet.getPath()).execute(importResponse -> {
@@ -549,11 +545,10 @@ public class ProjectHelper {
         if (logger.isDebugEnabled()) {
             logger.debug("deleteFrame: {}", response);
         }
-        if (response.code() == 200) {
-            logger.info("Deleted frame: {}", frameId);
-        } else {
+        if (response.code() != 200) {
             throw new H2oAccessException("Failed to delete frame " + frameId + " : " + response);
         }
+        logger.info("Deleted frame: {}", frameId);
         responseCache.invalidate(getFrameSummaryCacheKey(projectId, frameId));
     }
 
@@ -593,9 +588,9 @@ public class ProjectHelper {
         final var fessConfig = ComponentUtil.getFessConfig();
         final var minioClient = createClient(fessConfig);
         final var objectName = getJobsConfigPath(projectId);
-        try (Reader reader =
-                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
-                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
+        try (Reader reader = new InputStreamReader(
+                minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build()),
+                Constants.UTF_8_CHARSET)) {
             final var jobs = gson.fromJson(reader, JobV3[].class);
             if (update) {
                 jobLock.writeLock().lock();
@@ -696,9 +691,8 @@ public class ProjectHelper {
 
         jobLock.writeLock().lock();
         try {
-            store(projectId,
-                    Arrays.stream(getJobs(sessionKey, projectId, false)).filter(j -> !jobId.equals(keyToString(j.key)))
-                            .toArray(n -> new JobV3[n]));
+            store(projectId, Arrays.stream(getJobs(sessionKey, projectId, false)).filter(j -> !jobId.equals(keyToString(j.key)))
+                    .toArray(n -> new JobV3[n]));
         } finally {
             jobLock.writeLock().unlock();
         }
@@ -710,31 +704,28 @@ public class ProjectHelper {
     public synchronized void deleteAllJobs(final String sessionKey, final String projectId) {
         jobLock.writeLock().lock();
         try {
-            final var jobs =
-                    Arrays.stream(getJobs(sessionKey, projectId, false))
-                            .filter(j -> j.getKind() == Kind.AUTO_ML && !JobV3.RUNNING.equals(j.status)).toArray(n -> new JobV3[n]);
+            final var jobs = Arrays.stream(getJobs(sessionKey, projectId, false))
+                    .filter(j -> j.getKind() == Kind.AUTO_ML && !JobV3.RUNNING.equals(j.status)).toArray(n -> new JobV3[n]);
             if (jobs.length > 0) {
-                new Thread(() -> stream(jobs).of(
-                        stream -> stream.forEach(job -> {
-                            final var leaderboardId = keyToString(job.dest);
-                            if (StringUtil.isNotBlank(leaderboardId)) {
-                                final var leaderboard = getLeaderboard(sessionKey, projectId, leaderboardId);
-                                if (leaderboard != null) {
-                                    stream(leaderboard.models).of(
-                                            st -> st.map(H2oApi::keyToString).filter(StringUtil::isNotBlank).forEach(modelId -> {
-                                                try {
-                                                    deleteModel(sessionKey, projectId, modelId);
-                                                } catch (final Exception e) {
-                                                    logger.warn("Failed to delete {} in {}", modelId, projectId, e);
-                                                }
-                                            }));
-                                }
-                            }
-                        })), "DeleteModels").start();
+                new Thread(() -> stream(jobs).of(stream -> stream.forEach(job -> {
+                    final var leaderboardId = keyToString(job.dest);
+                    if (StringUtil.isNotBlank(leaderboardId)) {
+                        final var leaderboard = getLeaderboard(sessionKey, projectId, leaderboardId);
+                        if (leaderboard != null) {
+                            stream(leaderboard.models)
+                                    .of(st -> st.map(H2oApi::keyToString).filter(StringUtil::isNotBlank).forEach(modelId -> {
+                                        try {
+                                            deleteModel(sessionKey, projectId, modelId);
+                                        } catch (final Exception e) {
+                                            logger.warn("Failed to delete {} in {}", modelId, projectId, e);
+                                        }
+                                    }));
+                        }
+                    }
+                })), "DeleteModels").start();
             }
-            store(projectId,
-                    Arrays.stream(getJobs(sessionKey, projectId, false)).filter(j -> JobV3.RUNNING.equals(j.status))
-                            .toArray(n -> new JobV3[n]));
+            store(projectId, Arrays.stream(getJobs(sessionKey, projectId, false)).filter(j -> JobV3.RUNNING.equals(j.status))
+                    .toArray(n -> new JobV3[n]));
         } finally {
             jobLock.writeLock().unlock();
         }
@@ -768,7 +759,8 @@ public class ProjectHelper {
                 }
                 if (response.code() == 200) {
                     return response.body();
-                } else if (response.code() == 404) {
+                }
+                if (response.code() == 404) {
                     final var localLeaderboard = getLocalLeaderboard(sessionKey, projectId, leaderboardId);
                     if (localLeaderboard != null) {
                         return localLeaderboard;
@@ -797,70 +789,66 @@ public class ProjectHelper {
             final Consumer<DataSet> consumer) {
         final var workingJob = createWorkingJob(name, "Export Prediction", 0.25f);
         store(sessionKey, projectId, workingJob);
-        h2oHelper.predict(sessionKey, modelId, frameId).execute(
-                predictResponse -> {
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("predict: {}", predictResponse);
-                    }
-                    if (predictResponse.code() == 200) {
-                        workingJob.progress = 0.5f;
-                        store(sessionKey, projectId, workingJob);
-                        final var modelMetricsListSchema = predictResponse.body();
-                        final var predictionsFrameId = keyToString(modelMetricsListSchema.predictionsFrame);
-                        final var destinationFrameId = "combind-" + predictionsFrameId;
-                        h2oHelper.bindFrames(sessionKey, destinationFrameId, new String[] { predictionsFrameId, frameId }).execute(
-                                bindFramesResponse -> {
-                                    if (logger.isDebugEnabled()) {
-                                        logger.debug("bindFrames: {}", bindFramesResponse);
-                                    }
-                                    if (bindFramesResponse.code() == 200) {
-                                        workingJob.progress = 0.75f;
-                                        store(sessionKey, projectId, workingJob);
-                                        h2oHelper.exportFrame(sessionKey, new FrameKeyV3(destinationFrameId),
-                                                getPredictCsvPath(projectId, name), true).execute(
-                                                exportFrameResponse -> {
-                                                    if (logger.isDebugEnabled()) {
-                                                        logger.debug("exportFrame: {}", exportFrameResponse);
-                                                    }
-                                                    if (exportFrameResponse.code() == 200) {
-                                                        final var dataSet =
-                                                                createDataSet(projectId, StringCodecUtil.encodeUrlSafe(name + ".csv"));
-                                                        dataSet.setType(DataSet.PREDICT);
-                                                        store(projectId, dataSet);
-                                                        consumer.accept(dataSet);
-                                                        finish(sessionKey, projectId, workingJob, null);
-                                                    } else {
-                                                        logger.warn("Failed to export frame: {}", exportFrameResponse);
-                                                        finish(sessionKey, projectId, workingJob, new H2oAccessException(
-                                                                "Failed to access " + exportFrameResponse));
-                                                    }
-                                                    deleteFrameQuietly(sessionKey, destinationFrameId);
-                                                    deleteFrameQuietly(sessionKey, predictionsFrameId);
-                                                }, t -> {
-                                                    logger.warn("Failed to export frame: {}", name, t);
-                                                    finish(sessionKey, projectId, workingJob, t);
-                                                    deleteFrameQuietly(sessionKey, destinationFrameId);
-                                                    deleteFrameQuietly(sessionKey, predictionsFrameId);
-                                                });
-                                    } else {
-                                        logger.warn("Failed to export frame: {}", bindFramesResponse);
-                                        finish(sessionKey, projectId, workingJob, new H2oAccessException("Failed to access "
-                                                + bindFramesResponse));
-                                        deleteFrameQuietly(sessionKey, predictionsFrameId);
-                                    }
-                                }, t -> {
-                                    logger.warn("Failed to export frame: {}", name, t);
-                                    finish(sessionKey, projectId, workingJob, t);
-                                    deleteFrameQuietly(sessionKey, predictionsFrameId);
-                                });
-                    } else {
-                        logger.warn("Failed to export frame: {}", predictResponse);
-                        finish(sessionKey, projectId, workingJob, new H2oAccessException("Failed to access " + predictResponse));
-                    }
-                }, t -> {
-                    logger.warn("Failed to export frame: {}", name, t);
-                    finish(sessionKey, projectId, workingJob, t);
-                });
+        h2oHelper.predict(sessionKey, modelId, frameId).execute(predictResponse -> {
+            if (logger.isDebugEnabled()) {
+                logger.debug("predict: {}", predictResponse);
+            }
+            if (predictResponse.code() == 200) {
+                workingJob.progress = 0.5f;
+                store(sessionKey, projectId, workingJob);
+                final var modelMetricsListSchema = predictResponse.body();
+                final var predictionsFrameId = keyToString(modelMetricsListSchema.predictionsFrame);
+                final var destinationFrameId = "combind-" + predictionsFrameId;
+                h2oHelper.bindFrames(sessionKey, destinationFrameId, new String[] { predictionsFrameId, frameId })
+                        .execute(bindFramesResponse -> {
+                            if (logger.isDebugEnabled()) {
+                                logger.debug("bindFrames: {}", bindFramesResponse);
+                            }
+                            if (bindFramesResponse.code() == 200) {
+                                workingJob.progress = 0.75f;
+                                store(sessionKey, projectId, workingJob);
+                                h2oHelper.exportFrame(sessionKey, new FrameKeyV3(destinationFrameId), getPredictCsvPath(projectId, name),
+                                        true).execute(exportFrameResponse -> {
+                                            if (logger.isDebugEnabled()) {
+                                                logger.debug("exportFrame: {}", exportFrameResponse);
+                                            }
+                                            if (exportFrameResponse.code() == 200) {
+                                                final var dataSet = createDataSet(projectId, StringCodecUtil.encodeUrlSafe(name + ".csv"));
+                                                dataSet.setType(DataSet.PREDICT);
+                                                store(projectId, dataSet);
+                                                consumer.accept(dataSet);
+                                                finish(sessionKey, projectId, workingJob, null);
+                                            } else {
+                                                logger.warn("Failed to export frame: {}", exportFrameResponse);
+                                                finish(sessionKey, projectId, workingJob,
+                                                        new H2oAccessException("Failed to access " + exportFrameResponse));
+                                            }
+                                            deleteFrameQuietly(sessionKey, destinationFrameId);
+                                            deleteFrameQuietly(sessionKey, predictionsFrameId);
+                                        }, t -> {
+                                            logger.warn("Failed to export frame: {}", name, t);
+                                            finish(sessionKey, projectId, workingJob, t);
+                                            deleteFrameQuietly(sessionKey, destinationFrameId);
+                                            deleteFrameQuietly(sessionKey, predictionsFrameId);
+                                        });
+                            } else {
+                                logger.warn("Failed to export frame: {}", bindFramesResponse);
+                                finish(sessionKey, projectId, workingJob, new H2oAccessException("Failed to access " + bindFramesResponse));
+                                deleteFrameQuietly(sessionKey, predictionsFrameId);
+                            }
+                        }, t -> {
+                            logger.warn("Failed to export frame: {}", name, t);
+                            finish(sessionKey, projectId, workingJob, t);
+                            deleteFrameQuietly(sessionKey, predictionsFrameId);
+                        });
+            } else {
+                logger.warn("Failed to export frame: {}", predictResponse);
+                finish(sessionKey, projectId, workingJob, new H2oAccessException("Failed to access " + predictResponse));
+            }
+        }, t -> {
+            logger.warn("Failed to export frame: {}", name, t);
+            finish(sessionKey, projectId, workingJob, t);
+        });
     }
 
     public void writeDataSet(final String sessionKey, final String projectId, final DataSet dataSet, final WrittenStreamOut out) {
@@ -878,8 +866,8 @@ public class ProjectHelper {
         final var filename = name.toLowerCase().endsWith(".csv") ? name : name + ".csv";
         final var workingJob = createWorkingJob(filename, "Export Frame", 0.25f);
         store(sessionKey, projectId, workingJob);
-        h2oHelper.exportFrame(sessionKey, new FrameKeyV3(frameId), getPredictCsvPath(projectId, filename), true).execute(
-                exportFrameResponse -> {
+        h2oHelper.exportFrame(sessionKey, new FrameKeyV3(frameId), getPredictCsvPath(projectId, filename), true)
+                .execute(exportFrameResponse -> {
                     if (logger.isDebugEnabled()) {
                         logger.debug("exportFrame: {}", exportFrameResponse);
                     }
@@ -924,8 +912,8 @@ public class ProjectHelper {
         final var fessConfig = ComponentUtil.getFessConfig();
         final var minioClient = createClient(fessConfig);
         final var path = projectFolderName + "/" + projectId + "/";
-        for (final Result<Item> result : minioClient.listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
-                .prefix(path).recursive(true).build())) {
+        for (final Result<Item> result : minioClient
+                .listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket()).prefix(path).recursive(true).build())) {
             try {
                 final var item = result.get();
                 final var objectName = item.objectName();
@@ -999,28 +987,26 @@ public class ProjectHelper {
     public ColV3 getFrameColumnData(final String sessionKey, final FramesV3 params) {
         try {
             final var cacheKey = params.toString();
-            final var colData =
-                    (ColV3) responseCache.get(cacheKey, () -> {
-                        final var response = h2oHelper.getFrameColumnData(sessionKey, params).execute();
-                        if (logger.isDebugEnabled()) {
-                            logger.debug("getFrameColumnData: {}", response);
-                        }
-                        if (response.code() == 200) {
-                            final var frames = response.body();
-                            if (frames.frames != null && frames.frames.length > 0 && frames.frames[0] != null
-                                    && frames.frames[0].columns.length > 0) {
-                                final var frame = frames.frames[0];
-                                final var col = frame.columns[0];
-                                col.setRows(frame.rows);
-                                return col;
-                            }
-                        } else if (response.code() == 404) {
-                            throw new CacheNotFoundException();
-                        }
-                        logger.warn("Failed to read leaderboard: {}", response);
-                        throw new CacheNotFoundException();
-                    });
-            return colData;
+            return (ColV3) responseCache.get(cacheKey, () -> {
+                final var response = h2oHelper.getFrameColumnData(sessionKey, params).execute();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("getFrameColumnData: {}", response);
+                }
+                if (response.code() == 200) {
+                    final var frames = response.body();
+                    if (frames.frames != null && frames.frames.length > 0 && frames.frames[0] != null
+                            && frames.frames[0].columns.length > 0) {
+                        final var frame = frames.frames[0];
+                        final var col = frame.columns[0];
+                        col.setRows(frame.rows);
+                        return col;
+                    }
+                } else if (response.code() == 404) {
+                    throw new CacheNotFoundException();
+                }
+                logger.warn("Failed to read leaderboard: {}", response);
+                throw new CacheNotFoundException();
+            });
         } catch (final Exception e) {
             if (e.getCause() instanceof CacheNotFoundException) {
                 return null;
@@ -1128,11 +1114,10 @@ public class ProjectHelper {
         if (logger.isDebugEnabled()) {
             logger.debug("deleteFrame: {}", response);
         }
-        if (response.code() == 200) {
-            logger.info("Deleted frame: {}", modelId);
-        } else {
+        if (response.code() != 200) {
             throw new H2oAccessException("Failed to delete model " + modelId + " : " + response);
         }
+        logger.info("Deleted frame: {}", modelId);
 
         responseCache.invalidate(getLeaderboardsCacheKey(projectId));
         responseCache.invalidate(getModelCacheKey(projectId, modelId));
@@ -1186,44 +1171,43 @@ public class ProjectHelper {
             throw new H2oAccessException(leaderboardId + " is not found in " + projectId);
         }
 
-        new Thread(
-                () -> {
-                    final var counter = new AtomicInteger(0);
-                    final var workingJob = createWorkingJob(leaderboardId, "Export All Models", 0.0f);
-                    store(sessionKey, projectId, workingJob);
+        new Thread(() -> {
+            final var counter = new AtomicInteger(0);
+            final var workingJob = createWorkingJob(leaderboardId, "Export All Models", 0.0f);
+            store(sessionKey, projectId, workingJob);
 
-                    store(projectId, leaderboard);
+            store(projectId, leaderboard);
 
-                    workingJob.progress = 0.1f;
-                    store(sessionKey, projectId, workingJob);
+            workingJob.progress = 0.1f;
+            store(sessionKey, projectId, workingJob);
 
-                    final var size = leaderboard.models.length;
-                    Arrays.stream(leaderboard.models).map(m -> m.name).forEach(modelId -> {
-                        final var model = getModel(sessionKey, projectId, leaderboardId, modelId);
-                        if (model == null) {
-                            logger.warn("{} is not found in {}", modelId, projectId);
-                            return;
-                        }
+            final var size = leaderboard.models.length;
+            Arrays.stream(leaderboard.models).map(m -> m.name).forEach(modelId -> {
+                final var model = getModel(sessionKey, projectId, leaderboardId, modelId);
+                if (model == null) {
+                    logger.warn("{} is not found in {}", modelId, projectId);
+                    return;
+                }
 
-                        try {
-                            store(sessionKey, projectId, leaderboardId, model);
-                        } catch (final Exception e) {
-                            logger.warn("Failed to store model: {} : {} : {}", projectId, leaderboardId, model, e);
-                        }
+                try {
+                    store(sessionKey, projectId, leaderboardId, model);
+                } catch (final Exception e) {
+                    logger.warn("Failed to store model: {} : {} : {}", projectId, leaderboardId, model, e);
+                }
 
-                        final var current = counter.addAndGet(1);
-                        workingJob.progress = (float) current / (float) size * 0.9f + 0.1f;
-                        store(sessionKey, projectId, workingJob);
-                    });
+                final var current = counter.addAndGet(1);
+                workingJob.progress = (float) current / (float) size * 0.9f + 0.1f;
+                store(sessionKey, projectId, workingJob);
+            });
 
-                    workingJob.progress = 1.0f;
-                    if (counter.get() == size) {
-                        finish(sessionKey, projectId, workingJob, null);
-                    } else {
-                        finish(sessionKey, projectId, workingJob, new H2oAccessException("Failed to export " + (size - counter.get())
-                                + " models."));
-                    }
-                }, "ExportAllModels").start();
+            workingJob.progress = 1.0f;
+            if (counter.get() == size) {
+                finish(sessionKey, projectId, workingJob, null);
+            } else {
+                finish(sessionKey, projectId, workingJob,
+                        new H2oAccessException("Failed to export " + (size - counter.get()) + " models."));
+            }
+        }, "ExportAllModels").start();
     }
 
     protected void store(final String projectId, final LeaderboardV99 leaderboard) {
@@ -1315,9 +1299,9 @@ public class ProjectHelper {
         final var tempObjectName = objectName + ".tmp";
         final var csvConfig = new CsvConfig(',', '"', '"');
         csvConfig.setIgnoreEmptyLines(true);
-        try (final var csvReader =
-                new CsvReader(new InputStreamReader(openStorageObject(minioClient, fessConfig.getStorageBucket(), objectName),
-                        Constants.UTF_8_CHARSET), csvConfig)) {
+        try (final var csvReader = new CsvReader(
+                new InputStreamReader(openStorageObject(minioClient, fessConfig.getStorageBucket(), objectName), Constants.UTF_8_CHARSET),
+                csvConfig)) {
             final Map<String, Integer> indexMap = new HashMap<>();
             final var headerList = csvReader.readValues();
             for (var i = 0; i < headerList.size(); i++) {
@@ -1334,15 +1318,14 @@ public class ProjectHelper {
             }
 
             try (final var pipedOut = new PipedOutputStream(); final var pipedIn = new PipedInputStream()) {
-                final var pipeWriter =
-                        new Thread(() -> {
-                            try {
-                                minioClient.putObject(PutObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(tempObjectName)
-                                        .stream(pipedIn, -1, PutObjectArgs.MIN_MULTIPART_SIZE).build());
-                            } catch (final Exception e) {
-                                logger.warn("Failed to write {}.", tempObjectName, e);
-                            }
-                        }, "Filtercolumns");
+                final var pipeWriter = new Thread(() -> {
+                    try {
+                        minioClient.putObject(PutObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(tempObjectName)
+                                .stream(pipedIn, -1, PutObjectArgs.MIN_MULTIPART_SIZE).build());
+                    } catch (final Exception e) {
+                        logger.warn("Failed to write {}.", tempObjectName, e);
+                    }
+                }, "Filtercolumns");
 
                 pipedIn.connect(pipedOut);
                 pipeWriter.start();
@@ -1375,9 +1358,9 @@ public class ProjectHelper {
             if (logger.isDebugEnabled()) {
                 logger.debug("copying {} to {}.", tempObjectName, objectName);
             }
-            minioClient.copyObject(CopyObjectArgs.builder()
-                    .source(CopySource.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build())
-                    .bucket(fessConfig.getStorageBucket()).object(tempObjectName).build());
+            minioClient.copyObject(
+                    CopyObjectArgs.builder().source(CopySource.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build())
+                            .bucket(fessConfig.getStorageBucket()).object(tempObjectName).build());
             if (logger.isDebugEnabled()) {
                 logger.debug("removing {}.", tempObjectName);
             }
@@ -1577,16 +1560,15 @@ public class ProjectHelper {
         final var leaderboardDir = projectFolderName + "/" + projectId + "/model/" + StringCodecUtil.encodeUrlSafe(leaderboardId) + "/";
         final List<DeleteObject> objectNameList = new ArrayList<>();
         try {
-            for (final Result<Item> result : minioClient.listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
-                    .prefix(leaderboardDir).recursive(true).build())) {
+            for (final Result<Item> result : minioClient.listObjects(
+                    ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket()).prefix(leaderboardDir).recursive(true).build())) {
                 final var item = result.get();
                 final var objectName = item.objectName();
                 objectNameList.add(new DeleteObject(objectName));
             }
             objectNameList.add(new DeleteObject(getLeaderboardConfigPath(projectId, leaderboardId)));
-            final var results =
-                    minioClient.removeObjects(RemoveObjectsArgs.builder().bucket(fessConfig.getStorageBucket()).objects(objectNameList)
-                            .build());
+            final var results = minioClient
+                    .removeObjects(RemoveObjectsArgs.builder().bucket(fessConfig.getStorageBucket()).objects(objectNameList).build());
             for (final Result<DeleteError> result : results) {
                 logger.warn("Failed to delete {}", result.get());
             }
@@ -1638,8 +1620,8 @@ public class ProjectHelper {
         final List<String> list = new ArrayList<>();
         try {
             final var minioClient = createClient(fessConfig);
-            for (final Result<Item> result : minioClient.listObjects(ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket())
-                    .prefix(leaderboardDir).recursive(false).build())) {
+            for (final Result<Item> result : minioClient.listObjects(
+                    ListObjectsArgs.builder().bucket(fessConfig.getStorageBucket()).prefix(leaderboardDir).recursive(false).build())) {
                 final var item = result.get();
                 final var objectName = item.objectName();
                 if (logger.isDebugEnabled()) {
@@ -1666,9 +1648,9 @@ public class ProjectHelper {
         final var fessConfig = ComponentUtil.getFessConfig();
         final var minioClient = createClient(fessConfig);
         final var objectName = getLeaderboardConfigPath(projectId, leaderboardId);
-        try (Reader reader =
-                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
-                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
+        try (Reader reader = new InputStreamReader(
+                minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build()),
+                Constants.UTF_8_CHARSET)) {
             final var leaderboard = gson.fromJson(reader, LeaderboardV99.class);
             leaderboard.setInLocal(true);
             return leaderboard;
@@ -1688,9 +1670,9 @@ public class ProjectHelper {
         final var fessConfig = ComponentUtil.getFessConfig();
         final var minioClient = createClient(fessConfig);
         final var objectName = getModelConfigPath(projectId, leaderboardId, modelId);
-        try (Reader reader =
-                new InputStreamReader(minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket())
-                        .object(objectName).build()), Constants.UTF_8_CHARSET)) {
+        try (Reader reader = new InputStreamReader(
+                minioClient.getObject(GetObjectArgs.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build()),
+                Constants.UTF_8_CHARSET)) {
             final var model = modelHelper.deserialize(reader);
             model.setInLocal(true);
             return model;

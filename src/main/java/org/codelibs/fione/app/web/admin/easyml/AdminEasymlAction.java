@@ -211,10 +211,9 @@ public class AdminEasymlAction extends FioneAdminAction {
         form.columnTypes.put(form.responseColumn, Constants.REGRESSION_TYPE.equals(form.predictionType) ? "Numeric" : "Enum");
         try {
             final var columnSummaries = projectHelper.getColumnSummaries(sessionKey, form.projectId, form.frameId);
-            final var ignoredColumns =
-                    Arrays.stream(columnSummaries.columns)
-                            .filter(col -> !form.columns.containsKey(StringCodecUtil.encodeUrlSafe(col.label))).map(col -> col.label)
-                            .toArray(n -> new String[n]);
+            final var ignoredColumns = Arrays.stream(columnSummaries.columns)
+                    .filter(col -> !form.columns.containsKey(StringCodecUtil.encodeUrlSafe(col.label))).map(col -> col.label)
+                    .toArray(n -> new String[n]);
             var updateColumnType = false;
             for (var i = 0; i < columnSummaries.columns.length; i++) {
                 final var col = columnSummaries.columns[i];
@@ -236,25 +235,18 @@ public class AdminEasymlAction extends FioneAdminAction {
             final var projectName = StringCodecUtil.normalize(StringCodecUtil.decode(form.projectId));
             final var responseColumn = StringCodecUtil.decode(form.responseColumn);
 
-            final var buildControl =
-                    AutoMLBuildControlBuilder
-                            .create()
-                            .projectName(projectName)
-                            .nfolds(form.nfolds)
-                            .balanceClasses(Boolean.valueOf(form.balanceClasses))
-                            .stoppingCriteria(
-                                    AutoMLStoppingCriteriaBuilder.create().seed(form.seed).maxModels(form.maxModels)
-                                            .maxRuntimeSecs(form.maxRuntimeSecs).maxRuntimeSecsPerModel(form.maxRuntimeSecsPerModel)
-                                            .stoppingRounds(form.stoppingRounds)
-                                            .stoppingMetric(ScoreKeeperStoppingMetric.valueOf(form.stoppingMetric))
-                                            .stoppingTolerance(form.stoppingTolerance).build())
-                            .keepCrossValidationPredictions(Boolean.valueOf(form.keepCrossValidationPredictions))
-                            .keepCrossValidationModels(Boolean.valueOf(form.keepCrossValidationModels))
-                            .keepCrossValidationFoldAssignment(Boolean.valueOf(form.keepCrossValidationFoldAssignment)).build();
-            final var input =
-                    AutoMLInputBuilder.create().trainingFrame(form.frameId).responseColumn(responseColumn, null)
-                            .ignoredColumns(ignoredColumns)
-                            .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
+            final var buildControl = AutoMLBuildControlBuilder.create().projectName(projectName).nfolds(form.nfolds)
+                    .balanceClasses(Boolean.parseBoolean(form.balanceClasses))
+                    .stoppingCriteria(AutoMLStoppingCriteriaBuilder.create().seed(form.seed).maxModels(form.maxModels)
+                            .maxRuntimeSecs(form.maxRuntimeSecs).maxRuntimeSecsPerModel(form.maxRuntimeSecsPerModel)
+                            .stoppingRounds(form.stoppingRounds).stoppingMetric(ScoreKeeperStoppingMetric.valueOf(form.stoppingMetric))
+                            .stoppingTolerance(form.stoppingTolerance).build())
+                    .keepCrossValidationPredictions(Boolean.parseBoolean(form.keepCrossValidationPredictions))
+                    .keepCrossValidationModels(Boolean.parseBoolean(form.keepCrossValidationModels))
+                    .keepCrossValidationFoldAssignment(Boolean.parseBoolean(form.keepCrossValidationFoldAssignment)).build();
+            final var input = AutoMLInputBuilder.create().trainingFrame(form.frameId).responseColumn(responseColumn, null)
+                    .ignoredColumns(ignoredColumns)
+                    .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
             final List<AutoMLCustomParameterV99> argParamList = new ArrayList<>();
             argParamList.add(new AutoMLCustomParameterV99(Automlapischemas3AutoMLBuildSpecScopeProvider.DeepLearning,
                     "max_categorical_features", form.maxCategoricalFeatures));
@@ -389,8 +381,8 @@ public class AdminEasymlAction extends FioneAdminAction {
             throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
         }
 
-        return asStream(dataSet.getName()).contentTypeOctetStream().stream(
-                out -> projectHelper.writeDataSet(getSessionKey(), form.projectId, dataSet, out));
+        return asStream(dataSet.getName()).contentTypeOctetStream()
+                .stream(out -> projectHelper.writeDataSet(getSessionKey(), form.projectId, dataSet, out));
     }
 
     @Execute
@@ -458,14 +450,12 @@ public class AdminEasymlAction extends FioneAdminAction {
                                     form.responseColumn = StringCodecUtil.encodeUrlSafe(column.label);
                                     form.predictionType = Constants.REGRESSION_TYPE;
                                 }
-                            } else if ("enum".equals(column.type)) {
-                                if (column.domainCardinality < 10) {
-                                    form.responseColumn = StringCodecUtil.encodeUrlSafe(column.label);
-                                    if (column.domainCardinality > 2) {
-                                        form.predictionType = Constants.MULTICLASS_TYPE;
-                                    } else {
-                                        form.predictionType = Constants.BINARYCLASS_TYPE;
-                                    }
+                            } else if ("enum".equals(column.type) && (column.domainCardinality < 10)) {
+                                form.responseColumn = StringCodecUtil.encodeUrlSafe(column.label);
+                                if (column.domainCardinality > 2) {
+                                    form.predictionType = Constants.MULTICLASS_TYPE;
+                                } else {
+                                    form.predictionType = Constants.BINARYCLASS_TYPE;
                                 }
                             }
                         }
@@ -596,25 +586,21 @@ public class AdminEasymlAction extends FioneAdminAction {
                 form.dataSetId = dataSetId;
                 form.frameId = frameId;
             });
-        }).renderWith(
-                data -> {
-                    RenderDataUtil.register(data, "token", token);
-                    RenderDataUtil.register(data, "project", project);
-                    RenderDataUtil.register(data, "projectId", projectId);
-                    RenderDataUtil.register(data, "frameId", frameId);
-                    RenderDataUtil.register(data, "dataSetId", dataSetId);
-                    RenderDataUtil.register(
-                            data,
-                            "dataSets",
-                            Arrays.stream(project.getDataSets()).filter(d -> DataSet.PREDICT.equals(d.getType()))
-                                    .toArray(n -> new DataSet[n]));
-                    RenderDataUtil.register(data, "leaderboardId", leaderboardId);
-                    RenderDataUtil.register(data, "columnSummaries", columnSummaries);
-                    RenderDataUtil.register(data, "leaderboard", leaderboard);
-                    final var responseColumn = getResponseColumn(leaderboard.projectName);
-                    RenderDataUtil.register(data, "responseColumn", responseColumn);
-                    RenderDataUtil.register(data, "predictionMetric", getPredictionMetric(responseColumn, columnSummaries, leaderboard));
-                });
+        }).renderWith(data -> {
+            RenderDataUtil.register(data, "token", token);
+            RenderDataUtil.register(data, "project", project);
+            RenderDataUtil.register(data, "projectId", projectId);
+            RenderDataUtil.register(data, "frameId", frameId);
+            RenderDataUtil.register(data, "dataSetId", dataSetId);
+            RenderDataUtil.register(data, "dataSets",
+                    Arrays.stream(project.getDataSets()).filter(d -> DataSet.PREDICT.equals(d.getType())).toArray(n -> new DataSet[n]));
+            RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+            RenderDataUtil.register(data, "columnSummaries", columnSummaries);
+            RenderDataUtil.register(data, "leaderboard", leaderboard);
+            final var responseColumn = getResponseColumn(leaderboard.projectName);
+            RenderDataUtil.register(data, "responseColumn", responseColumn);
+            RenderDataUtil.register(data, "predictionMetric", getPredictionMetric(responseColumn, columnSummaries, leaderboard));
+        });
     }
 
     private HtmlResponse asPredictionHtml(final String projectId, final String dataSetId, final String leaderboardId) {
@@ -642,20 +628,19 @@ public class AdminEasymlAction extends FioneAdminAction {
             form.dataSetId = dataSetId;
             form.leaderboardId = leaderboardId;
             form.name = modelName;
-        })).renderWith(
-                data -> {
-                    RenderDataUtil.register(data, "project", project);
-                    final List<Map<String, String>> columnList = new ArrayList<>();
-                    final var dataSet = project.getDataSet(dataSetId);
-                    if (dataSet != null) {
-                        final var schema = dataSet.getSchema();
-                        if (schema != null) {
-                            Arrays.stream(schema.getAvailableColumnNames()).filter(s -> !s.equals(responseColumn))
-                                    .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
-                        }
-                    }
-                    RenderDataUtil.register(data, "columnItems", columnList);
-                });
+        })).renderWith(data -> {
+            RenderDataUtil.register(data, "project", project);
+            final List<Map<String, String>> columnList = new ArrayList<>();
+            final var dataSet = project.getDataSet(dataSetId);
+            if (dataSet != null) {
+                final var schema = dataSet.getSchema();
+                if (schema != null) {
+                    Arrays.stream(schema.getAvailableColumnNames()).filter(s -> !s.equals(responseColumn))
+                            .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
+                }
+            }
+            RenderDataUtil.register(data, "columnItems", columnList);
+        });
     }
 
     private HtmlResponse redirectJobHtml(final String projectId) {

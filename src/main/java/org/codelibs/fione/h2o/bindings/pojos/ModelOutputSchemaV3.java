@@ -168,9 +168,8 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
     @Override
     public String[] getFieldNames() {
         if (fieldNames == null) {
-            fieldNames =
-                    Arrays.stream(getClass().getFields()).filter(f -> isOutputClass(f.getType())).map(Field::getName)
-                            .toArray(n -> new String[n]);
+            fieldNames = Arrays.stream(getClass().getFields()).filter(f -> isOutputClass(f.getType())).map(Field::getName)
+                    .toArray(n -> new String[n]);
         }
         return fieldNames;
     }
@@ -180,10 +179,9 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
         for (var i = 0; i < scoringHistory.columns.length; i++) {
             columnIndexMap.put(scoringHistory.columns[i].name, i);
         }
-        final var xNames = new String[] { "number_of_trees", "epochs", "iteration", "iterations" };
-        final var yNames =
-                new String[] { "training_deviance", "training_classification_error", "deviance_train", "within_cluster_sum_of_squares",
-                        "objective" };
+        final String[] xNames = { "number_of_trees", "epochs", "iteration", "iterations" };
+        final String[] yNames =
+                { "training_deviance", "training_classification_error", "deviance_train", "within_cluster_sum_of_squares", "objective" };
         for (final String xName : xNames) {
             for (final String yName : yNames) {
                 final var chart = getScoringHistoryChart(columnIndexMap, xName, yName);

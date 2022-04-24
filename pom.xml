@@ -5,7 +5,7 @@
 	<artifactId>fione</artifactId>
 	<packaging>war</packaging>
 	<name>Fione</name>
-	<version>13.12.0-SNAPSHOT</version>
+	<version>14.1.0-SNAPSHOT</version>
 	<url>https://fione.codelibs.org/</url>
 	<inceptionYear>2009</inceptionYear>
 	<licenses>
@@ -28,53 +28,14 @@
 		<url>https://github.com/codelibs/fione</url>
 	</scm>
 	<parent>
-		<groupId>org.sonatype.oss</groupId>
-		<artifactId>oss-parent</artifactId>
-		<version>9</version>
+		<groupId>org.codelibs.fess</groupId>
+		<artifactId>fess-parent</artifactId>
+		<version>14.1.0</version>
 	</parent>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<fess.version>13.12.0</fess.version>
-		<retrofit.version>2.7.0</retrofit.version>
-
-		<!-- Main Framework -->
-		<dbflute.version>1.2.4</dbflute.version>
-		<lastaflute.version>1.2.0</lastaflute.version>
-		<lasta.di.version>0.8.3</lasta.di.version>
-		<lasta.taglib.version>0.7.3</lasta.taglib.version>
-		<lasta.job.version>0.5.4</lasta.job.version>
-		<mailflute.version>0.6.4</mailflute.version>
-
-		<!-- Partner Library -->
-		<slf4j.version>1.7.30</slf4j.version>
-		<log4j.version>2.14.1</log4j.version>
-		<jackson.version>2.12.2</jackson.version>
-		<commons.fileupload.version>1.4</commons.fileupload.version>
-		<asm.version>9.1</asm.version>
-		<tika.version>1.26</tika.version>
-		<groovy.version>3.0.7</groovy.version>
-		<minio.version>8.1.0</minio.version>
-		<okhttp.version>3.14.9</okhttp.version>
-
-		<!-- Crawler -->
-		<crawler.version>3.12.0</crawler.version>
-
-		<!-- Suggest -->
-		<suggest.version>7.12.0</suggest.version>
-
-		<!-- Fesen -->
-		<fesen.version>0.12.0</fesen.version>
-		<fesen.httpclient.version>0.12.0</fesen.httpclient.version>
-		<fesen.runner.version>0.12.0</fesen.runner.version>
-
-		<!-- Tomcat -->
-		<tomcat.version>9.0.44</tomcat.version>
-		<tomcat.boot.version>0.7.7</tomcat.boot.version>
-
-		<!-- Testing -->
-		<utflute.version>0.9.1</utflute.version>
-		<junit.version>4.13.2</junit.version>
+		<retrofit.version>2.9.0</retrofit.version>
 
 		<!-- DEB & RPM build -->
 		<packaging.fess.home.dir>/usr/share/fess</packaging.fess.home.dir>
@@ -103,15 +64,9 @@
 		<plugins>
 			<plugin>
 				<artifactId>maven-compiler-plugin</artifactId>
-				<version>3.8.1</version>
-				<configuration>
-					<release>11</release>
-					<encoding>UTF-8</encoding>
-				</configuration>
 			</plugin>
 			<plugin>
 				<artifactId>maven-source-plugin</artifactId>
-				<version>3.2.1</version>
 				<executions>
 					<execution>
 						<id>source-jar</id>
@@ -124,7 +79,6 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-war-plugin</artifactId>
-				<version>3.3.1</version>
 				<configuration>
 					<archive>
 						<manifest>
@@ -135,7 +89,6 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-dependency-plugin</artifactId>
-				<version>3.1.2</version>
 				<executions>
 					<execution>
 						<id>unpack-provided</id>
@@ -155,25 +108,15 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-surefire-plugin</artifactId>
-				<version>2.22.2</version>
 				<configuration>
 					<useSystemClassLoader>false</useSystemClassLoader>
 				</configuration>
 			</plugin>
 			<plugin>
 				<artifactId>maven-javadoc-plugin</artifactId>
-				<version>3.2.0</version>
-				<configuration>
-					<encoding>UTF-8</encoding>
-					<docencoding>UTF-8</docencoding>
-					<charset>UTF-8</charset>
-					<source>11</source>
-					<locale>en_US</locale>
-				</configuration>
 			</plugin>
 			<plugin>
 				<artifactId>maven-jxr-plugin</artifactId>
-				<version>3.0.0</version>
 				<configuration>
 					<docTitle>&lt;a href="https://fione.codelibs.org/"
 						target="_blank"&gt;Machine Learning Server: Fione
@@ -185,47 +128,14 @@
 			<plugin>
 				<groupId>com.mycila</groupId>
 				<artifactId>license-maven-plugin</artifactId>
-				<version>4.0</version>
-				<configuration>
-					<header>https://www.codelibs.org/assets/license/header.txt</header>
-					<properties>
-						<year>2020</year>
-					</properties>
-					<includes>
-						<include>src/**/*.java</include>
-					</includes>
-					<encoding>UTF-8</encoding>
-					<headerDefinitions>
-						<headerDefinition>https://www.codelibs.org/assets/license/header-definition-2.xml</headerDefinition>
-					</headerDefinitions>
-				</configuration>
-				<executions>
-					<execution>
-						<goals>
-							<goal>check</goal>
-						</goals>
-					</execution>
-				</executions>
 			</plugin>
 			<plugin>
-				<groupId>net.revelc.code</groupId>
+				<groupId>net.revelc.code.formatter</groupId>
 				<artifactId>formatter-maven-plugin</artifactId>
-				<version>0.5.2</version>
-				<executions>
-					<execution>
-						<goals>
-							<goal>format</goal>
-						</goals>
-					</execution>
-				</executions>
-				<configuration>
-					<configFile>${basedir}/src/main/config/eclipse/formatter/java.xml</configFile>
-				</configuration>
 			</plugin>
 			<plugin>
 				<groupId>org.dbflute</groupId>
 				<artifactId>dbflute-maven-plugin</artifactId>
-				<version>1.1.0</version>
 				<configuration>
 					<dbfluteVersion>${dbflute.version}</dbfluteVersion>
 					<packageBase>org.codelibs.fione.dbflute</packageBase>
@@ -235,7 +145,6 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-antrun-plugin</artifactId>
-				<version>3.0.0</version>
 				<dependencies>
 					<dependency>
 						<groupId>org.apache.ant</groupId>
@@ -255,7 +164,6 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-resources-plugin</artifactId>
-				<version>3.2.0</version>
 				<executions>
 					<execution>
 						<id>copy-resources-deb</id>
@@ -335,7 +243,6 @@
 			<plugin>
 				<groupId>org.vafer</groupId>
 				<artifactId>jdeb</artifactId>
-				<version>1.8</version>
 				<configuration>
 					<deb>${project.build.directory}/releases/${project.artifactId}-${project.version}.deb</deb>
 					<controlDir>${project.build.directory}/generated-packaging/deb/scripts</controlDir>
@@ -371,7 +278,6 @@
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>rpm-maven-plugin</artifactId>
-				<version>2.2.0</version>
 				<configuration>
 					<distribution>Fione</distribution>
 					<group>Application/Internet</group>
@@ -472,7 +378,7 @@
 		<dependency>
 			<groupId>org.codelibs</groupId>
 			<artifactId>corelib</artifactId>
-			<version>0.5.4</version>
+			<version>${corelib.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.lastaflute</groupId>
@@ -492,7 +398,7 @@
 		<dependency>
 			<groupId>javax.transaction</groupId>
 			<artifactId>javax.transaction-api</artifactId>
-			<version>1.3</version>
+			<version>${javax.transaction.api.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.dbflute</groupId>
@@ -540,7 +446,7 @@
 		<dependency>
 			<groupId>com.squareup.okhttp3</groupId>
 			<artifactId>logging-interceptor</artifactId>
-			<version>3.14.4</version>
+			<version>${okhttp.version}</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

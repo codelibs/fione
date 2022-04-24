@@ -114,9 +114,8 @@ public interface Predictions {
      */
     @FormUrlEncoded
     @POST("/4/Predictions/models/{model}/frames/{frame}")
-    Call<JobV3> predictAsync(@Path("model") String model, @Path("frame") String frame,
-            @Field("predictions_frame") String predictions_frame, @Field("deviances_frame") String deviances_frame,
-            @Field("reconstruction_error") boolean reconstruction_error,
+    Call<JobV3> predictAsync(@Path("model") String model, @Path("frame") String frame, @Field("predictions_frame") String predictions_frame,
+            @Field("deviances_frame") String deviances_frame, @Field("reconstruction_error") boolean reconstruction_error,
             @Field("reconstruction_error_per_feature") boolean reconstruction_error_per_feature,
             @Field("deep_features_hidden_layer") int deep_features_hidden_layer,
             @Field("deep_features_hidden_layer_name") String deep_features_hidden_layer_name,

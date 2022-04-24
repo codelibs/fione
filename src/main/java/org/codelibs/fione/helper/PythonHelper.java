@@ -37,14 +37,14 @@ import org.apache.logging.log4j.Logger;
 import org.codelibs.core.io.CopyUtil;
 import org.codelibs.core.io.FileUtil;
 import org.codelibs.core.lang.StringUtil;
-import org.codelibs.fesen.common.xcontent.LoggingDeprecationHandler;
-import org.codelibs.fesen.common.xcontent.NamedXContentRegistry;
-import org.codelibs.fesen.common.xcontent.json.JsonXContent;
 import org.codelibs.fess.crawler.Constants;
 import org.codelibs.fess.exception.JobProcessingException;
 import org.codelibs.fess.util.ComponentUtil;
 import org.codelibs.fess.util.ResourceUtil;
 import org.codelibs.fione.exception.PythonExecutionException;
+import org.opensearch.common.xcontent.LoggingDeprecationHandler;
+import org.opensearch.common.xcontent.NamedXContentRegistry;
+import org.opensearch.common.xcontent.json.JsonXContent;
 
 import com.google.common.collect.Lists;
 
@@ -206,8 +206,7 @@ public class PythonHelper {
             writer.write("[parameters]\n");
             for (final Map.Entry<String, Object> e : params.entrySet()) {
                 var value = e.getValue();
-                if (value instanceof String[]) {
-                    final var values = (String[]) value;
+                if (value instanceof String[] values) {
                     value = "[" + Arrays.stream(values).map(s -> "\"" + s + "\"").collect(Collectors.joining(",")) + "]";
                 }
                 writer.write(e.getKey() + " = " + value + "\n");
@@ -259,16 +258,14 @@ public class PythonHelper {
         @SuppressWarnings("unchecked")
         public PythonModule(final File pyFile, final String jsonString) throws IOException {
             this.pyFile = pyFile;
-            final var params =
-                    JsonXContent.jsonXContent.createParser(NamedXContentRegistry.EMPTY, LoggingDeprecationHandler.INSTANCE, jsonString)
-                            .map();
+            final var params = JsonXContent.jsonXContent
+                    .createParser(NamedXContentRegistry.EMPTY, LoggingDeprecationHandler.INSTANCE, jsonString).map();
             id = (String) params.get("id");
             name = (String) params.get("name");
             description = (String) params.get("description");
-            type =
-                    Arrays.stream(ModuleType.values())
-                            .filter(s -> s.name().equalsIgnoreCase((String) params.getOrDefault("type", "unknown"))).findFirst()
-                            .orElse(ModuleType.UNKNOWN);
+            type = Arrays.stream(ModuleType.values())
+                    .filter(s -> s.name().equalsIgnoreCase((String) params.getOrDefault("type", "unknown"))).findFirst()
+                    .orElse(ModuleType.UNKNOWN);
             priority = Integer.parseInt((String) params.getOrDefault("priority", "999"));
             components = (List<Map<String, Object>>) params.get("components");
         }

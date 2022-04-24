@@ -40,11 +40,11 @@ public class ModelHelper {
         objectMapper = new ObjectMapper();
         objectMapper.setVisibility(PropertyAccessor.ALL, Visibility.NONE);
         objectMapper.setVisibility(PropertyAccessor.FIELD, Visibility.ANY);
-        objectMapper.setDefaultTyping(new ObjectMapper.DefaultTypeResolverBuilder(ObjectMapper.DefaultTyping.EVERYTHING,
-                LaissezFaireSubTypeValidator.instance)//
-                .init(JsonTypeInfo.Id.CLASS, null)//
-                .inclusion(JsonTypeInfo.As.PROPERTY)//
-                .typeProperty("classType"));
+        objectMapper.setDefaultTyping(
+                new ObjectMapper.DefaultTypeResolverBuilder(ObjectMapper.DefaultTyping.EVERYTHING, LaissezFaireSubTypeValidator.instance)//
+                        .init(JsonTypeInfo.Id.CLASS, null)//
+                        .inclusion(JsonTypeInfo.As.PROPERTY)//
+                        .typeProperty("classType"));
         objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }

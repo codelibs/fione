@@ -307,8 +307,8 @@ public interface Grid {
     Call<TargetEncoderV3> trainTargetencoder(@Field("blending") boolean blending, @Field("k") double k, @Field("f") double f,
             @Field("data_leakage_handling") H2otargetencodingTargetEncoderDataLeakageHandlingStrategy data_leakage_handling,
             @Field("noise_level") double noise_level, @Field("seed") long seed, @Field("model_id") String model_id,
-            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame,
-            @Field("nfolds") int nfolds, @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
             @Field("parallelize_cross_validation") boolean parallelize_cross_validation,
@@ -472,8 +472,7 @@ public interface Grid {
             @Field("adaptive_rate") boolean adaptive_rate, @Field("rho") double rho, @Field("epsilon") double epsilon,
             @Field("rate") double rate, @Field("rate_annealing") double rate_annealing, @Field("rate_decay") double rate_decay,
             @Field("momentum_start") double momentum_start, @Field("momentum_ramp") double momentum_ramp,
-            @Field("momentum_stable") double momentum_stable,
-            @Field("nesterov_accelerated_gradient") boolean nesterov_accelerated_gradient,
+            @Field("momentum_stable") double momentum_stable, @Field("nesterov_accelerated_gradient") boolean nesterov_accelerated_gradient,
             @Field("input_dropout_ratio") double input_dropout_ratio, @Field("hidden_dropout_ratios") double[] hidden_dropout_ratios,
             @Field("l1") double l1, @Field("l2") double l2, @Field("max_w2") float max_w2,
             @Field("initial_weight_distribution") DeepLearningInitialWeightDistribution initial_weight_distribution,
@@ -498,8 +497,8 @@ public interface Grid {
             @Field("elastic_averaging_moving_rate") double elastic_averaging_moving_rate,
             @Field("elastic_averaging_regularization") double elastic_averaging_regularization,
             @Field("pretrained_autoencoder") String pretrained_autoencoder, @Field("model_id") String model_id,
-            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame,
-            @Field("nfolds") int nfolds, @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
             @Field("parallelize_cross_validation") boolean parallelize_cross_validation,
@@ -859,8 +858,8 @@ public interface Grid {
     Call<KMeansV3> trainKmeans(@Field("user_points") String user_points, @Field("max_iterations") int max_iterations,
             @Field("standardize") boolean standardize, @Field("seed") long seed, @Field("init") KMeansInitialization init,
             @Field("estimate_k") boolean estimate_k, @Field("k") int k, @Field("model_id") String model_id,
-            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame,
-            @Field("nfolds") int nfolds, @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
             @Field("parallelize_cross_validation") boolean parallelize_cross_validation,
@@ -1268,8 +1267,8 @@ public interface Grid {
             @Field("histogram_type") TreeSharedTreeModelSharedTreeParametersHistogramType histogram_type,
             @Field("calibrate_model") boolean calibrate_model, @Field("calibration_frame") String calibration_frame,
             @Field("check_constant_response") boolean check_constant_response, @Field("model_id") String model_id,
-            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame,
-            @Field("nfolds") int nfolds, @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
             @Field("parallelize_cross_validation") boolean parallelize_cross_validation,
@@ -1405,8 +1404,8 @@ public interface Grid {
             @Field("histogram_type") TreeSharedTreeModelSharedTreeParametersHistogramType histogram_type,
             @Field("calibrate_model") boolean calibrate_model, @Field("calibration_frame") String calibration_frame,
             @Field("check_constant_response") boolean check_constant_response, @Field("model_id") String model_id,
-            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame,
-            @Field("nfolds") int nfolds, @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
             @Field("parallelize_cross_validation") boolean parallelize_cross_validation,
@@ -1539,8 +1538,8 @@ public interface Grid {
             @Field("histogram_type") TreeSharedTreeModelSharedTreeParametersHistogramType histogram_type,
             @Field("calibrate_model") boolean calibrate_model, @Field("calibration_frame") String calibration_frame,
             @Field("check_constant_response") boolean check_constant_response, @Field("model_id") String model_id,
-            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame,
-            @Field("nfolds") int nfolds, @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
             @Field("parallelize_cross_validation") boolean parallelize_cross_validation,
@@ -1628,8 +1627,8 @@ public interface Grid {
             @Field("rel_tol_num_exemplars") double rel_tol_num_exemplars, @Field("seed") long seed,
             @Field("use_all_factor_levels") boolean use_all_factor_levels, @Field("save_mapping_frame") boolean save_mapping_frame,
             @Field("num_iteration_without_new_exemplar") int num_iteration_without_new_exemplar, @Field("model_id") String model_id,
-            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame,
-            @Field("nfolds") int nfolds, @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
             @Field("parallelize_cross_validation") boolean parallelize_cross_validation,
@@ -1793,8 +1792,8 @@ public interface Grid {
             @Field("export_native_parameters_prefix") String export_native_parameters_prefix, @Field("standardize") boolean standardize,
             @Field("balance_classes") boolean balance_classes, @Field("class_sampling_factors") float[] class_sampling_factors,
             @Field("max_after_balance_size") float max_after_balance_size, @Field("model_id") String model_id,
-            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame,
-            @Field("nfolds") int nfolds, @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
             @Field("parallelize_cross_validation") boolean parallelize_cross_validation,
@@ -1879,9 +1878,8 @@ public interface Grid {
     Call<Word2VecV3> trainWord2vec(@Field("vec_size") int vec_size, @Field("window_size") int window_size,
             @Field("sent_sample_rate") float sent_sample_rate, @Field("norm_model") Word2VecNormModel norm_model,
             @Field("epochs") int epochs, @Field("min_word_freq") int min_word_freq, @Field("init_learning_rate") float init_learning_rate,
-            @Field("word_model") Word2VecWordModel word_model, @Field("pre_trained") String pre_trained,
-            @Field("model_id") String model_id, @Field("training_frame") String training_frame,
-            @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("word_model") Word2VecWordModel word_model, @Field("pre_trained") String pre_trained, @Field("model_id") String model_id,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
             @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
@@ -2151,8 +2149,8 @@ public interface Grid {
     @FormUrlEncoded
     @POST("/99/Grid/generic")
     Call<GenericV3> trainGeneric(@Field("path") String path, @Field("model_key") String model_key, @Field("model_id") String model_id,
-            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame,
-            @Field("nfolds") int nfolds, @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
+            @Field("training_frame") String training_frame, @Field("validation_frame") String validation_frame, @Field("nfolds") int nfolds,
+            @Field("keep_cross_validation_models") boolean keep_cross_validation_models,
             @Field("keep_cross_validation_predictions") boolean keep_cross_validation_predictions,
             @Field("keep_cross_validation_fold_assignment") boolean keep_cross_validation_fold_assignment,
             @Field("parallelize_cross_validation") boolean parallelize_cross_validation,
@@ -2302,27 +2300,27 @@ public interface Grid {
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
                     p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
                     p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
-                    (p.weightsColumn == null ? null : p.weightsColumn.columnName), (p.offsetColumn == null ? null
-                            : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment,
-                    p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration,
-                    (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric,
-                    p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
          * Run grid search for TargetEncoderBuilder model.
          */
         public static Call<TargetEncoderV3> trainTargetencoder(final Grid z, final TargetEncoderParametersV3 p) {
-            return z.trainTargetencoder(p.blending, p.k, p.f, p.dataLeakageHandling, p.noiseLevel, p.seed, (p.modelId == null ? null
-                    : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null
-                    : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions,
-                    p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha,
-                    p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+            return z.trainTargetencoder(p.blending, p.k, p.f, p.dataLeakageHandling, p.noiseLevel, p.seed,
+                    (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
+                    (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
+                    p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
+                    p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2333,25 +2331,24 @@ public interface Grid {
                     p.maxHitRatioK, p.activation, p.hidden, p.epochs, p.trainSamplesPerIteration, p.targetRatioCommToComp, p.seed,
                     p.adaptiveRate, p.rho, p.epsilon, p.rate, p.rateAnnealing, p.rateDecay, p.momentumStart, p.momentumRamp,
                     p.momentumStable, p.nesterovAcceleratedGradient, p.inputDropoutRatio, p.hiddenDropoutRatios, p.l1, p.l2, p.maxW2,
-                    p.initialWeightDistribution, p.initialWeightScale, (p.initialWeights == null ? null
-                            : keyArrayToStringArray(p.initialWeights)), (p.initialBiases == null ? null
-                            : keyArrayToStringArray(p.initialBiases)), p.loss, p.scoreInterval, p.scoreTrainingSamples,
-                    p.scoreValidationSamples, p.scoreDutyCycle, p.classificationStop, p.regressionStop, p.quietMode,
+                    p.initialWeightDistribution, p.initialWeightScale,
+                    (p.initialWeights == null ? null : keyArrayToStringArray(p.initialWeights)),
+                    (p.initialBiases == null ? null : keyArrayToStringArray(p.initialBiases)), p.loss, p.scoreInterval,
+                    p.scoreTrainingSamples, p.scoreValidationSamples, p.scoreDutyCycle, p.classificationStop, p.regressionStop, p.quietMode,
                     p.scoreValidationSampling, p.overwriteWithBestModel, p.autoencoder, p.useAllFactorLevels, p.standardize, p.diagnostics,
-                    p.variableImportances, p.fastMode, p.forceLoadBalance, p.replicateTrainingData, p.singleNodeMode,
-                    p.shuffleTrainingData, p.missingValuesHandling, p.sparse, p.colMajor, p.averageActivation, p.sparsityBeta,
-                    p.maxCategoricalFeatures, p.reproducible, p.exportWeightsAndBiases, p.miniBatchSize, p.elasticAveraging,
-                    p.elasticAveragingMovingRate, p.elasticAveragingRegularization, (p.pretrainedAutoencoder == null ? null
-                            : p.pretrainedAutoencoder.name), (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null
-                            : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds,
-                    p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
-                    p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
-                    (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    p.variableImportances, p.fastMode, p.forceLoadBalance, p.replicateTrainingData, p.singleNodeMode, p.shuffleTrainingData,
+                    p.missingValuesHandling, p.sparse, p.colMajor, p.averageActivation, p.sparsityBeta, p.maxCategoricalFeatures,
+                    p.reproducible, p.exportWeightsAndBiases, p.miniBatchSize, p.elasticAveraging, p.elasticAveragingMovingRate,
+                    p.elasticAveragingRegularization, (p.pretrainedAutoencoder == null ? null : p.pretrainedAutoencoder.name),
+                    (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
+                    (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
+                    p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
+                    p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2368,12 +2365,12 @@ public interface Grid {
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
                     p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
-                    (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2387,12 +2384,12 @@ public interface Grid {
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
                     p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
-                    (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2404,11 +2401,11 @@ public interface Grid {
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
                     p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
                     p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
-                    (p.weightsColumn == null ? null : p.weightsColumn.columnName), (p.offsetColumn == null ? null
-                            : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment,
-                    p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration,
-                    (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric,
-                    p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2421,11 +2418,11 @@ public interface Grid {
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
                     p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
                     p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
-                    (p.weightsColumn == null ? null : p.weightsColumn.columnName), (p.offsetColumn == null ? null
-                            : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment,
-                    p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration,
-                    (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric,
-                    p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2437,11 +2434,11 @@ public interface Grid {
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
                     p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
                     p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
-                    (p.weightsColumn == null ? null : p.weightsColumn.columnName), (p.offsetColumn == null ? null
-                            : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment,
-                    p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration,
-                    (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric,
-                    p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2453,11 +2450,11 @@ public interface Grid {
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
                     p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
                     p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
-                    (p.weightsColumn == null ? null : p.weightsColumn.columnName), (p.offsetColumn == null ? null
-                            : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment,
-                    p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration,
-                    (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric,
-                    p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2468,37 +2465,37 @@ public interface Grid {
                     p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.maxHitRatioK, p.ntrees, p.maxDepth, p.minRows, p.nbins,
                     p.nbinsTopLevel, p.nbinsCats, p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree,
                     p.colSampleRateChangePerLevel, p.scoreTreeInterval, p.minSplitImprovement, p.histogramType, p.calibrateModel,
-                    (p.calibrationFrame == null ? null : p.calibrationFrame.name), p.checkConstantResponse, (p.modelId == null ? null
-                            : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null
-                            : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions,
-                    p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha,
-                    p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.calibrationFrame == null ? null : p.calibrationFrame.name), p.checkConstantResponse,
+                    (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
+                    (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
+                    p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
+                    p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
          * Run grid search for GBM model.
          */
         public static Call<GBMV3> trainGbm(final Grid z, final GBMParametersV3 p) {
-            return z.trainGbm(p.learnRate, p.learnRateAnnealing, p.sampleRate, p.colSampleRate, p.monotoneConstraints,
-                    p.maxAbsLeafnodePred, p.predNoiseBandwidth, p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize,
-                    p.maxConfusionMatrixSize, p.maxHitRatioK, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats,
-                    p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree, p.colSampleRateChangePerLevel,
-                    p.scoreTreeInterval, p.minSplitImprovement, p.histogramType, p.calibrateModel, (p.calibrationFrame == null ? null
-                            : p.calibrationFrame.name), p.checkConstantResponse, (p.modelId == null ? null : p.modelId.name),
+            return z.trainGbm(p.learnRate, p.learnRateAnnealing, p.sampleRate, p.colSampleRate, p.monotoneConstraints, p.maxAbsLeafnodePred,
+                    p.predNoiseBandwidth, p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize,
+                    p.maxHitRatioK, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats, p.r2Stopping, p.seed,
+                    p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree, p.colSampleRateChangePerLevel, p.scoreTreeInterval,
+                    p.minSplitImprovement, p.histogramType, p.calibrateModel, (p.calibrationFrame == null ? null : p.calibrationFrame.name),
+                    p.checkConstantResponse, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
                     p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
-                    (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2509,16 +2506,16 @@ public interface Grid {
                     p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.maxHitRatioK, p.ntrees, p.maxDepth, p.minRows, p.nbins,
                     p.nbinsTopLevel, p.nbinsCats, p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree,
                     p.colSampleRateChangePerLevel, p.scoreTreeInterval, p.minSplitImprovement, p.histogramType, p.calibrateModel,
-                    (p.calibrationFrame == null ? null : p.calibrationFrame.name), p.checkConstantResponse, (p.modelId == null ? null
-                            : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null
-                            : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions,
-                    p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha,
-                    p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.calibrationFrame == null ? null : p.calibrationFrame.name), p.checkConstantResponse,
+                    (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
+                    (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
+                    p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
+                    p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2526,16 +2523,16 @@ public interface Grid {
          */
         public static Call<AggregatorV99> trainAggregator(final Grid z, final AggregatorParametersV99 p) {
             return z.trainAggregator(p.transform, p.pcaMethod, p.k, p.maxIterations, p.targetNumExemplars, p.relTolNumExemplars, p.seed,
-                    p.useAllFactorLevels, p.saveMappingFrame, p.numIterationWithoutNewExemplar,
-                    (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
-                    (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
-                    p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
-                    p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
-                    (p.weightsColumn == null ? null : p.weightsColumn.columnName), (p.offsetColumn == null ? null
-                            : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment,
-                    p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration,
-                    (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric,
-                    p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    p.useAllFactorLevels, p.saveMappingFrame, p.numIterationWithoutNewExemplar, (p.modelId == null ? null : p.modelId.name),
+                    (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
+                    p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
+                    p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
+                    (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2545,8 +2542,8 @@ public interface Grid {
             return z.trainDeepwater(p.problemType, p.activation, p.hidden, p.inputDropoutRatio, p.hiddenDropoutRatios,
                     p.maxConfusionMatrixSize, p.sparse, p.maxHitRatioK, p.epochs, p.trainSamplesPerIteration, p.targetRatioCommToComp,
                     p.seed, p.learningRate, p.learningRateAnnealing, p.momentumStart, p.momentumRamp, p.momentumStable, p.scoreInterval,
-                    p.scoreTrainingSamples, p.scoreValidationSamples, p.scoreDutyCycle, p.classificationStop, p.regressionStop,
-                    p.quietMode, p.overwriteWithBestModel, p.autoencoder, p.diagnostics, p.variableImportances, p.replicateTrainingData,
+                    p.scoreTrainingSamples, p.scoreValidationSamples, p.scoreDutyCycle, p.classificationStop, p.regressionStop, p.quietMode,
+                    p.overwriteWithBestModel, p.autoencoder, p.diagnostics, p.variableImportances, p.replicateTrainingData,
                     p.singleNodeMode, p.shuffleTrainingData, p.miniBatchSize, p.clipGradient, p.network, p.backend, p.imageShape,
                     p.channels, p.gpu, p.deviceId, p.cacheData, p.networkDefinitionFile, p.networkParametersFile, p.meanImageFile,
                     p.exportNativeParametersPrefix, p.standardize, p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize,
@@ -2554,11 +2551,11 @@ public interface Grid {
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
                     p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
                     p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
-                    (p.weightsColumn == null ? null : p.weightsColumn.columnName), (p.offsetColumn == null ? null
-                            : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment,
-                    p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration,
-                    (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric,
-                    p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2570,12 +2567,12 @@ public interface Grid {
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
                     p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
-                    (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2583,36 +2580,36 @@ public interface Grid {
          */
         public static Call<StackedEnsembleV99> trainStackedensemble(final Grid z, final StackedEnsembleParametersV99 p) {
             return z.trainStackedensemble((p.baseModels == null ? null : keyArrayToStringArray(p.baseModels)), p.metalearnerAlgorithm,
-                    p.metalearnerNfolds, p.metalearnerFoldAssignment, (p.metalearnerFoldColumn == null ? null
-                            : p.metalearnerFoldColumn.columnName), p.keepLeveloneFrame, p.metalearnerParams,
+                    p.metalearnerNfolds, p.metalearnerFoldAssignment,
+                    (p.metalearnerFoldColumn == null ? null : p.metalearnerFoldColumn.columnName), p.keepLeveloneFrame, p.metalearnerParams,
                     (p.blendingFrame == null ? null : p.blendingFrame.name), p.seed, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
                     p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
-                    (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
          * Run grid search for CoxPH model.
          */
         public static Call<CoxPHV3> trainCoxph(final Grid z, final CoxPHParametersV3 p) {
-            return z.trainCoxph((p.startColumn == null ? null : p.startColumn.columnName), (p.stopColumn == null ? null
-                    : p.stopColumn.columnName), p.stratifyBy, p.ties, p.init, p.lreMin, p.maxIterations, p.interactionsOnly,
-                    p.interactions, p.interactionPairs, p.useAllFactorLevels, (p.modelId == null ? null : p.modelId.name),
-                    (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
-                    p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
-                    p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
-                    (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+            return z.trainCoxph((p.startColumn == null ? null : p.startColumn.columnName),
+                    (p.stopColumn == null ? null : p.stopColumn.columnName), p.stratifyBy, p.ties, p.init, p.lreMin, p.maxIterations,
+                    p.interactionsOnly, p.interactions, p.interactionPairs, p.useAllFactorLevels,
+                    (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
+                    (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
+                    p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment, p.parallelizeCrossValidation, p.distribution,
+                    p.tweediePower, p.quantileAlpha, p.huberAlpha, (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2623,12 +2620,12 @@ public interface Grid {
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
                     p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
-                    (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2636,17 +2633,17 @@ public interface Grid {
          */
         public static Call<PSVMV3> trainPsvm(final Grid z, final PSVMParametersV3 p) {
             return z.trainPsvm(p.hyperParam, p.kernelType, p.gamma, p.rankRatio, p.positiveWeight, p.negativeWeight,
-                    p.disableTrainingMetrics, p.svThreshold, p.maxIterations, p.factThreshold, p.feasibleThreshold,
-                    p.surrogateGapThreshold, p.muFactor, p.seed, (p.modelId == null ? null : p.modelId.name),
+                    p.disableTrainingMetrics, p.svThreshold, p.maxIterations, p.factThreshold, p.feasibleThreshold, p.surrogateGapThreshold,
+                    p.muFactor, p.seed, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
                     p.parallelizeCrossValidation, p.distribution, p.tweediePower, p.quantileAlpha, p.huberAlpha,
-                    (p.responseColumn == null ? null : p.responseColumn.columnName), (p.weightsColumn == null ? null
-                            : p.weightsColumn.columnName), (p.offsetColumn == null ? null : p.offsetColumn.columnName),
-                    (p.foldColumn == null ? null : p.foldColumn.columnName), p.foldAssignment, p.categoricalEncoding,
-                    p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols, p.scoreEachIteration, (p.checkpoint == null ? null
-                            : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs, p.stoppingMetric, p.stoppingTolerance,
-                    p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
+                    (p.responseColumn == null ? null : p.responseColumn.columnName),
+                    (p.weightsColumn == null ? null : p.weightsColumn.columnName),
+                    (p.offsetColumn == null ? null : p.offsetColumn.columnName), (p.foldColumn == null ? null : p.foldColumn.columnName),
+                    p.foldAssignment, p.categoricalEncoding, p.maxCategoricalLevels, p.ignoredColumns, p.ignoreConstCols,
+                    p.scoreEachIteration, (p.checkpoint == null ? null : p.checkpoint.name), p.stoppingRounds, p.maxRuntimeSecs,
+                    p.stoppingMetric, p.stoppingTolerance, p.customMetricFunc, p.customDistributionFunc, p.exportCheckpointsDir);
         }
 
         /**
@@ -2659,7 +2656,8 @@ public interface Grid {
             final var ids = new String[keys.length];
             var i = 0;
             for (final KeyV3 key : keys) {
-                ids[i++] = key.name;
+                ids[i] = key.name;
+                i++;
             }
             return ids;
         }

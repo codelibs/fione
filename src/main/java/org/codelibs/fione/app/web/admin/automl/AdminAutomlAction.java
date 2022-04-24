@@ -54,7 +54,6 @@ import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.taglib.FioneFunctions;
 import org.codelibs.fione.util.StringCodecUtil;
-import org.json.simple.JSONObject;
 import org.lastaflute.di.util.tiger.Maps;
 import org.lastaflute.web.Execute;
 import org.lastaflute.web.response.ActionResponse;
@@ -65,6 +64,7 @@ import org.lastaflute.web.ruts.process.ActionRuntime;
 import org.lastaflute.web.util.LaRequestUtil;
 
 import com.google.common.base.CaseFormat;
+import com.google.gson.Gson;
 
 /**
  * @author shinsuke
@@ -249,10 +249,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                         lastId = destId;
                     }
                 }
-                if (lastId != null) {
-                    return lastId;
-                }
-                return null;
+                return lastId;
             }).orElse(null);
 
             final var dataQuery = LaRequestUtil.getOptionalRequest().map(req -> {
@@ -343,10 +340,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                         lastId = destId;
                     }
                 }
-                if (lastId != null) {
-                    return lastId;
-                }
-                return null;
+                return lastId;
             }).orElse(null);
 
             final var columnData = LaRequestUtil.getOptionalRequest().map(req -> {
@@ -433,8 +427,8 @@ public class AdminAutomlAction extends FioneAdminAction {
             throw validationError(messages -> messages.addErrorsDatasetIsNotFound(GLOBAL, form.dataSetId), this::asListHtml);
         }
 
-        return asStream(dataSet.getName()).contentTypeOctetStream().stream(
-                out -> projectHelper.writeDataSet(getSessionKey(), form.projectId, dataSet, out));
+        return asStream(dataSet.getName()).contentTypeOctetStream()
+                .stream(out -> projectHelper.writeDataSet(getSessionKey(), form.projectId, dataSet, out));
     }
 
     @Execute
@@ -614,29 +608,21 @@ public class AdminAutomlAction extends FioneAdminAction {
         if (project == null) {
             throw validationError(messages -> messages.addErrorsProjectIsNotFound(GLOBAL, form.projectId), this::asListHtml);
         }
-        final var ignoredColumns =
-                form.ignoredColumns.entrySet().stream().filter(e -> StringUtil.isNotBlank(e.getValue())).map(Entry<String, String>::getKey)
-                        .toArray(n -> new String[n]);
+        final var ignoredColumns = form.ignoredColumns.entrySet().stream().filter(e -> StringUtil.isNotBlank(e.getValue()))
+                .map(Entry<String, String>::getKey).toArray(n -> new String[n]);
         try {
-            final var buildControl =
-                    AutoMLBuildControlBuilder
-                            .create()
-                            .projectName(form.projectName)
-                            .nfolds(form.nfolds)
-                            .balanceClasses(Boolean.valueOf(form.balanceClasses))
-                            .stoppingCriteria(
-                                    AutoMLStoppingCriteriaBuilder.create().seed(form.seed).maxModels(form.maxModels)
-                                            .maxRuntimeSecs(form.maxRuntimeSecs).maxRuntimeSecsPerModel(form.maxRuntimeSecsPerModel)
-                                            .stoppingRounds(form.stoppingRounds)
-                                            .stoppingMetric(ScoreKeeperStoppingMetric.valueOf(form.stoppingMetric))
-                                            .stoppingTolerance(form.stoppingTolerance).build())
-                            .keepCrossValidationPredictions(Boolean.valueOf(form.keepCrossValidationPredictions))
-                            .keepCrossValidationModels(Boolean.valueOf(form.keepCrossValidationModels))
-                            .keepCrossValidationFoldAssignment(Boolean.valueOf(form.keepCrossValidationFoldAssignment)).build();
-            final var input =
-                    AutoMLInputBuilder.create().trainingFrame(form.frameId).responseColumn(form.responseColumn, null)
-                            .ignoredColumns(ignoredColumns)
-                            .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
+            final var buildControl = AutoMLBuildControlBuilder.create().projectName(form.projectName).nfolds(form.nfolds)
+                    .balanceClasses(Boolean.parseBoolean(form.balanceClasses))
+                    .stoppingCriteria(AutoMLStoppingCriteriaBuilder.create().seed(form.seed).maxModels(form.maxModels)
+                            .maxRuntimeSecs(form.maxRuntimeSecs).maxRuntimeSecsPerModel(form.maxRuntimeSecsPerModel)
+                            .stoppingRounds(form.stoppingRounds).stoppingMetric(ScoreKeeperStoppingMetric.valueOf(form.stoppingMetric))
+                            .stoppingTolerance(form.stoppingTolerance).build())
+                    .keepCrossValidationPredictions(Boolean.parseBoolean(form.keepCrossValidationPredictions))
+                    .keepCrossValidationModels(Boolean.parseBoolean(form.keepCrossValidationModels))
+                    .keepCrossValidationFoldAssignment(Boolean.parseBoolean(form.keepCrossValidationFoldAssignment)).build();
+            final var input = AutoMLInputBuilder.create().trainingFrame(form.frameId).responseColumn(form.responseColumn, null)
+                    .ignoredColumns(ignoredColumns)
+                    .sortMetric(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.valueOf(form.sortMetric)).build();
             final List<AutoMLCustomParameterV99> argParamList = new ArrayList<>();
             argParamList.add(new AutoMLCustomParameterV99(Automlapischemas3AutoMLBuildSpecScopeProvider.DeepLearning,
                     "max_categorical_features", form.maxCategoricalFeatures));
@@ -715,24 +701,18 @@ public class AdminAutomlAction extends FioneAdminAction {
             params.put("project_name", StringCodecUtil.decode(form.projectId));
             params.put("frame_id", form.frameId);
             params.put("model_id", form.modelId);
-            form.params
-                    .entrySet()
-                    .stream()
-                    .forEach(
-                            e -> {
-                                final var key = CaseFormat.UPPER_CAMEL.to(CaseFormat.LOWER_UNDERSCORE, e.getKey());
-                                Object value = e.getValue();
-                                final var isArray =
-                                        pythonModule.getComponents().stream().filter(c -> key.equals(c.get("id")))
-                                                .map(c -> (String) c.get("type")).anyMatch(s -> s.startsWith("MULTI"));
-                                if (!isArray && value instanceof String[]) {
-                                    final var values = (String[]) value;
-                                    if (values.length > 0) {
-                                        value = values[0];
-                                    }
-                                }
-                                params.put(key, value);
-                            });
+            form.params.entrySet().stream().forEach(e -> {
+                final var key = CaseFormat.UPPER_CAMEL.to(CaseFormat.LOWER_UNDERSCORE, e.getKey());
+                Object value = e.getValue();
+                final var isArray = pythonModule.getComponents().stream().filter(c -> key.equals(c.get("id")))
+                        .map(c -> (String) c.get("type")).anyMatch(s -> s.startsWith("MULTI"));
+                if (!isArray && value instanceof String[] values) {
+                    if (values.length > 0) {
+                        value = values[0];
+                    }
+                }
+                params.put(key, value);
+            });
             projectHelper.executeModule(sessionKey, form.projectId, pythonModule, params);
             saveMessage(messages -> messages.addSuccessRunModule(GLOBAL, pythonModule.getId()));
         } catch (final Exception e) {
@@ -803,15 +783,14 @@ public class AdminAutomlAction extends FioneAdminAction {
         if (model == null) {
             throw validationError(messages -> messages.addErrorsLeaderboardIsNotFound(GLOBAL), this::asListHtml);
         }
-        return asHtml(path_AdminAutoml_AdminAutomlModelJsp).renderWith(
-                data -> {
-                    RenderDataUtil.register(data, "token", token);
-                    RenderDataUtil.register(data, "projectId", projectId);
-                    RenderDataUtil.register(data, "frameId", LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID))
-                            .orElse(null));
-                    RenderDataUtil.register(data, "leaderboardId", leaderboardId);
-                    RenderDataUtil.register(data, "model", model);
-                });
+        return asHtml(path_AdminAutoml_AdminAutomlModelJsp).renderWith(data -> {
+            RenderDataUtil.register(data, "token", token);
+            RenderDataUtil.register(data, "projectId", projectId);
+            RenderDataUtil.register(data, "frameId",
+                    LaRequestUtil.getOptionalRequest().map(req -> req.getParameter(FRAME_ID)).orElse(null));
+            RenderDataUtil.register(data, "leaderboardId", leaderboardId);
+            RenderDataUtil.register(data, "model", model);
+        });
     }
 
     @Execute
@@ -820,8 +799,8 @@ public class AdminAutomlAction extends FioneAdminAction {
         validate(form, messages -> {}, () -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
         verifyTokenKeep(() -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
 
-        return asStream(form.modelId + ".zip").contentTypeOctetStream().stream(
-                out -> projectHelper.writeMojo(getSessionKey(), form.projectId, form.modelId, out));
+        return asStream(form.modelId + ".zip").contentTypeOctetStream()
+                .stream(out -> projectHelper.writeMojo(getSessionKey(), form.projectId, form.modelId, out));
     }
 
     @Execute
@@ -830,8 +809,8 @@ public class AdminAutomlAction extends FioneAdminAction {
         validate(form, messages -> {}, () -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
         verifyTokenKeep(() -> redirectModelHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
 
-        return asStream("h2o-genmodel.jar").contentTypeOctetStream().stream(
-                out -> projectHelper.writeGenModel(getSessionKey(), form.projectId, form.modelId, out));
+        return asStream("h2o-genmodel.jar").contentTypeOctetStream()
+                .stream(out -> projectHelper.writeGenModel(getSessionKey(), form.projectId, form.modelId, out));
     }
 
     @Execute
@@ -931,7 +910,7 @@ public class AdminAutomlAction extends FioneAdminAction {
                         }
                     }
                 }
-                RenderDataUtil.register(data, "instance", new JSONObject(instanceMap).toString());
+                RenderDataUtil.register(data, "instance", new Gson().toJson(instanceMap));
             }
         });
     }
@@ -942,8 +921,8 @@ public class AdminAutomlAction extends FioneAdminAction {
         validate(form, messages -> {}, () -> redirectServingHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
         verifyTokenKeep(() -> redirectServingHtml(form.projectId, form.modelId, form.frameId, form.leaderboardId));
 
-        return asStream(getServingZipName(form.projectId, form.modelId)).contentTypeOctetStream().stream(
-                out -> projectHelper.writeServing(getSessionKey(), form.projectId, form.modelId, out));
+        return asStream(getServingZipName(form.projectId, form.modelId)).contentTypeOctetStream()
+                .stream(out -> projectHelper.writeServing(getSessionKey(), form.projectId, form.modelId, out));
     }
 
     private String getServingZipName(final String projectId, final String modelId) {
@@ -968,8 +947,8 @@ public class AdminAutomlAction extends FioneAdminAction {
     //                                                                           =========
 
     private HtmlResponse asListHtml() {
-        return asHtml(path_AdminAutoml_AdminAutomlJsp).renderWith(
-                data -> RenderDataUtil.register(data, "projects", projectHelper.getProjects())).useForm(SearchForm.class);
+        return asHtml(path_AdminAutoml_AdminAutomlJsp)
+                .renderWith(data -> RenderDataUtil.register(data, "projects", projectHelper.getProjects())).useForm(SearchForm.class);
     }
 
     private HtmlResponse asNewProjectHtml() {
@@ -1045,18 +1024,17 @@ public class AdminAutomlAction extends FioneAdminAction {
                 frameName = frameName.substring(0, pos);
             }
             form.name = frameName + "_" + new SimpleDateFormat("yyyyMMddHHmmss").format(systemHelper.getCurrentTime());
-        })).renderWith(
-                data -> {
-                    RenderDataUtil.register(data, "modelIdItems", modelIdItems);
-                    final List<Map<String, String>> columnList = new ArrayList<>();
-                    final var frame = projectHelper.getColumnSummaries(sessionKey, projectId, frameId);
-                    if (frame != null) {
-                        final var responseColumn = getResponseColumn(leaderboardId);
-                        Arrays.stream(frame.columns).map(c -> c.label).filter(s -> !s.equals(responseColumn))
-                                .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
-                    }
-                    RenderDataUtil.register(data, "columnItems", columnList);
-                });
+        })).renderWith(data -> {
+            RenderDataUtil.register(data, "modelIdItems", modelIdItems);
+            final List<Map<String, String>> columnList = new ArrayList<>();
+            final var frame = projectHelper.getColumnSummaries(sessionKey, projectId, frameId);
+            if (frame != null) {
+                final var responseColumn = getResponseColumn(leaderboardId);
+                Arrays.stream(frame.columns).map(c -> c.label).filter(s -> !s.equals(responseColumn))
+                        .forEach(s -> columnList.add(Maps.map("label", s).$("value", StringCodecUtil.encodeUrlSafe(s)).$()));
+            }
+            RenderDataUtil.register(data, "columnItems", columnList);
+        });
     }
 
     private HtmlResponse asModuleHtml(final String projectId, final String moduleId) {
@@ -1133,7 +1111,8 @@ public class AdminAutomlAction extends FioneAdminAction {
         return redirectWith(getClass(), moreUrl);
     }
 
-    private HtmlResponse redirectServingHtml(final String projectId, final String modelId, final String frameId, final String leaderboardId) {
+    private HtmlResponse redirectServingHtml(final String projectId, final String modelId, final String frameId,
+            final String leaderboardId) {
         final var moreUrl = moreUrl("serving", projectId);
         final List<String> params = new ArrayList<>();
         if (StringUtil.isNotBlank(frameId)) {
@@ -1159,12 +1138,11 @@ public class AdminAutomlAction extends FioneAdminAction {
         final var s = req.getParameter(key);
         if (StringUtil.isBlank(s)) {
             return defautValue;
-        } else {
-            try {
-                return Integer.parseInt(s);
-            } catch (final NumberFormatException e) {
-                return defautValue;
-            }
+        }
+        try {
+            return Integer.parseInt(s);
+        } catch (final NumberFormatException e) {
+            return defautValue;
         }
     }
 
@@ -1172,12 +1150,11 @@ public class AdminAutomlAction extends FioneAdminAction {
         final var s = req.getParameter(key);
         if (StringUtil.isBlank(s)) {
             return defautValue;
-        } else {
-            try {
-                return Long.parseLong(s);
-            } catch (final NumberFormatException e) {
-                return defautValue;
-            }
+        }
+        try {
+            return Long.parseLong(s);
+        } catch (final NumberFormatException e) {
+            return defautValue;
         }
     }
 

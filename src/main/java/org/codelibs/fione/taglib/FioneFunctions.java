@@ -45,7 +45,8 @@ public class FioneFunctions {
         final var values = name.split("_");
         if (values.length == 2) {
             return StringCodecUtil.decode(values[1]);
-        } else if (values.length == 3) {
+        }
+        if (values.length == 3) {
             return StringCodecUtil.decode(values[1]) + ":" + StringCodecUtil.decode(values[2]);
         }
         return frameId;

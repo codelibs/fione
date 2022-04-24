@@ -56,8 +56,8 @@ public interface CreateFrame {
     @POST("/3/CreateFrame")
     Call<JobV3> run(@Field("dest") String dest, @Field("rows") long rows, @Field("cols") int cols, @Field("seed") long seed,
             @Field("seed_for_column_types") long seed_for_column_types, @Field("randomize") boolean randomize, @Field("value") long value,
-            @Field("real_range") long real_range, @Field("categorical_fraction") double categorical_fraction,
-            @Field("factors") int factors, @Field("integer_fraction") double integer_fraction, @Field("integer_range") long integer_range,
+            @Field("real_range") long real_range, @Field("categorical_fraction") double categorical_fraction, @Field("factors") int factors,
+            @Field("integer_fraction") double integer_fraction, @Field("integer_range") long integer_range,
             @Field("binary_fraction") double binary_fraction, @Field("binary_ones_fraction") double binary_ones_fraction,
             @Field("time_fraction") double time_fraction, @Field("string_fraction") double string_fraction,
             @Field("missing_fraction") double missing_fraction, @Field("has_response") boolean has_response,

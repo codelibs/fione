@@ -54,11 +54,10 @@ public interface Frames {
     @FormUrlEncoded
     @POST("/3/Frames/{frame_id}/export")
     Call<FramesV3> export(@Path("frame_id") String frame_id, @Field("column") String column, @Field("row_offset") long row_offset,
-            @Field("row_count") int row_count, @Field("column_offset") int column_offset,
-            @Field("full_column_count") int full_column_count, @Field("column_count") int column_count,
-            @Field("find_compatible_models") boolean find_compatible_models, @Field("path") String path, @Field("force") boolean force,
-            @Field("num_parts") int num_parts, @Field("compression") String compression, @Field("separator") byte separator,
-            @Field("_exclude_fields") String _exclude_fields);
+            @Field("row_count") int row_count, @Field("column_offset") int column_offset, @Field("full_column_count") int full_column_count,
+            @Field("column_count") int column_count, @Field("find_compatible_models") boolean find_compatible_models,
+            @Field("path") String path, @Field("force") boolean force, @Field("num_parts") int num_parts,
+            @Field("compression") String compression, @Field("separator") byte separator, @Field("_exclude_fields") String _exclude_fields);
 
     @FormUrlEncoded
     @POST("/3/Frames/{frame_id}/export")
@@ -86,11 +85,10 @@ public interface Frames {
      */
     @GET("/3/Frames/{frame_id}/columns/{column}/summary")
     Call<FramesV3> columnSummary(@Path("frame_id") String frame_id, @Path("column") String column, @Query("row_offset") long row_offset,
-            @Query("row_count") int row_count, @Query("column_offset") int column_offset,
-            @Query("full_column_count") int full_column_count, @Query("column_count") int column_count,
-            @Query("find_compatible_models") boolean find_compatible_models, @Query("path") String path, @Query("force") boolean force,
-            @Query("num_parts") int num_parts, @Query("compression") String compression, @Query("separator") byte separator,
-            @Query("_exclude_fields") String _exclude_fields);
+            @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
+            @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
+            @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
+            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/columns/{column}/summary")
     Call<FramesV3> columnSummary(@Path("frame_id") String frame_id, @Path("column") String column);
@@ -117,11 +115,10 @@ public interface Frames {
      */
     @GET("/3/Frames/{frame_id}/columns/{column}/domain")
     Call<FramesV3> columnDomain(@Path("frame_id") String frame_id, @Path("column") String column, @Query("row_offset") long row_offset,
-            @Query("row_count") int row_count, @Query("column_offset") int column_offset,
-            @Query("full_column_count") int full_column_count, @Query("column_count") int column_count,
-            @Query("find_compatible_models") boolean find_compatible_models, @Query("path") String path, @Query("force") boolean force,
-            @Query("num_parts") int num_parts, @Query("compression") String compression, @Query("separator") byte separator,
-            @Query("_exclude_fields") String _exclude_fields);
+            @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
+            @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
+            @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
+            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/columns/{column}/domain")
     Call<FramesV3> columnDomain(@Path("frame_id") String frame_id, @Path("column") String column);
@@ -148,11 +145,10 @@ public interface Frames {
      */
     @GET("/3/Frames/{frame_id}/columns/{column}")
     Call<FramesV3> column(@Path("frame_id") String frame_id, @Path("column") String column, @Query("row_offset") long row_offset,
-            @Query("row_count") int row_count, @Query("column_offset") int column_offset,
-            @Query("full_column_count") int full_column_count, @Query("column_count") int column_count,
-            @Query("find_compatible_models") boolean find_compatible_models, @Query("path") String path, @Query("force") boolean force,
-            @Query("num_parts") int num_parts, @Query("compression") String compression, @Query("separator") byte separator,
-            @Query("_exclude_fields") String _exclude_fields);
+            @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
+            @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
+            @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
+            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/columns/{column}")
     Call<FramesV3> column(@Path("frame_id") String frame_id, @Path("column") String column);
@@ -179,11 +175,10 @@ public interface Frames {
      */
     @GET("/3/Frames/{frame_id}/columns")
     Call<FramesV3> columns(@Path("frame_id") String frame_id, @Query("column") String column, @Query("row_offset") long row_offset,
-            @Query("row_count") int row_count, @Query("column_offset") int column_offset,
-            @Query("full_column_count") int full_column_count, @Query("column_count") int column_count,
-            @Query("find_compatible_models") boolean find_compatible_models, @Query("path") String path, @Query("force") boolean force,
-            @Query("num_parts") int num_parts, @Query("compression") String compression, @Query("separator") byte separator,
-            @Query("_exclude_fields") String _exclude_fields);
+            @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
+            @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
+            @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
+            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/columns")
     Call<FramesV3> columns(@Path("frame_id") String frame_id);
@@ -210,11 +205,10 @@ public interface Frames {
      */
     @GET("/3/Frames/{frame_id}/summary")
     Call<FramesV3> summary(@Path("frame_id") String frame_id, @Query("column") String column, @Query("row_offset") long row_offset,
-            @Query("row_count") int row_count, @Query("column_offset") int column_offset,
-            @Query("full_column_count") int full_column_count, @Query("column_count") int column_count,
-            @Query("find_compatible_models") boolean find_compatible_models, @Query("path") String path, @Query("force") boolean force,
-            @Query("num_parts") int num_parts, @Query("compression") String compression, @Query("separator") byte separator,
-            @Query("_exclude_fields") String _exclude_fields);
+            @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
+            @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
+            @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
+            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/summary")
     Call<FramesV3> summary(@Path("frame_id") String frame_id);
@@ -241,11 +235,10 @@ public interface Frames {
      */
     @GET("/3/Frames/{frame_id}/light")
     Call<FramesV3> fetchLight(@Path("frame_id") String frame_id, @Query("column") String column, @Query("row_offset") long row_offset,
-            @Query("row_count") int row_count, @Query("column_offset") int column_offset,
-            @Query("full_column_count") int full_column_count, @Query("column_count") int column_count,
-            @Query("find_compatible_models") boolean find_compatible_models, @Query("path") String path, @Query("force") boolean force,
-            @Query("num_parts") int num_parts, @Query("compression") String compression, @Query("separator") byte separator,
-            @Query("_exclude_fields") String _exclude_fields);
+            @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
+            @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
+            @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
+            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/light")
     Call<FramesV3> fetchLight(@Path("frame_id") String frame_id);
@@ -272,11 +265,10 @@ public interface Frames {
      */
     @GET("/3/Frames/{frame_id}")
     Call<FramesV3> fetch(@Path("frame_id") String frame_id, @Query("column") String column, @Query("row_offset") long row_offset,
-            @Query("row_count") int row_count, @Query("column_offset") int column_offset,
-            @Query("full_column_count") int full_column_count, @Query("column_count") int column_count,
-            @Query("find_compatible_models") boolean find_compatible_models, @Query("path") String path, @Query("force") boolean force,
-            @Query("num_parts") int num_parts, @Query("compression") String compression, @Query("separator") byte separator,
-            @Query("_exclude_fields") String _exclude_fields);
+            @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
+            @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
+            @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
+            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}")
     Call<FramesV3> fetch(@Path("frame_id") String frame_id);
@@ -315,11 +307,10 @@ public interface Frames {
      */
     @DELETE("/3/Frames/{frame_id}")
     Call<FramesV3> delete(@Path("frame_id") String frame_id, @Field("column") String column, @Field("row_offset") long row_offset,
-            @Field("row_count") int row_count, @Field("column_offset") int column_offset,
-            @Field("full_column_count") int full_column_count, @Field("column_count") int column_count,
-            @Field("find_compatible_models") boolean find_compatible_models, @Field("path") String path, @Field("force") boolean force,
-            @Field("num_parts") int num_parts, @Field("compression") String compression, @Field("separator") byte separator,
-            @Field("_exclude_fields") String _exclude_fields);
+            @Field("row_count") int row_count, @Field("column_offset") int column_offset, @Field("full_column_count") int full_column_count,
+            @Field("column_count") int column_count, @Field("find_compatible_models") boolean find_compatible_models,
+            @Field("path") String path, @Field("force") boolean force, @Field("num_parts") int num_parts,
+            @Field("compression") String compression, @Field("separator") byte separator, @Field("_exclude_fields") String _exclude_fields);
 
     @DELETE("/3/Frames/{frame_id}")
     Call<FramesV3> delete(@Path("frame_id") String frame_id);
@@ -346,11 +337,10 @@ public interface Frames {
      */
     @DELETE("/3/Frames")
     Call<FramesV3> deleteAll(@Field("frame_id") String frame_id, @Field("column") String column, @Field("row_offset") long row_offset,
-            @Field("row_count") int row_count, @Field("column_offset") int column_offset,
-            @Field("full_column_count") int full_column_count, @Field("column_count") int column_count,
-            @Field("find_compatible_models") boolean find_compatible_models, @Field("path") String path, @Field("force") boolean force,
-            @Field("num_parts") int num_parts, @Field("compression") String compression, @Field("separator") byte separator,
-            @Field("_exclude_fields") String _exclude_fields);
+            @Field("row_count") int row_count, @Field("column_offset") int column_offset, @Field("full_column_count") int full_column_count,
+            @Field("column_count") int column_count, @Field("find_compatible_models") boolean find_compatible_models,
+            @Field("path") String path, @Field("force") boolean force, @Field("num_parts") int num_parts,
+            @Field("compression") String compression, @Field("separator") byte separator, @Field("_exclude_fields") String _exclude_fields);
 
     @DELETE("/3/Frames")
     Call<FramesV3> deleteAll();

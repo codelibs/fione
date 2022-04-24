@@ -27,11 +27,11 @@ public class Project {
 
     private String name;
 
-    private transient DataSet[] dataSets = new DataSet[0];
+    private transient DataSet[] dataSets = {};
 
     private transient String[] frameIds = StringUtil.EMPTY_STRINGS;
 
-    private transient JobV3[] jobs = new JobV3[0];
+    private transient JobV3[] jobs = {};
 
     public Project() {
         // no-op

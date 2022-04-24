@@ -225,7 +225,8 @@ public class H2oHelper {
         return getJobs(sessionKey, new JobKeyV3(jobId));
     }
 
-    public Callable<RapidsSchemaV3> bindFrames(final String sessionKey, final FrameKeyV3 destinationFrame, final FrameKeyV3[] sourceFrames) {
+    public Callable<RapidsSchemaV3> bindFrames(final String sessionKey, final FrameKeyV3 destinationFrame,
+            final FrameKeyV3[] sourceFrames) {
         final var buf = new StringBuilder(100);
         buf.append("(assign ").append(H2oApi.keyToString(destinationFrame)).append(" (cbind");
         Arrays.stream(sourceFrames).map(H2oApi::keyToString).forEach(s -> buf.append(' ').append(s));

@@ -143,11 +143,8 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
     }
 
     protected void registerSortMetricItems(final RenderData data) {
-        RenderDataUtil.register(
-                data,
-                "sortMetricItems",
-                Arrays.stream(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.values())
-                        .map(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider::toString).toArray(n -> new String[n]));
+        RenderDataUtil.register(data, "sortMetricItems", Arrays.stream(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider.values())
+                .map(Automlapischemas3AutoMLBuildSpecAutoMLMetricProvider::toString).toArray(n -> new String[n]));
     }
 
     protected void registerStoppingMetricItems(final RenderData data) {

@@ -57,34 +57,32 @@ public class SchemaV3 {
 
     public Object[] getFieldValues() {
         if (fieldValues == null) {
-            fieldValues =
-                    Arrays.stream(getFieldNames())
-                            .map(s -> {
-                                try {
-                                    final var value = getClass().getField(s).get(this);
-                                    if (value instanceof Number) {
-                                        if (s.equals("runTime")) {
-                                            return FessFunctions.formatDuration(((Number) value).longValue());
-                                        } else if (s.endsWith("Time")) {
-                                            final DateFormat formatter = new SimpleDateFormat(CoreLibConstants.DATE_FORMAT_ISO_8601_EXTEND);
-                                            return formatter.format(new Date(((Number) value).longValue()));
-                                        }
-                                    } else if (value instanceof String[]) {
-                                        return Arrays.stream((String[]) value).collect(Collectors.joining(", "));
-                                    } else if (value instanceof String[][]) {
-                                        return Arrays.stream((String[][]) value)
-                                                .map(v -> "[" + Arrays.stream(v).collect(Collectors.joining(", ")) + "]")
-                                                .collect(Collectors.joining(", "));
-                                    } else if (value instanceof KeyV3) {
-                                        return ((KeyV3) value).name;
-                                    } else if (value instanceof KeyV3[]) {
-                                        return Arrays.stream((KeyV3[]) value).map(k -> k.name).collect(Collectors.joining(", "));
-                                    }
-                                    return value;
-                                } catch (final Exception e) {
-                                    return StringUtil.EMPTY;
-                                }
-                            }).toArray(n -> new Object[n]);
+            fieldValues = Arrays.stream(getFieldNames()).map(s -> {
+                try {
+                    final var value = getClass().getField(s).get(this);
+                    if (value instanceof Number) {
+                        if ("runTime".equals(s)) {
+                            return FessFunctions.formatDuration(((Number) value).longValue());
+                        }
+                        if (s.endsWith("Time")) {
+                            final DateFormat formatter = new SimpleDateFormat(CoreLibConstants.DATE_FORMAT_ISO_8601_EXTEND);
+                            return formatter.format(new Date(((Number) value).longValue()));
+                        }
+                    } else if (value instanceof String[]) {
+                        return Arrays.stream((String[]) value).collect(Collectors.joining(", "));
+                    } else if (value instanceof String[][]) {
+                        return Arrays.stream((String[][]) value).map(v -> "[" + Arrays.stream(v).collect(Collectors.joining(", ")) + "]")
+                                .collect(Collectors.joining(", "));
+                    } else if (value instanceof KeyV3) {
+                        return ((KeyV3) value).name;
+                    } else if (value instanceof KeyV3[]) {
+                        return Arrays.stream((KeyV3[]) value).map(k -> k.name).collect(Collectors.joining(", "));
+                    }
+                    return value;
+                } catch (final Exception e) {
+                    return StringUtil.EMPTY;
+                }
+            }).toArray(n -> new Object[n]);
         }
         return fieldValues;
     }
