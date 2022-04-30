@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class AggregatorModelV99 extends ModelSchemaV3<AggregatorParametersV99, AggregatorModelOutputV99> {
 
@@ -83,7 +83,7 @@ public class AggregatorModelV99 extends ModelSchemaV3<AggregatorParametersV99, A
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

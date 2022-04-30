@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class GBMModelV3 extends SharedTreeModelV3<GBMParametersV3, GBMModelOutputV3> {
 
@@ -83,7 +83,7 @@ public class GBMModelV3 extends SharedTreeModelV3<GBMParametersV3, GBMModelOutpu
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

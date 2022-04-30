@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class UpliftDRFModelV3 extends SharedTreeModelV3<UpliftDRFParametersV3, UpliftDRFModelOutputV3> {
 
@@ -83,7 +83,7 @@ public class UpliftDRFModelV3 extends SharedTreeModelV3<UpliftDRFParametersV3, U
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

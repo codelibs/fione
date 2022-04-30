@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class CoxPHModelV3 extends ModelSchemaV3<CoxPHParametersV3, CoxPHModelOutputV3> {
 
@@ -83,7 +83,7 @@ public class CoxPHModelV3 extends ModelSchemaV3<CoxPHParametersV3, CoxPHModelOut
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

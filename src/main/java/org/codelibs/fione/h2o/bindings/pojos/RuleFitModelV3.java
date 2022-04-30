@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class RuleFitModelV3 extends ModelSchemaV3<RuleFitParametersV3, RuleFitModelOutputV3> {
 
@@ -83,7 +83,7 @@ public class RuleFitModelV3 extends ModelSchemaV3<RuleFitParametersV3, RuleFitMo
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class ExtendedIsolationForestV3 extends ModelBuilderSchema<ExtendedIsolationForestParametersV3> {
 
@@ -77,7 +77,7 @@ public class ExtendedIsolationForestV3 extends ModelBuilderSchema<ExtendedIsolat
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

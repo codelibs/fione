@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class StackedEnsembleModelV99 extends ModelSchemaV3<StackedEnsembleParametersV99, StackedEnsembleModelOutputV99> {
 
@@ -83,7 +83,7 @@ public class StackedEnsembleModelV99 extends ModelSchemaV3<StackedEnsembleParame
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

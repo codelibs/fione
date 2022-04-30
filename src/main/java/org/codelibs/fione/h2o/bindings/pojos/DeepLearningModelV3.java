@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class DeepLearningModelV3 extends ModelSchemaV3<DeepLearningParametersV3, DeepLearningModelOutputV3> {
 
@@ -83,7 +83,7 @@ public class DeepLearningModelV3 extends ModelSchemaV3<DeepLearningParametersV3,
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelSchemaV3<P extends ModelParametersSchemaV3, O extends ModelOutputSchemaV3> extends ModelSchemaBaseV3 {
@@ -93,7 +93,7 @@ public class ModelSchemaV3<P extends ModelParametersSchemaV3, O extends ModelOut
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

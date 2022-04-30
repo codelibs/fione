@@ -17,7 +17,7 @@ package org.codelibs.fione.h2o.bindings.pojos;
 
 import java.util.Map;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
 public class GridSearchSchema extends SchemaV3 {
@@ -89,7 +89,7 @@ public class GridSearchSchema extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }

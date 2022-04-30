@@ -17,7 +17,7 @@ package org.codelibs.fione.h2o.bindings.pojos;
 
 import static org.codelibs.fione.h2o.bindings.H2oApi.keyToString;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
 public class JobsV3 extends RequestSchemaV3 {
@@ -55,7 +55,7 @@ public class JobsV3 extends RequestSchemaV3 {
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
     public JobV3 findJob(final String jobId) {

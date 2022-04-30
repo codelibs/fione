@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class GrepModelV3 extends ModelSchemaV3<GrepParametersV3, GrepModelOutputV3> {
 
@@ -83,7 +83,7 @@ public class GrepModelV3 extends ModelSchemaV3<GrepParametersV3, GrepModelOutput
      */
     @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
     }
 
 }
