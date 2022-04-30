@@ -1,11 +1,15 @@
-FROM adoptopenjdk:11-jre-hotspot
+FROM eclipse-temurin:17-jre-focal
 
-RUN mkdir /opt/fione && \
-    echo "#!/bin/bash\njava -jar /opt/fione/fione-serving.jar" > /usr/bin/serve && \
-    chmod +x /usr/bin/serve
+WORKDIR /opt/fione
+
 COPY fione-serving.jar /opt/fione
 COPY model.zip /opt/fione
 
+RUN groupadd -r fione && useradd -r -g fione fione && \
+    chown -R fione /opt/fione && \
+    echo "#!/bin/bash\nexec java -jar /opt/fione/fione-serving.jar" > /usr/bin/serve && \
+    chmod +x /usr/bin/serve
+
 ENV MODEL_PATH /opt/fione/model.zip
 
-CMD ["java", "-jar", "/opt/fione/fione-serving.jar"]
+CMD ["/bin/bash", "/usr/bin/serve"]
