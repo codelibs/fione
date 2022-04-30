@@ -13,8 +13,27 @@
  * either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-package org.codelibs.fione.h2o.bindings.pojos;
+package org.codelibs.fione.h2o.bindings.proxies.retrofit;
 
-public enum H2otargetencodingTargetEncoderDataLeakageHandlingStrategy {
-    KFold, LeaveOneOut, None,
+import org.codelibs.fione.h2o.bindings.pojos.ResumeV3;
+
+import retrofit2.Call;
+import retrofit2.http.Field;
+import retrofit2.http.FormUrlEncoded;
+import retrofit2.http.POST;
+
+public interface Recovery {
+
+    /**
+     * Recover stored state and resume interrupted job.
+     *   @param recovery_dir Full path to the directory with recovery data
+     */
+    @FormUrlEncoded
+    @POST("/3/Recovery/resume")
+    Call<ResumeV3> resume(@Field("recovery_dir") String recovery_dir);
+
+    @FormUrlEncoded
+    @POST("/3/Recovery/resume")
+    Call<ResumeV3> resume();
+
 }

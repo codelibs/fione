@@ -15,6 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.proxies.retrofit;
 
+import org.codelibs.fione.h2o.bindings.pojos.TreeHandlerPlainLanguageRules;
 import org.codelibs.fione.h2o.bindings.pojos.TreeV3;
 
 import retrofit2.Call;
@@ -28,9 +29,11 @@ public interface Tree {
      *   @param model Key of the model the desired tree belongs to
      *   @param tree_number Index of the tree in the model.
      *   @param tree_class Name of the class of the tree. Ignored for regression and binomial.
+     *   @param plain_language_rules Whether to generate plain language rules.
      */
     @GET("/3/Tree")
-    Call<TreeV3> getTree(@Query("model") String model, @Query("tree_number") int tree_number, @Query("tree_class") String tree_class);
+    Call<TreeV3> getTree(@Query("model") String model, @Query("tree_number") int tree_number, @Query("tree_class") String tree_class,
+            @Query("plain_language_rules") TreeHandlerPlainLanguageRules plain_language_rules);
 
     @GET("/3/Tree")
     Call<TreeV3> getTree(@Query("model") String model, @Query("tree_number") int tree_number);

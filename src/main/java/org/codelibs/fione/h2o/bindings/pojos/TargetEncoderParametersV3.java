@@ -15,41 +15,64 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class TargetEncoderParametersV3 extends ModelParametersSchemaV3 {
 
     /**
-     * Blending enabled/disabled
+     * List of categorical columns or groups of categorical columns to encode. When groups of columns are specified,
+     * each group is encoded as a single column (interactions are created internally).
+     */
+    @SerializedName("columns_to_encode")
+    public String[][] columnsToEncode;
+
+    /**
+     * If true, the original non-encoded categorical features will remain in the result frame.
+     */
+    @SerializedName("keep_original_categorical_columns")
+    public boolean keepOriginalCategoricalColumns;
+
+    /**
+     * If true, enables blending of posterior probabilities (computed for a given categorical value) with prior
+     * probabilities (computed on the entire set). This allows to mitigate the effect of categorical values with small
+     * cardinality. The blending effect can be tuned using the `inflection_point` and `smoothing` parameters.
      */
     public boolean blending;
 
     /**
-     * Inflection point. Used for blending (if enabled). Blending is to be enabled separately using the 'blending'
-     * parameter.
+     * Inflection point of the sigmoid used to blend probabilities (see `blending` parameter). For a given categorical
+     * value, if it appears less that `inflection_point` in a data sample, then the influence of the posterior
+     * probability will be smaller than the prior.
      */
-    public double k;
+    @SerializedName("inflection_point")
+    public double inflectionPoint;
 
     /**
-     * Smoothing. Used for blending (if enabled). Blending is to be enabled separately using the 'blending' parameter.
+     * Smoothing factor corresponds to the inverse of the slope at the inflection point on the sigmoid used to blend
+     * probabilities (see `blending` parameter). If smoothing tends towards 0, then the sigmoid used for blending turns
+     * into a Heaviside step function.
      */
-    public double f;
+    public double smoothing;
 
     /**
-     * Data leakage handling strategy.
+     * Data leakage handling strategy used to generate the encoding. Supported options are:
+     * 1) "none" (default) - no holdout, using the entire training frame.
+     * 2) "leave_one_out" - current row's response value is subtracted from the per-level frequencies pre-calculated on
+     * the entire training frame.
+     * 3) "k_fold" - encodings for a fold are generated based on out-of-fold data.
      */
     @SerializedName("data_leakage_handling")
-    public H2otargetencodingTargetEncoderDataLeakageHandlingStrategy dataLeakageHandling;
+    public H2otargetencodingTargetEncoderModelDataLeakageHandlingStrategy dataLeakageHandling;
 
     /**
-     * Noise level
+     * The amount of noise to add to the encoded column. Use 0 to disable noise, and -1 (=AUTO) to let the algorithm
+     * determine a reasonable amount of noise.
      */
-    @SerializedName("noise_level")
-    public double noiseLevel;
+    public double noise;
 
     /**
-     * Seed for the specified noise level
+     * Seed used to generate the noise. By default, the seed is chosen randomly.
      */
     public long seed;
 
@@ -100,7 +123,9 @@ public class TargetEncoderParametersV3 extends ModelParametersSchemaV3 {
     // dataset; giving an observation a relative weight of 2 is equivalent to repeating that row twice. Negative weights
     // are not allowed. Note: Weights are per-row observation weights and do not increase the size of the data frame.
     // This is typically the number of times a row is repeated, but non-integer values are supported as well. During
-    // training, rows with higher weights matter more, due to the larger loss function pre-factor.
+    // training, rows with higher weights matter more, due to the larger loss function pre-factor. If you set weight = 0
+    // for a row, the returned prediction frame at that row is zero and this is incorrect. To get an accurate
+    // prediction, remove all rows with weight == 0.
     public ColSpecifierV3 weightsColumn;
 
     // Offset column. This will be added to the combination of columns before applying the link function.
@@ -147,6 +172,9 @@ public class TargetEncoderParametersV3 extends ModelParametersSchemaV3 {
     // Relative tolerance for metric-based stopping criterion (stop if relative improvement is not at least this much)
     public double stoppingTolerance;
 
+    // Gains/Lift table number of bins. 0 means disabled.. Default value -1 means automatic binning.
+    public int gainsliftBins;
+
     // Reference to custom evaluation function, format: `language:keyName=funcName`
     public String customMetricFunc;
 
@@ -156,17 +184,21 @@ public class TargetEncoderParametersV3 extends ModelParametersSchemaV3 {
     // Automatically export generated models to this directory.
     public String exportCheckpointsDir;
 
+    // Set default multinomial AUC type.
+    public MultinomialAucType aucType;
+
     */
 
     /**
      * Public constructor
      */
     public TargetEncoderParametersV3() {
+        keepOriginalCategoricalColumns = true;
         blending = false;
-        k = 10.0;
-        f = 20.0;
-        dataLeakageHandling = H2otargetencodingTargetEncoderDataLeakageHandlingStrategy.None;
-        noiseLevel = 0.01;
+        inflectionPoint = 10.0;
+        smoothing = 20.0;
+        dataLeakageHandling = H2otargetencodingTargetEncoderModelDataLeakageHandlingStrategy.None;
+        noise = 0.01;
         seed = -1L;
         nfolds = 0;
         keepCrossValidationModels = true;
@@ -180,15 +212,17 @@ public class TargetEncoderParametersV3 extends ModelParametersSchemaV3 {
         foldAssignment = ModelParametersFoldAssignmentScheme.AUTO;
         categoricalEncoding = ModelParametersCategoricalEncodingScheme.AUTO;
         maxCategoricalLevels = 10;
-        ignoreConstCols = true;
+        ignoreConstCols = false;
         scoreEachIteration = false;
         stoppingRounds = 0;
         maxRuntimeSecs = 0.0;
         stoppingMetric = ScoreKeeperStoppingMetric.AUTO;
         stoppingTolerance = 0.001;
+        gainsliftBins = -1;
         customMetricFunc = "";
         customDistributionFunc = "";
         exportCheckpointsDir = "";
+        aucType = MultinomialAucType.AUTO;
     }
 
     /**
@@ -196,7 +230,7 @@ public class TargetEncoderParametersV3 extends ModelParametersSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

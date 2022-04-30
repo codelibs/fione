@@ -17,7 +17,7 @@ package org.codelibs.fione.h2o.bindings.pojos;
 
 import org.codelibs.fione.entity.ChartData;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class DeepLearningModelOutputV3 extends ModelOutputSchemaV3 {
@@ -70,6 +70,9 @@ public class DeepLearningModelOutputV3 extends ModelOutputSchemaV3 {
     // Column names
     public String[] names;
 
+    // Original column names
+    public String[] originalNames;
+
     // Column types
     public String[] columnTypes;
 
@@ -98,6 +101,12 @@ public class DeepLearningModelOutputV3 extends ModelOutputSchemaV3 {
     // Scoring history
     public TwoDimTableV3 scoringHistory;
 
+    // Cross-Validation scoring history
+    public TwoDimTableV3[] cvScoringHistory;
+
+    // Model reproducibility information
+    public TwoDimTableV3[] reproducibilityInformationTable;
+
     // Training data model metrics
     public ModelMetricsBaseV3 trainingMetrics;
 
@@ -122,6 +131,9 @@ public class DeepLearningModelOutputV3 extends ModelOutputSchemaV3 {
     // Runtime in milliseconds
     public long runTime;
 
+    // Default threshold used for predictions
+    public double defaultThreshold;
+
     // Help information for output fields
     public Map<String,String> help;
 
@@ -135,6 +147,7 @@ public class DeepLearningModelOutputV3 extends ModelOutputSchemaV3 {
         startTime = 0L;
         endTime = 0L;
         runTime = 0L;
+        defaultThreshold = 0.0;
     }
 
     /**
@@ -142,7 +155,7 @@ public class DeepLearningModelOutputV3 extends ModelOutputSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
     @Override

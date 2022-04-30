@@ -15,19 +15,19 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
-public class DeepWaterModelV3 extends ModelSchemaV3<DeepWaterParametersV3, DeepWaterModelOutputV3> {
+public class UpliftDRFModelV3 extends SharedTreeModelV3<UpliftDRFParametersV3, UpliftDRFModelOutputV3> {
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
 
     // The build parameters for the model (e.g. K for KMeans).
-    public DeepWaterParametersV3 parameters;
+    public UpliftDRFParametersV3 parameters;
 
     // The build output for the model (e.g. the cluster centers for KMeans).
-    public DeepWaterModelOutputV3 output;
+    public UpliftDRFModelOutputV3 output;
 
     // Compatible frames, if requested
     public String[] compatibleFrames;
@@ -47,6 +47,9 @@ public class DeepWaterModelV3 extends ModelSchemaV3<DeepWaterParametersV3, DeepW
     // The response column name for this Model (if applicable). Is null otherwise.
     public String responseColumnName;
 
+    // The treatment column name for this Model (if applicable). Is null otherwise.
+    public String treatmentColumnName;
+
     // The Model's training frame key
     public FrameKeyV3 dataFrame;
 
@@ -64,11 +67,12 @@ public class DeepWaterModelV3 extends ModelSchemaV3<DeepWaterParametersV3, DeepW
     /**
      * Public constructor
      */
-    public DeepWaterModelV3() {
+    public UpliftDRFModelV3() {
         checksum = 0L;
         algo = "";
         algoFullName = "";
         responseColumnName = "";
+        treatmentColumnName = "";
         timestamp = 0L;
         havePojo = false;
         haveMojo = false;
@@ -79,7 +83,7 @@ public class DeepWaterModelV3 extends ModelSchemaV3<DeepWaterParametersV3, DeepW
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

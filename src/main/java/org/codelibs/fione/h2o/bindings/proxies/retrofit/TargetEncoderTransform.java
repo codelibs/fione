@@ -16,7 +16,6 @@
 package org.codelibs.fione.h2o.bindings.proxies.retrofit;
 
 import org.codelibs.fione.h2o.bindings.pojos.FrameKeyV3;
-import org.codelibs.fione.h2o.bindings.pojos.H2otargetencodingTargetEncoderDataLeakageHandlingStrategy;
 
 import retrofit2.Call;
 import retrofit2.http.GET;
@@ -27,19 +26,18 @@ public interface TargetEncoderTransform {
     /**
      * Transform using give TargetEncoderModel
      *   @param model Target Encoder model to use.
-     *   @param seed Seed value
-     *   @param data_leakage_handling Data leakage handling strategy.
-     *   @param noise Noise
-     *   @param frame Frame to transform
-     *   @param blending Enables or disables blending
-     *   @param inflection_point Inflection point
-     *   @param smoothing Smoothing
+     *   @param frame Frame to transform.
+     *   @param as_training Force encoding mode for training data: when using a leakage handling strategy different from
+     *                      None, training data should be transformed with this flag set to true (Defaults to false).
+     *   @param blending Enables or disables blending. Defaults to the value assigned at model creation.
+     *   @param inflection_point Inflection point. Defaults to the value assigned at model creation.
+     *   @param smoothing Smoothing. Defaults to the value assigned at model creation.
+     *   @param noise Noise. Defaults to the value assigned at model creation.
      */
     @GET("/3/TargetEncoderTransform")
-    Call<FrameKeyV3> transform(@Query("model") String model, @Query("seed") long seed,
-            @Query("data_leakage_handling") H2otargetencodingTargetEncoderDataLeakageHandlingStrategy data_leakage_handling,
-            @Query("noise") double noise, @Query("frame") String frame, @Query("blending") boolean blending,
-            @Query("inflection_point") double inflection_point, @Query("smoothing") double smoothing);
+    Call<FrameKeyV3> transform(@Query("model") String model, @Query("frame") String frame, @Query("as_training") boolean as_training,
+            @Query("blending") boolean blending, @Query("inflection_point") double inflection_point, @Query("smoothing") double smoothing,
+            @Query("noise") double noise);
 
     @GET("/3/TargetEncoderTransform")
     Call<FrameKeyV3> transform();

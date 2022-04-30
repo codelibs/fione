@@ -16,5 +16,5 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 public enum H2oautomlStepDefinitionAlias {
-    all, defaults, grids,
+    all, defaults, exploitation, grids, optionals,
 }

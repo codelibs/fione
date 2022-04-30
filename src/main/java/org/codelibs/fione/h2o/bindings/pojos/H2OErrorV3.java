@@ -17,7 +17,7 @@ package org.codelibs.fione.h2o.bindings.pojos;
 
 import java.util.Map;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class H2OErrorV3 extends SchemaV3 {
@@ -93,7 +93,7 @@ public class H2OErrorV3 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

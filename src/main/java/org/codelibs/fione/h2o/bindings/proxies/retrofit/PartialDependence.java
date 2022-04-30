@@ -42,6 +42,7 @@ public interface PartialDependence {
      *   @param num_user_splits Number of user defined splits per column
      *   @param col_pairs_2dpdp lists of column name pairs to plot 2D pdp for
      *   @param destination_key Key to store the destination
+     *   @param targets Target classes for multinomial classification
      */
     @FormUrlEncoded
     @POST("/3/PartialDependence/")
@@ -49,7 +50,8 @@ public interface PartialDependence {
             @Field("row_index") long row_index, @Field("cols") String[] cols, @Field("weight_column_index") int weight_column_index,
             @Field("add_missing_na") boolean add_missing_na, @Field("nbins") int nbins, @Field("user_splits") double[] user_splits,
             @Field("user_cols") String[] user_cols, @Field("num_user_splits") int[] num_user_splits,
-            @Field("col_pairs_2dpdp") String[][] col_pairs_2dpdp, @Field("destination_key") String destination_key);
+            @Field("col_pairs_2dpdp") String[][] col_pairs_2dpdp, @Field("destination_key") String destination_key,
+            @Field("targets") String[] targets);
 
     @FormUrlEncoded
     @POST("/3/PartialDependence/")

@@ -28,7 +28,13 @@ public interface PersistS3 {
      * Set Amazon S3 credentials (Secret Key ID, Secret Access Key)
      *   @param secret_key_id S3 Secret Key ID
      *   @param secret_access_key S3 Secret Key
+     *   @param session_token S3 Session token
      */
+    @FormUrlEncoded
+    @POST("/3/PersistS3")
+    Call<PersistS3CredentialsV3> setS3Credentials(@Field("secret_key_id") String secret_key_id,
+            @Field("secret_access_key") String secret_access_key, @Field("session_token") String session_token);
+
     @FormUrlEncoded
     @POST("/3/PersistS3")
     Call<PersistS3CredentialsV3> setS3Credentials(@Field("secret_key_id") String secret_key_id,

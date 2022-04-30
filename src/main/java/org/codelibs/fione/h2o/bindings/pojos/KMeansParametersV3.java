@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class KMeansParametersV3 extends ClusteringModelParametersSchemaV3 {
@@ -50,10 +50,17 @@ public class KMeansParametersV3 extends ClusteringModelParametersSchemaV3 {
     public KMeansInitialization init;
 
     /**
-     * Whether to estimate the number of clusters (&lt;=k) iteratively and deterministically.
+     * Whether to estimate the number of clusters (<=k) iteratively and deterministically.
      */
     @SerializedName("estimate_k")
     public boolean estimateK;
+
+    /**
+     * An array specifying the minimum number of points that should be in each cluster. The length of the constraints
+     * array has to be the same as the number of clusters.
+     */
+    @SerializedName("cluster_size_constraints")
+    public int[] clusterSizeConstraints;
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
@@ -106,7 +113,9 @@ public class KMeansParametersV3 extends ClusteringModelParametersSchemaV3 {
     // dataset; giving an observation a relative weight of 2 is equivalent to repeating that row twice. Negative weights
     // are not allowed. Note: Weights are per-row observation weights and do not increase the size of the data frame.
     // This is typically the number of times a row is repeated, but non-integer values are supported as well. During
-    // training, rows with higher weights matter more, due to the larger loss function pre-factor.
+    // training, rows with higher weights matter more, due to the larger loss function pre-factor. If you set weight = 0
+    // for a row, the returned prediction frame at that row is zero and this is incorrect. To get an accurate
+    // prediction, remove all rows with weight == 0.
     public ColSpecifierV3 weightsColumn;
 
     // Offset column. This will be added to the combination of columns before applying the link function.
@@ -153,6 +162,9 @@ public class KMeansParametersV3 extends ClusteringModelParametersSchemaV3 {
     // Relative tolerance for metric-based stopping criterion (stop if relative improvement is not at least this much)
     public double stoppingTolerance;
 
+    // Gains/Lift table number of bins. 0 means disabled.. Default value -1 means automatic binning.
+    public int gainsliftBins;
+
     // Reference to custom evaluation function, format: `language:keyName=funcName`
     public String customMetricFunc;
 
@@ -161,6 +173,9 @@ public class KMeansParametersV3 extends ClusteringModelParametersSchemaV3 {
 
     // Automatically export generated models to this directory.
     public String exportCheckpointsDir;
+
+    // Set default multinomial AUC type.
+    public MultinomialAucType aucType;
 
     */
 
@@ -192,9 +207,11 @@ public class KMeansParametersV3 extends ClusteringModelParametersSchemaV3 {
         maxRuntimeSecs = 0.0;
         stoppingMetric = ScoreKeeperStoppingMetric.AUTO;
         stoppingTolerance = 0.001;
+        gainsliftBins = -1;
         customMetricFunc = "";
         customDistributionFunc = "";
         exportCheckpointsDir = "";
+        aucType = MultinomialAucType.AUTO;
     }
 
     /**
@@ -202,7 +219,7 @@ public class KMeansParametersV3 extends ClusteringModelParametersSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

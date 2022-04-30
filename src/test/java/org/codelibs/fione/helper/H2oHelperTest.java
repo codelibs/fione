@@ -46,6 +46,8 @@ import org.codelibs.fione.h2o.bindings.pojos.ParseV3;
 import org.codelibs.fione.h2o.bindings.pojos.ScoreKeeperStoppingMetric;
 import org.codelibs.fione.h2o.bindings.pojos.TwoDimTableV3;
 import org.dbflute.utflute.lastaflute.LastaFluteTestCase;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -54,6 +56,8 @@ import junit.framework.AssertionFailedError;
 import okhttp3.logging.HttpLoggingInterceptor;
 
 public class H2oHelperTest extends LastaFluteTestCase {
+
+    private static final Logger logger = LoggerFactory.getLogger(H2oHelperTest.class);
 
     private GenericContainer<?> h2o;
 
@@ -120,6 +124,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_parseSetup(final CountDownLatch latch, final ImportFilesV3 data) {
+        logger.info("running test_iris_parseSetup");
         final ParseSetupV3 parseSetup = new ParseSetupV3();
         parseSetup.sourceFrames = Arrays.stream(data.destinationFrames).map(FrameKeyV3::new).toArray(n -> new FrameKeyV3[n]);
         h2oHelper.setupParse(getSessionKey(), parseSetup).execute((call, res) -> {
@@ -148,6 +153,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_parse(final CountDownLatch latch, final ParseSetupV3 data) {
+        logger.info("running test_iris_parse");
         final ParseV3 params = h2oHelper.convert(data);
         h2oHelper.parseFiles(getSessionKey(), params).execute((call, res) -> {
             final ParseV3 result = res.body();
@@ -172,6 +178,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_summary(final CountDownLatch latch, final ParseV3 data, final JobV3 job) {
+        logger.info("running test_iris_summary");
         if ("DONE".equals(job.status)) {
             h2oHelper.getFrameSummary(getSessionKey(), data.destinationFrame.name).execute((call, res) -> {
                 final FramesV3 result = res.body();
@@ -235,6 +242,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_columnSummary(final CountDownLatch latch, final ParseV3 data) {
+        logger.info("running test_iris_columnSummary");
         h2oHelper.getFrameColumnSummary(getSessionKey(), data.destinationFrame.name, "SepalLength").execute((call, res) -> {
             final FramesV3 result = res.body();
             assertEquals(1, result.frames.length);
@@ -264,6 +272,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_runAutoML(final CountDownLatch latch, final ParseV3 data) {
+        logger.info("running test_iris_runAutoML");
         h2oHelper.runAutoML(getSessionKey(), AutoMLBuildControlBuilder.create().projectName("iris").nfolds(5).balanceClasses(false)
                 .stoppingCriteria(AutoMLStoppingCriteriaBuilder.create().seed(-1).maxModels(0).maxRuntimeSecs(60).maxRuntimeSecsPerModel(0)
                         .stoppingRounds(3).stoppingMetric(ScoreKeeperStoppingMetric.AUTO).stoppingTolerance(0.001).build())
@@ -319,6 +328,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_leaderboard(final CountDownLatch latch, final AutoMLBuildSpecV99 data, final JobV3 job) {
+        logger.info("running test_iris_leaderboard");
         if ("DONE".equals(job.status)) {
             h2oHelper.getLeaderboard(getSessionKey(), job.dest.name).execute((call, res) -> {
                 final LeaderboardV99 result = res.body();
@@ -361,6 +371,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_getModel(final CountDownLatch latch, final ModelKeyV3 modelKey) {
+        logger.info("running test_iris_getModel");
         h2oHelper.getModel(getSessionKey(), modelKey).execute((call, res) -> {
             final ModelsV3 result = res.body();
             assertEquals("", result._excludeFields);
@@ -377,6 +388,7 @@ public class H2oHelperTest extends LastaFluteTestCase {
     }
 
     private void test_iris_predict(final CountDownLatch latch, final ModelKeyV3 modelKey) {
+        logger.info("running test_iris_predict");
         final FrameKeyV3 frameKey = new FrameKeyV3();
         frameKey.name = "iris.hex";
         h2oHelper.predict(getSessionKey(), modelKey, frameKey).execute((call, res) -> {

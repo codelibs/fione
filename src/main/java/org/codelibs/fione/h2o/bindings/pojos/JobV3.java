@@ -17,7 +17,7 @@ package org.codelibs.fione.h2o.bindings.pojos;
 
 import org.codelibs.core.lang.StringUtil;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class JobV3 extends SchemaV3 {
@@ -80,6 +80,12 @@ public class JobV3 extends SchemaV3 {
     public String stacktrace;
 
     /**
+     * recoverable
+     */
+    @SerializedName("auto_recoverable")
+    public boolean autoRecoverable;
+
+    /**
      * ready for view
      */
     @SerializedName("ready_for_view")
@@ -108,6 +114,7 @@ public class JobV3 extends SchemaV3 {
         msec = 0L;
         exception = "";
         stacktrace = "";
+        autoRecoverable = false;
         readyForView = false;
     }
 
@@ -116,7 +123,7 @@ public class JobV3 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
     public String getIconType() {

@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ImportSQLTableV99 extends RequestSchemaV3 {
@@ -70,6 +70,12 @@ public class ImportSQLTableV99 extends RequestSchemaV3 {
     @SerializedName("fetch_mode")
     public String fetchMode;
 
+    /**
+     * Desired number of chunks for the target Frame. Optional.
+     */
+    @SerializedName("num_chunks_hint")
+    public String numChunksHint;
+
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
@@ -93,6 +99,7 @@ public class ImportSQLTableV99 extends RequestSchemaV3 {
         password = "";
         columns = "*";
         fetchMode = "";
+        numChunksHint = "";
         _excludeFields = "";
     }
 
@@ -101,7 +108,7 @@ public class ImportSQLTableV99 extends RequestSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

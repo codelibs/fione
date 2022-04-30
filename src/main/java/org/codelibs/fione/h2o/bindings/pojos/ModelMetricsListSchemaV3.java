@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelMetricsListSchemaV3 extends RequestSchemaV3 {
@@ -109,6 +109,31 @@ public class ModelMetricsListSchemaV3 extends RequestSchemaV3 {
     public boolean predictContributions;
 
     /**
+     * Specify how to output feature contributions in XGBoost - XGBoost by default outputs contributions for 1-hot
+     * encoded features, specifying a Compact output format will produce a per-feature contribution
+     */
+    @SerializedName("predict_contributions_output_format")
+    public ModelContributionsContributionsOutputFormat predictContributionsOutputFormat;
+
+    /**
+     * Only for predict_contributions function - sort Shapley values and return top_n highest (optional)
+     */
+    @SerializedName("top_n")
+    public int topN;
+
+    /**
+     * Only for predict_contributions function - sort Shapley values and return bottom_n lowest (optional)
+     */
+    @SerializedName("bottom_n")
+    public int bottomN;
+
+    /**
+     * Only for predict_contributions function - sort absolute Shapley values (optional)
+     */
+    @SerializedName("compare_abs")
+    public boolean compareAbs;
+
+    /**
      * Retrieve the feature frequencies on paths in trees in tree-based models (optional, only for GBM, DRF and
      * Isolation Forest)
      */
@@ -131,6 +156,27 @@ public class ModelMetricsListSchemaV3 extends RequestSchemaV3 {
      */
     @SerializedName("custom_metric_func")
     public String customMetricFunc;
+
+    /**
+     * Set default multinomial AUC type. Must be one of: "AUTO", "NONE", "MACRO_OVR", "WEIGHTED_OVR", "MACRO_OVO",
+     * "WEIGHTED_OVO". Default is "NONE" (optional, only for multinomial classification).
+     */
+    @SerializedName("auc_type")
+    public String aucType;
+
+    /**
+     * Set default AUUC type for uplift binomial classification. Must be one of: "AUTO", "qini", "lift", "gain". Default
+     * is "AUTO" (optional, only for uplift binomial classification).
+     */
+    @SerializedName("auuc_type")
+    public String auucType;
+
+    /**
+     * Set number of bins to calculate AUUC. Must be -1 or higher than 0. Default is -1 which means 1000 (optional, only
+     * for uplift binomial classification).
+     */
+    @SerializedName("auuc_nbins")
+    public int auucNbins;
 
     /**
      * ModelMetrics
@@ -162,10 +208,16 @@ public class ModelMetricsListSchemaV3 extends RequestSchemaV3 {
         leafNodeAssignment = false;
         predictStagedProba = false;
         predictContributions = false;
+        topN = 0;
+        bottomN = 0;
+        compareAbs = false;
         featureFrequencies = false;
         exemplarIndex = -1;
         deviances = false;
         customMetricFunc = "";
+        aucType = "";
+        auucType = "";
+        auucNbins = 0;
         modelMetrics = new ModelMetricsBaseV3[] {};
         _excludeFields = "";
     }
@@ -175,7 +227,7 @@ public class ModelMetricsListSchemaV3 extends RequestSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

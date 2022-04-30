@@ -15,20 +15,126 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
-public class ExampleParametersV3 extends ModelParametersSchemaV3 {
+public class UpliftDRFParametersV3 extends SharedTreeParametersV3 {
 
     /**
-     * Maximum training iterations.
+     * Number of variables randomly sampled as candidates at each split. If set to -1, defaults to sqrt{p} for
+     * classification and p/3 for regression (where p is the # of predictors
      */
-    @SerializedName("max_iterations")
-    public int maxIterations;
+    public int mtries;
+
+    /**
+     * Row sample rate per tree (from 0.0 to 1.0)
+     */
+    @SerializedName("sample_rate")
+    public double sampleRate;
+
+    /**
+     * Define the column which will be used for computing uplift gain to select best split for a tree. The column has to
+     * divide the dataset into treatment (value 1) and control (value 0) groups.
+     */
+    @SerializedName("treatment_column")
+    public String treatmentColumn;
+
+    /**
+     * Divergence metric used to find best split when building an uplift tree.
+     */
+    @SerializedName("uplift_metric")
+    public TreeupliftUpliftDRFModelUpliftDRFParametersUpliftMetricType upliftMetric;
+
+    /**
+     * Metric used to calculate Area Under Uplift Curve.
+     */
+    @SerializedName("auuc_type")
+    public AUUCType auucType;
+
+    /**
+     * Number of bins to calculate Area Under Uplift Curve.
+     */
+    @SerializedName("auuc_nbins")
+    public int auucNbins;
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
+
+    // Balance training data class counts via over/under-sampling (for imbalanced data).
+    public boolean balanceClasses;
+
+    // Desired over/under-sampling ratios per class (in lexicographic order). If not specified, sampling factors will be
+    // automatically computed to obtain class balance during training. Requires balance_classes.
+    public float[] classSamplingFactors;
+
+    // Maximum relative size of the training data after balancing class counts (can be less than 1.0). Requires
+    // balance_classes.
+    public float maxAfterBalanceSize;
+
+    // [Deprecated] Maximum size (# classes) for confusion matrices to be printed in the Logs
+    public int maxConfusionMatrixSize;
+
+    // Number of trees.
+    public int ntrees;
+
+    // Maximum tree depth (0 for unlimited).
+    public int maxDepth;
+
+    // Fewest allowed (weighted) observations in a leaf.
+    public double minRows;
+
+    // For numerical columns (real/int), build a histogram of (at least) this many bins, then split at the best point
+    public int nbins;
+
+    // For numerical columns (real/int), build a histogram of (at most) this many bins at the root level, then decrease
+    // by factor of two per level
+    public int nbinsTopLevel;
+
+    // For categorical columns (factors), build a histogram of this many bins, then split at the best point. Higher
+    // values can lead to more overfitting.
+    public int nbinsCats;
+
+    // r2_stopping is no longer supported and will be ignored if set - please use stopping_rounds, stopping_metric and
+    // stopping_tolerance instead. Previous version of H2O would stop making trees when the R^2 metric equals or exceeds
+    // this
+    public double r2Stopping;
+
+    // Seed for pseudo random number generator (if applicable)
+    public long seed;
+
+    // Run on one node only; no network overhead but fewer cpus used. Suitable for small datasets.
+    public boolean buildTreeOneNode;
+
+    // A list of row sample rates per class (relative fraction for each class, from 0.0 to 1.0), for each tree
+    public double[] sampleRatePerClass;
+
+    // Column sample rate per tree (from 0.0 to 1.0)
+    public double colSampleRatePerTree;
+
+    // Relative change of the column sampling rate for every level (must be > 0.0 and <= 2.0)
+    public double colSampleRateChangePerLevel;
+
+    // Score the model after every so many trees. Disabled if set to 0.
+    public int scoreTreeInterval;
+
+    // Minimum relative improvement in squared error reduction for a split to happen
+    public double minSplitImprovement;
+
+    // What type of histogram to use for finding optimal split points
+    public TreeSharedTreeModelSharedTreeParametersHistogramType histogramType;
+
+    // Use Platt Scaling to calculate calibrated class probabilities. Calibration can provide more accurate estimates of
+    // class probabilities.
+    public boolean calibrateModel;
+
+    // Calibration frame for Platt Scaling
+    public FrameKeyV3 calibrationFrame;
+
+    // Check if response column is constant. If enabled, then an exception is thrown if the response column is a
+    // constant value.If disabled, then model will train regardless of the response column being a constant value or
+    // not.
+    public boolean checkConstantResponse;
 
     // Destination id for this model; auto-generated if not specified.
     public ModelKeyV3 modelId;
@@ -73,7 +179,9 @@ public class ExampleParametersV3 extends ModelParametersSchemaV3 {
     // dataset; giving an observation a relative weight of 2 is equivalent to repeating that row twice. Negative weights
     // are not allowed. Note: Weights are per-row observation weights and do not increase the size of the data frame.
     // This is typically the number of times a row is repeated, but non-integer values are supported as well. During
-    // training, rows with higher weights matter more, due to the larger loss function pre-factor.
+    // training, rows with higher weights matter more, due to the larger loss function pre-factor. If you set weight = 0
+    // for a row, the returned prediction frame at that row is zero and this is incorrect. To get an accurate
+    // prediction, remove all rows with weight == 0.
     public ColSpecifierV3 weightsColumn;
 
     // Offset column. This will be added to the combination of columns before applying the link function.
@@ -120,6 +228,9 @@ public class ExampleParametersV3 extends ModelParametersSchemaV3 {
     // Relative tolerance for metric-based stopping criterion (stop if relative improvement is not at least this much)
     public double stoppingTolerance;
 
+    // Gains/Lift table number of bins. 0 means disabled.. Default value -1 means automatic binning.
+    public int gainsliftBins;
+
     // Reference to custom evaluation function, format: `language:keyName=funcName`
     public String customMetricFunc;
 
@@ -129,13 +240,40 @@ public class ExampleParametersV3 extends ModelParametersSchemaV3 {
     // Automatically export generated models to this directory.
     public String exportCheckpointsDir;
 
+    // Set default multinomial AUC type.
+    public MultinomialAucType aucType;
+
     */
 
     /**
      * Public constructor
      */
-    public ExampleParametersV3() {
-        maxIterations = 1000;
+    public UpliftDRFParametersV3() {
+        mtries = -2;
+        sampleRate = 0.632;
+        treatmentColumn = "treatment";
+        upliftMetric = TreeupliftUpliftDRFModelUpliftDRFParametersUpliftMetricType.AUTO;
+        auucType = AUUCType.AUTO;
+        auucNbins = -1;
+        balanceClasses = false;
+        maxAfterBalanceSize = 5.0f;
+        maxConfusionMatrixSize = 20;
+        ntrees = 50;
+        maxDepth = 20;
+        minRows = 1.0;
+        nbins = 20;
+        nbinsTopLevel = 1024;
+        nbinsCats = 1024;
+        r2Stopping = 1.7976931348623157e+308;
+        seed = -1L;
+        buildTreeOneNode = false;
+        colSampleRatePerTree = 1.0;
+        colSampleRateChangePerLevel = 1.0;
+        scoreTreeInterval = 0;
+        minSplitImprovement = 1e-05;
+        histogramType = TreeSharedTreeModelSharedTreeParametersHistogramType.AUTO;
+        calibrateModel = false;
+        checkConstantResponse = true;
         nfolds = 0;
         keepCrossValidationModels = true;
         keepCrossValidationPredictions = false;
@@ -154,9 +292,11 @@ public class ExampleParametersV3 extends ModelParametersSchemaV3 {
         maxRuntimeSecs = 0.0;
         stoppingMetric = ScoreKeeperStoppingMetric.AUTO;
         stoppingTolerance = 0.001;
+        gainsliftBins = -1;
         customMetricFunc = "";
         customDistributionFunc = "";
         exportCheckpointsDir = "";
+        aucType = MultinomialAucType.AUTO;
     }
 
     /**
@@ -164,7 +304,7 @@ public class ExampleParametersV3 extends ModelParametersSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

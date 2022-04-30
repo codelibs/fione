@@ -43,6 +43,8 @@ public interface ParseSetup {
      *   @param total_filtered_column_count Total number of columns we would return with no column pagination
      *   @param custom_non_data_line_markers Custom characters to be treated as non-data line markers
      *   @param decrypt_tool Key-reference to an initialized instance of a Decryption Tool
+     *   @param partition_by Names of the columns the persisted dataset has been partitioned by.
+     *   @param escapechar One ASCII character used to escape other characters.
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -56,6 +58,7 @@ public interface ParseSetup {
             @Field("column_name_filter") String column_name_filter, @Field("column_offset") int column_offset,
             @Field("column_count") int column_count, @Field("total_filtered_column_count") int total_filtered_column_count,
             @Field("custom_non_data_line_markers") String custom_non_data_line_markers, @Field("decrypt_tool") String decrypt_tool,
+            @Field("partition_by") String[] partition_by, @Field("escapechar") byte escapechar,
             @Field("_exclude_fields") String _exclude_fields);
 
     @FormUrlEncoded

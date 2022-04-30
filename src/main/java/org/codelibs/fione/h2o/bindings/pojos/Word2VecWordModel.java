@@ -16,5 +16,5 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 public enum Word2VecWordModel {
-    SkipGram,
+    CBOW, SkipGram,
 }

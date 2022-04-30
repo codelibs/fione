@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class CoxPHModelOutputV3 extends ModelOutputSchemaV3 {
@@ -164,6 +164,18 @@ public class CoxPHModelOutputV3 extends ModelOutputSchemaV3 {
     public FrameKeyV3 varCumhaz2;
 
     /**
+     * Baseline Hazard
+     */
+    @SerializedName("baseline_hazard")
+    public FrameKeyV3 baselineHazard;
+
+    /**
+     * Baseline Survival
+     */
+    @SerializedName("baseline_survival")
+    public FrameKeyV3 baselineSurvival;
+
+    /**
      * formula
      */
     public String formula;
@@ -173,12 +185,20 @@ public class CoxPHModelOutputV3 extends ModelOutputSchemaV3 {
      */
     public CoxPHTies ties;
 
+    /**
+     * concordance
+     */
+    public double concordance;
+
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
 
     // Column names
     public String[] names;
+
+    // Original column names
+    public String[] originalNames;
 
     // Column types
     public String[] columnTypes;
@@ -208,6 +228,12 @@ public class CoxPHModelOutputV3 extends ModelOutputSchemaV3 {
     // Scoring history
     public TwoDimTableV3 scoringHistory;
 
+    // Cross-Validation scoring history
+    public TwoDimTableV3[] cvScoringHistory;
+
+    // Model reproducibility information
+    public TwoDimTableV3[] reproducibilityInformationTable;
+
     // Training data model metrics
     public ModelMetricsBaseV3 trainingMetrics;
 
@@ -232,6 +258,9 @@ public class CoxPHModelOutputV3 extends ModelOutputSchemaV3 {
     // Runtime in milliseconds
     public long runTime;
 
+    // Default threshold used for predictions
+    public double defaultThreshold;
+
     // Help information for output fields
     public Map<String,String> help;
 
@@ -254,10 +283,12 @@ public class CoxPHModelOutputV3 extends ModelOutputSchemaV3 {
         nMissing = 0L;
         totalEvent = 0L;
         formula = "";
+        concordance = 0.0;
         status = "";
         startTime = 0L;
         endTime = 0L;
         runTime = 0L;
+        defaultThreshold = 0.0;
     }
 
     /**
@@ -265,7 +296,7 @@ public class CoxPHModelOutputV3 extends ModelOutputSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

@@ -16,5 +16,5 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 public enum TreeSharedTreeModelSharedTreeParametersHistogramType {
-    AUTO, QuantilesGlobal, Random, RoundRobin, UniformAdaptive,
+    AUTO, QuantilesGlobal, Random, RoundRobin, UniformAdaptive, UniformRobust,
 }

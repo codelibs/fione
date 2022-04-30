@@ -16,5 +16,5 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 public enum GridHyperSpaceSearchCriteriaStrategy {
-    Cartesian, RandomDiscrete, Unknown,
+    Cartesian, RandomDiscrete, Sequential, Unknown,
 }

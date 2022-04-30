@@ -15,6 +15,6 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-public enum DeepWaterParametersNetwork {
-    alexnet, auto, googlenet, inception_bn, lenet, resnet, user, vgg,
+public enum MultinomialAucType {
+    AUTO, MACRO_OVO, MACRO_OVR, NONE, WEIGHTED_OVO, WEIGHTED_OVR,
 }

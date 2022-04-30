@@ -16,5 +16,5 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 public enum ModelCategory {
-    AutoEncoder, Binomial, Clustering, DimReduction, Multinomial, Ordinal, Regression, Unknown, WordEmbedding,
+    AutoEncoder, Binomial, BinomialUplift, Clustering, DimReduction, Multinomial, Ordinal, Regression, Unknown, WordEmbedding,
 }

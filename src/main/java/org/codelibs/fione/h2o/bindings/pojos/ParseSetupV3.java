@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ParseSetupV3 extends RequestSchemaV3 {
@@ -143,6 +143,17 @@ public class ParseSetupV3 extends RequestSchemaV3 {
     @SerializedName("decrypt_tool")
     public DecryptionToolKeyV3 decryptTool;
 
+    /**
+     * Names of the columns the persisted dataset has been partitioned by.
+     */
+    @SerializedName("partition_by")
+    public String[] partitionBy;
+
+    /**
+     * One ASCII character used to escape other characters.
+     */
+    public byte escapechar;
+
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
@@ -166,10 +177,11 @@ public class ParseSetupV3 extends RequestSchemaV3 {
         columnCount = 0;
         destinationFrame = "";
         headerLines = 0L;
-        numberColumns = -1;
-        chunkSize = 4194304; // 1 << 22
+        numberColumns = 0;
+        chunkSize = 4194304;
         totalFilteredColumnCount = 0;
         customNonDataLineMarkers = "";
+        escapechar = 0;
         _excludeFields = "";
     }
 
@@ -178,7 +190,7 @@ public class ParseSetupV3 extends RequestSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

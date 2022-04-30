@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class TreeV3 extends SchemaV3 {
@@ -36,6 +36,12 @@ public class TreeV3 extends SchemaV3 {
      */
     @SerializedName("tree_class")
     public String treeClass;
+
+    /**
+     * Whether to generate plain language rules.
+     */
+    @SerializedName("plain_language_rules")
+    public TreeHandlerPlainLanguageRules plainLanguageRules;
 
     /**
      * Left child nodes in the tree
@@ -86,12 +92,25 @@ public class TreeV3 extends SchemaV3 {
     public float[] predictions;
 
     /**
+     * Plain language rules representation of a trained decision tree
+     */
+    @SerializedName("tree_decision_path")
+    public String treeDecisionPath;
+
+    /**
+     * Plain language rules that were used in a particular prediction
+     */
+    @SerializedName("decision_paths")
+    public String[] decisionPaths;
+
+    /**
      * Public constructor
      */
     public TreeV3() {
         treeNumber = 0;
         treeClass = "";
         rootNodeId = 0;
+        treeDecisionPath = "";
     }
 
     /**
@@ -99,7 +118,7 @@ public class TreeV3 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

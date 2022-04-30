@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
 public class TargetEncoderV3 extends ModelBuilderSchema<TargetEncoderParametersV3> {
 
@@ -77,7 +77,7 @@ public class TargetEncoderV3 extends ModelBuilderSchema<TargetEncoderParametersV
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

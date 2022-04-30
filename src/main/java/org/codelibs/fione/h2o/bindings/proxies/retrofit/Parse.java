@@ -45,6 +45,8 @@ public interface Parse {
      *   @param blocking Block until the parse completes (as opposed to returning early and requiring polling
      *   @param decrypt_tool Key-reference to an initialized instance of a Decryption Tool
      *   @param custom_non_data_line_markers Custom characters to be treated as non-data line markers
+     *   @param partition_by Name of the column the persisted dataset has been partitioned by.
+     *   @param escapechar One ASCII character used to escape other characters.
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -58,6 +60,7 @@ public interface Parse {
             @Field("domains") String[][] domains, @Field("na_strings") String[][] na_strings, @Field("chunk_size") int chunk_size,
             @Field("delete_on_done") boolean delete_on_done, @Field("blocking") boolean blocking,
             @Field("decrypt_tool") String decrypt_tool, @Field("custom_non_data_line_markers") String custom_non_data_line_markers,
+            @Field("partition_by") String[] partition_by, @Field("escapechar") byte escapechar,
             @Field("_exclude_fields") String _exclude_fields);
 
     @FormUrlEncoded

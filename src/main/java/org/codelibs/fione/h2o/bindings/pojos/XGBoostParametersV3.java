@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
@@ -26,13 +26,7 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
     public int ntrees;
 
     /**
-     * (same as ntrees) Number of trees.
-     */
-    @SerializedName("n_estimators")
-    public int nEstimators;
-
-    /**
-     * Maximum tree depth.
+     * Maximum tree depth (0 for unlimited).
      */
     @SerializedName("max_depth")
     public int maxDepth;
@@ -96,6 +90,12 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
     public double colsampleBytree;
 
     /**
+     * Column sample rate per tree node (from 0.0 to 1.0)
+     */
+    @SerializedName("colsample_bynode")
+    public double colsampleBynode;
+
+    /**
      * A mapping representing monotonic constraints. Use +1 to enforce an increasing constraint and -1 to specify a
      * decreasing constraint.
      */
@@ -143,6 +143,12 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
     public int nthread;
 
     /**
+     * Run on one node only; no network overhead but fewer cpus used. Suitable for small datasets.
+     */
+    @SerializedName("build_tree_one_node")
+    public boolean buildTreeOneNode;
+
+    /**
      * Directory where to save matrices passed to XGBoost library. Useful for debugging.
      */
     @SerializedName("save_matrix_directory")
@@ -172,18 +178,6 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
      */
     @SerializedName("max_leaves")
     public int maxLeaves;
-
-    /**
-     * For tree_method=hist only: the mininum sum of hessian in a leaf to keep splitting
-     */
-    @SerializedName("min_sum_hessian_in_leaf")
-    public float minSumHessianInLeaf;
-
-    /**
-     * For tree_method=hist only: the mininum data in a leaf to keep splitting
-     */
-    @SerializedName("min_data_in_leaf")
-    public float minDataInLeaf;
 
     /**
      * Tree method
@@ -262,10 +256,23 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
     public TreexgboostXGBoostModelXGBoostParametersBackend backend;
 
     /**
-     * Which GPU to use.
+     * Which GPU(s) to use.
      */
     @SerializedName("gpu_id")
-    public int gpuId;
+    public int[] gpuId;
+
+    /**
+     * A set of allowed column interactions.
+     */
+    @SerializedName("interaction_constraints")
+    public String[][] interactionConstraints;
+
+    /**
+     * Controls the effect of observations with positive labels in relation to the observations with negative labels on
+     * gradient calculation. Useful for imbalanced problems.
+     */
+    @SerializedName("scale_pos_weight")
+    public float scalePosWeight;
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
@@ -314,7 +321,9 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
     // dataset; giving an observation a relative weight of 2 is equivalent to repeating that row twice. Negative weights
     // are not allowed. Note: Weights are per-row observation weights and do not increase the size of the data frame.
     // This is typically the number of times a row is repeated, but non-integer values are supported as well. During
-    // training, rows with higher weights matter more, due to the larger loss function pre-factor.
+    // training, rows with higher weights matter more, due to the larger loss function pre-factor. If you set weight = 0
+    // for a row, the returned prediction frame at that row is zero and this is incorrect. To get an accurate
+    // prediction, remove all rows with weight == 0.
     public ColSpecifierV3 weightsColumn;
 
     // Offset column. This will be added to the combination of columns before applying the link function.
@@ -361,6 +370,9 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
     // Relative tolerance for metric-based stopping criterion (stop if relative improvement is not at least this much)
     public double stoppingTolerance;
 
+    // Gains/Lift table number of bins. 0 means disabled.. Default value -1 means automatic binning.
+    public int gainsliftBins;
+
     // Reference to custom evaluation function, format: `language:keyName=funcName`
     public String customMetricFunc;
 
@@ -370,6 +382,9 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
     // Automatically export generated models to this directory.
     public String exportCheckpointsDir;
 
+    // Set default multinomial AUC type.
+    public MultinomialAucType aucType;
+
     */
 
     /**
@@ -377,7 +392,6 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
      */
     public XGBoostParametersV3() {
         ntrees = 50;
-        nEstimators = 0;
         maxDepth = 6;
         minRows = 1.0;
         minChildWeight = 1.0;
@@ -389,6 +403,7 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
         colsampleBylevel = 1.0;
         colSampleRatePerTree = 1.0;
         colsampleBytree = 1.0;
+        colsampleBynode = 1.0;
         maxAbsLeafnodePred = 0.0f;
         maxDeltaStep = 0.0f;
         scoreTreeInterval = 0;
@@ -396,12 +411,11 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
         minSplitImprovement = 0.0f;
         gamma = 0.0f;
         nthread = -1;
+        buildTreeOneNode = false;
         saveMatrixDirectory = "";
         calibrateModel = false;
         maxBins = 256;
         maxLeaves = 0;
-        minSumHessianInLeaf = 100.0f;
-        minDataInLeaf = 0.0f;
         treeMethod = TreexgboostXGBoostModelXGBoostParametersTreeMethod.auto;
         growPolicy = TreexgboostXGBoostModelXGBoostParametersGrowPolicy.depthwise;
         booster = TreexgboostXGBoostModelXGBoostParametersBooster.gbtree;
@@ -415,7 +429,7 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
         skipDrop = 0.0f;
         dmatrixType = TreexgboostXGBoostModelXGBoostParametersDMatrixType.auto;
         backend = TreexgboostXGBoostModelXGBoostParametersBackend.auto;
-        gpuId = 0;
+        scalePosWeight = 1.0f;
         nfolds = 0;
         keepCrossValidationModels = true;
         keepCrossValidationPredictions = false;
@@ -434,9 +448,11 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
         maxRuntimeSecs = 0.0;
         stoppingMetric = ScoreKeeperStoppingMetric.AUTO;
         stoppingTolerance = 0.001;
+        gainsliftBins = -1;
         customMetricFunc = "";
         customDistributionFunc = "";
         exportCheckpointsDir = "";
+        aucType = MultinomialAucType.AUTO;
     }
 
     /**
@@ -444,7 +460,7 @@ public class XGBoostParametersV3 extends ModelParametersSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

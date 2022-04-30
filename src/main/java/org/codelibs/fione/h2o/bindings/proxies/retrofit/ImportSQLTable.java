@@ -35,6 +35,7 @@ public interface ImportSQLTable {
      *   @param password password
      *   @param columns columns
      *   @param fetch_mode Mode for data loading. All modes may not be supported by all databases.
+     *   @param num_chunks_hint Desired number of chunks for the target Frame. Optional.
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -43,7 +44,8 @@ public interface ImportSQLTable {
     Call<JobV3> importSQLTable(@Field("connection_url") String connection_url, @Field("table") String table,
             @Field("select_query") String select_query, @Field("use_temp_table") String use_temp_table,
             @Field("temp_table_name") String temp_table_name, @Field("username") String username, @Field("password") String password,
-            @Field("columns") String columns, @Field("fetch_mode") String fetch_mode, @Field("_exclude_fields") String _exclude_fields);
+            @Field("columns") String columns, @Field("fetch_mode") String fetch_mode, @Field("num_chunks_hint") String num_chunks_hint,
+            @Field("_exclude_fields") String _exclude_fields);
 
     @FormUrlEncoded
     @POST("/99/ImportSQLTable")

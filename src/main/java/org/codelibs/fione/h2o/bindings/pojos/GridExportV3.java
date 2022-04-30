@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class GridExportV3 extends SchemaV3 {
@@ -33,11 +33,25 @@ public class GridExportV3 extends SchemaV3 {
     public String gridDirectory;
 
     /**
+     * True if objects referenced by params should also be saved.
+     */
+    @SerializedName("save_params_references")
+    public boolean saveParamsReferences;
+
+    /**
+     * Flag indicating whether the exported model artifacts should also include CV Holdout Frame predictions
+     */
+    @SerializedName("export_cross_validation_predictions")
+    public boolean exportCrossValidationPredictions;
+
+    /**
      * Public constructor
      */
     public GridExportV3() {
         gridId = "";
         gridDirectory = "";
+        saveParamsReferences = false;
+        exportCrossValidationPredictions = false;
     }
 
     /**
@@ -45,7 +59,7 @@ public class GridExportV3 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

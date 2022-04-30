@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class DRFParametersV3 extends SharedTreeParametersV3 {
@@ -56,13 +56,10 @@ public class DRFParametersV3 extends SharedTreeParametersV3 {
     // [Deprecated] Maximum size (# classes) for confusion matrices to be printed in the Logs
     public int maxConfusionMatrixSize;
 
-    // Max. number (top K) of predictions to use for hit ratio computation (for multi-class only, 0 to disable)
-    public int maxHitRatioK;
-
     // Number of trees.
     public int ntrees;
 
-    // Maximum tree depth.
+    // Maximum tree depth (0 for unlimited).
     public int maxDepth;
 
     // Fewest allowed (weighted) observations in a leaf.
@@ -87,7 +84,7 @@ public class DRFParametersV3 extends SharedTreeParametersV3 {
     // Seed for pseudo random number generator (if applicable)
     public long seed;
 
-    // Run on one node only; no network overhead but fewer cpus used.  Suitable for small datasets.
+    // Run on one node only; no network overhead but fewer cpus used. Suitable for small datasets.
     public boolean buildTreeOneNode;
 
     // A list of row sample rates per class (relative fraction for each class, from 0.0 to 1.0), for each tree
@@ -163,7 +160,9 @@ public class DRFParametersV3 extends SharedTreeParametersV3 {
     // dataset; giving an observation a relative weight of 2 is equivalent to repeating that row twice. Negative weights
     // are not allowed. Note: Weights are per-row observation weights and do not increase the size of the data frame.
     // This is typically the number of times a row is repeated, but non-integer values are supported as well. During
-    // training, rows with higher weights matter more, due to the larger loss function pre-factor.
+    // training, rows with higher weights matter more, due to the larger loss function pre-factor. If you set weight = 0
+    // for a row, the returned prediction frame at that row is zero and this is incorrect. To get an accurate
+    // prediction, remove all rows with weight == 0.
     public ColSpecifierV3 weightsColumn;
 
     // Offset column. This will be added to the combination of columns before applying the link function.
@@ -210,6 +209,9 @@ public class DRFParametersV3 extends SharedTreeParametersV3 {
     // Relative tolerance for metric-based stopping criterion (stop if relative improvement is not at least this much)
     public double stoppingTolerance;
 
+    // Gains/Lift table number of bins. 0 means disabled.. Default value -1 means automatic binning.
+    public int gainsliftBins;
+
     // Reference to custom evaluation function, format: `language:keyName=funcName`
     public String customMetricFunc;
 
@@ -218,6 +220,9 @@ public class DRFParametersV3 extends SharedTreeParametersV3 {
 
     // Automatically export generated models to this directory.
     public String exportCheckpointsDir;
+
+    // Set default multinomial AUC type.
+    public MultinomialAucType aucType;
 
     */
 
@@ -231,7 +236,6 @@ public class DRFParametersV3 extends SharedTreeParametersV3 {
         balanceClasses = false;
         maxAfterBalanceSize = 5.0f;
         maxConfusionMatrixSize = 20;
-        maxHitRatioK = 0;
         ntrees = 50;
         maxDepth = 20;
         minRows = 1.0;
@@ -266,9 +270,11 @@ public class DRFParametersV3 extends SharedTreeParametersV3 {
         maxRuntimeSecs = 0.0;
         stoppingMetric = ScoreKeeperStoppingMetric.AUTO;
         stoppingTolerance = 0.001;
+        gainsliftBins = -1;
         customMetricFunc = "";
         customDistributionFunc = "";
         exportCheckpointsDir = "";
+        aucType = MultinomialAucType.AUTO;
     }
 
     /**
@@ -276,7 +282,7 @@ public class DRFParametersV3 extends SharedTreeParametersV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

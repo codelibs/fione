@@ -15,6 +15,8 @@
  */
 package org.codelibs.fione.h2o.bindings.proxies.retrofit;
 
+import org.codelibs.fione.h2o.bindings.pojos.FrameLoadV3;
+import org.codelibs.fione.h2o.bindings.pojos.FrameSaveV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesListV3;
 import org.codelibs.fione.h2o.bindings.pojos.FramesV3;
 import org.codelibs.fione.h2o.bindings.pojos.JobV4;
@@ -45,9 +47,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -57,11 +63,46 @@ public interface Frames {
             @Field("row_count") int row_count, @Field("column_offset") int column_offset, @Field("full_column_count") int full_column_count,
             @Field("column_count") int column_count, @Field("find_compatible_models") boolean find_compatible_models,
             @Field("path") String path, @Field("force") boolean force, @Field("num_parts") int num_parts,
-            @Field("compression") String compression, @Field("separator") byte separator, @Field("_exclude_fields") String _exclude_fields);
+            @Field("parallel") boolean parallel, @Field("compression") String compression, @Field("separator") byte separator,
+            @Field("header") boolean header, @Field("quote_header") boolean quote_header, @Field("_exclude_fields") String _exclude_fields);
 
     @FormUrlEncoded
     @POST("/3/Frames/{frame_id}/export")
     Call<FramesV3> export(@Path("frame_id") String frame_id);
+
+    /**
+     * Save frame data to the given path.
+     *   @param frame_id Name of Frame of interest
+     *   @param dir Destination directory (hdfs, s3, local)
+     *   @param force Overwrite destination file in case it exists or throw exception if set to false.
+     *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
+     *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
+     */
+    @FormUrlEncoded
+    @POST("/3/Frames/{frame_id}/save")
+    Call<FrameSaveV3> save(@Path("frame_id") String frame_id, @Field("dir") String dir, @Field("force") boolean force,
+            @Field("_exclude_fields") String _exclude_fields);
+
+    @FormUrlEncoded
+    @POST("/3/Frames/{frame_id}/save")
+    Call<FrameSaveV3> save(@Path("frame_id") String frame_id);
+
+    /**
+     * Load a frame from data on given path.
+     *   @param frame_id Import frame under given key into DKV.
+     *   @param dir Source directory (hdfs, s3, local) containing serialized frame
+     *   @param force Override existing frame in case it exists or throw exception if set to false
+     *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
+     *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
+     */
+    @FormUrlEncoded
+    @POST("/3/Frames/load")
+    Call<FrameLoadV3> load(@Field("frame_id") String frame_id, @Field("dir") String dir, @Field("force") boolean force,
+            @Field("_exclude_fields") String _exclude_fields);
+
+    @FormUrlEncoded
+    @POST("/3/Frames/load")
+    Call<FrameLoadV3> load();
 
     /**
      * Return the summary metrics for a column, e.g. min, max, mean, sigma, percentiles, etc.
@@ -77,9 +118,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -88,7 +133,8 @@ public interface Frames {
             @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
             @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
             @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
-            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
+            @Query("parallel") boolean parallel, @Query("compression") String compression, @Query("separator") byte separator,
+            @Query("header") boolean header, @Query("quote_header") boolean quote_header, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/columns/{column}/summary")
     Call<FramesV3> columnSummary(@Path("frame_id") String frame_id, @Path("column") String column);
@@ -107,9 +153,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -118,7 +168,8 @@ public interface Frames {
             @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
             @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
             @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
-            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
+            @Query("parallel") boolean parallel, @Query("compression") String compression, @Query("separator") byte separator,
+            @Query("header") boolean header, @Query("quote_header") boolean quote_header, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/columns/{column}/domain")
     Call<FramesV3> columnDomain(@Path("frame_id") String frame_id, @Path("column") String column);
@@ -137,9 +188,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -148,7 +203,8 @@ public interface Frames {
             @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
             @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
             @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
-            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
+            @Query("parallel") boolean parallel, @Query("compression") String compression, @Query("separator") byte separator,
+            @Query("header") boolean header, @Query("quote_header") boolean quote_header, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/columns/{column}")
     Call<FramesV3> column(@Path("frame_id") String frame_id, @Path("column") String column);
@@ -167,9 +223,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -178,7 +238,8 @@ public interface Frames {
             @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
             @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
             @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
-            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
+            @Query("parallel") boolean parallel, @Query("compression") String compression, @Query("separator") byte separator,
+            @Query("header") boolean header, @Query("quote_header") boolean quote_header, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/columns")
     Call<FramesV3> columns(@Path("frame_id") String frame_id);
@@ -197,9 +258,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -208,7 +273,8 @@ public interface Frames {
             @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
             @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
             @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
-            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
+            @Query("parallel") boolean parallel, @Query("compression") String compression, @Query("separator") byte separator,
+            @Query("header") boolean header, @Query("quote_header") boolean quote_header, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/summary")
     Call<FramesV3> summary(@Path("frame_id") String frame_id);
@@ -227,9 +293,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -238,7 +308,8 @@ public interface Frames {
             @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
             @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
             @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
-            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
+            @Query("parallel") boolean parallel, @Query("compression") String compression, @Query("separator") byte separator,
+            @Query("header") boolean header, @Query("quote_header") boolean quote_header, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}/light")
     Call<FramesV3> fetchLight(@Path("frame_id") String frame_id);
@@ -257,9 +328,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -268,7 +343,8 @@ public interface Frames {
             @Query("row_count") int row_count, @Query("column_offset") int column_offset, @Query("full_column_count") int full_column_count,
             @Query("column_count") int column_count, @Query("find_compatible_models") boolean find_compatible_models,
             @Query("path") String path, @Query("force") boolean force, @Query("num_parts") int num_parts,
-            @Query("compression") String compression, @Query("separator") byte separator, @Query("_exclude_fields") String _exclude_fields);
+            @Query("parallel") boolean parallel, @Query("compression") String compression, @Query("separator") byte separator,
+            @Query("header") boolean header, @Query("quote_header") boolean quote_header, @Query("_exclude_fields") String _exclude_fields);
 
     @GET("/3/Frames/{frame_id}")
     Call<FramesV3> fetch(@Path("frame_id") String frame_id);
@@ -299,9 +375,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -310,7 +390,8 @@ public interface Frames {
             @Field("row_count") int row_count, @Field("column_offset") int column_offset, @Field("full_column_count") int full_column_count,
             @Field("column_count") int column_count, @Field("find_compatible_models") boolean find_compatible_models,
             @Field("path") String path, @Field("force") boolean force, @Field("num_parts") int num_parts,
-            @Field("compression") String compression, @Field("separator") byte separator, @Field("_exclude_fields") String _exclude_fields);
+            @Field("parallel") boolean parallel, @Field("compression") String compression, @Field("separator") byte separator,
+            @Field("header") boolean header, @Field("quote_header") boolean quote_header, @Field("_exclude_fields") String _exclude_fields);
 
     @DELETE("/3/Frames/{frame_id}")
     Call<FramesV3> delete(@Path("frame_id") String frame_id);
@@ -329,9 +410,13 @@ public interface Frames {
      *   @param path File output path
      *   @param force Overwrite existing file
      *   @param num_parts Number of part files to use (1=single file,-1=automatic)
+     *   @param parallel Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files
+     *                   in the destination directory)
      *   @param compression Compression method (default none; gzip, bzip2 and snappy available depending on runtime
      *                      environment)
      *   @param separator Field separator (default ',')
+     *   @param header Use header (default true)
+     *   @param quote_header Quote column names in header line (default true)
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -340,7 +425,8 @@ public interface Frames {
             @Field("row_count") int row_count, @Field("column_offset") int column_offset, @Field("full_column_count") int full_column_count,
             @Field("column_count") int column_count, @Field("find_compatible_models") boolean find_compatible_models,
             @Field("path") String path, @Field("force") boolean force, @Field("num_parts") int num_parts,
-            @Field("compression") String compression, @Field("separator") byte separator, @Field("_exclude_fields") String _exclude_fields);
+            @Field("parallel") boolean parallel, @Field("compression") String compression, @Field("separator") byte separator,
+            @Field("header") boolean header, @Field("quote_header") boolean quote_header, @Field("_exclude_fields") String _exclude_fields);
 
     @DELETE("/3/Frames")
     Call<FramesV3> deleteAll();

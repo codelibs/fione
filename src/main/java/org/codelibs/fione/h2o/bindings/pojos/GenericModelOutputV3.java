@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class GenericModelOutputV3 extends ModelOutputSchemaV3 {
@@ -26,12 +26,27 @@ public class GenericModelOutputV3 extends ModelOutputSchemaV3 {
     @SerializedName("variable_importances")
     public TwoDimTableV3 variableImportances;
 
+    /**
+     * Short identifier of the original algorithm name
+     */
+    @SerializedName("original_model_identifier")
+    public String originalModelIdentifier;
+
+    /**
+     * Full, potentially long name of the original agorithm
+     */
+    @SerializedName("original_model_full_name")
+    public String originalModelFullName;
+
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
 
     // Column names
     public String[] names;
+
+    // Original column names
+    public String[] originalNames;
 
     // Column types
     public String[] columnTypes;
@@ -61,6 +76,12 @@ public class GenericModelOutputV3 extends ModelOutputSchemaV3 {
     // Scoring history
     public TwoDimTableV3 scoringHistory;
 
+    // Cross-Validation scoring history
+    public TwoDimTableV3[] cvScoringHistory;
+
+    // Model reproducibility information
+    public TwoDimTableV3[] reproducibilityInformationTable;
+
     // Training data model metrics
     public ModelMetricsBaseV3 trainingMetrics;
 
@@ -85,6 +106,9 @@ public class GenericModelOutputV3 extends ModelOutputSchemaV3 {
     // Runtime in milliseconds
     public long runTime;
 
+    // Default threshold used for predictions
+    public double defaultThreshold;
+
     // Help information for output fields
     public Map<String,String> help;
 
@@ -94,10 +118,13 @@ public class GenericModelOutputV3 extends ModelOutputSchemaV3 {
      * Public constructor
      */
     public GenericModelOutputV3() {
+        originalModelIdentifier = "";
+        originalModelFullName = "";
         status = "";
         startTime = 0L;
         endTime = 0L;
         runTime = 0L;
+        defaultThreshold = 0.0;
     }
 
     /**
@@ -105,7 +132,7 @@ public class GenericModelOutputV3 extends ModelOutputSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

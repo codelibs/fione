@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
 public class ModelMetricsMultinomialGenericV3 extends ModelMetricsMultinomialV3 {
 
@@ -37,6 +37,18 @@ public class ModelMetricsMultinomialGenericV3 extends ModelMetricsMultinomialV3 
 
     // The mean misclassification error per class.
     public double meanPerClassError;
+
+    // The average AUC for this scoring run.
+    public double auc;
+
+    // The average precision-recall AUC for this scoring run.
+    public double prAuc;
+
+    // The multinomial AUC values.
+    public TwoDimTableV3 multinomialAucTable;
+
+    // The multinomial PR AUC values.
+    public TwoDimTableV3 multinomialAucprTable;
 
     // The model used for this scoring run.
     public ModelKeyV3 model;
@@ -86,6 +98,8 @@ public class ModelMetricsMultinomialGenericV3 extends ModelMetricsMultinomialV3 
         r2 = 0.0;
         logloss = 0.0;
         meanPerClassError = 0.0;
+        auc = 0.0;
+        prAuc = 0.0;
         modelChecksum = 0L;
         frameChecksum = 0L;
         description = "";
@@ -102,7 +116,7 @@ public class ModelMetricsMultinomialGenericV3 extends ModelMetricsMultinomialV3 
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

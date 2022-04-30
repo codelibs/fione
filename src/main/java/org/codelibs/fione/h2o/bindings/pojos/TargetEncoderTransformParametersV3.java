@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class TargetEncoderTransformParametersV3 extends SchemaV3 {
@@ -26,51 +26,47 @@ public class TargetEncoderTransformParametersV3 extends SchemaV3 {
     public ModelKeyV3 model;
 
     /**
-     * Seed value
-     */
-    public long seed;
-
-    /**
-     * Data leakage handling strategy.
-     */
-    @SerializedName("data_leakage_handling")
-    public H2otargetencodingTargetEncoderDataLeakageHandlingStrategy dataLeakageHandling;
-
-    /**
-     * Noise
-     */
-    public double noise;
-
-    /**
-     * Frame to transform
+     * Frame to transform.
      */
     public FrameKeyV3 frame;
 
     /**
-     * Enables or disables blending
+     * Force encoding mode for training data: when using a leakage handling strategy different from None, training data
+     * should be transformed with this flag set to true (Defaults to false).
+     */
+    @SerializedName("as_training")
+    public boolean asTraining;
+
+    /**
+     * Enables or disables blending. Defaults to the value assigned at model creation.
      */
     public boolean blending;
 
     /**
-     * Inflection point
+     * Inflection point. Defaults to the value assigned at model creation.
      */
     @SerializedName("inflection_point")
     public double inflectionPoint;
 
     /**
-     * Smoothing
+     * Smoothing. Defaults to the value assigned at model creation.
      */
     public double smoothing;
+
+    /**
+     * Noise. Defaults to the value assigned at model creation.
+     */
+    public double noise;
 
     /**
      * Public constructor
      */
     public TargetEncoderTransformParametersV3() {
-        seed = 0L;
-        noise = 0.0;
+        asTraining = false;
         blending = false;
-        inflectionPoint = 0.0;
-        smoothing = 0.0;
+        inflectionPoint = -1.0;
+        smoothing = -1.0;
+        noise = -2.0;
     }
 
     /**
@@ -78,7 +74,7 @@ public class TargetEncoderTransformParametersV3 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

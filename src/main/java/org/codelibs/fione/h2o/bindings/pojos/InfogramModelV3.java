@@ -15,19 +15,19 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
-public class ExampleModelV3 extends ModelSchemaV3<ExampleParametersV3, ExampleModelOutputV3> {
+public class InfogramModelV3 extends ModelSchemaV3<InfogramParametersV3, InfogramModelOutputV3> {
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
 
     // The build parameters for the model (e.g. K for KMeans).
-    public ExampleParametersV3 parameters;
+    public InfogramParametersV3 parameters;
 
     // The build output for the model (e.g. the cluster centers for KMeans).
-    public ExampleModelOutputV3 output;
+    public InfogramModelOutputV3 output;
 
     // Compatible frames, if requested
     public String[] compatibleFrames;
@@ -47,6 +47,9 @@ public class ExampleModelV3 extends ModelSchemaV3<ExampleParametersV3, ExampleMo
     // The response column name for this Model (if applicable). Is null otherwise.
     public String responseColumnName;
 
+    // The treatment column name for this Model (if applicable). Is null otherwise.
+    public String treatmentColumnName;
+
     // The Model's training frame key
     public FrameKeyV3 dataFrame;
 
@@ -64,11 +67,12 @@ public class ExampleModelV3 extends ModelSchemaV3<ExampleParametersV3, ExampleMo
     /**
      * Public constructor
      */
-    public ExampleModelV3() {
+    public InfogramModelV3() {
         checksum = 0L;
         algo = "";
         algoFullName = "";
         responseColumnName = "";
+        treatmentColumnName = "";
         timestamp = 0L;
         havePojo = false;
         haveMojo = false;
@@ -79,7 +83,7 @@ public class ExampleModelV3 extends ModelSchemaV3<ExampleParametersV3, ExampleMo
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

@@ -23,7 +23,7 @@ import java.util.Map;
 import org.apache.commons.lang3.ArrayUtils;
 import org.codelibs.fione.entity.ChartData;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelOutputSchemaV3 extends SchemaV3 {
@@ -32,6 +32,12 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
      * Column names
      */
     public String[] names;
+
+    /**
+     * Original column names
+     */
+    @SerializedName("original_names")
+    public String[] originalNames;
 
     /**
      * Column types
@@ -88,6 +94,18 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
     public TwoDimTableV3 scoringHistory;
 
     /**
+     * Cross-Validation scoring history
+     */
+    @SerializedName("cv_scoring_history")
+    public TwoDimTableV3[] cvScoringHistory;
+
+    /**
+     * Model reproducibility information
+     */
+    @SerializedName("reproducibility_information_table")
+    public TwoDimTableV3[] reproducibilityInformationTable;
+
+    /**
      * Training data model metrics
      */
     @SerializedName("training_metrics")
@@ -135,6 +153,12 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
     public long runTime;
 
     /**
+     * Default threshold used for predictions
+     */
+    @SerializedName("default_threshold")
+    public double defaultThreshold;
+
+    /**
      * Help information for output fields
      */
     public Map<String, String> help;
@@ -147,6 +171,7 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
         startTime = 0L;
         endTime = 0L;
         runTime = 0L;
+        defaultThreshold = 0.0;
     }
 
     /**
@@ -154,7 +179,7 @@ public class ModelOutputSchemaV3 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
     private boolean isOutputClass(final Class<?> clazz) {

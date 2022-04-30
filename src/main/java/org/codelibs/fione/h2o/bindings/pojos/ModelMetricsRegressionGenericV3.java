@@ -15,15 +15,10 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelMetricsRegressionGenericV3 extends ModelMetricsBaseV3 {
-
-    /**
-     * The R^2 for this scoring run.
-     */
-    public double r2;
 
     /**
      * The mean residual deviance for this scoring run.
@@ -90,7 +85,6 @@ public class ModelMetricsRegressionGenericV3 extends ModelMetricsBaseV3 {
      * Public constructor
      */
     public ModelMetricsRegressionGenericV3() {
-        r2 = 0.0;
         meanResidualDeviance = 0.0;
         mae = 0.0;
         rmsle = 0.0;
@@ -110,7 +104,7 @@ public class ModelMetricsRegressionGenericV3 extends ModelMetricsBaseV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

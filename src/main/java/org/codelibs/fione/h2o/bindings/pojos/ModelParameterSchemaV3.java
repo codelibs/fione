@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelParameterSchemaV3 extends SchemaV3 {
@@ -56,6 +56,12 @@ public class ModelParameterSchemaV3 extends SchemaV3 {
      */
     @SerializedName("actual_value")
     public Object actualValue;
+
+    /**
+     * input value as set by the user, e.g., 10
+     */
+    @SerializedName("input_value")
+    public Object inputValue;
 
     /**
      * the importance of the parameter, used by the UI, e.g. "critical", "extended" or "expert"
@@ -104,7 +110,7 @@ public class ModelParameterSchemaV3 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

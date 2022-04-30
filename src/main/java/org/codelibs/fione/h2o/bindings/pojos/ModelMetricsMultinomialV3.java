@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelMetricsMultinomialV3 extends ModelMetricsBaseV3 {
@@ -46,6 +46,30 @@ public class ModelMetricsMultinomialV3 extends ModelMetricsBaseV3 {
      */
     @SerializedName("mean_per_class_error")
     public double meanPerClassError;
+
+    /**
+     * The average AUC for this scoring run.
+     */
+    @SerializedName("AUC")
+    public double auc;
+
+    /**
+     * The average precision-recall AUC for this scoring run.
+     */
+    @SerializedName("pr_auc")
+    public double prAuc;
+
+    /**
+     * The multinomial AUC values.
+     */
+    @SerializedName("multinomial_auc_table")
+    public TwoDimTableV3 multinomialAucTable;
+
+    /**
+     * The multinomial PR AUC values.
+     */
+    @SerializedName("multinomial_aucpr_table")
+    public TwoDimTableV3 multinomialAucprTable;
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
@@ -99,6 +123,8 @@ public class ModelMetricsMultinomialV3 extends ModelMetricsBaseV3 {
         r2 = 0.0;
         logloss = 0.0;
         meanPerClassError = 0.0;
+        auc = 0.0;
+        prAuc = 0.0;
         modelChecksum = 0L;
         frameChecksum = 0L;
         description = "";
@@ -115,7 +141,7 @@ public class ModelMetricsMultinomialV3 extends ModelMetricsBaseV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

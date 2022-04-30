@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelExportV3 extends RequestSchemaV3 {
@@ -36,6 +36,12 @@ public class ModelExportV3 extends RequestSchemaV3 {
      */
     public boolean force;
 
+    /**
+     * Flag indicating whether the exported model artifact should also include CV Holdout Frame predictions
+     */
+    @SerializedName("export_cross_validation_predictions")
+    public boolean exportCrossValidationPredictions;
+
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
@@ -52,6 +58,7 @@ public class ModelExportV3 extends RequestSchemaV3 {
     public ModelExportV3() {
         dir = "";
         force = true;
+        exportCrossValidationPredictions = false;
         _excludeFields = "";
     }
 
@@ -60,7 +67,7 @@ public class ModelExportV3 extends RequestSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

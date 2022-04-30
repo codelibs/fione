@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelMetricsMakerSchemaV3 extends SchemaV3 {
@@ -33,6 +33,18 @@ public class ModelMetricsMakerSchemaV3 extends SchemaV3 {
     public String actualsFrame;
 
     /**
+     * Weights Frame.
+     */
+    @SerializedName("weights_frame")
+    public String weightsFrame;
+
+    /**
+     * Treatment Frame.
+     */
+    @SerializedName("treatment_frame")
+    public String treatmentFrame;
+
+    /**
      * Domain (for classification).
      */
     public String[] domain;
@@ -41,6 +53,24 @@ public class ModelMetricsMakerSchemaV3 extends SchemaV3 {
      * Distribution (for regression).
      */
     public GenmodelutilsDistributionFamily distribution;
+
+    /**
+     * Default AUC type (for multinomial classification).
+     */
+    @SerializedName("auc_type")
+    public MultinomialAucType aucType;
+
+    /**
+     * Default AUUC type (for uplift binomial classification).
+     */
+    @SerializedName("auuc_type")
+    public AUUCType auucType;
+
+    /**
+     * Number of bins to calculate AUUC (for uplift binomial classification).
+     */
+    @SerializedName("auuc_nbins")
+    public int auucNbins;
 
     /**
      * Model Metrics.
@@ -54,6 +84,9 @@ public class ModelMetricsMakerSchemaV3 extends SchemaV3 {
     public ModelMetricsMakerSchemaV3() {
         predictionsFrame = "";
         actualsFrame = "";
+        weightsFrame = "";
+        treatmentFrame = "";
+        auucNbins = 0;
     }
 
     /**
@@ -61,7 +94,7 @@ public class ModelMetricsMakerSchemaV3 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

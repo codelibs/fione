@@ -15,6 +15,6 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-public enum DeepWaterParametersActivation {
-    Rectifier, Tanh,
+public enum H2oautomlpreprocessingPreprocessingStepDefinitionType {
+    TargetEncoding,
 }

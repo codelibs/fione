@@ -15,19 +15,46 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
+import com.google.gson.annotations.SerializedName;
 
-public class ExampleModelOutputV3 extends ModelOutputSchemaV3 {
-
-    /**
-     * Iterations executed
-     */
-    public int iterations;
+public class ModelSelectionModelOutputV3 extends ModelOutputSchemaV3 {
 
     /**
-
+     * Best predictor subset names for each subset size.
      */
-    public double[] maxs;
+    @SerializedName("best_model_predictors")
+    public String[][] bestModelPredictors;
+
+    /**
+     * R2 values of all possible predictor subsets.  Only for model='allsubsets' or 'maxr'.
+     */
+    @SerializedName("best_r2_values")
+    public double[] bestR2Values;
+
+    /**
+     * p-values of chosen predictor subsets at each subset size. Only for model='backward'.
+     */
+    @SerializedName("coef_p_values")
+    public double[][] coefPValues;
+
+    /**
+     * z-values of chosen predictor subsets at each subset size. Only for model='backward'.
+     */
+    @SerializedName("z_values")
+    public double[][] zValues;
+
+    /**
+     * Key of models containing best 1-predictor model, best 2-predictors model, ....
+     */
+    @SerializedName("best_model_ids")
+    public ModelKeyV3[] bestModelIds;
+
+    /**
+     * arrays of string arrays containing coefficient names of best 1-predictor model, best 2-predictors model, ....
+     */
+    @SerializedName("coefficient_names")
+    public String[][] coefficientNames;
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
@@ -35,6 +62,9 @@ public class ExampleModelOutputV3 extends ModelOutputSchemaV3 {
 
     // Column names
     public String[] names;
+
+    // Original column names
+    public String[] originalNames;
 
     // Column types
     public String[] columnTypes;
@@ -64,6 +94,12 @@ public class ExampleModelOutputV3 extends ModelOutputSchemaV3 {
     // Scoring history
     public TwoDimTableV3 scoringHistory;
 
+    // Cross-Validation scoring history
+    public TwoDimTableV3[] cvScoringHistory;
+
+    // Model reproducibility information
+    public TwoDimTableV3[] reproducibilityInformationTable;
+
     // Training data model metrics
     public ModelMetricsBaseV3 trainingMetrics;
 
@@ -88,6 +124,9 @@ public class ExampleModelOutputV3 extends ModelOutputSchemaV3 {
     // Runtime in milliseconds
     public long runTime;
 
+    // Default threshold used for predictions
+    public double defaultThreshold;
+
     // Help information for output fields
     public Map<String,String> help;
 
@@ -96,12 +135,12 @@ public class ExampleModelOutputV3 extends ModelOutputSchemaV3 {
     /**
      * Public constructor
      */
-    public ExampleModelOutputV3() {
-        iterations = 0;
+    public ModelSelectionModelOutputV3() {
         status = "";
         startTime = 0L;
         endTime = 0L;
         runTime = 0L;
+        defaultThreshold = 0.0;
     }
 
     /**
@@ -109,7 +148,7 @@ public class ExampleModelOutputV3 extends ModelOutputSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

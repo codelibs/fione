@@ -26,7 +26,7 @@ import org.codelibs.core.CoreLibConstants;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fess.taglib.FessFunctions;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
 public class SchemaV3 {
 
@@ -41,7 +41,7 @@ public class SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
     protected transient String[] fieldNames;

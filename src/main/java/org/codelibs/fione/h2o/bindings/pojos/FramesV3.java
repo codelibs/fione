@@ -18,7 +18,7 @@ package org.codelibs.fione.h2o.bindings.pojos;
 import java.util.Arrays;
 import java.util.Objects;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class FramesV3 extends RequestSchemaV3 {
@@ -88,6 +88,12 @@ public class FramesV3 extends RequestSchemaV3 {
     public int numParts;
 
     /**
+     * Use parallel export to a single file (doesn't apply when num_parts != 1, creates temporary files in the
+     * destination directory)
+     */
+    public boolean parallel;
+
+    /**
      * Compression method (default none; gzip, bzip2 and snappy available depending on runtime environment)
      */
     public String compression;
@@ -96,6 +102,17 @@ public class FramesV3 extends RequestSchemaV3 {
      * Field separator (default ',')
      */
     public byte separator;
+
+    /**
+     * Use header (default true)
+     */
+    public boolean header;
+
+    /**
+     * Quote column names in header line (default true)
+     */
+    @SerializedName("quote_header")
+    public boolean quoteHeader;
 
     /**
      * Job for export file
@@ -142,8 +159,11 @@ public class FramesV3 extends RequestSchemaV3 {
         path = "";
         force = false;
         numParts = 1;
+        parallel = false;
         compression = "";
         separator = 44;
+        header = true;
+        quoteHeader = true;
         _excludeFields = "";
     }
 
@@ -152,7 +172,7 @@ public class FramesV3 extends RequestSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
     @Override

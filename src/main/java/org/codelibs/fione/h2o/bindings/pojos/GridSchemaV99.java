@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class GridSchemaV99 extends SchemaV3 {
@@ -55,6 +55,12 @@ public class GridSchemaV99 extends SchemaV3 {
      */
     @SerializedName("failed_params")
     public ModelParametersSchemaV3[] failedParams;
+
+    /**
+     * List of detailed warning messages
+     */
+    @SerializedName("warning_details")
+    public String[] warningDetails;
 
     /**
      * List of detailed failure messages
@@ -130,7 +136,7 @@ public class GridSchemaV99 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

@@ -16,6 +16,7 @@
 package org.codelibs.fione.h2o.bindings.proxies.retrofit;
 
 import org.codelibs.fione.h2o.bindings.pojos.JobV3;
+import org.codelibs.fione.h2o.bindings.pojos.ModelContributionsContributionsOutputFormat;
 import org.codelibs.fione.h2o.bindings.pojos.ModelLeafNodeAssignmentLeafNodeAssignmentType;
 import org.codelibs.fione.h2o.bindings.pojos.ModelMetricsListSchemaV3;
 
@@ -51,11 +52,24 @@ public interface Predictions {
      *   @param predict_staged_proba Predict the class probabilities at each stage (optional, only for GBM models)
      *   @param predict_contributions Predict the feature contributions - Shapley values (optional, only for DRF, GBM and
      *                                XGBoost models)
+     *   @param predict_contributions_output_format Specify how to output feature contributions in XGBoost - XGBoost by
+     *                                              default outputs contributions for 1-hot encoded features, specifying a
+     *                                              Compact output format will produce a per-feature contribution
+     *   @param top_n Only for predict_contributions function - sort Shapley values and return top_n highest (optional)
+     *   @param bottom_n Only for predict_contributions function - sort Shapley values and return bottom_n lowest
+     *                   (optional)
+     *   @param compare_abs Only for predict_contributions function - sort absolute Shapley values (optional)
      *   @param feature_frequencies Retrieve the feature frequencies on paths in trees in tree-based models (optional,
      *                              only for GBM, DRF and Isolation Forest)
      *   @param exemplar_index Retrieve all members for a given exemplar (optional, only for Aggregator models)
      *   @param deviances Compute the deviances per row (optional, only for classification or regression models)
      *   @param custom_metric_func Reference to custom evaluation function, format: `language:keyName=funcName`
+     *   @param auc_type Set default multinomial AUC type. Must be one of: "AUTO", "NONE", "MACRO_OVR", "WEIGHTED_OVR",
+     *                   "MACRO_OVO", "WEIGHTED_OVO". Default is "NONE" (optional, only for multinomial classification).
+     *   @param auuc_type Set default AUUC type for uplift binomial classification. Must be one of: "AUTO", "qini",
+     *                    "lift", "gain". Default is "AUTO" (optional, only for uplift binomial classification).
+     *   @param auuc_nbins Set number of bins to calculate AUUC. Must be -1 or higher than 0. Default is -1 which means
+     *                     1000 (optional, only for uplift binomial classification).
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -71,8 +85,11 @@ public interface Predictions {
             @Field("reverse_transform") boolean reverse_transform, @Field("leaf_node_assignment") boolean leaf_node_assignment,
             @Field("leaf_node_assignment_type") ModelLeafNodeAssignmentLeafNodeAssignmentType leaf_node_assignment_type,
             @Field("predict_staged_proba") boolean predict_staged_proba, @Field("predict_contributions") boolean predict_contributions,
+            @Field("predict_contributions_output_format") ModelContributionsContributionsOutputFormat predict_contributions_output_format,
+            @Field("top_n") int top_n, @Field("bottom_n") int bottom_n, @Field("compare_abs") boolean compare_abs,
             @Field("feature_frequencies") boolean feature_frequencies, @Field("exemplar_index") int exemplar_index,
             @Field("deviances") boolean deviances, @Field("custom_metric_func") String custom_metric_func,
+            @Field("auc_type") String auc_type, @Field("auuc_type") String auuc_type, @Field("auuc_nbins") int auuc_nbins,
             @Field("_exclude_fields") String _exclude_fields);
 
     @FormUrlEncoded
@@ -104,11 +121,24 @@ public interface Predictions {
      *   @param predict_staged_proba Predict the class probabilities at each stage (optional, only for GBM models)
      *   @param predict_contributions Predict the feature contributions - Shapley values (optional, only for DRF, GBM and
      *                                XGBoost models)
+     *   @param predict_contributions_output_format Specify how to output feature contributions in XGBoost - XGBoost by
+     *                                              default outputs contributions for 1-hot encoded features, specifying a
+     *                                              Compact output format will produce a per-feature contribution
+     *   @param top_n Only for predict_contributions function - sort Shapley values and return top_n highest (optional)
+     *   @param bottom_n Only for predict_contributions function - sort Shapley values and return bottom_n lowest
+     *                   (optional)
+     *   @param compare_abs Only for predict_contributions function - sort absolute Shapley values (optional)
      *   @param feature_frequencies Retrieve the feature frequencies on paths in trees in tree-based models (optional,
      *                              only for GBM, DRF and Isolation Forest)
      *   @param exemplar_index Retrieve all members for a given exemplar (optional, only for Aggregator models)
      *   @param deviances Compute the deviances per row (optional, only for classification or regression models)
      *   @param custom_metric_func Reference to custom evaluation function, format: `language:keyName=funcName`
+     *   @param auc_type Set default multinomial AUC type. Must be one of: "AUTO", "NONE", "MACRO_OVR", "WEIGHTED_OVR",
+     *                   "MACRO_OVO", "WEIGHTED_OVO". Default is "NONE" (optional, only for multinomial classification).
+     *   @param auuc_type Set default AUUC type for uplift binomial classification. Must be one of: "AUTO", "qini",
+     *                    "lift", "gain". Default is "AUTO" (optional, only for uplift binomial classification).
+     *   @param auuc_nbins Set number of bins to calculate AUUC. Must be -1 or higher than 0. Default is -1 which means
+     *                     1000 (optional, only for uplift binomial classification).
      *   @param _exclude_fields Comma-separated list of JSON field paths to exclude from the result, used like:
      *                          "/3/Frames?_exclude_fields=frames/frame_id/URL,__meta"
      */
@@ -123,8 +153,11 @@ public interface Predictions {
             @Field("reverse_transform") boolean reverse_transform, @Field("leaf_node_assignment") boolean leaf_node_assignment,
             @Field("leaf_node_assignment_type") ModelLeafNodeAssignmentLeafNodeAssignmentType leaf_node_assignment_type,
             @Field("predict_staged_proba") boolean predict_staged_proba, @Field("predict_contributions") boolean predict_contributions,
+            @Field("predict_contributions_output_format") ModelContributionsContributionsOutputFormat predict_contributions_output_format,
+            @Field("top_n") int top_n, @Field("bottom_n") int bottom_n, @Field("compare_abs") boolean compare_abs,
             @Field("feature_frequencies") boolean feature_frequencies, @Field("exemplar_index") int exemplar_index,
             @Field("deviances") boolean deviances, @Field("custom_metric_func") String custom_metric_func,
+            @Field("auc_type") String auc_type, @Field("auuc_type") String auuc_type, @Field("auuc_nbins") int auuc_nbins,
             @Field("_exclude_fields") String _exclude_fields);
 
     @FormUrlEncoded

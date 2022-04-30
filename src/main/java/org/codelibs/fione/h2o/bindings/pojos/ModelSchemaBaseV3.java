@@ -16,7 +16,7 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelSchemaBaseV3 extends SchemaV3 {
@@ -43,6 +43,12 @@ public class ModelSchemaBaseV3 extends SchemaV3 {
      */
     @SerializedName("response_column_name")
     public String responseColumnName;
+
+    /**
+     * The treatment column name for this Model (if applicable). Is null otherwise.
+     */
+    @SerializedName("treatment_column_name")
+    public String treatmentColumnName;
 
     /**
      * The Model's training frame key
@@ -74,6 +80,7 @@ public class ModelSchemaBaseV3 extends SchemaV3 {
         algo = "";
         algoFullName = "";
         responseColumnName = "";
+        treatmentColumnName = "";
         timestamp = 0L;
         havePojo = false;
         haveMojo = false;
@@ -84,7 +91,7 @@ public class ModelSchemaBaseV3 extends SchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
     @JsonIgnore

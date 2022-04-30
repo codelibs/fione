@@ -16,5 +16,5 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 public enum H2oautomleventsEventLogEntryStage {
-    DataImport, FeatureAnalysis, FeatureCreation, FeatureReduction, ModelTraining, Workflow,
+    DataImport, FeatureAnalysis, FeatureCreation, FeatureReduction, ModelSelection, ModelTraining, Validation, Workflow,
 }

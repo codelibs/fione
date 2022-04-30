@@ -15,6 +15,6 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-public enum DeepWaterParametersProblemType {
-    auto, dataset, image,
+public enum ApiSaveToHiveTableHandlerHiveFrameSaverFormat {
+    CSV, PARQUET,
 }

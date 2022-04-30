@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class GLMParametersV3 extends ModelParametersSchemaV3 {
@@ -90,9 +90,22 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
     public int nlambdas;
 
     /**
+     * Perform scoring for every score_iteration_interval iterations
+     */
+    @SerializedName("score_iteration_interval")
+    public int scoreIterationInterval;
+
+    /**
      * Standardize numeric columns to have zero mean and unit variance
      */
     public boolean standardize;
+
+    /**
+     * Only applicable to multiple alpha/lambda values.  If false, build the next model for next set of alpha/lambda
+     * values starting from the values provided by current model.  If true will start GLM model from scratch.
+     */
+    @SerializedName("cold_start")
+    public boolean coldStart;
 
     /**
      * Handling of missing values. Either MeanImputation, Skip or PlugValues.
@@ -126,25 +139,25 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
     public double betaEpsilon;
 
     /**
-     * Converge if  objective value changes less than this. Default indicates: If lambda_search is set to True the value
-     * of objective_epsilon is set to .0001. If the lambda_search is set to False and lambda is equal to zero, the value
-     * of objective_epsilon is set to .000001, for any other value of lambda the default value of objective_epsilon is
-     * set to .0001.
+     * Converge if  objective value changes less than this. Default (of -1.0) indicates: If lambda_search is set to True
+     * the value of objective_epsilon is set to .0001. If the lambda_search is set to False and lambda is equal to zero,
+     * the value of objective_epsilon is set to .000001, for any other value of lambda the default value of
+     * objective_epsilon is set to .0001.
      */
     @SerializedName("objective_epsilon")
     public double objectiveEpsilon;
 
     /**
-     * Converge if  objective changes less (using L-infinity norm) than this, ONLY applies to L-BFGS solver. Default
-     * indicates: If lambda_search is set to False and lambda is equal to zero, the default value of gradient_epsilon is
-     * equal to .000001, otherwise the default value is .0001. If lambda_search is set to True, the conditional values
-     * above are 1E-8 and 1E-6 respectively.
+     * Converge if  objective changes less (using L-infinity norm) than this, ONLY applies to L-BFGS solver. Default (of
+     * -1.0) indicates: If lambda_search is set to False and lambda is equal to zero, the default value of
+     * gradient_epsilon is equal to .000001, otherwise the default value is .0001. If lambda_search is set to True, the
+     * conditional values above are 1E-8 and 1E-6 respectively.
      */
     @SerializedName("gradient_epsilon")
     public double gradientEpsilon;
 
     /**
-     * Likelihood divider in objective value computation, default is 1/nobs
+     * Likelihood divider in objective value computation, default (of -1.0) will set it to 1/nobs
      */
     @SerializedName("obj_reg")
     public double objReg;
@@ -161,7 +174,7 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
     public GLMLink[] randLink;
 
     /**
-     * double array to initialize fixed and random coefficients for HGLM.
+     * double array to initialize fixed and random coefficients for HGLM, coefficients for GLM.
      */
     public double[] startval;
 
@@ -255,12 +268,6 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
     public int maxConfusionMatrixSize;
 
     /**
-     * Maximum number (top K) of predictions to use for hit ratio computation (for multi-class only, 0 to disable)
-     */
-    @SerializedName("max_hit_ratio_k")
-    public int maxHitRatioK;
-
-    /**
      * Request p-values computation, p-values work only with IRLSM solver and no regularization
      */
     @SerializedName("compute_p_values")
@@ -271,6 +278,12 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
      */
     @SerializedName("remove_collinear_columns")
     public boolean removeCollinearColumns;
+
+    /**
+     * If set to true, will generate scoring history for GLM.  This may significantly slow down the algo.
+     */
+    @SerializedName("generate_scoring_history")
+    public boolean generateScoringHistory;
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
@@ -319,7 +332,9 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
     // dataset; giving an observation a relative weight of 2 is equivalent to repeating that row twice. Negative weights
     // are not allowed. Note: Weights are per-row observation weights and do not increase the size of the data frame.
     // This is typically the number of times a row is repeated, but non-integer values are supported as well. During
-    // training, rows with higher weights matter more, due to the larger loss function pre-factor.
+    // training, rows with higher weights matter more, due to the larger loss function pre-factor. If you set weight = 0
+    // for a row, the returned prediction frame at that row is zero and this is incorrect. To get an accurate
+    // prediction, remove all rows with weight == 0.
     public ColSpecifierV3 weightsColumn;
 
     // Offset column. This will be added to the combination of columns before applying the link function.
@@ -366,6 +381,9 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
     // Relative tolerance for metric-based stopping criterion (stop if relative improvement is not at least this much)
     public double stoppingTolerance;
 
+    // Gains/Lift table number of bins. 0 means disabled.. Default value -1 means automatic binning.
+    public int gainsliftBins;
+
     // Reference to custom evaluation function, format: `language:keyName=funcName`
     public String customMetricFunc;
 
@@ -375,6 +393,9 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
     // Automatically export generated models to this directory.
     public String exportCheckpointsDir;
 
+    // Set default multinomial AUC type.
+    public MultinomialAucType aucType;
+
     */
 
     /**
@@ -382,7 +403,7 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
      */
     public GLMParametersV3() {
         seed = -1L;
-        family = GLMFamily.gaussian;
+        family = GLMFamily.AUTO;
         tweedieVariancePower = 0.0;
         tweedieLinkPower = 1.0;
         theta = 1e-10;
@@ -390,7 +411,9 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
         lambdaSearch = false;
         earlyStopping = true;
         nlambdas = -1;
+        scoreIterationInterval = -1;
         standardize = true;
+        coldStart = false;
         missingValuesHandling = GLMMissingValuesHandling.MeanImputation;
         nonNegative = false;
         maxIterations = -1;
@@ -408,9 +431,9 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
         balanceClasses = false;
         maxAfterBalanceSize = 5.0f;
         maxConfusionMatrixSize = 20;
-        maxHitRatioK = 0;
         computePValues = false;
         removeCollinearColumns = false;
+        generateScoringHistory = false;
         nfolds = 0;
         keepCrossValidationModels = true;
         keepCrossValidationPredictions = false;
@@ -425,13 +448,15 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
         maxCategoricalLevels = 10;
         ignoreConstCols = true;
         scoreEachIteration = false;
-        stoppingRounds = 3;
+        stoppingRounds = 0;
         maxRuntimeSecs = 0.0;
-        stoppingMetric = ScoreKeeperStoppingMetric.deviance;
-        stoppingTolerance = 0.0001;
+        stoppingMetric = ScoreKeeperStoppingMetric.AUTO;
+        stoppingTolerance = 0.001;
+        gainsliftBins = -1;
         customMetricFunc = "";
         customDistributionFunc = "";
         exportCheckpointsDir = "";
+        aucType = MultinomialAucType.AUTO;
     }
 
     /**
@@ -439,7 +464,7 @@ public class GLMParametersV3 extends ModelParametersSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

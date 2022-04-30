@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
 public class NaiveBayesModelV3 extends ModelSchemaV3<NaiveBayesParametersV3, NaiveBayesModelOutputV3> {
 
@@ -47,6 +47,9 @@ public class NaiveBayesModelV3 extends ModelSchemaV3<NaiveBayesParametersV3, Nai
     // The response column name for this Model (if applicable). Is null otherwise.
     public String responseColumnName;
 
+    // The treatment column name for this Model (if applicable). Is null otherwise.
+    public String treatmentColumnName;
+
     // The Model's training frame key
     public FrameKeyV3 dataFrame;
 
@@ -69,6 +72,7 @@ public class NaiveBayesModelV3 extends ModelSchemaV3<NaiveBayesParametersV3, Nai
         algo = "";
         algoFullName = "";
         responseColumnName = "";
+        treatmentColumnName = "";
         timestamp = 0L;
         havePojo = false;
         haveMojo = false;
@@ -79,7 +83,7 @@ public class NaiveBayesModelV3 extends ModelSchemaV3<NaiveBayesParametersV3, Nai
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

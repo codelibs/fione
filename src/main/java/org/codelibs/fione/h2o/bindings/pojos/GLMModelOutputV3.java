@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class GLMModelOutputV3 extends ModelOutputSchemaV3 {
@@ -45,10 +45,29 @@ public class GLMModelOutputV3 extends ModelOutputSchemaV3 {
     public TwoDimTableV3 standardizedCoefficientMagnitudes;
 
     /**
-     * Lambda minimizing the objective value, only applicable with lambd search
+     * Variable Importances
+     */
+    @SerializedName("variable_importances")
+    public TwoDimTableV3 variableImportances;
+
+    /**
+     * Lambda minimizing the objective value, only applicable with lambda search or when arrays of alpha and lambdas are
+     * provided
      */
     @SerializedName("lambda_best")
     public double lambdaBest;
+
+    /**
+     * Alpha minimizing the objective value, only applicable when arrays of alphas are given
+     */
+    @SerializedName("alpha_best")
+    public double alphaBest;
+
+    /**
+     * submodel index minimizing the objective value, only applicable for arrays of alphas/lambda
+     */
+    @SerializedName("best_submodel_index")
+    public int bestSubmodelIndex;
 
     /**
      * Lambda best + 1 standard error. Only applicable with lambda search and cross-validation
@@ -57,7 +76,20 @@ public class GLMModelOutputV3 extends ModelOutputSchemaV3 {
     public double lambda1se;
 
     /**
-     * Dispersion parameter, only applicable to Tweedie family
+     * Minimum lambda value calculated that may be used for lambda search.  Early-stop may happen and the minimum lambda
+     * value will not be used in this case.
+     */
+    @SerializedName("lambda_min")
+    public double lambdaMin;
+
+    /**
+     * Starting lambda value used when lambda search is enabled.
+     */
+    @SerializedName("lambda_max")
+    public double lambdaMax;
+
+    /**
+     * Dispersion parameter, only applicable to Tweedie family (input/output) and fractional Binomial (output only)
      */
     public double dispersion;
 
@@ -67,6 +99,9 @@ public class GLMModelOutputV3 extends ModelOutputSchemaV3 {
 
     // Column names
     public String[] names;
+
+    // Original column names
+    public String[] originalNames;
 
     // Column types
     public String[] columnTypes;
@@ -96,6 +131,12 @@ public class GLMModelOutputV3 extends ModelOutputSchemaV3 {
     // Scoring history
     public TwoDimTableV3 scoringHistory;
 
+    // Cross-Validation scoring history
+    public TwoDimTableV3[] cvScoringHistory;
+
+    // Model reproducibility information
+    public TwoDimTableV3[] reproducibilityInformationTable;
+
     // Training data model metrics
     public ModelMetricsBaseV3 trainingMetrics;
 
@@ -120,6 +161,9 @@ public class GLMModelOutputV3 extends ModelOutputSchemaV3 {
     // Runtime in milliseconds
     public long runTime;
 
+    // Default threshold used for predictions
+    public double defaultThreshold;
+
     // Help information for output fields
     public Map<String,String> help;
 
@@ -130,13 +174,18 @@ public class GLMModelOutputV3 extends ModelOutputSchemaV3 {
      */
     public GLMModelOutputV3() {
         lambdaBest = -1.0;
+        alphaBest = -1.0;
+        bestSubmodelIndex = 0;
         lambda1se = -1.0;
+        lambdaMin = -1.0;
+        lambdaMax = -1.0;
         dispersion = 0.0;
         modelCategory = ModelCategory.Regression;
         status = "";
         startTime = 0L;
         endTime = 0L;
         runTime = 0L;
+        defaultThreshold = 0.5;
     }
 
     /**
@@ -144,7 +193,7 @@ public class GLMModelOutputV3 extends ModelOutputSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

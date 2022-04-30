@@ -16,5 +16,5 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 public enum EnsembleMetalearnerAlgorithm {
-    AUTO, deeplearning, drf, gbm, glm,
+    AUTO, deeplearning, drf, gbm, glm, naivebayes, xgboost,
 }

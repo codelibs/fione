@@ -16,5 +16,5 @@
 package org.codelibs.fione.h2o.bindings.pojos;
 
 public enum GLMFamily {
-    binomial, gamma, gaussian, multinomial, negativebinomial, ordinal, poisson, quasibinomial, tweedie,
+    AUTO, binomial, fractionalbinomial, gamma, gaussian, multinomial, negativebinomial, ordinal, poisson, quasibinomial, tweedie,
 }

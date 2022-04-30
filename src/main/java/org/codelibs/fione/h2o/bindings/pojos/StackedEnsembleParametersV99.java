@@ -15,29 +15,31 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
 
     /**
-     * List of models (or model ids) to ensemble/stack together. If not using blending frame, then models must have been
-     * cross-validated using nfolds &gt; 1, and folds must be identical across models.
+     * List of models or grids (or their ids) to ensemble/stack together. Grids are expanded to individual models. If
+     * not using blending frame, then models must have been cross-validated using nfolds > 1, and folds must be
+     * identical across models.
      */
     @SerializedName("base_models")
-    public ModelKeyV3[] baseModels;
+    public KeyV3[] baseModels;
 
     /**
      * Type of algorithm to use as the metalearner. Options include 'AUTO' (GLM with non negative weights; if
-     * validation_frame is present, a lambda search is performed), 'glm' (GLM with default parameters), 'gbm' (GBM with
-     * default parameters), 'drf' (Random Forest with default parameters), or 'deeplearning' (Deep Learning with default
-     * parameters).
+     * validation_frame is present, a lambda search is performed), 'deeplearning' (Deep Learning with default
+     * parameters), 'drf' (Random Forest with default parameters), 'gbm' (GBM with default parameters), 'glm' (GLM with
+     * default parameters), 'naivebayes' (NaiveBayes with default parameters), or 'xgboost' (if available, XGBoost with
+     * default parameters).
      */
     @SerializedName("metalearner_algorithm")
     public EnsembleMetalearnerAlgorithm metalearnerAlgorithm;
 
     /**
-     * Number of folds for K-fold cross-validation of the metalearner algorithm (0 to disable or &gt;= 2).
+     * Number of folds for K-fold cross-validation of the metalearner algorithm (0 to disable or >= 2).
      */
     @SerializedName("metalearner_nfolds")
     public int metalearnerNfolds;
@@ -55,6 +57,12 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
      */
     @SerializedName("metalearner_fold_column")
     public ColSpecifierV3 metalearnerFoldColumn;
+
+    /**
+     * Transformation used for the level one frame.
+     */
+    @SerializedName("metalearner_transform")
+    public EnsembleStackedEnsembleModelStackedEnsembleParametersMetalearnerTransform metalearnerTransform;
 
     /**
      * Keep level one frame used for metalearner training.
@@ -80,6 +88,13 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
      */
     public long seed;
 
+    /**
+     * Specify the number of training set samples for scoring. The value must be >= 0. To use all training samples,
+     * enter 0.
+     */
+    @SerializedName("score_training_samples")
+    public long scoreTrainingSamples;
+
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
@@ -93,7 +108,7 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
     // Id of the validation data frame.
     public FrameKeyV3 validationFrame;
 
-    // Number of folds for K-fold cross-validation (0 to disable or &gt;= 2).
+    // Number of folds for K-fold cross-validation (0 to disable or >= 2).
     public int nfolds;
 
     // Whether to keep the cross-validation models.
@@ -127,7 +142,9 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
     // dataset; giving an observation a relative weight of 2 is equivalent to repeating that row twice. Negative weights
     // are not allowed. Note: Weights are per-row observation weights and do not increase the size of the data frame.
     // This is typically the number of times a row is repeated, but non-integer values are supported as well. During
-    // training, rows with higher weights matter more, due to the larger loss function pre-factor.
+    // training, rows with higher weights matter more, due to the larger loss function pre-factor. If you set weight = 0
+    // for a row, the returned prediction frame at that row is zero and this is incorrect. To get an accurate
+    // prediction, remove all rows with weight == 0.
     public ColSpecifierV3 weightsColumn;
 
     // Offset column. This will be added to the combination of columns before applying the link function.
@@ -174,6 +191,9 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
     // Relative tolerance for metric-based stopping criterion (stop if relative improvement is not at least this much)
     public double stoppingTolerance;
 
+    // Gains/Lift table number of bins. 0 means disabled.. Default value -1 means automatic binning.
+    public int gainsliftBins;
+
     // Reference to custom evaluation function, format: `language:keyName=funcName`
     public String customMetricFunc;
 
@@ -183,18 +203,23 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
     // Automatically export generated models to this directory.
     public String exportCheckpointsDir;
 
+    // Set default multinomial AUC type.
+    public MultinomialAucType aucType;
+
     */
 
     /**
      * Public constructor
      */
     public StackedEnsembleParametersV99() {
-        baseModels = new ModelKeyV3[] {};
+        baseModels = new KeyV3[] {};
         metalearnerAlgorithm = EnsembleMetalearnerAlgorithm.AUTO;
         metalearnerNfolds = 0;
+        metalearnerTransform = EnsembleStackedEnsembleModelStackedEnsembleParametersMetalearnerTransform.NONE;
         keepLeveloneFrame = false;
         metalearnerParams = "";
         seed = -1L;
+        scoreTrainingSamples = 10000L;
         nfolds = 0;
         keepCrossValidationModels = true;
         keepCrossValidationPredictions = false;
@@ -213,9 +238,11 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
         maxRuntimeSecs = 0.0;
         stoppingMetric = ScoreKeeperStoppingMetric.AUTO;
         stoppingTolerance = 0.001;
+        gainsliftBins = -1;
         customMetricFunc = "";
         customDistributionFunc = "";
         exportCheckpointsDir = "";
+        aucType = MultinomialAucType.AUTO;
     }
 
     /**
@@ -223,7 +250,7 @@ public class StackedEnsembleParametersV99 extends ModelParametersSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

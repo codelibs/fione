@@ -15,16 +15,16 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
-public class ExampleV3 extends ModelBuilderSchema<ExampleParametersV3> {
+public class UpliftDRFV3 extends SharedTreeV3<UpliftDRFParametersV3> {
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
 
     // Model builder parameters.
-    public ExampleParametersV3 parameters;
+    public UpliftDRFParametersV3 parameters;
 
     // The algo name for this ModelBuilder.
     public String algo;
@@ -63,7 +63,7 @@ public class ExampleV3 extends ModelBuilderSchema<ExampleParametersV3> {
     /**
      * Public constructor
      */
-    public ExampleV3() {
+    public UpliftDRFV3() {
         algo = "";
         algoFullName = "";
         supervised = false;
@@ -77,7 +77,7 @@ public class ExampleV3 extends ModelBuilderSchema<ExampleParametersV3> {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

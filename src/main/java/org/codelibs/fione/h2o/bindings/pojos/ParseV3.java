@@ -17,7 +17,7 @@ package org.codelibs.fione.h2o.bindings.pojos;
 
 import org.codelibs.core.lang.StringUtil;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ParseV3 extends RequestSchemaV3 {
@@ -122,6 +122,12 @@ public class ParseV3 extends RequestSchemaV3 {
     public String customNonDataLineMarkers;
 
     /**
+     * Name of the column the persisted dataset has been partitioned by.
+     */
+    @SerializedName("partition_by")
+    public String[] partitionBy;
+
+    /**
      * Parse job
      */
     public JobV3 job;
@@ -130,6 +136,11 @@ public class ParseV3 extends RequestSchemaV3 {
      * Rows
      */
     public long rows;
+
+    /**
+     * One ASCII character used to escape other characters.
+     */
+    public byte escapechar;
 
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
@@ -154,6 +165,7 @@ public class ParseV3 extends RequestSchemaV3 {
         blocking = false;
         customNonDataLineMarkers = "";
         rows = 0L;
+        escapechar = 0;
         _excludeFields = "";
     }
 
@@ -162,7 +174,7 @@ public class ParseV3 extends RequestSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
     public String[] getAvailableColumnNames() {

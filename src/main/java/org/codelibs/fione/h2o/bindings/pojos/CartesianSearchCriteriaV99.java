@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
 public class CartesianSearchCriteriaV99 extends HyperSpaceSearchCriteriaV99 {
 
@@ -40,7 +40,7 @@ public class CartesianSearchCriteriaV99 extends HyperSpaceSearchCriteriaV99 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

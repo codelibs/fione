@@ -27,6 +27,7 @@ public interface GetGLMRegPath {
      * Get full regularization path
      *   @param model source model
      *   @param lambdas Computed lambda values
+     *   @param alphas alpha values used in building submodels
      *   @param explained_deviance_train explained deviance on the training set
      *   @param explained_deviance_valid explained deviance on the validation set
      *   @param coefficients coefficients for all lambdas
@@ -35,7 +36,7 @@ public interface GetGLMRegPath {
      */
     @GET("/3/GetGLMRegPath")
     Call<GLMRegularizationPathV3> extractRegularizationPath(@Query("model") String model, @Query("lambdas") double[] lambdas,
-            @Query("explained_deviance_train") double[] explained_deviance_train,
+            @Query("alphas") double[] alphas, @Query("explained_deviance_train") double[] explained_deviance_train,
             @Query("explained_deviance_valid") double[] explained_deviance_valid, @Query("coefficients") double[][] coefficients,
             @Query("coefficients_std") double[][] coefficients_std, @Query("coefficient_names") String[] coefficient_names);
 

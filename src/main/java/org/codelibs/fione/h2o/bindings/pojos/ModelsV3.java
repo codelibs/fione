@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 public class ModelsV3 extends RequestSchemaV3 {
@@ -48,6 +48,12 @@ public class ModelsV3 extends RequestSchemaV3 {
     @SerializedName("compatible_frames")
     public FrameV3[] compatibleFrames;
 
+    /**
+     * Flag indicating whether the exported model artifact should also include CV Holdout Frame predictions
+     */
+    @SerializedName("export_cross_validation_predictions")
+    public boolean exportCrossValidationPredictions;
+
     /*------------------------------------------------------------------------------------------------------------------
     //                                                  INHERITED
     //------------------------------------------------------------------------------------------------------------------
@@ -64,6 +70,7 @@ public class ModelsV3 extends RequestSchemaV3 {
     public ModelsV3() {
         preview = false;
         findCompatibleFrames = false;
+        exportCrossValidationPredictions = false;
         _excludeFields = "";
     }
 
@@ -72,7 +79,7 @@ public class ModelsV3 extends RequestSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

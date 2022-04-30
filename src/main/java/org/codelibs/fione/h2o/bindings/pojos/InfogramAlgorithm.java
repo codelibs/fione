@@ -15,6 +15,6 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-public enum DeepWaterParametersBackend {
-    caffe, mxnet, tensorflow,
+public enum InfogramAlgorithm {
+    AUTO, deeplearning, drf, gbm, glm, xgboost,
 }

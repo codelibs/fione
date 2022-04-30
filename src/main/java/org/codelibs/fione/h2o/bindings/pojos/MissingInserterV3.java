@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
 public class MissingInserterV3 extends RequestSchemaV3 {
 
@@ -49,7 +49,7 @@ public class MissingInserterV3 extends RequestSchemaV3 {
      */
     public MissingInserterV3() {
         fraction = 0.0;
-        seed = -4610607697714338186L;
+        seed = 5599496681242492958L;
         _excludeFields = "";
     }
 
@@ -58,7 +58,7 @@ public class MissingInserterV3 extends RequestSchemaV3 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }

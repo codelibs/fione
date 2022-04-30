@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.h2o.bindings.pojos;
 
-import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
 
 public class StepV99 {
 
@@ -25,7 +25,14 @@ public class StepV99 {
     public String id;
 
     /**
-     * The relative weight for the given step (can impact time and/or number of models allocated for this step).
+     * The group of execution of the given step (groups are executed in ascending order of priority).Steps with group=0
+     * are skipped. Defaults to -1 to use the default group assigned to the step id.
+     */
+    public int group;
+
+    /**
+     * The relative weight for the given step (can impact time and/or number of models allocated for this step). Steps
+     * with weight=0 are skipped. Defaults to -1 to use the default weight assigned to the step id.
      */
     public int weight;
 
@@ -34,6 +41,7 @@ public class StepV99 {
      */
     public StepV99() {
         id = "";
+        group = -1;
         weight = -1;
     }
 
@@ -42,7 +50,7 @@ public class StepV99 {
      */
     @Override
     public String toString() {
-        return new GsonBuilder().serializeSpecialFloatingPointValues().create().toJson(this);
+        return new Gson().toJson(this);
     }
 
 }
