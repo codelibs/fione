@@ -4702,22 +4702,32 @@ public class H2oApi {
                 key.url = "";
                 return key;
             }
-            final JsonObject jobj = json.getAsJsonObject();
-            final String type = jobj.get("type").getAsString();
+            final JsonObject jsonObj = json.getAsJsonObject();
+            final String type = jsonObj.get("type").getAsString();
             switch (type) {
             // TODO: dynamically generate all possible cases
             case "Key<Model>":
-                return context.deserialize(jobj, ModelKeyV3.class);
+                return context.deserialize(jsonObj, ModelKeyV3.class);
+            case "Key<Models>":
+                return context.deserialize(jsonObj, ModelsKeyV3.class);
             case "Key<Job>":
-                return context.deserialize(jobj, JobKeyV3.class);
+                return context.deserialize(jsonObj, JobKeyV3.class);
             case "Key<Grid>":
-                return context.deserialize(jobj, GridKeyV3.class);
+                return context.deserialize(jsonObj, GridKeyV3.class);
             case "Key<Frame>":
-                return context.deserialize(jobj, FrameKeyV3.class);
+                return context.deserialize(jsonObj, FrameKeyV3.class);
             case "Key<AutoML>":
-                return context.deserialize(jobj, AutoMLKeyV3.class);
+                return context.deserialize(jsonObj, AutoMLKeyV3.class);
+            case "Key<DecryptionTool>":
+                return context.deserialize(jsonObj, DecryptionToolKeyV3.class);
+            case "Key<Assembly>":
+                return context.deserialize(jsonObj, AssemblyKeyV3.class);
+            case "Key<SegmentModels>":
+                return context.deserialize(jsonObj, SegmentModelsKeyV3.class);
+            case "Key<PartialDependence>":
+                return context.deserialize(jsonObj, PartialDependenceKeyV3.class);
             default:
-                throw new JsonParseException("Unable to deserialize key of type " + type);
+                throw new JsonParseException("Unable to deserialize key of type " + type + " : " + jsonObj);
             }
         }
     }
