@@ -1894,7 +1894,7 @@ public interface ModelBuilders {
      *   @param standardize Standardize columns before computing distances
      *   @param seed RNG Seed
      *   @param init Initialization mode
-     *   @param estimate_k Whether to estimate the number of clusters (<=k) iteratively and deterministically.
+     *   @param estimate_k Whether to estimate the number of clusters (&lt;=k) iteratively and deterministically.
      *   @param cluster_size_constraints An array specifying the minimum number of points that should be in each cluster.
      *                                   The length of the constraints array has to be the same as the number of clusters.
      *   @param k The max. number of clusters. If estimate_k is disabled, the model will find k centroids, otherwise it
@@ -1989,7 +1989,7 @@ public interface ModelBuilders {
      *   @param standardize Standardize columns before computing distances
      *   @param seed RNG Seed
      *   @param init Initialization mode
-     *   @param estimate_k Whether to estimate the number of clusters (<=k) iteratively and deterministically.
+     *   @param estimate_k Whether to estimate the number of clusters (&lt;=k) iteratively and deterministically.
      *   @param cluster_size_constraints An array specifying the minimum number of points that should be in each cluster.
      *                                   The length of the constraints array has to be the same as the number of clusters.
      *   @param k The max. number of clusters. If estimate_k is disabled, the model will find k centroids, otherwise it
@@ -2690,7 +2690,7 @@ public interface ModelBuilders {
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
      *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -2824,7 +2824,7 @@ public interface ModelBuilders {
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
      *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -2963,7 +2963,7 @@ public interface ModelBuilders {
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
      *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -3105,7 +3105,7 @@ public interface ModelBuilders {
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
      *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -3250,7 +3250,7 @@ public interface ModelBuilders {
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
      *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -3393,7 +3393,7 @@ public interface ModelBuilders {
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
      *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -3863,7 +3863,7 @@ public interface ModelBuilders {
      *                                           will be randomly down-sampled; useful range is (0, 1e-5)
      *   @param norm_model Use Hierarchical Softmax
      *   @param epochs Number of training iterations to run
-     *   @param min_word_freq This will discard words that appear less than <int> times
+     *   @param min_word_freq This will discard words that appear less than &lt;int&gt; times
      *   @param init_learning_rate Set the starting learning rate
      *   @param word_model The word model to use (SkipGram or CBOW)
      *   @param pre_trained Id of a data frame that contains a pre-trained (external) word2vec model
@@ -3956,7 +3956,7 @@ public interface ModelBuilders {
      *                                           will be randomly down-sampled; useful range is (0, 1e-5)
      *   @param norm_model Use Hierarchical Softmax
      *   @param epochs Number of training iterations to run
-     *   @param min_word_freq This will discard words that appear less than <int> times
+     *   @param min_word_freq This will discard words that appear less than &lt;int&gt; times
      *   @param init_learning_rate Set the starting learning rate
      *   @param word_model The word model to use (SkipGram or CBOW)
      *   @param pre_trained Id of a data frame that contains a pre-trained (external) word2vec model
@@ -5664,7 +5664,7 @@ public interface ModelBuilders {
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
      *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points
@@ -5804,7 +5804,7 @@ public interface ModelBuilders {
      *                                1.0), for each tree
      *   @param col_sample_rate_per_tree Column sample rate per tree (from 0.0 to 1.0)
      *   @param col_sample_rate_change_per_level Relative change of the column sampling rate for every level (must be >
-     *                                           0.0 and <= 2.0)
+     *                                           0.0 and &lt;= 2.0)
      *   @param score_tree_interval Score the model after every so many trees. Disabled if set to 0.
      *   @param min_split_improvement Minimum relative improvement in squared error reduction for a split to happen
      *   @param histogram_type What type of histogram to use for finding optimal split points

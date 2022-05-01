@@ -51,7 +51,7 @@ public class Word2VecParametersV3 extends ModelParametersSchemaV3 {
     public int epochs;
 
     /**
-     * This will discard words that appear less than <int> times
+     * This will discard words that appear less than &lt;int&gt; times
      */
     @SerializedName("min_word_freq")
     public int minWordFreq;

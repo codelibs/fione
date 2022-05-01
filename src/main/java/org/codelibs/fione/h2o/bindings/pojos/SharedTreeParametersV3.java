@@ -114,7 +114,7 @@ public class SharedTreeParametersV3 extends ModelParametersSchemaV3 {
     public double colSampleRatePerTree;
 
     /**
-     * Relative change of the column sampling rate for every level (must be > 0.0 and <= 2.0)
+     * Relative change of the column sampling rate for every level (must be &gt; 0.0 and &lt;= 2.0)
      */
     @SerializedName("col_sample_rate_change_per_level")
     public double colSampleRateChangePerLevel;
