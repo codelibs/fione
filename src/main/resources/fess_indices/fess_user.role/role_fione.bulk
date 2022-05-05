@@ -1,0 +1,6 @@
+{"index":{"_index":"fess_user.role","_id":"YWRtaW4tYXV0b21s"}}
+{"name":"admin-automl"}
+{"index":{"_index":"fess_user.role","_id":"YWRtaW4tZWFzeW1s"}}
+{"name":"admin-easyml"}
+{"index":{"_index":"fess_user.role","_id":"YWRtaW4tc3lzdGVtbWw="}}
+{"name":"admin-systemml"}
