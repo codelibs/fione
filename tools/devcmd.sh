@@ -30,9 +30,12 @@ copy_to_fess() {
   cp src/main/resources/fess++.xml ../fess/src/main/resources
   cp src/main/resources/lastaflute_director+assistantDirector.xml ../fess/src/main/resources
   cp src/main/resources/fess+systemHelper.xml ../fess/src/main/resources
+  cp src/main/resources/fess_indices/fess_user.role/role_fione.bulk ../fess/src/main/resources/fess_indices/fess_user.role/role_fione.bulk
+  cp src/main/resources/fess_indices/fess_user.user/user_fione.bulk ../fess/src/main/resources/fess_indices/fess_user.user/user_fione.bulk
   echo "smart.package2 = org.codelibs.fione.app" >> ../fess/src/main/resources/lasta_di.properties
   sed -i "s|RPM build -->|RPM build --><retrofit.version>2.9.0</retrofit.version>|" ../fess/pom.xml
   sed -i 's|common library -->|common library --><dependency><groupId>com.squareup.retrofit2</groupId><artifactId>retrofit</artifactId><version>${retrofit.version}</version></dependency><dependency><groupId>com.squareup.retrofit2</groupId><artifactId>converter-gson</artifactId><version>${retrofit.version}</version></dependency>|' ../fess/pom.xml
+  sed -i "s/app.extension.names=/app.extension.names=fione/" ../fess/src/main/resources/fess_config.properties
 }
 
 copy_from_fess() {
@@ -52,6 +55,8 @@ copy_from_fess() {
   cp ../fess/src/main/resources/fess++.xml src/main/resources
   cp ../fess/src/main/resources/lastaflute_director+assistantDirector.xml src/main/resources
   cp ../fess/src/main/resources/fess+systemHelper.xml src/main/resources
+  cp ../fess/src/main/resources/fess_indices/fess_user.role/role_fione.bulk src/main/resources/fess_indices/fess_user.role
+  cp ../fess/src/main/resources/fess_indices/fess_user.user/user_fione.bulk src/main/resources/fess_indices/fess_user.user
 }
 
 clean() {
@@ -72,8 +77,10 @@ clean() {
   rm -f ../fess/src/main/resources/fess++.xml
   rm -f ../fess/src/main/resources/lastaflute_director+assistantDirector.xml
   rm -f ../fess/src/main/resources/fess+systemHelper.xml
+  rm -f ../fess/src/main/resources/fess_indices/fess_user.role/role_fione.bulk
+  rm -f ../fess/src/main/resources/fess_indices/fess_user.user/user_fione.bulk
   pushd ../fess
-  git checkout -- src/main/resources/lasta_di.properties pom.xml
+  git checkout -- src/main/resources/lasta_di.properties pom.xml src/main/resources/fess_config.properties
   popd
 }
 
