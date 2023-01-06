@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2022 CodeLibs Project and the Others.
+ * Copyright 2012-2023 CodeLibs Project and the Others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -206,7 +206,7 @@ public class PythonHelper {
             writer.write("[parameters]\n");
             for (final Map.Entry<String, Object> e : params.entrySet()) {
                 var value = e.getValue();
-                if (value instanceof String[] values) {
+                if (value instanceof final String[] values) {
                     value = "[" + Arrays.stream(values).map(s -> "\"" + s + "\"").collect(Collectors.joining(",")) + "]";
                 }
                 writer.write(e.getKey() + " = " + value + "\n");

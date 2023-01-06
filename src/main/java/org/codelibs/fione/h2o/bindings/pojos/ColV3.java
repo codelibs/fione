@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2022 CodeLibs Project and the Others.
+ * Copyright 2012-2023 CodeLibs Project and the Others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.lang3.ArrayUtils;
-import org.codelibs.fione.Constants;
 import org.codelibs.fione.entity.ChartData;
 
 import com.google.gson.GsonBuilder;
@@ -216,7 +215,7 @@ public class ColV3 extends SchemaV3 {
         if ((histogramBins != null && domain != null) && "enum".equals(type)) {
             final var xName = "label";
             final var yName = "count";
-            final var maxLength = Integer.parseInt(System.getProperty(Constants.CHART_MAX_ITEM_SIZE, "1000"));
+            final var maxLength = Integer.getInteger("fione.chart.max_item_size", 1000);
             labelListChart = new ChartData();
             var domains = Arrays.copyOf(domain, domain.length);
             ArrayUtils.reverse(domains);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2022 CodeLibs Project and the Others.
+ * Copyright 2012-2023 CodeLibs Project and the Others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -774,9 +774,10 @@ public class FioneLabels extends FessMessages {
      * Assert the property is not null.
      * @param property The value of the property. (NotNull)
      */
-    protected void assertPropertyNotNull(String property) {
+    @Override
+    protected void assertPropertyNotNull(final String property) {
         if (property == null) {
-            String msg = "The argument 'property' for message should not be null.";
+            final String msg = "The argument 'property' for message should not be null.";
             throw new IllegalArgumentException(msg);
         }
     }

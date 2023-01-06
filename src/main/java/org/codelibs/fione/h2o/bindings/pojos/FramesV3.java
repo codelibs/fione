@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2022 CodeLibs Project and the Others.
+ * Copyright 2012-2023 CodeLibs Project and the Others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -207,52 +207,20 @@ public class FramesV3 extends RequestSchemaV3 {
             return false;
         }
         final var other = (FramesV3) obj;
-        if (!Objects.equals(column, other.column)) {
+        if (!Objects.equals(column, other.column) || (columnCount != other.columnCount) || (columnOffset != other.columnOffset)
+                || !Arrays.equals(compatibleModels, other.compatibleModels)) {
             return false;
         }
-        if (columnCount != other.columnCount) {
+        if (!Objects.equals(compression, other.compression) || !Arrays.deepEquals(domain, other.domain)
+                || (findCompatibleModels != other.findCompatibleModels) || (force != other.force)) {
             return false;
         }
-        if (columnOffset != other.columnOffset) {
+        if (!Objects.equals(frameId, other.frameId) || !Arrays.equals(frames, other.frames) || (fullColumnCount != other.fullColumnCount)
+                || !Objects.equals(job, other.job)) {
             return false;
         }
-        if (!Arrays.equals(compatibleModels, other.compatibleModels)) {
-            return false;
-        }
-        if (!Objects.equals(compression, other.compression)) {
-            return false;
-        }
-        if (!Arrays.deepEquals(domain, other.domain)) {
-            return false;
-        }
-        if (findCompatibleModels != other.findCompatibleModels) {
-            return false;
-        }
-        if (force != other.force) {
-            return false;
-        }
-        if (!Objects.equals(frameId, other.frameId)) {
-            return false;
-        }
-        if (!Arrays.equals(frames, other.frames)) {
-            return false;
-        }
-        if (fullColumnCount != other.fullColumnCount) {
-            return false;
-        }
-        if (!Objects.equals(job, other.job)) {
-            return false;
-        }
-        if (numParts != other.numParts) {
-            return false;
-        }
-        if (!Objects.equals(path, other.path)) {
-            return false;
-        }
-        if (rowCount != other.rowCount) {
-            return false;
-        }
-        if (rowOffset != other.rowOffset) {
+        if ((numParts != other.numParts) || !Objects.equals(path, other.path) || (rowCount != other.rowCount)
+                || (rowOffset != other.rowOffset)) {
             return false;
         }
         if (separator != other.separator) {

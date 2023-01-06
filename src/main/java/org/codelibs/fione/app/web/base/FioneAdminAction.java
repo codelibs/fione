@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2022 CodeLibs Project and the Others.
+ * Copyright 2012-2023 CodeLibs Project and the Others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -101,32 +101,15 @@ public abstract class FioneAdminAction extends FessAdminAction implements FioneH
     }
 
     protected String convertSchemaColumnType(final String type) {
-        switch (type) {
-        case "BAD":
-            return "BAD";
-        case "UUID":
-            return "UUID";
-        case "String":
-        case "string":
-        case "str":
-        case "character":
-            return "String";
-        case "Numeric":
-        case "numeric":
-        case "int":
-        case "real":
-            return "Numeric";
-        case "Enum":
-        case "enum":
-        case "factor":
-        case "categorical":
-            return "Enum";
-        case "Time":
-        case "time":
-            return "Time";
-        default:
-            return "String";
-        }
+        return switch (type) {
+        case "BAD" -> "BAD";
+        case "UUID" -> "UUID";
+        case "String", "string", "str", "character" -> "String";
+        case "Numeric", "numeric", "int", "real" -> "Numeric";
+        case "Enum", "enum", "factor", "categorical" -> "Enum";
+        case "Time", "time" -> "Time";
+        default -> "String";
+        };
     }
 
     protected void registerColumnItems(final ParseV3 schema, final RenderData data,

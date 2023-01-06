@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2022 CodeLibs Project and the Others.
+ * Copyright 2012-2023 CodeLibs Project and the Others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -6299,7 +6299,7 @@ public interface ModelBuilders {
         /**
          * Train a XGBoost model.
          */
-        public static Call<XGBoostV3> trainXgboost(ModelBuilders z, XGBoostParametersV3 p) {
+        public static Call<XGBoostV3> trainXgboost(final ModelBuilders z, final XGBoostParametersV3 p) {
             return z.trainXgboost(p.ntrees, p.maxDepth, p.minRows, p.minChildWeight, p.learnRate, p.eta, p.sampleRate, p.subsample,
                     p.colSampleRate, p.colsampleBylevel, p.colSampleRatePerTree, p.colsampleBytree, p.colsampleBynode,
                     p.monotoneConstraints, p.maxAbsLeafnodePred, p.maxDeltaStep, p.scoreTreeInterval, p.seed, p.minSplitImprovement,
@@ -6322,7 +6322,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of XGBoost model builder parameters.
          */
-        public static Call<XGBoostV3> validate_parametersXgboost(ModelBuilders z, XGBoostParametersV3 p) {
+        public static Call<XGBoostV3> validate_parametersXgboost(final ModelBuilders z, final XGBoostParametersV3 p) {
             return z.validate_parametersXgboost(p.ntrees, p.maxDepth, p.minRows, p.minChildWeight, p.learnRate, p.eta, p.sampleRate,
                     p.subsample, p.colSampleRate, p.colsampleBylevel, p.colSampleRatePerTree, p.colsampleBytree, p.colsampleBynode,
                     p.monotoneConstraints, p.maxAbsLeafnodePred, p.maxDeltaStep, p.scoreTreeInterval, p.seed, p.minSplitImprovement,
@@ -6345,7 +6345,7 @@ public interface ModelBuilders {
         /**
          * Train a Infogram model.
          */
-        public static Call<InfogramV3> trainInfogram(ModelBuilders z, InfogramParametersV3 p) {
+        public static Call<InfogramV3> trainInfogram(final ModelBuilders z, final InfogramParametersV3 p) {
             return z.trainInfogram(p.seed, p.standardize, (p.plugValues == null ? null : p.plugValues.name), p.maxIterations, p.prior,
                     p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.algorithm, p.algorithmParams, p.protectedColumns,
                     p.totalInformationThreshold, p.netInformationThreshold, p.relevanceIndexThreshold, p.safetyIndexThreshold,
@@ -6365,7 +6365,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of Infogram model builder parameters.
          */
-        public static Call<InfogramV3> validate_parametersInfogram(ModelBuilders z, InfogramParametersV3 p) {
+        public static Call<InfogramV3> validate_parametersInfogram(final ModelBuilders z, final InfogramParametersV3 p) {
             return z.validate_parametersInfogram(p.seed, p.standardize, (p.plugValues == null ? null : p.plugValues.name), p.maxIterations,
                     p.prior, p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.algorithm, p.algorithmParams,
                     p.protectedColumns, p.totalInformationThreshold, p.netInformationThreshold, p.relevanceIndexThreshold,
@@ -6385,7 +6385,7 @@ public interface ModelBuilders {
         /**
          * Train a TargetEncoder model.
          */
-        public static Call<TargetEncoderV3> trainTargetencoder(ModelBuilders z, TargetEncoderParametersV3 p) {
+        public static Call<TargetEncoderV3> trainTargetencoder(final ModelBuilders z, final TargetEncoderParametersV3 p) {
             return z.trainTargetencoder(p.columnsToEncode, p.keepOriginalCategoricalColumns, p.blending, p.inflectionPoint, p.smoothing,
                     p.dataLeakageHandling, p.noise, p.seed, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6403,7 +6403,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of TargetEncoder model builder parameters.
          */
-        public static Call<TargetEncoderV3> validate_parametersTargetencoder(ModelBuilders z, TargetEncoderParametersV3 p) {
+        public static Call<TargetEncoderV3> validate_parametersTargetencoder(final ModelBuilders z, final TargetEncoderParametersV3 p) {
             return z.validate_parametersTargetencoder(p.columnsToEncode, p.keepOriginalCategoricalColumns, p.blending, p.inflectionPoint,
                     p.smoothing, p.dataLeakageHandling, p.noise, p.seed, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6421,7 +6421,7 @@ public interface ModelBuilders {
         /**
          * Train a DeepLearning model.
          */
-        public static Call<DeepLearningV3> trainDeeplearning(ModelBuilders z, DeepLearningParametersV3 p) {
+        public static Call<DeepLearningV3> trainDeeplearning(final ModelBuilders z, final DeepLearningParametersV3 p) {
             return z.trainDeeplearning(p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize,
                     p.activation, p.hidden, p.epochs, p.trainSamplesPerIteration, p.targetRatioCommToComp, p.seed, p.adaptiveRate, p.rho,
                     p.epsilon, p.rate, p.rateAnnealing, p.rateDecay, p.momentumStart, p.momentumRamp, p.momentumStable,
@@ -6450,7 +6450,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of DeepLearning model builder parameters.
          */
-        public static Call<DeepLearningV3> validate_parametersDeeplearning(ModelBuilders z, DeepLearningParametersV3 p) {
+        public static Call<DeepLearningV3> validate_parametersDeeplearning(final ModelBuilders z, final DeepLearningParametersV3 p) {
             return z.validate_parametersDeeplearning(p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize,
                     p.maxConfusionMatrixSize, p.activation, p.hidden, p.epochs, p.trainSamplesPerIteration, p.targetRatioCommToComp, p.seed,
                     p.adaptiveRate, p.rho, p.epsilon, p.rate, p.rateAnnealing, p.rateDecay, p.momentumStart, p.momentumRamp,
@@ -6479,7 +6479,7 @@ public interface ModelBuilders {
         /**
          * Train a GLM model.
          */
-        public static Call<GLMV3> trainGlm(ModelBuilders z, GLMParametersV3 p) {
+        public static Call<GLMV3> trainGlm(final ModelBuilders z, final GLMParametersV3 p) {
             return z.trainGlm(p.seed, p.family, p.randFamily, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha,
                     p.lambda, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.scoreIterationInterval, p.standardize, p.coldStart,
                     p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations,
@@ -6502,7 +6502,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of GLM model builder parameters.
          */
-        public static Call<GLMV3> validate_parametersGlm(ModelBuilders z, GLMParametersV3 p) {
+        public static Call<GLMV3> validate_parametersGlm(final ModelBuilders z, final GLMParametersV3 p) {
             return z.validate_parametersGlm(p.seed, p.family, p.randFamily, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver,
                     p.alpha, p.lambda, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.scoreIterationInterval, p.standardize, p.coldStart,
                     p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations,
@@ -6525,7 +6525,7 @@ public interface ModelBuilders {
         /**
          * Train a GLRM model.
          */
-        public static Call<GLRMV3> trainGlrm(ModelBuilders z, GLRMParametersV3 p) {
+        public static Call<GLRMV3> trainGlrm(final ModelBuilders z, final GLRMParametersV3 p) {
             return z.trainGlrm(p.transform, p.k, p.loss, p.multiLoss, p.lossByCol, p.lossByColIdx, p.period, p.regularizationX,
                     p.regularizationY, p.gammaX, p.gammaY, p.maxIterations, p.maxUpdates, p.initStepSize, p.minStepSize, p.seed, p.init,
                     p.svdMethod, (p.userY == null ? null : p.userY.name), (p.userX == null ? null : p.userX.name), p.loadingName,
@@ -6545,7 +6545,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of GLRM model builder parameters.
          */
-        public static Call<GLRMV3> validate_parametersGlrm(ModelBuilders z, GLRMParametersV3 p) {
+        public static Call<GLRMV3> validate_parametersGlrm(final ModelBuilders z, final GLRMParametersV3 p) {
             return z.validate_parametersGlrm(p.transform, p.k, p.loss, p.multiLoss, p.lossByCol, p.lossByColIdx, p.period,
                     p.regularizationX, p.regularizationY, p.gammaX, p.gammaY, p.maxIterations, p.maxUpdates, p.initStepSize, p.minStepSize,
                     p.seed, p.init, p.svdMethod, (p.userY == null ? null : p.userY.name), (p.userX == null ? null : p.userX.name),
@@ -6565,7 +6565,7 @@ public interface ModelBuilders {
         /**
          * Train a KMeans model.
          */
-        public static Call<KMeansV3> trainKmeans(ModelBuilders z, KMeansParametersV3 p) {
+        public static Call<KMeansV3> trainKmeans(final ModelBuilders z, final KMeansParametersV3 p) {
             return z.trainKmeans((p.userPoints == null ? null : p.userPoints.name), p.maxIterations, p.standardize, p.seed, p.init,
                     p.estimateK, p.clusterSizeConstraints, p.k, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6583,7 +6583,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of KMeans model builder parameters.
          */
-        public static Call<KMeansV3> validate_parametersKmeans(ModelBuilders z, KMeansParametersV3 p) {
+        public static Call<KMeansV3> validate_parametersKmeans(final ModelBuilders z, final KMeansParametersV3 p) {
             return z.validate_parametersKmeans((p.userPoints == null ? null : p.userPoints.name), p.maxIterations, p.standardize, p.seed,
                     p.init, p.estimateK, p.clusterSizeConstraints, p.k, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6601,7 +6601,7 @@ public interface ModelBuilders {
         /**
          * Train a NaiveBayes model.
          */
-        public static Call<NaiveBayesV3> trainNaivebayes(ModelBuilders z, NaiveBayesParametersV3 p) {
+        public static Call<NaiveBayesV3> trainNaivebayes(final ModelBuilders z, final NaiveBayesParametersV3 p) {
             return z.trainNaivebayes(p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.laplace,
                     p.minSdev, p.epsSdev, p.minProb, p.epsProb, p.computeMetrics, p.seed, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6619,7 +6619,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of NaiveBayes model builder parameters.
          */
-        public static Call<NaiveBayesV3> validate_parametersNaivebayes(ModelBuilders z, NaiveBayesParametersV3 p) {
+        public static Call<NaiveBayesV3> validate_parametersNaivebayes(final ModelBuilders z, final NaiveBayesParametersV3 p) {
             return z.validate_parametersNaivebayes(p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize,
                     p.maxConfusionMatrixSize, p.laplace, p.minSdev, p.epsSdev, p.minProb, p.epsProb, p.computeMetrics, p.seed,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
@@ -6637,7 +6637,7 @@ public interface ModelBuilders {
         /**
          * Train a PCA model.
          */
-        public static Call<PCAV3> trainPca(ModelBuilders z, PCAParametersV3 p) {
+        public static Call<PCAV3> trainPca(final ModelBuilders z, final PCAParametersV3 p) {
             return z.trainPca(p.transform, p.pcaMethod, p.pcaImpl, p.k, p.maxIterations, p.seed, p.useAllFactorLevels, p.computeMetrics,
                     p.imputeMissing, (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6654,7 +6654,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of PCA model builder parameters.
          */
-        public static Call<PCAV3> validate_parametersPca(ModelBuilders z, PCAParametersV3 p) {
+        public static Call<PCAV3> validate_parametersPca(final ModelBuilders z, final PCAParametersV3 p) {
             return z.validate_parametersPca(p.transform, p.pcaMethod, p.pcaImpl, p.k, p.maxIterations, p.seed, p.useAllFactorLevels,
                     p.computeMetrics, p.imputeMissing, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6672,7 +6672,7 @@ public interface ModelBuilders {
         /**
          * Train a SVD model.
          */
-        public static Call<SVDV99> trainSvd(ModelBuilders z, SVDParametersV99 p) {
+        public static Call<SVDV99> trainSvd(final ModelBuilders z, final SVDParametersV99 p) {
             return z.trainSvd(p.transform, p.svdMethod, p.nv, p.maxIterations, p.seed, p.keepU, p.uName, p.useAllFactorLevels,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6689,7 +6689,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of SVD model builder parameters.
          */
-        public static Call<SVDV99> validate_parametersSvd(ModelBuilders z, SVDParametersV99 p) {
+        public static Call<SVDV99> validate_parametersSvd(final ModelBuilders z, final SVDParametersV99 p) {
             return z.validate_parametersSvd(p.transform, p.svdMethod, p.nv, p.maxIterations, p.seed, p.keepU, p.uName, p.useAllFactorLevels,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6706,7 +6706,7 @@ public interface ModelBuilders {
         /**
          * Train a DRF model.
          */
-        public static Call<DRFV3> trainDrf(ModelBuilders z, DRFParametersV3 p) {
+        public static Call<DRFV3> trainDrf(final ModelBuilders z, final DRFParametersV3 p) {
             return z.trainDrf(p.mtries, p.binomialDoubleTrees, p.sampleRate, p.balanceClasses, p.classSamplingFactors,
                     p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats,
                     p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree, p.colSampleRateChangePerLevel,
@@ -6727,7 +6727,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of DRF model builder parameters.
          */
-        public static Call<DRFV3> validate_parametersDrf(ModelBuilders z, DRFParametersV3 p) {
+        public static Call<DRFV3> validate_parametersDrf(final ModelBuilders z, final DRFParametersV3 p) {
             return z.validate_parametersDrf(p.mtries, p.binomialDoubleTrees, p.sampleRate, p.balanceClasses, p.classSamplingFactors,
                     p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats,
                     p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree, p.colSampleRateChangePerLevel,
@@ -6748,7 +6748,7 @@ public interface ModelBuilders {
         /**
          * Train a GBM model.
          */
-        public static Call<GBMV3> trainGbm(ModelBuilders z, GBMParametersV3 p) {
+        public static Call<GBMV3> trainGbm(final ModelBuilders z, final GBMParametersV3 p) {
             return z.trainGbm(p.learnRate, p.learnRateAnnealing, p.sampleRate, p.colSampleRate, p.monotoneConstraints, p.maxAbsLeafnodePred,
                     p.predNoiseBandwidth, p.interactionConstraints, p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize,
                     p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats, p.r2Stopping, p.seed,
@@ -6770,7 +6770,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of GBM model builder parameters.
          */
-        public static Call<GBMV3> validate_parametersGbm(ModelBuilders z, GBMParametersV3 p) {
+        public static Call<GBMV3> validate_parametersGbm(final ModelBuilders z, final GBMParametersV3 p) {
             return z.validate_parametersGbm(p.learnRate, p.learnRateAnnealing, p.sampleRate, p.colSampleRate, p.monotoneConstraints,
                     p.maxAbsLeafnodePred, p.predNoiseBandwidth, p.interactionConstraints, p.balanceClasses, p.classSamplingFactors,
                     p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats,
@@ -6792,7 +6792,7 @@ public interface ModelBuilders {
         /**
          * Train a IsolationForest model.
          */
-        public static Call<IsolationForestV3> trainIsolationforest(ModelBuilders z, IsolationForestParametersV3 p) {
+        public static Call<IsolationForestV3> trainIsolationforest(final ModelBuilders z, final IsolationForestParametersV3 p) {
             return z.trainIsolationforest(p.sampleSize, p.sampleRate, p.mtries, p.contamination,
                     (p.validationResponseColumn == null ? null : p.validationResponseColumn.columnName), p.balanceClasses,
                     p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins,
@@ -6814,7 +6814,8 @@ public interface ModelBuilders {
         /**
          * Validate a set of IsolationForest model builder parameters.
          */
-        public static Call<IsolationForestV3> validate_parametersIsolationforest(ModelBuilders z, IsolationForestParametersV3 p) {
+        public static Call<IsolationForestV3> validate_parametersIsolationforest(final ModelBuilders z,
+                final IsolationForestParametersV3 p) {
             return z.validate_parametersIsolationforest(p.sampleSize, p.sampleRate, p.mtries, p.contamination,
                     (p.validationResponseColumn == null ? null : p.validationResponseColumn.columnName), p.balanceClasses,
                     p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins,
@@ -6836,7 +6837,8 @@ public interface ModelBuilders {
         /**
          * Train a ExtendedIsolationForest model.
          */
-        public static Call<ExtendedIsolationForestV3> trainExtendedisolationforest(ModelBuilders z, ExtendedIsolationForestParametersV3 p) {
+        public static Call<ExtendedIsolationForestV3> trainExtendedisolationforest(final ModelBuilders z,
+                final ExtendedIsolationForestParametersV3 p) {
             return z.trainExtendedisolationforest(p.ntrees, p.sampleSize, p.extensionLevel, p.seed,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6853,8 +6855,8 @@ public interface ModelBuilders {
         /**
          * Validate a set of ExtendedIsolationForest model builder parameters.
          */
-        public static Call<ExtendedIsolationForestV3> validate_parametersExtendedisolationforest(ModelBuilders z,
-                ExtendedIsolationForestParametersV3 p) {
+        public static Call<ExtendedIsolationForestV3> validate_parametersExtendedisolationforest(final ModelBuilders z,
+                final ExtendedIsolationForestParametersV3 p) {
             return z.validate_parametersExtendedisolationforest(p.ntrees, p.sampleSize, p.extensionLevel, p.seed,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6871,7 +6873,7 @@ public interface ModelBuilders {
         /**
          * Train a Aggregator model.
          */
-        public static Call<AggregatorV99> trainAggregator(ModelBuilders z, AggregatorParametersV99 p) {
+        public static Call<AggregatorV99> trainAggregator(final ModelBuilders z, final AggregatorParametersV99 p) {
             return z.trainAggregator(p.transform, p.pcaMethod, p.k, p.maxIterations, p.targetNumExemplars, p.relTolNumExemplars, p.seed,
                     p.useAllFactorLevels, p.saveMappingFrame, p.numIterationWithoutNewExemplar, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6889,7 +6891,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of Aggregator model builder parameters.
          */
-        public static Call<AggregatorV99> validate_parametersAggregator(ModelBuilders z, AggregatorParametersV99 p) {
+        public static Call<AggregatorV99> validate_parametersAggregator(final ModelBuilders z, final AggregatorParametersV99 p) {
             return z.validate_parametersAggregator(p.transform, p.pcaMethod, p.k, p.maxIterations, p.targetNumExemplars,
                     p.relTolNumExemplars, p.seed, p.useAllFactorLevels, p.saveMappingFrame, p.numIterationWithoutNewExemplar,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
@@ -6907,7 +6909,7 @@ public interface ModelBuilders {
         /**
          * Train a Word2Vec model.
          */
-        public static Call<Word2VecV3> trainWord2vec(ModelBuilders z, Word2VecParametersV3 p) {
+        public static Call<Word2VecV3> trainWord2vec(final ModelBuilders z, final Word2VecParametersV3 p) {
             return z.trainWord2vec(p.vecSize, p.windowSize, p.sentSampleRate, p.normModel, p.epochs, p.minWordFreq, p.initLearningRate,
                     p.wordModel, (p.preTrained == null ? null : p.preTrained.name), (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6925,7 +6927,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of Word2Vec model builder parameters.
          */
-        public static Call<Word2VecV3> validate_parametersWord2vec(ModelBuilders z, Word2VecParametersV3 p) {
+        public static Call<Word2VecV3> validate_parametersWord2vec(final ModelBuilders z, final Word2VecParametersV3 p) {
             return z.validate_parametersWord2vec(p.vecSize, p.windowSize, p.sentSampleRate, p.normModel, p.epochs, p.minWordFreq,
                     p.initLearningRate, p.wordModel, (p.preTrained == null ? null : p.preTrained.name),
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
@@ -6943,7 +6945,7 @@ public interface ModelBuilders {
         /**
          * Train a StackedEnsemble model.
          */
-        public static Call<StackedEnsembleV99> trainStackedensemble(ModelBuilders z, StackedEnsembleParametersV99 p) {
+        public static Call<StackedEnsembleV99> trainStackedensemble(final ModelBuilders z, final StackedEnsembleParametersV99 p) {
             return z.trainStackedensemble((p.baseModels == null ? null : keyArrayToStringArray(p.baseModels)), p.metalearnerAlgorithm,
                     p.metalearnerNfolds, p.metalearnerFoldAssignment,
                     (p.metalearnerFoldColumn == null ? null : p.metalearnerFoldColumn.columnName), p.metalearnerTransform,
@@ -6964,7 +6966,8 @@ public interface ModelBuilders {
         /**
          * Validate a set of StackedEnsemble model builder parameters.
          */
-        public static Call<StackedEnsembleV99> validate_parametersStackedensemble(ModelBuilders z, StackedEnsembleParametersV99 p) {
+        public static Call<StackedEnsembleV99> validate_parametersStackedensemble(final ModelBuilders z,
+                final StackedEnsembleParametersV99 p) {
             return z.validate_parametersStackedensemble((p.baseModels == null ? null : keyArrayToStringArray(p.baseModels)),
                     p.metalearnerAlgorithm, p.metalearnerNfolds, p.metalearnerFoldAssignment,
                     (p.metalearnerFoldColumn == null ? null : p.metalearnerFoldColumn.columnName), p.metalearnerTransform,
@@ -6985,7 +6988,7 @@ public interface ModelBuilders {
         /**
          * Train a CoxPH model.
          */
-        public static Call<CoxPHV3> trainCoxph(ModelBuilders z, CoxPHParametersV3 p) {
+        public static Call<CoxPHV3> trainCoxph(final ModelBuilders z, final CoxPHParametersV3 p) {
             return z.trainCoxph((p.startColumn == null ? null : p.startColumn.columnName),
                     (p.stopColumn == null ? null : p.stopColumn.columnName), p.stratifyBy, p.ties, p.init, p.lreMin, p.maxIterations,
                     p.interactionsOnly, p.interactions, p.interactionPairs, p.useAllFactorLevels, p.singleNodeMode,
@@ -7004,7 +7007,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of CoxPH model builder parameters.
          */
-        public static Call<CoxPHV3> validate_parametersCoxph(ModelBuilders z, CoxPHParametersV3 p) {
+        public static Call<CoxPHV3> validate_parametersCoxph(final ModelBuilders z, final CoxPHParametersV3 p) {
             return z.validate_parametersCoxph((p.startColumn == null ? null : p.startColumn.columnName),
                     (p.stopColumn == null ? null : p.stopColumn.columnName), p.stratifyBy, p.ties, p.init, p.lreMin, p.maxIterations,
                     p.interactionsOnly, p.interactions, p.interactionPairs, p.useAllFactorLevels, p.singleNodeMode,
@@ -7023,7 +7026,7 @@ public interface ModelBuilders {
         /**
          * Train a Generic model.
          */
-        public static Call<GenericV3> trainGeneric(ModelBuilders z, GenericParametersV3 p) {
+        public static Call<GenericV3> trainGeneric(final ModelBuilders z, final GenericParametersV3 p) {
             return z.trainGeneric(p.path, (p.modelKey == null ? null : p.modelKey.name), (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
@@ -7040,7 +7043,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of Generic model builder parameters.
          */
-        public static Call<GenericV3> validate_parametersGeneric(ModelBuilders z, GenericParametersV3 p) {
+        public static Call<GenericV3> validate_parametersGeneric(final ModelBuilders z, final GenericParametersV3 p) {
             return z.validate_parametersGeneric(p.path, (p.modelKey == null ? null : p.modelKey.name),
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -7057,7 +7060,7 @@ public interface ModelBuilders {
         /**
          * Train a GAM model.
          */
-        public static Call<GAMV3> trainGam(ModelBuilders z, GAMParametersV3 p) {
+        public static Call<GAMV3> trainGam(final ModelBuilders z, final GAMParametersV3 p) {
             return z.trainGam(p.seed, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha, p.lambda,
                     p.startval, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.standardize, p.missingValuesHandling,
                     (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations, p.betaEpsilon, p.objectiveEpsilon,
@@ -7081,7 +7084,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of GAM model builder parameters.
          */
-        public static Call<GAMV3> validate_parametersGam(ModelBuilders z, GAMParametersV3 p) {
+        public static Call<GAMV3> validate_parametersGam(final ModelBuilders z, final GAMParametersV3 p) {
             return z.validate_parametersGam(p.seed, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha,
                     p.lambda, p.startval, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.standardize, p.missingValuesHandling,
                     (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations, p.betaEpsilon, p.objectiveEpsilon,
@@ -7105,7 +7108,7 @@ public interface ModelBuilders {
         /**
          * Train a ANOVAGLM model.
          */
-        public static Call<ANOVAGLMV3> trainAnovaglm(ModelBuilders z, ANOVAGLMParametersV3 p) {
+        public static Call<ANOVAGLMV3> trainAnovaglm(final ModelBuilders z, final ANOVAGLMParametersV3 p) {
             return z.trainAnovaglm(p.seed, p.standardize, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.alpha, p.lambda,
                     p.lambdaSearch, p.solver, p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative,
                     p.computePValues, p.maxIterations, p.link, p.prior, p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize,
@@ -7125,7 +7128,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of ANOVAGLM model builder parameters.
          */
-        public static Call<ANOVAGLMV3> validate_parametersAnovaglm(ModelBuilders z, ANOVAGLMParametersV3 p) {
+        public static Call<ANOVAGLMV3> validate_parametersAnovaglm(final ModelBuilders z, final ANOVAGLMParametersV3 p) {
             return z.validate_parametersAnovaglm(p.seed, p.standardize, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta,
                     p.alpha, p.lambda, p.lambdaSearch, p.solver, p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name),
                     p.nonNegative, p.computePValues, p.maxIterations, p.link, p.prior, p.balanceClasses, p.classSamplingFactors,
@@ -7145,7 +7148,7 @@ public interface ModelBuilders {
         /**
          * Train a PSVM model.
          */
-        public static Call<PSVMV3> trainPsvm(ModelBuilders z, PSVMParametersV3 p) {
+        public static Call<PSVMV3> trainPsvm(final ModelBuilders z, final PSVMParametersV3 p) {
             return z.trainPsvm(p.hyperParam, p.kernelType, p.gamma, p.rankRatio, p.positiveWeight, p.negativeWeight,
                     p.disableTrainingMetrics, p.svThreshold, p.maxIterations, p.factThreshold, p.feasibleThreshold, p.surrogateGapThreshold,
                     p.muFactor, p.seed, (p.modelId == null ? null : p.modelId.name),
@@ -7164,7 +7167,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of PSVM model builder parameters.
          */
-        public static Call<PSVMV3> validate_parametersPsvm(ModelBuilders z, PSVMParametersV3 p) {
+        public static Call<PSVMV3> validate_parametersPsvm(final ModelBuilders z, final PSVMParametersV3 p) {
             return z.validate_parametersPsvm(p.hyperParam, p.kernelType, p.gamma, p.rankRatio, p.positiveWeight, p.negativeWeight,
                     p.disableTrainingMetrics, p.svThreshold, p.maxIterations, p.factThreshold, p.feasibleThreshold, p.surrogateGapThreshold,
                     p.muFactor, p.seed, (p.modelId == null ? null : p.modelId.name),
@@ -7183,7 +7186,7 @@ public interface ModelBuilders {
         /**
          * Train a RuleFit model.
          */
-        public static Call<RuleFitV3> trainRulefit(ModelBuilders z, RuleFitParametersV3 p) {
+        public static Call<RuleFitV3> trainRulefit(final ModelBuilders z, final RuleFitParametersV3 p) {
             return z.trainRulefit(p.seed, p.algorithm, p.minRuleLength, p.maxRuleLength, p.maxNumRules, p.modelType, p.ruleGenerationNtrees,
                     p.removeDuplicates, p.lambda, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -7201,7 +7204,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of RuleFit model builder parameters.
          */
-        public static Call<RuleFitV3> validate_parametersRulefit(ModelBuilders z, RuleFitParametersV3 p) {
+        public static Call<RuleFitV3> validate_parametersRulefit(final ModelBuilders z, final RuleFitParametersV3 p) {
             return z.validate_parametersRulefit(p.seed, p.algorithm, p.minRuleLength, p.maxRuleLength, p.maxNumRules, p.modelType,
                     p.ruleGenerationNtrees, p.removeDuplicates, p.lambda, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -7219,7 +7222,7 @@ public interface ModelBuilders {
         /**
          * Train a UpliftDRF model.
          */
-        public static Call<UpliftDRFV3> trainUpliftdrf(ModelBuilders z, UpliftDRFParametersV3 p) {
+        public static Call<UpliftDRFV3> trainUpliftdrf(final ModelBuilders z, final UpliftDRFParametersV3 p) {
             return z.trainUpliftdrf(p.mtries, p.sampleRate, p.treatmentColumn, p.upliftMetric, p.auucType, p.auucNbins, p.balanceClasses,
                     p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins,
                     p.nbinsTopLevel, p.nbinsCats, p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree,
@@ -7240,7 +7243,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of UpliftDRF model builder parameters.
          */
-        public static Call<UpliftDRFV3> validate_parametersUpliftdrf(ModelBuilders z, UpliftDRFParametersV3 p) {
+        public static Call<UpliftDRFV3> validate_parametersUpliftdrf(final ModelBuilders z, final UpliftDRFParametersV3 p) {
             return z.validate_parametersUpliftdrf(p.mtries, p.sampleRate, p.treatmentColumn, p.upliftMetric, p.auucType, p.auucNbins,
                     p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth,
                     p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats, p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass,
@@ -7261,7 +7264,7 @@ public interface ModelBuilders {
         /**
          * Train a ModelSelection model.
          */
-        public static Call<ModelSelectionV3> trainModelselection(ModelBuilders z, ModelSelectionParametersV3 p) {
+        public static Call<ModelSelectionV3> trainModelselection(final ModelBuilders z, final ModelSelectionParametersV3 p) {
             return z.trainModelselection(p.seed, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha, p.lambda,
                     p.lambdaSearch, p.earlyStopping, p.nlambdas, p.scoreIterationInterval, p.standardize, p.coldStart,
                     p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations,
@@ -7284,7 +7287,7 @@ public interface ModelBuilders {
         /**
          * Validate a set of ModelSelection model builder parameters.
          */
-        public static Call<ModelSelectionV3> validate_parametersModelselection(ModelBuilders z, ModelSelectionParametersV3 p) {
+        public static Call<ModelSelectionV3> validate_parametersModelselection(final ModelBuilders z, final ModelSelectionParametersV3 p) {
             return z.validate_parametersModelselection(p.seed, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver,
                     p.alpha, p.lambda, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.scoreIterationInterval, p.standardize, p.coldStart,
                     p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations,
@@ -7307,13 +7310,16 @@ public interface ModelBuilders {
         /**
          * Return an array of Strings for an array of keys.
          */
-        public static String[] keyArrayToStringArray(KeyV3[] keys) {
-            if (keys == null)
+        public static String[] keyArrayToStringArray(final KeyV3[] keys) {
+            if (keys == null) {
                 return null;
-            String[] ids = new String[keys.length];
+            }
+            final String[] ids = new String[keys.length];
             int i = 0;
-            for (KeyV3 key : keys)
-                ids[i++] = key.name;
+            for (final KeyV3 key : keys) {
+                ids[i] = key.name;
+                i++;
+            }
             return ids;
         }
     }

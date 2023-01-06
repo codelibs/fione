@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2022 CodeLibs Project and the Others.
+ * Copyright 2012-2023 CodeLibs Project and the Others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -6286,7 +6286,7 @@ public interface Grid {
         /**
          * Run grid search for XGBoost model.
          */
-        public static Call<XGBoostV3> trainXgboost(Grid z, XGBoostParametersV3 p) {
+        public static Call<XGBoostV3> trainXgboost(final Grid z, final XGBoostParametersV3 p) {
             return z.trainXgboost(p.ntrees, p.maxDepth, p.minRows, p.minChildWeight, p.learnRate, p.eta, p.sampleRate, p.subsample,
                     p.colSampleRate, p.colsampleBylevel, p.colSampleRatePerTree, p.colsampleBytree, p.colsampleBynode,
                     p.monotoneConstraints, p.maxAbsLeafnodePred, p.maxDeltaStep, p.scoreTreeInterval, p.seed, p.minSplitImprovement,
@@ -6309,7 +6309,7 @@ public interface Grid {
         /**
          * Resume grid search for XGBoost model.
          */
-        public static Call<XGBoostV3> resumeXgboost(Grid z, XGBoostParametersV3 p) {
+        public static Call<XGBoostV3> resumeXgboost(final Grid z, final XGBoostParametersV3 p) {
             return z.resumeXgboost(p.ntrees, p.maxDepth, p.minRows, p.minChildWeight, p.learnRate, p.eta, p.sampleRate, p.subsample,
                     p.colSampleRate, p.colsampleBylevel, p.colSampleRatePerTree, p.colsampleBytree, p.colsampleBynode,
                     p.monotoneConstraints, p.maxAbsLeafnodePred, p.maxDeltaStep, p.scoreTreeInterval, p.seed, p.minSplitImprovement,
@@ -6332,7 +6332,7 @@ public interface Grid {
         /**
          * Run grid search for Infogram model.
          */
-        public static Call<InfogramV3> trainInfogram(Grid z, InfogramParametersV3 p) {
+        public static Call<InfogramV3> trainInfogram(final Grid z, final InfogramParametersV3 p) {
             return z.trainInfogram(p.seed, p.standardize, (p.plugValues == null ? null : p.plugValues.name), p.maxIterations, p.prior,
                     p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.algorithm, p.algorithmParams, p.protectedColumns,
                     p.totalInformationThreshold, p.netInformationThreshold, p.relevanceIndexThreshold, p.safetyIndexThreshold,
@@ -6352,7 +6352,7 @@ public interface Grid {
         /**
          * Resume grid search for Infogram model.
          */
-        public static Call<InfogramV3> resumeInfogram(Grid z, InfogramParametersV3 p) {
+        public static Call<InfogramV3> resumeInfogram(final Grid z, final InfogramParametersV3 p) {
             return z.resumeInfogram(p.seed, p.standardize, (p.plugValues == null ? null : p.plugValues.name), p.maxIterations, p.prior,
                     p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.algorithm, p.algorithmParams, p.protectedColumns,
                     p.totalInformationThreshold, p.netInformationThreshold, p.relevanceIndexThreshold, p.safetyIndexThreshold,
@@ -6372,7 +6372,7 @@ public interface Grid {
         /**
          * Run grid search for TargetEncoder model.
          */
-        public static Call<TargetEncoderV3> trainTargetencoder(Grid z, TargetEncoderParametersV3 p) {
+        public static Call<TargetEncoderV3> trainTargetencoder(final Grid z, final TargetEncoderParametersV3 p) {
             return z.trainTargetencoder(p.columnsToEncode, p.keepOriginalCategoricalColumns, p.blending, p.inflectionPoint, p.smoothing,
                     p.dataLeakageHandling, p.noise, p.seed, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6390,7 +6390,7 @@ public interface Grid {
         /**
          * Resume grid search for TargetEncoder model.
          */
-        public static Call<TargetEncoderV3> resumeTargetencoder(Grid z, TargetEncoderParametersV3 p) {
+        public static Call<TargetEncoderV3> resumeTargetencoder(final Grid z, final TargetEncoderParametersV3 p) {
             return z.resumeTargetencoder(p.columnsToEncode, p.keepOriginalCategoricalColumns, p.blending, p.inflectionPoint, p.smoothing,
                     p.dataLeakageHandling, p.noise, p.seed, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6408,7 +6408,7 @@ public interface Grid {
         /**
          * Run grid search for DeepLearning model.
          */
-        public static Call<DeepLearningV3> trainDeeplearning(Grid z, DeepLearningParametersV3 p) {
+        public static Call<DeepLearningV3> trainDeeplearning(final Grid z, final DeepLearningParametersV3 p) {
             return z.trainDeeplearning(p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize,
                     p.activation, p.hidden, p.epochs, p.trainSamplesPerIteration, p.targetRatioCommToComp, p.seed, p.adaptiveRate, p.rho,
                     p.epsilon, p.rate, p.rateAnnealing, p.rateDecay, p.momentumStart, p.momentumRamp, p.momentumStable,
@@ -6437,7 +6437,7 @@ public interface Grid {
         /**
          * Resume grid search for DeepLearning model.
          */
-        public static Call<DeepLearningV3> resumeDeeplearning(Grid z, DeepLearningParametersV3 p) {
+        public static Call<DeepLearningV3> resumeDeeplearning(final Grid z, final DeepLearningParametersV3 p) {
             return z.resumeDeeplearning(p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize,
                     p.activation, p.hidden, p.epochs, p.trainSamplesPerIteration, p.targetRatioCommToComp, p.seed, p.adaptiveRate, p.rho,
                     p.epsilon, p.rate, p.rateAnnealing, p.rateDecay, p.momentumStart, p.momentumRamp, p.momentumStable,
@@ -6466,7 +6466,7 @@ public interface Grid {
         /**
          * Run grid search for GLM model.
          */
-        public static Call<GLMV3> trainGlm(Grid z, GLMParametersV3 p) {
+        public static Call<GLMV3> trainGlm(final Grid z, final GLMParametersV3 p) {
             return z.trainGlm(p.seed, p.family, p.randFamily, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha,
                     p.lambda, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.scoreIterationInterval, p.standardize, p.coldStart,
                     p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations,
@@ -6489,7 +6489,7 @@ public interface Grid {
         /**
          * Resume grid search for GLM model.
          */
-        public static Call<GLMV3> resumeGlm(Grid z, GLMParametersV3 p) {
+        public static Call<GLMV3> resumeGlm(final Grid z, final GLMParametersV3 p) {
             return z.resumeGlm(p.seed, p.family, p.randFamily, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha,
                     p.lambda, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.scoreIterationInterval, p.standardize, p.coldStart,
                     p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations,
@@ -6512,7 +6512,7 @@ public interface Grid {
         /**
          * Run grid search for GLRM model.
          */
-        public static Call<GLRMV3> trainGlrm(Grid z, GLRMParametersV3 p) {
+        public static Call<GLRMV3> trainGlrm(final Grid z, final GLRMParametersV3 p) {
             return z.trainGlrm(p.transform, p.k, p.loss, p.multiLoss, p.lossByCol, p.lossByColIdx, p.period, p.regularizationX,
                     p.regularizationY, p.gammaX, p.gammaY, p.maxIterations, p.maxUpdates, p.initStepSize, p.minStepSize, p.seed, p.init,
                     p.svdMethod, (p.userY == null ? null : p.userY.name), (p.userX == null ? null : p.userX.name), p.loadingName,
@@ -6532,7 +6532,7 @@ public interface Grid {
         /**
          * Resume grid search for GLRM model.
          */
-        public static Call<GLRMV3> resumeGlrm(Grid z, GLRMParametersV3 p) {
+        public static Call<GLRMV3> resumeGlrm(final Grid z, final GLRMParametersV3 p) {
             return z.resumeGlrm(p.transform, p.k, p.loss, p.multiLoss, p.lossByCol, p.lossByColIdx, p.period, p.regularizationX,
                     p.regularizationY, p.gammaX, p.gammaY, p.maxIterations, p.maxUpdates, p.initStepSize, p.minStepSize, p.seed, p.init,
                     p.svdMethod, (p.userY == null ? null : p.userY.name), (p.userX == null ? null : p.userX.name), p.loadingName,
@@ -6552,7 +6552,7 @@ public interface Grid {
         /**
          * Run grid search for KMeans model.
          */
-        public static Call<KMeansV3> trainKmeans(Grid z, KMeansParametersV3 p) {
+        public static Call<KMeansV3> trainKmeans(final Grid z, final KMeansParametersV3 p) {
             return z.trainKmeans((p.userPoints == null ? null : p.userPoints.name), p.maxIterations, p.standardize, p.seed, p.init,
                     p.estimateK, p.clusterSizeConstraints, p.k, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6570,7 +6570,7 @@ public interface Grid {
         /**
          * Resume grid search for KMeans model.
          */
-        public static Call<KMeansV3> resumeKmeans(Grid z, KMeansParametersV3 p) {
+        public static Call<KMeansV3> resumeKmeans(final Grid z, final KMeansParametersV3 p) {
             return z.resumeKmeans((p.userPoints == null ? null : p.userPoints.name), p.maxIterations, p.standardize, p.seed, p.init,
                     p.estimateK, p.clusterSizeConstraints, p.k, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6588,7 +6588,7 @@ public interface Grid {
         /**
          * Run grid search for NaiveBayes model.
          */
-        public static Call<NaiveBayesV3> trainNaivebayes(Grid z, NaiveBayesParametersV3 p) {
+        public static Call<NaiveBayesV3> trainNaivebayes(final Grid z, final NaiveBayesParametersV3 p) {
             return z.trainNaivebayes(p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.laplace,
                     p.minSdev, p.epsSdev, p.minProb, p.epsProb, p.computeMetrics, p.seed, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6606,7 +6606,7 @@ public interface Grid {
         /**
          * Resume grid search for NaiveBayes model.
          */
-        public static Call<NaiveBayesV3> resumeNaivebayes(Grid z, NaiveBayesParametersV3 p) {
+        public static Call<NaiveBayesV3> resumeNaivebayes(final Grid z, final NaiveBayesParametersV3 p) {
             return z.resumeNaivebayes(p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.laplace,
                     p.minSdev, p.epsSdev, p.minProb, p.epsProb, p.computeMetrics, p.seed, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6624,7 +6624,7 @@ public interface Grid {
         /**
          * Run grid search for PCA model.
          */
-        public static Call<PCAV3> trainPca(Grid z, PCAParametersV3 p) {
+        public static Call<PCAV3> trainPca(final Grid z, final PCAParametersV3 p) {
             return z.trainPca(p.transform, p.pcaMethod, p.pcaImpl, p.k, p.maxIterations, p.seed, p.useAllFactorLevels, p.computeMetrics,
                     p.imputeMissing, (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6641,7 +6641,7 @@ public interface Grid {
         /**
          * Resume grid search for PCA model.
          */
-        public static Call<PCAV3> resumePca(Grid z, PCAParametersV3 p) {
+        public static Call<PCAV3> resumePca(final Grid z, final PCAParametersV3 p) {
             return z.resumePca(p.transform, p.pcaMethod, p.pcaImpl, p.k, p.maxIterations, p.seed, p.useAllFactorLevels, p.computeMetrics,
                     p.imputeMissing, (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6658,7 +6658,7 @@ public interface Grid {
         /**
          * Run grid search for SVD model.
          */
-        public static Call<SVDV99> trainSvd(Grid z, SVDParametersV99 p) {
+        public static Call<SVDV99> trainSvd(final Grid z, final SVDParametersV99 p) {
             return z.trainSvd(p.transform, p.svdMethod, p.nv, p.maxIterations, p.seed, p.keepU, p.uName, p.useAllFactorLevels,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6675,7 +6675,7 @@ public interface Grid {
         /**
          * Resume grid search for SVD model.
          */
-        public static Call<SVDV99> resumeSvd(Grid z, SVDParametersV99 p) {
+        public static Call<SVDV99> resumeSvd(final Grid z, final SVDParametersV99 p) {
             return z.resumeSvd(p.transform, p.svdMethod, p.nv, p.maxIterations, p.seed, p.keepU, p.uName, p.useAllFactorLevels,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6692,7 +6692,7 @@ public interface Grid {
         /**
          * Run grid search for DRF model.
          */
-        public static Call<DRFV3> trainDrf(Grid z, DRFParametersV3 p) {
+        public static Call<DRFV3> trainDrf(final Grid z, final DRFParametersV3 p) {
             return z.trainDrf(p.mtries, p.binomialDoubleTrees, p.sampleRate, p.balanceClasses, p.classSamplingFactors,
                     p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats,
                     p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree, p.colSampleRateChangePerLevel,
@@ -6713,7 +6713,7 @@ public interface Grid {
         /**
          * Resume grid search for DRF model.
          */
-        public static Call<DRFV3> resumeDrf(Grid z, DRFParametersV3 p) {
+        public static Call<DRFV3> resumeDrf(final Grid z, final DRFParametersV3 p) {
             return z.resumeDrf(p.mtries, p.binomialDoubleTrees, p.sampleRate, p.balanceClasses, p.classSamplingFactors,
                     p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats,
                     p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree, p.colSampleRateChangePerLevel,
@@ -6734,7 +6734,7 @@ public interface Grid {
         /**
          * Run grid search for GBM model.
          */
-        public static Call<GBMV3> trainGbm(Grid z, GBMParametersV3 p) {
+        public static Call<GBMV3> trainGbm(final Grid z, final GBMParametersV3 p) {
             return z.trainGbm(p.learnRate, p.learnRateAnnealing, p.sampleRate, p.colSampleRate, p.monotoneConstraints, p.maxAbsLeafnodePred,
                     p.predNoiseBandwidth, p.interactionConstraints, p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize,
                     p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats, p.r2Stopping, p.seed,
@@ -6756,7 +6756,7 @@ public interface Grid {
         /**
          * Resume grid search for GBM model.
          */
-        public static Call<GBMV3> resumeGbm(Grid z, GBMParametersV3 p) {
+        public static Call<GBMV3> resumeGbm(final Grid z, final GBMParametersV3 p) {
             return z.resumeGbm(p.learnRate, p.learnRateAnnealing, p.sampleRate, p.colSampleRate, p.monotoneConstraints,
                     p.maxAbsLeafnodePred, p.predNoiseBandwidth, p.interactionConstraints, p.balanceClasses, p.classSamplingFactors,
                     p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins, p.nbinsTopLevel, p.nbinsCats,
@@ -6778,7 +6778,7 @@ public interface Grid {
         /**
          * Run grid search for IsolationForest model.
          */
-        public static Call<IsolationForestV3> trainIsolationforest(Grid z, IsolationForestParametersV3 p) {
+        public static Call<IsolationForestV3> trainIsolationforest(final Grid z, final IsolationForestParametersV3 p) {
             return z.trainIsolationforest(p.sampleSize, p.sampleRate, p.mtries, p.contamination,
                     (p.validationResponseColumn == null ? null : p.validationResponseColumn.columnName), p.balanceClasses,
                     p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins,
@@ -6800,7 +6800,7 @@ public interface Grid {
         /**
          * Resume grid search for IsolationForest model.
          */
-        public static Call<IsolationForestV3> resumeIsolationforest(Grid z, IsolationForestParametersV3 p) {
+        public static Call<IsolationForestV3> resumeIsolationforest(final Grid z, final IsolationForestParametersV3 p) {
             return z.resumeIsolationforest(p.sampleSize, p.sampleRate, p.mtries, p.contamination,
                     (p.validationResponseColumn == null ? null : p.validationResponseColumn.columnName), p.balanceClasses,
                     p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins,
@@ -6822,7 +6822,8 @@ public interface Grid {
         /**
          * Run grid search for ExtendedIsolationForest model.
          */
-        public static Call<ExtendedIsolationForestV3> trainExtendedisolationforest(Grid z, ExtendedIsolationForestParametersV3 p) {
+        public static Call<ExtendedIsolationForestV3> trainExtendedisolationforest(final Grid z,
+                final ExtendedIsolationForestParametersV3 p) {
             return z.trainExtendedisolationforest(p.ntrees, p.sampleSize, p.extensionLevel, p.seed,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6839,7 +6840,8 @@ public interface Grid {
         /**
          * Resume grid search for ExtendedIsolationForest model.
          */
-        public static Call<ExtendedIsolationForestV3> resumeExtendedisolationforest(Grid z, ExtendedIsolationForestParametersV3 p) {
+        public static Call<ExtendedIsolationForestV3> resumeExtendedisolationforest(final Grid z,
+                final ExtendedIsolationForestParametersV3 p) {
             return z.resumeExtendedisolationforest(p.ntrees, p.sampleSize, p.extensionLevel, p.seed,
                     (p.modelId == null ? null : p.modelId.name), (p.trainingFrame == null ? null : p.trainingFrame.name),
                     (p.validationFrame == null ? null : p.validationFrame.name), p.nfolds, p.keepCrossValidationModels,
@@ -6856,7 +6858,7 @@ public interface Grid {
         /**
          * Run grid search for Aggregator model.
          */
-        public static Call<AggregatorV99> trainAggregator(Grid z, AggregatorParametersV99 p) {
+        public static Call<AggregatorV99> trainAggregator(final Grid z, final AggregatorParametersV99 p) {
             return z.trainAggregator(p.transform, p.pcaMethod, p.k, p.maxIterations, p.targetNumExemplars, p.relTolNumExemplars, p.seed,
                     p.useAllFactorLevels, p.saveMappingFrame, p.numIterationWithoutNewExemplar, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6874,7 +6876,7 @@ public interface Grid {
         /**
          * Resume grid search for Aggregator model.
          */
-        public static Call<AggregatorV99> resumeAggregator(Grid z, AggregatorParametersV99 p) {
+        public static Call<AggregatorV99> resumeAggregator(final Grid z, final AggregatorParametersV99 p) {
             return z.resumeAggregator(p.transform, p.pcaMethod, p.k, p.maxIterations, p.targetNumExemplars, p.relTolNumExemplars, p.seed,
                     p.useAllFactorLevels, p.saveMappingFrame, p.numIterationWithoutNewExemplar, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6892,7 +6894,7 @@ public interface Grid {
         /**
          * Run grid search for Word2Vec model.
          */
-        public static Call<Word2VecV3> trainWord2vec(Grid z, Word2VecParametersV3 p) {
+        public static Call<Word2VecV3> trainWord2vec(final Grid z, final Word2VecParametersV3 p) {
             return z.trainWord2vec(p.vecSize, p.windowSize, p.sentSampleRate, p.normModel, p.epochs, p.minWordFreq, p.initLearningRate,
                     p.wordModel, (p.preTrained == null ? null : p.preTrained.name), (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6910,7 +6912,7 @@ public interface Grid {
         /**
          * Resume grid search for Word2Vec model.
          */
-        public static Call<Word2VecV3> resumeWord2vec(Grid z, Word2VecParametersV3 p) {
+        public static Call<Word2VecV3> resumeWord2vec(final Grid z, final Word2VecParametersV3 p) {
             return z.resumeWord2vec(p.vecSize, p.windowSize, p.sentSampleRate, p.normModel, p.epochs, p.minWordFreq, p.initLearningRate,
                     p.wordModel, (p.preTrained == null ? null : p.preTrained.name), (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -6928,7 +6930,7 @@ public interface Grid {
         /**
          * Run grid search for StackedEnsemble model.
          */
-        public static Call<StackedEnsembleV99> trainStackedensemble(Grid z, StackedEnsembleParametersV99 p) {
+        public static Call<StackedEnsembleV99> trainStackedensemble(final Grid z, final StackedEnsembleParametersV99 p) {
             return z.trainStackedensemble((p.baseModels == null ? null : keyArrayToStringArray(p.baseModels)), p.metalearnerAlgorithm,
                     p.metalearnerNfolds, p.metalearnerFoldAssignment,
                     (p.metalearnerFoldColumn == null ? null : p.metalearnerFoldColumn.columnName), p.metalearnerTransform,
@@ -6949,7 +6951,7 @@ public interface Grid {
         /**
          * Resume grid search for StackedEnsemble model.
          */
-        public static Call<StackedEnsembleV99> resumeStackedensemble(Grid z, StackedEnsembleParametersV99 p) {
+        public static Call<StackedEnsembleV99> resumeStackedensemble(final Grid z, final StackedEnsembleParametersV99 p) {
             return z.resumeStackedensemble((p.baseModels == null ? null : keyArrayToStringArray(p.baseModels)), p.metalearnerAlgorithm,
                     p.metalearnerNfolds, p.metalearnerFoldAssignment,
                     (p.metalearnerFoldColumn == null ? null : p.metalearnerFoldColumn.columnName), p.metalearnerTransform,
@@ -6970,7 +6972,7 @@ public interface Grid {
         /**
          * Run grid search for CoxPH model.
          */
-        public static Call<CoxPHV3> trainCoxph(Grid z, CoxPHParametersV3 p) {
+        public static Call<CoxPHV3> trainCoxph(final Grid z, final CoxPHParametersV3 p) {
             return z.trainCoxph((p.startColumn == null ? null : p.startColumn.columnName),
                     (p.stopColumn == null ? null : p.stopColumn.columnName), p.stratifyBy, p.ties, p.init, p.lreMin, p.maxIterations,
                     p.interactionsOnly, p.interactions, p.interactionPairs, p.useAllFactorLevels, p.singleNodeMode,
@@ -6989,7 +6991,7 @@ public interface Grid {
         /**
          * Resume grid search for CoxPH model.
          */
-        public static Call<CoxPHV3> resumeCoxph(Grid z, CoxPHParametersV3 p) {
+        public static Call<CoxPHV3> resumeCoxph(final Grid z, final CoxPHParametersV3 p) {
             return z.resumeCoxph((p.startColumn == null ? null : p.startColumn.columnName),
                     (p.stopColumn == null ? null : p.stopColumn.columnName), p.stratifyBy, p.ties, p.init, p.lreMin, p.maxIterations,
                     p.interactionsOnly, p.interactions, p.interactionPairs, p.useAllFactorLevels, p.singleNodeMode,
@@ -7008,7 +7010,7 @@ public interface Grid {
         /**
          * Run grid search for Generic model.
          */
-        public static Call<GenericV3> trainGeneric(Grid z, GenericParametersV3 p) {
+        public static Call<GenericV3> trainGeneric(final Grid z, final GenericParametersV3 p) {
             return z.trainGeneric(p.path, (p.modelKey == null ? null : p.modelKey.name), (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
@@ -7025,7 +7027,7 @@ public interface Grid {
         /**
          * Resume grid search for Generic model.
          */
-        public static Call<GenericV3> resumeGeneric(Grid z, GenericParametersV3 p) {
+        public static Call<GenericV3> resumeGeneric(final Grid z, final GenericParametersV3 p) {
             return z.resumeGeneric(p.path, (p.modelKey == null ? null : p.modelKey.name), (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
                     p.nfolds, p.keepCrossValidationModels, p.keepCrossValidationPredictions, p.keepCrossValidationFoldAssignment,
@@ -7042,7 +7044,7 @@ public interface Grid {
         /**
          * Run grid search for GAM model.
          */
-        public static Call<GAMV3> trainGam(Grid z, GAMParametersV3 p) {
+        public static Call<GAMV3> trainGam(final Grid z, final GAMParametersV3 p) {
             return z.trainGam(p.seed, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha, p.lambda,
                     p.startval, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.standardize, p.missingValuesHandling,
                     (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations, p.betaEpsilon, p.objectiveEpsilon,
@@ -7066,7 +7068,7 @@ public interface Grid {
         /**
          * Resume grid search for GAM model.
          */
-        public static Call<GAMV3> resumeGam(Grid z, GAMParametersV3 p) {
+        public static Call<GAMV3> resumeGam(final Grid z, final GAMParametersV3 p) {
             return z.resumeGam(p.seed, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha, p.lambda,
                     p.startval, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.standardize, p.missingValuesHandling,
                     (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations, p.betaEpsilon, p.objectiveEpsilon,
@@ -7090,7 +7092,7 @@ public interface Grid {
         /**
          * Run grid search for ANOVAGLM model.
          */
-        public static Call<ANOVAGLMV3> trainAnovaglm(Grid z, ANOVAGLMParametersV3 p) {
+        public static Call<ANOVAGLMV3> trainAnovaglm(final Grid z, final ANOVAGLMParametersV3 p) {
             return z.trainAnovaglm(p.seed, p.standardize, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.alpha, p.lambda,
                     p.lambdaSearch, p.solver, p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative,
                     p.computePValues, p.maxIterations, p.link, p.prior, p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize,
@@ -7110,7 +7112,7 @@ public interface Grid {
         /**
          * Resume grid search for ANOVAGLM model.
          */
-        public static Call<ANOVAGLMV3> resumeAnovaglm(Grid z, ANOVAGLMParametersV3 p) {
+        public static Call<ANOVAGLMV3> resumeAnovaglm(final Grid z, final ANOVAGLMParametersV3 p) {
             return z.resumeAnovaglm(p.seed, p.standardize, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.alpha, p.lambda,
                     p.lambdaSearch, p.solver, p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative,
                     p.computePValues, p.maxIterations, p.link, p.prior, p.balanceClasses, p.classSamplingFactors, p.maxAfterBalanceSize,
@@ -7130,7 +7132,7 @@ public interface Grid {
         /**
          * Run grid search for PSVM model.
          */
-        public static Call<PSVMV3> trainPsvm(Grid z, PSVMParametersV3 p) {
+        public static Call<PSVMV3> trainPsvm(final Grid z, final PSVMParametersV3 p) {
             return z.trainPsvm(p.hyperParam, p.kernelType, p.gamma, p.rankRatio, p.positiveWeight, p.negativeWeight,
                     p.disableTrainingMetrics, p.svThreshold, p.maxIterations, p.factThreshold, p.feasibleThreshold, p.surrogateGapThreshold,
                     p.muFactor, p.seed, (p.modelId == null ? null : p.modelId.name),
@@ -7149,7 +7151,7 @@ public interface Grid {
         /**
          * Resume grid search for PSVM model.
          */
-        public static Call<PSVMV3> resumePsvm(Grid z, PSVMParametersV3 p) {
+        public static Call<PSVMV3> resumePsvm(final Grid z, final PSVMParametersV3 p) {
             return z.resumePsvm(p.hyperParam, p.kernelType, p.gamma, p.rankRatio, p.positiveWeight, p.negativeWeight,
                     p.disableTrainingMetrics, p.svThreshold, p.maxIterations, p.factThreshold, p.feasibleThreshold, p.surrogateGapThreshold,
                     p.muFactor, p.seed, (p.modelId == null ? null : p.modelId.name),
@@ -7168,7 +7170,7 @@ public interface Grid {
         /**
          * Run grid search for RuleFit model.
          */
-        public static Call<RuleFitV3> trainRulefit(Grid z, RuleFitParametersV3 p) {
+        public static Call<RuleFitV3> trainRulefit(final Grid z, final RuleFitParametersV3 p) {
             return z.trainRulefit(p.seed, p.algorithm, p.minRuleLength, p.maxRuleLength, p.maxNumRules, p.modelType, p.ruleGenerationNtrees,
                     p.removeDuplicates, p.lambda, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -7186,7 +7188,7 @@ public interface Grid {
         /**
          * Resume grid search for RuleFit model.
          */
-        public static Call<RuleFitV3> resumeRulefit(Grid z, RuleFitParametersV3 p) {
+        public static Call<RuleFitV3> resumeRulefit(final Grid z, final RuleFitParametersV3 p) {
             return z.resumeRulefit(p.seed, p.algorithm, p.minRuleLength, p.maxRuleLength, p.maxNumRules, p.modelType,
                     p.ruleGenerationNtrees, p.removeDuplicates, p.lambda, (p.modelId == null ? null : p.modelId.name),
                     (p.trainingFrame == null ? null : p.trainingFrame.name), (p.validationFrame == null ? null : p.validationFrame.name),
@@ -7204,7 +7206,7 @@ public interface Grid {
         /**
          * Run grid search for UpliftDRF model.
          */
-        public static Call<UpliftDRFV3> trainUpliftdrf(Grid z, UpliftDRFParametersV3 p) {
+        public static Call<UpliftDRFV3> trainUpliftdrf(final Grid z, final UpliftDRFParametersV3 p) {
             return z.trainUpliftdrf(p.mtries, p.sampleRate, p.treatmentColumn, p.upliftMetric, p.auucType, p.auucNbins, p.balanceClasses,
                     p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins,
                     p.nbinsTopLevel, p.nbinsCats, p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree,
@@ -7225,7 +7227,7 @@ public interface Grid {
         /**
          * Resume grid search for UpliftDRF model.
          */
-        public static Call<UpliftDRFV3> resumeUpliftdrf(Grid z, UpliftDRFParametersV3 p) {
+        public static Call<UpliftDRFV3> resumeUpliftdrf(final Grid z, final UpliftDRFParametersV3 p) {
             return z.resumeUpliftdrf(p.mtries, p.sampleRate, p.treatmentColumn, p.upliftMetric, p.auucType, p.auucNbins, p.balanceClasses,
                     p.classSamplingFactors, p.maxAfterBalanceSize, p.maxConfusionMatrixSize, p.ntrees, p.maxDepth, p.minRows, p.nbins,
                     p.nbinsTopLevel, p.nbinsCats, p.r2Stopping, p.seed, p.buildTreeOneNode, p.sampleRatePerClass, p.colSampleRatePerTree,
@@ -7246,7 +7248,7 @@ public interface Grid {
         /**
          * Run grid search for ModelSelection model.
          */
-        public static Call<ModelSelectionV3> trainModelselection(Grid z, ModelSelectionParametersV3 p) {
+        public static Call<ModelSelectionV3> trainModelselection(final Grid z, final ModelSelectionParametersV3 p) {
             return z.trainModelselection(p.seed, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha, p.lambda,
                     p.lambdaSearch, p.earlyStopping, p.nlambdas, p.scoreIterationInterval, p.standardize, p.coldStart,
                     p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations,
@@ -7269,7 +7271,7 @@ public interface Grid {
         /**
          * Resume grid search for ModelSelection model.
          */
-        public static Call<ModelSelectionV3> resumeModelselection(Grid z, ModelSelectionParametersV3 p) {
+        public static Call<ModelSelectionV3> resumeModelselection(final Grid z, final ModelSelectionParametersV3 p) {
             return z.resumeModelselection(p.seed, p.family, p.tweedieVariancePower, p.tweedieLinkPower, p.theta, p.solver, p.alpha,
                     p.lambda, p.lambdaSearch, p.earlyStopping, p.nlambdas, p.scoreIterationInterval, p.standardize, p.coldStart,
                     p.missingValuesHandling, (p.plugValues == null ? null : p.plugValues.name), p.nonNegative, p.maxIterations,
@@ -7292,13 +7294,16 @@ public interface Grid {
         /**
          * Return an array of Strings for an array of keys.
          */
-        public static String[] keyArrayToStringArray(KeyV3[] keys) {
-            if (keys == null)
+        public static String[] keyArrayToStringArray(final KeyV3[] keys) {
+            if (keys == null) {
                 return null;
-            String[] ids = new String[keys.length];
+            }
+            final String[] ids = new String[keys.length];
             int i = 0;
-            for (KeyV3 key : keys)
-                ids[i++] = key.name;
+            for (final KeyV3 key : keys) {
+                ids[i] = key.name;
+                i++;
+            }
             return ids;
         }
     }

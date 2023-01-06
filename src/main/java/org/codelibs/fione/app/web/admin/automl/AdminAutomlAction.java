@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2022 CodeLibs Project and the Others.
+ * Copyright 2012-2023 CodeLibs Project and the Others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -706,10 +706,8 @@ public class AdminAutomlAction extends FioneAdminAction {
                 Object value = e.getValue();
                 final var isArray = pythonModule.getComponents().stream().filter(c -> key.equals(c.get("id")))
                         .map(c -> (String) c.get("type")).anyMatch(s -> s.startsWith("MULTI"));
-                if (!isArray && value instanceof String[] values) {
-                    if (values.length > 0) {
-                        value = values[0];
-                    }
+                if ((!isArray && value instanceof final String[] values) && (values.length > 0)) {
+                    value = values[0];
                 }
                 params.put(key, value);
             });

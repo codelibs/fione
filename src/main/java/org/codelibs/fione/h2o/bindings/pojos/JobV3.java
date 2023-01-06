@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2022 CodeLibs Project and the Others.
+ * Copyright 2012-2023 CodeLibs Project and the Others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -127,21 +127,14 @@ public class JobV3 extends SchemaV3 {
     }
 
     public String getIconType() {
-        switch (getKind()) {
-        case MODEL:
-        case AUTO_ML:
-            return "hammer";
-        case FRAME:
-            return "table";
-        case GRID:
-            return "th";
-        case EXPORT:
-            return "download";
-        case IMPORT:
-            return "upload";
-        default:
-            return "question";
-        }
+        return switch (getKind()) {
+        case MODEL, AUTO_ML -> "hammer";
+        case FRAME -> "table";
+        case GRID -> "th";
+        case EXPORT -> "download";
+        case IMPORT -> "upload";
+        default -> "question";
+        };
     }
 
     public Kind getKind() {
@@ -150,13 +143,17 @@ public class JobV3 extends SchemaV3 {
         }
         if (description.contains("AutoML build") || description.contains("AutoML starting")) {
             return Kind.AUTO_ML;
-        } else if (description.contains("Parse") || description.contains("Export dataset") || description.contains("Pivot")) {
+        }
+        if (description.contains("Parse") || description.contains("Export dataset") || description.contains("Pivot")) {
             return Kind.FRAME;
-        } else if (description.contains("Grid Search")) {
+        }
+        if (description.contains("Grid Search")) {
             return Kind.GRID;
-        } else if (description.contains("Export ")) {
+        }
+        if (description.contains("Export ")) {
             return Kind.EXPORT;
-        } else if (description.contains("Import ")) {
+        }
+        if (description.contains("Import ")) {
             return Kind.IMPORT;
         }
         return Kind.MODEL;
