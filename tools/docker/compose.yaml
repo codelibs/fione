@@ -16,7 +16,7 @@ services:
     command: server /data
 
   h2o01:
-    image: ghcr.io/codelibs/h2o:3.36.1.1
+    image: ghcr.io/codelibs/h2o:3.38.0.4
     container_name: h2o01
     restart: always
     ports:
