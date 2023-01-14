@@ -1347,6 +1347,7 @@ public class ProjectHelper {
                         }).collect(Collectors.toList());
                         csvWriter.writeValues(valueList);
                     }
+                    csvWriter.flush();
                 }
                 pipeWriter.join();
             }
@@ -1358,9 +1359,9 @@ public class ProjectHelper {
             if (logger.isDebugEnabled()) {
                 logger.debug("copying {} to {}.", tempObjectName, objectName);
             }
-            minioClient.copyObject(
-                    CopyObjectArgs.builder().source(CopySource.builder().bucket(fessConfig.getStorageBucket()).object(objectName).build())
-                            .bucket(fessConfig.getStorageBucket()).object(tempObjectName).build());
+            minioClient.copyObject(CopyObjectArgs.builder()
+                    .source(CopySource.builder().bucket(fessConfig.getStorageBucket()).object(tempObjectName).build())
+                    .bucket(fessConfig.getStorageBucket()).object(objectName).build());
             if (logger.isDebugEnabled()) {
                 logger.debug("removing {}.", tempObjectName);
             }
