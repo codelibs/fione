@@ -17,7 +17,7 @@
 			<param name="jar.groupId" value="org/codelibs/fione" />
 			<param name="jar.artifactId" value="fione-serving" />
 			<param name="jar.version" value="3.40.0.0-SNAPSHOT" />
-			<param name="file.version" value="3.40.0.020230311.060953-1" />
+			<param name="file.version" value="3.40.0.0-20230311.060953-1" />
 		</antcall>
 	</target>
 
