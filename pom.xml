@@ -5,7 +5,7 @@
 	<artifactId>fione</artifactId>
 	<packaging>war</packaging>
 	<name>Fione</name>
-	<version>14.8.0-SNAPSHOT</version>
+	<version>15.3.2-SNAPSHOT</version>
 	<url>https://fione.codelibs.org/</url>
 	<inceptionYear>2009</inceptionYear>
 	<licenses>
@@ -30,7 +30,7 @@
 	<parent>
 		<groupId>org.codelibs.fess</groupId>
 		<artifactId>fess-parent</artifactId>
-		<version>14.8.0</version>
+		<version>15.3.2</version>
 	</parent>
 	<properties>
 		<retrofit.version>2.9.0</retrofit.version>
@@ -400,9 +400,9 @@
 			<version>${tomcat.boot.version}</version>
 		</dependency>
 		<dependency>
-			<groupId>javax.transaction</groupId>
-			<artifactId>javax.transaction-api</artifactId>
-			<version>${javax.transaction.api.version}</version>
+			<groupId>jakarta.transaction</groupId>
+			<artifactId>jakarta.transaction-api</artifactId>
+			<version>${jakarta.transaction.api.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.dbflute</groupId>

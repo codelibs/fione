@@ -15,7 +15,7 @@
  */
 package org.codelibs.fione.app.web.admin.systemml;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
