@@ -159,7 +159,8 @@
 				<configuration>
 					<target>
 						<ant antfile="${basedir}/dbflute.xml" target="download.dbflute" />
-						<ant antfile="deps.xml" target="install.jars" />
+						<!-- deps.xml disabled: old fione-serving snapshot no longer available -->
+						<!-- <ant antfile="deps.xml" target="install.jars" /> -->
 					</target>
 				</configuration>
 				<goals>
