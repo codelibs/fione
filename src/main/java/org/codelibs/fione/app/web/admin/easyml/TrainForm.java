@@ -18,8 +18,8 @@ package org.codelibs.fione.app.web.admin.easyml;
 import java.util.HashMap;
 import java.util.Map;
 
-import javax.validation.constraints.Max;
-import javax.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 import org.codelibs.fione.Constants;
 import org.lastaflute.web.validation.Required;

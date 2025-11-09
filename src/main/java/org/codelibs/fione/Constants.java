@@ -15,10 +15,19 @@
  */
 package org.codelibs.fione;
 
-public class Constants extends org.codelibs.fess.Constants {
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+
+public class Constants {
     private Constants() {
+        // Utility class - prevent instantiation
     }
 
+    // Character encoding constants (previously inherited from Fess)
+    public static final Charset UTF_8_CHARSET = StandardCharsets.UTF_8;
+    public static final String UTF_8 = "UTF-8";
+
+    // Fione-specific constants
     public static final String REGRESSION_TYPE = "r";
 
     public static final String MULTICLASS_TYPE = "m";

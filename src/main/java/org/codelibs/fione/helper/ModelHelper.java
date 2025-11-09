@@ -17,7 +17,7 @@ package org.codelibs.fione.helper;
 
 import java.io.Reader;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 
 import org.codelibs.fione.exception.ModelIOException;
 import org.codelibs.fione.h2o.bindings.pojos.ModelSchemaBaseV3;
