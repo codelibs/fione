@@ -24,6 +24,7 @@ from fione.api import (
     routes_system,
     routes_users,
 )
+from fione.api.deps import UPLOAD_SLACK_BYTES
 from fione.api.errors import error_response, install_error_handlers
 from fione.api.security import LoginThrottle, SessionSigner, ensure_setup_token
 from fione.auth import service as auth_service
@@ -35,8 +36,6 @@ from fione.version import __version__
 API_PREFIX = "/api/v1"
 DB_FILE = "fione.db"
 MAX_BODY_BYTES = 1 << 20
-# Multipart framing around the file: the file itself is checked against max_upload_bytes.
-UPLOAD_SLACK_BYTES = 1 << 20
 
 ROUTERS = [
     routes_system.router,

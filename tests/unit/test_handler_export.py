@@ -318,6 +318,33 @@ def test_a_failing_cleanup_does_not_mask_the_original_error(
     assert done.status is JobStatus.FAILED and done.message.startswith("could not record progress")
 
 
+def test_a_new_export_replaces_the_older_ones(conn, run_job, owner, project, records, storage):
+    first = run_job(submit_export_all(conn, owner, project.id))
+    stray = f"projects/{project.id}/exports/stray.zip"
+    storage.put(stray, b"old")
+    second = run_job(submit_export_all(conn, owner, project.id))
+    assert (first.status, second.status) == (JobStatus.DONE, JobStatus.DONE)
+    assert exports(storage, project) == [second.result["key"]]
+
+
+def test_a_failing_removal_of_an_old_export_is_only_logged(
+    conn, run_job, owner, project, records, storage, monkeypatch, caplog
+):
+    first = run_job(submit_export_all(conn, owner, project.id))
+    original = type(storage).delete
+
+    def delete(self, key):
+        if key == first.result["key"]:
+            raise OSError("disk says no")
+        original(self, key)
+
+    monkeypatch.setattr(type(storage), "delete", delete)
+    second = run_job(submit_export_all(conn, owner, project.id))
+    assert second.status is JobStatus.DONE, second.message
+    assert sorted(exports(storage, project)) == sorted([first.result["key"], second.result["key"]])
+    assert "could not remove the older export" in caplog.text
+
+
 def test_no_temp_file_is_left_behind(conn, run_job, job, tmp_path, monkeypatch):
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path / "scratch"))
     (tmp_path / "scratch").mkdir()

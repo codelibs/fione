@@ -24,6 +24,9 @@ MAX_SLUG = 80
 _SHOWN_CHARS = 50
 
 CHUNK = 1 << 20
+# The zip's members, in order; the run command mounts the unzipped ``model`` directory.
+_MEMBERS = ((MANIFEST_FILE, zipfile.ZIP_DEFLATED), (MODEL_FILE, zipfile.ZIP_STORED))
+BUNDLE_FILES = tuple(f"model/{name}" for name, _ in _MEMBERS)
 CONTAINER_PORT = 8080
 HOST_PORT = 8081
 
@@ -72,7 +75,7 @@ def example_curl(columns: Sequence[str]) -> str:
 
 def _write_zip(storage: Storage, record: ModelRecord, out) -> None:
     with zipfile.ZipFile(out, "w") as zf:
-        for name, kind in ((MANIFEST_FILE, zipfile.ZIP_DEFLATED), (MODEL_FILE, zipfile.ZIP_STORED)):
+        for name, kind in _MEMBERS:
             try:
                 source = storage.open_read(record.storage_prefix + name)
             except KeyError as e:

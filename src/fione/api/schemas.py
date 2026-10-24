@@ -173,10 +173,13 @@ _ADMIN_ONLY_FIELDS = ("traceback", "log_tail")
 
 
 def event_out(event_id: int, event: Event, *, admin: bool) -> dict:
-    """The event. Non-admins get no traceback or worker log tail, and only the first line of
+    """The event, never with a storage ``key``. Non-admins get no traceback or worker log
+    tail, and only the first line of
     an error: the ``error`` field, and the ``message`` of an engine error notice (one that
     names its ``exception``)."""
     data = event.data
+    if isinstance(data, dict) and "key" in data:  # a storage key (export events)
+        data = {k: v for k, v in data.items() if k != "key"}
     if not admin and isinstance(data, dict):
         data = {k: v for k, v in data.items() if k not in _ADMIN_ONLY_FIELDS}
         for key in ("error", "message") if "exception" in data else ("error",):

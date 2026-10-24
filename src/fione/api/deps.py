@@ -23,6 +23,8 @@ from fione.auth.roles import project_access as membership
 from fione.projects.service import Project, ProjectNotFound, require_project
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+# Multipart framing around an uploaded file: the file itself is checked against its own limit.
+UPLOAD_SLACK_BYTES = 1 << 20
 
 
 def get_conn(request: Request) -> Iterator[sqlite3.Connection]:

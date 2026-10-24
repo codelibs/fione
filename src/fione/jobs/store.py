@@ -82,16 +82,23 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> Job:
 
 
 def list_jobs(
-    conn: sqlite3.Connection, project_id: str | None, *, status: JobStatus | None = None
+    conn: sqlite3.Connection,
+    project_id: str | None,
+    *,
+    status: JobStatus | None = None,
+    limit: int | None = None,
 ) -> list[Job]:
-    """The project's jobs, newest first."""
+    """The project's jobs, newest first; at most ``limit`` of them if given."""
     sql = "SELECT * FROM jobs WHERE project_id IS ?"
     args: list = [project_id]
     if status is not None:
         sql += " AND status = ?"
         args.append(status)
-    rows = conn.execute(sql + " ORDER BY created_at DESC, id DESC", args).fetchall()
-    return [_job(r) for r in rows]
+    sql += " ORDER BY created_at DESC, id DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        args.append(limit)
+    return [_job(r) for r in conn.execute(sql, args).fetchall()]
 
 
 def append_event(conn: sqlite3.Connection, job_id: int, event: Event) -> None:
@@ -111,12 +118,14 @@ def append_event(conn: sqlite3.Connection, job_id: int, event: Event) -> None:
 
 
 def events_since(
-    conn: sqlite3.Connection, job_id: int, after_id: int = 0
+    conn: sqlite3.Connection, job_id: int, after_id: int = 0, *, limit: int = -1
 ) -> list[tuple[int, Event]]:
-    """``(event id, event)`` pairs after ``after_id``, oldest first; pass the last id to page."""
+    """``(event id, event)`` pairs after ``after_id``, oldest first, at most ``limit`` (-1: no
+    limit); pass the last id to page."""
     rows = conn.execute(
-        "SELECT id, ts, type, data_json FROM job_events WHERE job_id = ? AND id > ? ORDER BY id",
-        (job_id, after_id),
+        "SELECT id, ts, type, data_json FROM job_events WHERE job_id = ? AND id > ?"
+        " ORDER BY id LIMIT ?",
+        (job_id, after_id, limit),
     ).fetchall()
     return [(r["id"], Event(r["type"], r["ts"], json.loads(r["data_json"]))) for r in rows]
 

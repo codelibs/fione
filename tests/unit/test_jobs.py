@@ -171,6 +171,19 @@ def test_events_since_paginates_in_order(conn, enqueue):
     assert store.events_since(conn, job.id, after_id=page[-1][0]) == []
 
 
+def test_events_since_and_list_jobs_take_a_limit(conn, enqueue, project):
+    job = enqueue("echo")
+    for i in range(5):
+        store.append_event(conn, job.id, Event("trial", data={"i": i}))
+    first = store.events_since(conn, job.id, limit=2)
+    assert [e.data["i"] for _, e in first] == [0, 1]
+    rest = store.events_since(conn, job.id, after_id=first[-1][0], limit=2)
+    assert [e.data["i"] for _, e in rest] == [2, 3]
+    newer = [enqueue("echo") for _ in range(3)]
+    listed = store.list_jobs(conn, project.id, limit=2)
+    assert [j.id for j in listed] == [newer[2].id, newer[1].id]
+
+
 def test_event_data_over_64kb_is_replaced_by_a_marker(conn, enqueue):
     job = enqueue("echo")
     store.append_event(conn, job.id, Event("notice", data={"message": "あ" * 30000}))

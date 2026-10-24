@@ -46,8 +46,9 @@ def export_models(ctx: JobContext) -> None:
     """Store ``projects/<id>/exports/<job id>.zip``; a cancelled run leaves no object.
 
     The zip is built in a temp file and stored only after a forced stop check; a cancel landing
-    during the store, or a failure after it, deletes the object again. Old exports are not
-    cleaned up here: ``delete_project`` removes them with the project.
+    during the store, or a failure after it, deletes the object again. Only the latest export
+    is kept: once this one is stored, the project's other exports are removed (a failure to
+    remove one is logged, not fatal).
     """
     project_id = ctx.job.project_id
     records = models_service.list_models(ctx.conn, project_id)
@@ -75,3 +76,17 @@ def export_models(ctx: JobContext) -> None:
                 # Never mask the original error (a JobAbort must stay a JobAbort).
                 log.exception("could not remove %s", key)
             raise
+    _remove_older(ctx, key)
+
+
+def _remove_older(ctx: JobContext, key: str) -> None:
+    try:
+        older = [k for k in ctx.storage.list(f"projects/{ctx.job.project_id}/exports/") if k != key]
+    except Exception:
+        log.exception("could not list the older exports of %s", ctx.job.project_id)
+        return
+    for old in older:
+        try:
+            ctx.storage.delete(old)
+        except Exception:
+            log.exception("could not remove the older export %s", old)

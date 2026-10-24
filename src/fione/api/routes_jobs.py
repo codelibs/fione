@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from fione import db
 from fione.api.deps import Conn, CurrentUser, ProjectContext, authorize, project_access
 from fione.api.errors import ApiError, not_found, service_errors
 from fione.api.schemas import (
@@ -101,13 +102,25 @@ def submit_module(body: ModuleJobIn, ctx: Writer, conn: Conn) -> dict:
     return job_out(job, admin=_admin(ctx.user))
 
 
+def _active_jobs(conn, project_id: str) -> list[Job]:
+    return [
+        job
+        for status in (JobStatus.QUEUED, JobStatus.RUNNING)
+        for job in store.list_jobs(conn, project_id, status=status)
+    ]
+
+
 @router.post("/projects/{project_id}/jobs/export", status_code=201)
 def submit_export(ctx: Reader, conn: Conn) -> dict:
     """Queue an export of every model of the project into one zip. Download the result from
     ``GET /projects/{project_id}/exports/{job_id}``."""
     # The one job a reader may submit (every other submission needs write): it yields no
-    # more than the per-model exports, which read access can already download.
-    with service_errors():
+    # more than the per-model exports, which read access can already download. One export
+    # at a time per project, so readers cannot flood the queue.
+    with db.immediate(conn), service_errors():
+        if any(j.kind == EXPORT_KIND for j in _active_jobs(conn, ctx.project.id)):
+            message = "an export of this project is already queued or running"
+            raise ApiError(409, "conflict", message)
         job = submit_export_all(conn, ctx.user, ctx.project.id)
     return job_out(job, admin=_admin(ctx.user))
 
@@ -118,17 +131,19 @@ def list_jobs(
     conn: Conn,
     project_id: str | None = Query(None, max_length=100),
     status: JobStatus | None = None,
+    limit: int = Query(200, ge=1, le=1000),
 ) -> list[dict]:
-    """Jobs newest first: of ``project_id``, or of every project the caller can read."""
+    """The newest ``limit`` jobs, newest first: of ``project_id``, or of every project the
+    caller can read."""
     if project_id is not None:
         projects.require_project(conn, project_id)
         authorize(conn, user, project_id, "read", "project not found")
         ids = [project_id]
     else:
         ids = [p.id for p in projects.list_projects(conn, user)]
-    jobs = [job for pid in ids for job in store.list_jobs(conn, pid, status=status)]
+    jobs = [job for pid in ids for job in store.list_jobs(conn, pid, status=status, limit=limit)]
     jobs.sort(key=lambda j: (j.created_at, j.id), reverse=True)
-    return [job_out(job, admin=_admin(user)) for job in jobs]
+    return [job_out(job, admin=_admin(user)) for job in jobs[:limit]]
 
 
 @router.get("/jobs/{job_id}")
@@ -142,11 +157,12 @@ def job_events(
     user: CurrentUser,
     conn: Conn,
     after: int = Query(0, ge=0, le=MAX_ID),
+    limit: int = Query(500, ge=1, le=1000),
 ) -> dict:
-    """Events after the event id ``after``, oldest first; pass ``last_id`` back as ``after``
-    to get only newer ones."""
+    """At most ``limit`` events after the event id ``after``, oldest first; pass ``last_id``
+    back as ``after`` for the next page (an empty page: nothing newer yet)."""
     job = _job(conn, user, job_id, "read")
-    events = store.events_since(conn, job.id, after)
+    events = store.events_since(conn, job.id, after, limit=limit)
     return {
         "events": [event_out(i, e, admin=_admin(user)) for i, e in events],
         "last_id": events[-1][0] if events else after,

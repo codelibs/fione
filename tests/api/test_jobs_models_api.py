@@ -1,5 +1,6 @@
 import io
 import os
+import shlex
 import time
 import zipfile
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from api_helpers import (
     upload,
     wait_job,
 )
+from starlette.requests import Request
 
 from fione.auth.roles import Role
 from fione.engine.events import Event
@@ -210,11 +212,23 @@ def test_automl_trains_and_the_model_exports_imports_serves_and_predicts(make_en
         f'attachment; filename="fione-export-P-{export_job["id"]}.zip"'
     )
     assert zip_names(download.content) == {f"model-{model_id}.zip"}
+    events = c.get(f"/api/v1/jobs/{export_job['id']}/events", headers=h["viewer"]).json()
+    assert events["events"] and "key" not in str(events)
 
-    assert c.delete(f"/api/v1/jobs/{export_job['id']}", headers=h["owner"]).status_code == 204
-    key = f"projects/{p}/exports/{export_job['id']}.zip"
+    # A second export replaces the first: only the latest zip is kept.
+    r = c.post(f"/api/v1/projects/{p}/jobs/export", headers=h["viewer"])
+    newer = wait_job(c, r.json()["id"], h["viewer"])
+    assert newer["status"] == "done", newer
+    exports = f"/api/v1/projects/{p}/exports"
+    old = c.get(f"{exports}/{export_job['id']}", headers=h["viewer"])
+    assert old.status_code == 404 and "superseded" in old.json()["error"]
+    assert c.get(f"{exports}/{newer['id']}", headers=h["viewer"]).status_code == 200
+    assert env.storage.list(f"projects/{p}/exports/") == [f"projects/{p}/exports/{newer['id']}.zip"]
+
+    assert c.delete(f"/api/v1/jobs/{newer['id']}", headers=h["owner"]).status_code == 204
+    key = f"projects/{p}/exports/{newer['id']}.zip"
     assert not env.storage.exists(key)
-    assert not (env.data_dir / "jobs" / f"{export_job['id']}.log").exists()
+    assert not (env.data_dir / "jobs" / f"{newer['id']}.log").exists()
 
 
 def test_a_running_job_is_cancelled(make_env, monkeypatch):
@@ -369,6 +383,46 @@ def test_events_page_with_after(env):
     assert env.client.get(url, params={"after": 2**63}, headers=env.h["viewer"]).status_code == 422
 
 
+def test_events_come_in_pages_of_limit(env):
+    job_id = queued_job(env, env.p)
+    conn = env.conn()
+    try:
+        for i in range(7):
+            store.append_event(conn, job_id, Event("notice", data={"i": i}))
+    finally:
+        conn.close()
+    url = f"/api/v1/jobs/{job_id}/events"
+    seen, after, pages = [], 0, 0
+    while True:
+        page = env.client.get(url, params={"after": after, "limit": 3}, headers=env.h["viewer"])
+        body = page.json()
+        if not body["events"]:
+            break
+        assert len(body["events"]) <= 3
+        seen += [e["data"]["i"] for e in body["events"]]
+        after, pages = body["last_id"], pages + 1
+    assert seen == list(range(7)) and pages == 3
+    for bad in (0, 1001):
+        assert (
+            env.client.get(url, params={"limit": bad}, headers=env.h["viewer"]).status_code == 422
+        )
+
+
+def test_the_job_list_is_newest_first_and_limited(env):
+    ids = []
+    for _ in range(3):  # alternating projects: the limit applies to the merged list
+        ids += [queued_job(env, env.p), queued_job(env, env.q)]
+    url = "/api/v1/jobs"
+    newest = env.client.get(url, params={"limit": 3}, headers=env.h["admin"]).json()
+    assert [j["id"] for j in newest] == ids[::-1][:3]
+    ids = ids[0::2]  # the owner's
+    one = env.client.get(url, params={"project_id": env.p, "limit": 1}, headers=env.h["owner"])
+    assert [j["id"] for j in one.json()] == [ids[-1]]
+    assert len(env.client.get(url, headers=env.h["owner"]).json()) == 3
+    for bad in (0, 1001):
+        assert env.client.get(url, params={"limit": bad}, headers=env.h["owner"]).status_code == 422
+
+
 def test_deleting_a_job_removes_its_log_and_export_zip(env):
     logs = env.data_dir / "jobs"
     logs.mkdir(parents=True, exist_ok=True)
@@ -388,10 +442,12 @@ def test_deleting_a_job_removes_its_log_and_export_zip(env):
 def test_deleting_the_finished_jobs_of_a_project(env):
     logs = env.data_dir / "jobs"
     logs.mkdir(parents=True, exist_ok=True)
-    done = finished_job(env, env.p)
+    done = finished_job(env, env.p, kind="export_models")
+    env.storage.put(f"projects/{env.p}/exports/{done}.zip", b"zip")
     failed = finished_job(env, env.p, status=JobStatus.FAILED, message="boom")
     queued = queued_job(env, env.p)
-    elsewhere = finished_job(env, env.q)
+    elsewhere = finished_job(env, env.q, kind="export_models")
+    env.storage.put(f"projects/{env.q}/exports/{elsewhere}.zip", b"zip")
     for job_id in (done, failed, queued, elsewhere):
         (logs / f"{job_id}.log").write_text("log")
     url = "/api/v1/jobs"
@@ -404,6 +460,8 @@ def test_deleting_the_finished_jobs_of_a_project(env):
     left = env.client.get(url, params={"project_id": env.p}, headers=env.h["owner"]).json()
     assert [j["id"] for j in left] == [queued]
     assert sorted(p.name for p in logs.iterdir()) == sorted([f"{queued}.log", f"{elsewhere}.log"])
+    assert env.storage.list(f"projects/{env.p}/exports/") == []
+    assert env.storage.exists(f"projects/{env.q}/exports/{elsewhere}.zip")
 
 
 def test_job_and_model_ids_of_another_project_are_404(env):
@@ -457,6 +515,45 @@ def test_export_downloads_are_checked_against_the_path_project(env):
     assert env.client.get(f"{base}/{gone}", headers=admin).status_code == 404
     ok = env.client.get(f"/api/v1/projects/{env.q}/exports/{q_export}", headers=admin)
     assert ok.status_code == 200 and ok.content == b"zip"
+
+
+def test_only_one_export_is_queued_or_running_per_project(env):
+    url = f"/api/v1/projects/{env.p}/jobs/export"
+    a_model(env, env.p)
+    first = env.client.post(url, headers=env.h["viewer"])
+    assert first.status_code == 201
+    again = env.client.post(url, headers=env.h["owner"])
+    assert again.status_code == 409 and "already" in again.json()["error"]
+    assert (
+        env.client.post(
+            f"/api/v1/projects/{env.q}/jobs/export", headers=env.h["outsider"]
+        ).status_code
+        == 201
+    )
+    conn = env.conn()
+    try:  # running counts too
+        store.claim_job(conn, first.json()["id"], "token")
+    finally:
+        conn.close()
+    assert env.client.post(url, headers=env.h["viewer"]).status_code == 409
+    cancelled = env.client.post(f"/api/v1/jobs/{first.json()['id']}/cancel", headers=env.h["owner"])
+    assert cancelled.status_code == 200
+    conn = env.conn()
+    try:  # no runner: settle the cancel the way the worker would
+        store.finish_job(conn, first.json()["id"], JobStatus.CANCELLED)
+    finally:
+        conn.close()
+    assert env.client.post(url, headers=env.h["viewer"]).status_code == 201
+
+
+def test_an_export_that_did_not_complete_is_404(env):
+    base = f"/api/v1/projects/{env.p}/exports"
+    for status in (JobStatus.FAILED, JobStatus.CANCELLED):
+        job_id = finished_job(env, env.p, kind="export_models", status=status)
+        r = env.client.get(f"{base}/{job_id}", headers=env.h["viewer"])
+        assert r.status_code == 404 and r.json()["error"] == "the export did not complete"
+    queued = queued_job(env, env.p, kind="export_models")
+    assert env.client.get(f"{base}/{queued}", headers=env.h["viewer"]).status_code == 409
 
 
 def test_non_admins_see_error_messages_without_tracebacks(env):
@@ -529,6 +626,80 @@ def test_a_bundle_that_cannot_be_made_safely_is_409(make_env):
     r = env.client.get(f"/api/v1/models/{model.id}/serving", headers=env.h["viewer"])
     assert r.status_code == 409
     assert r.json()["error"].startswith("the serving image name is not a valid image name")
+
+
+def test_serving_info_gives_the_command_without_building_the_zip(make_env, monkeypatch):
+    env = make_env(serving_image="registry.example:5000/team/serving")
+    model = a_model(env, env.p)
+    from fione.models import bundle
+
+    def no_zip(*args, **kwargs):
+        raise AssertionError("the zip was built")
+
+    monkeypatch.setattr(bundle, "_write_zip", no_zip)
+    r = env.client.get(f"/api/v1/models/{model.id}/serving/info", headers=env.h["viewer"])
+    assert r.status_code == 200, r.text
+    info = r.json()
+    image = shlex.quote("registry.example:5000/team/serving:test")
+    assert image in info["run_command"] and info["run_command"].startswith("docker run")
+    assert info["example_curl"].startswith("curl -s -X POST localhost:8081/invocations")
+    assert "sepal length (cm)" in info["example_curl"]
+    assert info["files"] == ["model/manifest.json", "model/model.joblib"]
+    assert info["filename"] == f"fione-serving-iris-model-{model.id}.zip"
+    assert tmp_files(env) == []
+    other = a_model(env, env.q)
+    url = f"/api/v1/models/{other.id}/serving/info"
+    assert env.client.get(url, headers=env.h["owner"]).status_code == 404
+    env.storage.delete(model.storage_prefix + "manifest.json")
+    gone = env.client.get(f"/api/v1/models/{model.id}/serving/info", headers=env.h["viewer"])
+    assert gone.status_code == 404
+
+
+def test_serving_info_of_a_bundle_that_cannot_be_made_safely_is_409(make_env):
+    env = make_env(serving_image="Not An Image")
+    model = a_model(env, env.p)
+    r = env.client.get(f"/api/v1/models/{model.id}/serving/info", headers=env.h["viewer"])
+    assert r.status_code == 409 and "not a valid image name" in r.json()["error"]
+
+
+@pytest.mark.parametrize("path", ["/api/v1/modules", "/api/v1/projects/{p}/models/import"])
+def test_admin_only_uploads_refuse_non_admins_before_reading_the_body(env, path):
+    url = path.format(p=env.p)
+    for persona in ("owner", "viewer", "outsider"):
+        for kwargs in (
+            {"json": {"id": "x"}},
+            {"content": b"", "headers": {"Content-Type": "application/json"}},
+            {},
+            {"data": {}, "files": {}},
+        ):
+            headers = {**env.h[persona], **kwargs.pop("headers", {})}
+            r = env.client.post(url, headers=headers, **kwargs)
+            assert r.status_code == 403, (persona, kwargs, r.text)
+
+
+def test_an_import_over_the_archive_limit_is_413(env, monkeypatch):
+    from fione.api import routes_models
+
+    monkeypatch.setattr(routes_models, "MAX_ARCHIVE_BYTES", 1000)
+    url = f"/api/v1/projects/{env.p}/models/import"
+
+    def post(content):
+        return env.client.post(
+            url, files={"file": ("m.zip", content, "application/zip")}, headers=env.h["admin"]
+        )
+
+    with monkeypatch.context() as m:  # refused from Content-Length alone: the form is never read
+
+        def no_form(*args, **kwargs):
+            raise AssertionError("the form was parsed")
+
+        m.setattr(Request, "form", no_form)
+        over_declared = post(b"\0" * (2 << 20))  # Content-Length over the limit plus slack
+    assert over_declared.status_code == 413
+    over_file = post(b"\0" * 5000)  # the body fits the slack, the file does not
+    assert over_file.status_code == 413 and over_file.json()["code"] == "too_large"
+    assert post(b"\0" * 500).status_code == 422  # under the limit: the import's own check
+    assert tmp_files(env) == []
 
 
 def test_a_degraded_model_says_so(env):

@@ -408,6 +408,14 @@ ROWS = [
     Row("GET", M, "/api/v1/models/999999", e(401, 404, 404, 404, 404, 404, 404), note="missing"),
     Row("GET", M + "/export", "/api/v1/models/{M}/export", READ),
     Row("GET", M + "/serving", "/api/v1/models/{M}/serving", READ),
+    Row("GET", M + "/serving/info", "/api/v1/models/{M}/serving/info", READ),
+    Row(
+        "GET",
+        M + "/serving/info",
+        "/api/v1/models/{M2}/serving/info",
+        e(401, 404, 404, 404, 200, 200, 404),
+        note="model of another project",
+    ),
     Row("DELETE", M, "/api/v1/models/{M}", e(401, 403, 204, 204, 204, 404, 403)),
     Row(
         "POST",
