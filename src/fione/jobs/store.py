@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 
-from fione.engine.events import Event
+from fione.engine.events import Event, jsonable
 
 MAX_EVENT_BYTES = 64 * 1024
 
@@ -95,8 +95,12 @@ def list_jobs(
 
 
 def append_event(conn: sqlite3.Connection, job_id: int, event: Event) -> None:
-    """Store ``event``; data whose JSON exceeds 64 KB is replaced by a size marker."""
-    data = _dumps(event.data)
+    """Store ``event``; data whose JSON exceeds 64 KB is replaced by a size marker.
+
+    Values JSON cannot hold are stored as their ``str`` (NaN and infinity as null), so a
+    stray object in event data never fails the job.
+    """
+    data = json.dumps(jsonable(event.data), ensure_ascii=False, allow_nan=False, default=str)
     size = len(data.encode())
     if size > MAX_EVENT_BYTES:
         data = _dumps({"truncated": True, "size": size})
@@ -159,6 +163,14 @@ def cancel_queued(conn: sqlite3.Connection, job_id: int) -> bool:
 
 def request_cancel(conn: sqlite3.Connection, job_id: int) -> None:
     conn.execute("UPDATE jobs SET cancel_requested = 1 WHERE id = ?", (job_id,))
+
+
+def stop_requested(conn: sqlite3.Connection, job_id: int) -> bool:
+    """Whether the job's worker should stop: cancel requested, job finished or deleted."""
+    row = conn.execute(
+        "SELECT status, cancel_requested FROM jobs WHERE id = ?", (job_id,)
+    ).fetchone()
+    return row is None or row["status"] != JobStatus.RUNNING or row["cancel_requested"] == 1
 
 
 def cancel_requested(conn: sqlite3.Connection, job_id: int) -> bool:

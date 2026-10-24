@@ -41,7 +41,10 @@ class JobAbort(BaseException):
 
 
 class _StopFlag:
-    """``should_stop``: the ``cancel_requested`` flag (read at most every 0.5 s) or SIGTERM."""
+    """``should_stop``: the job row, read at most every 0.5 s, or SIGTERM.
+
+    True once a cancel is requested or the job is deleted or no longer running.
+    """
 
     def __init__(self, conn: sqlite3.Connection, job_id: int):
         self._conn = conn
@@ -56,7 +59,7 @@ class _StopFlag:
         now = time.monotonic()
         if not self._stopped and (force or now - self._checked >= STOP_CHECK_SECS):
             self._checked = now
-            self._stopped = store.cancel_requested(self._conn, self._job_id)
+            self._stopped = store.stop_requested(self._conn, self._job_id)
         return self._stopped
 
 
@@ -79,7 +82,9 @@ def _emitter(conn: sqlite3.Connection, job_id: int):
                 store.append_event(conn, job_id, event)
                 return
             except sqlite3.OperationalError as e:
-                error = e
+                error = e  # e.g. locked: worth another try
+            except sqlite3.Error as e:
+                raise JobAbort(str(e)) from e  # e.g. the job row is gone: retrying cannot help
             finally:
                 conn.execute(f"PRAGMA busy_timeout={busy_ms}")
         raise JobAbort(str(error))
@@ -103,7 +108,7 @@ def _run(conn: sqlite3.Connection, job: Job, settings: Settings) -> None:
     try:
         if handler is None:
             status, message = JobStatus.FAILED, f"unknown job kind: {job.kind}"
-        else:
+        elif not stop(force=True):  # cancelled before it started: never run the handler
             storage = open_storage(settings)
             handler(JobContext(conn, storage, job, settings, emit, stop, set_result))
     except JobAbort as e:

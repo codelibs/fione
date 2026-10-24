@@ -70,6 +70,10 @@ def _is_worker(pid: int, run_token: str) -> bool:
     return out.returncode == 0 and "fione.jobs.worker" in args and run_token in args
 
 
+def _is_live_worker(row: sqlite3.Row) -> bool:
+    return bool(row["pid"] and row["run_token"] and _is_worker(row["pid"], row["run_token"]))
+
+
 def _kill_worker(pid: int) -> None:
     try:
         if os.getpgid(pid) != pid:
@@ -81,6 +85,9 @@ def _kill_worker(pid: int) -> None:
 
 
 class JobRunner:
+    """Runs the queue of one database. Run exactly one per database: runners do not
+    coordinate, and each settles running jobs it does not track as dead."""
+
     def __init__(
         self,
         settings: Settings,
@@ -138,7 +145,9 @@ class JobRunner:
                 "SELECT id, pid, run_token FROM jobs WHERE status = 'running'"
             ).fetchall()
             for row in rows:
-                if row["pid"] and row["run_token"] and _is_worker(row["pid"], row["run_token"]):
+                # Also tells a worker we could not kill (or identify) to stop by itself.
+                store.request_cancel(conn, row["id"])
+                if _is_live_worker(row):
                     _kill_worker(row["pid"])
                 store.finish_job(
                     conn, row["id"], JobStatus.FAILED, message="interrupted by restart"
@@ -149,7 +158,9 @@ class JobRunner:
 
         A running worker gets ``cancel_grace_secs`` to notice ``should_stop`` and wind down,
         then its process group is killed regardless, which also takes any grandchildren.
-        Returns whether the job ended cancelled (a worker may finish first).
+        Returns whether the job ended cancelled (a worker may finish first). If recording
+        that fails, the error propagates and the poller records it later; cancelling again
+        is safe.
         """
         with self._connect() as conn:
             with self._lock:
@@ -162,7 +173,14 @@ class JobRunner:
                 if entry is not None:
                     self._cancelling.add(job_id)
             if entry is None:
-                raise RuntimeError(f"job {job_id} is running but was not started by this runner")
+                # Not launched by this runner (its launch failed half way); no worker to wait for.
+                row = conn.execute(
+                    "SELECT pid, run_token FROM jobs WHERE id = ?", (job_id,)
+                ).fetchone()
+                if row is not None and _is_live_worker(row):
+                    _kill_worker(row["pid"])
+                store.finish_job(conn, job_id, JobStatus.CANCELLED)
+                return store.get_job(conn, job_id).status is JobStatus.CANCELLED
             proc = entry[0]
             try:
                 try:
@@ -172,11 +190,15 @@ class JobRunner:
                 _kill_group(proc.pid)
                 proc.wait()
                 store.finish_job(conn, job_id, JobStatus.CANCELLED)
+                final = store.get_job(conn, job_id).status
             finally:
+                # Forget the worker only once its job is recorded as finished; until then the
+                # poller keeps it and settles it (cancel_requested makes that CANCELLED).
                 with self._lock:
-                    self._procs.pop(job_id, None)
                     self._cancelling.discard(job_id)
-            return store.get_job(conn, job_id).status is JobStatus.CANCELLED
+            with self._lock:
+                self._procs.pop(job_id, None)
+            return final is JobStatus.CANCELLED
 
     def _connect(self) -> closing[sqlite3.Connection]:
         return closing(db.connect(self._db_path))
@@ -213,6 +235,8 @@ class JobRunner:
         if not store.claim_job(conn, job_id, run_token):
             return  # cancelled since it was listed
         log_path = self._settings.data_dir / "jobs" / f"{job_id}.log"
+        # If this fails, or the FAILED write below does, the job is running but untracked
+        # and the next poll settles it.
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(log_path, "ab") as log_file:
@@ -224,8 +248,9 @@ class JobRunner:
                     env=worker_env(self._settings, self._db_path),
                     start_new_session=True,
                 )
-        except OSError as e:
-            store.finish_job(conn, job_id, JobStatus.FAILED, message=f"could not start worker: {e}")
+        except Exception as e:
+            message = f"could not start worker: {type(e).__name__}: {e}"
+            store.finish_job(conn, job_id, JobStatus.FAILED, message=message)
             return
         self._procs[job_id] = (proc, kind)
         store.set_pid(conn, job_id, proc.pid)
@@ -243,8 +268,18 @@ class JobRunner:
             self._settle(conn, job_id, proc.returncode)
             with self._lock:
                 self._procs.pop(job_id, None)
+        self._settle_untracked(conn)
 
-    def _settle(self, conn: sqlite3.Connection, job_id: int, code: int) -> None:
+    def _settle_untracked(self, conn: sqlite3.Connection) -> None:
+        """Settle running jobs with no worker: a launch or a terminal write that failed."""
+        rows = conn.execute("SELECT id, pid, run_token FROM jobs WHERE status = 'running'")
+        for row in rows.fetchall():
+            with self._lock:
+                tracked = row["id"] in self._procs
+            if not tracked and not _is_live_worker(row):
+                self._settle(conn, row["id"], None)
+
+    def _settle(self, conn: sqlite3.Connection, job_id: int, code: int | None) -> None:
         """Record the outcome of a worker that exited without recording one itself."""
         try:
             job = store.get_job(conn, job_id)
@@ -255,7 +290,9 @@ class JobRunner:
         if store.cancel_requested(conn, job_id):
             store.finish_job(conn, job_id, JobStatus.CANCELLED)
             return
-        message = f"worker exited unexpectedly (code {code})"
+        message = "worker exited unexpectedly"
+        if code is not None:
+            message += f" (code {code})"
         data = {"error": message, "log_tail": self._log_tail(job_id)}
         store.append_event(conn, job_id, Event("error", data=data))
         store.finish_job(conn, job_id, JobStatus.FAILED, message=message)

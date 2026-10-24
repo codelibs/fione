@@ -1,11 +1,13 @@
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from fione import db
@@ -13,9 +15,11 @@ from fione.auth import service as auth
 from fione.auth.roles import Role
 from fione.config import Settings
 from fione.engine.events import Event
+from fione.jobs import runner as runner_module
 from fione.jobs import store
 from fione.jobs.runner import JobRunner, worker_env
 from fione.jobs.store import JobStatus
+from fione.jobs.worker import JobAbort, _emitter
 from fione.projects import service
 from fione.storage import LocalStorage
 
@@ -462,3 +466,137 @@ def test_recover_orphans_never_kills_an_unrelated_process(conn, enqueue, make_ru
         stranger.wait(timeout=0.3)
     final = store.get_job(conn, job.id)
     assert final.status is JobStatus.FAILED and final.message == "interrupted by restart"
+
+
+# --- failure paths ---
+
+
+def test_event_data_json_cannot_hold_is_stored_as_text(conn, enqueue):
+    job = enqueue("echo")
+    data = {"path": Path("/x"), "nan": float("nan"), "n": np.int64(3)}
+    store.append_event(conn, job.id, Event("notice", data=data))
+    assert store.events_since(conn, job.id)[0][1].data == {"path": "/x", "nan": None, "n": 3}
+
+
+def test_emit_for_a_deleted_job_aborts(conn, enqueue):
+    job = enqueue("echo")
+    claim(conn, job.id, "tok", 1)
+    conn.execute("DELETE FROM jobs WHERE id = ?", (job.id,))
+    with pytest.raises(JobAbort):
+        _emitter(conn, job.id)(Event("notice", data={"message": "x"}))
+
+
+def test_cancel_before_the_worker_starts_never_runs_the_handler(conn, enqueue, settings, db_path):
+    job = enqueue("echo")
+    claim(conn, job.id, "tok-early", 1)
+    store.request_cancel(conn, job.id)
+    proc = subprocess.run(
+        [sys.executable, "-m", "fione.jobs.worker", str(job.id), "tok-early"],
+        env=worker_env(settings, db_path),
+        capture_output=True,
+        timeout=20,
+    )
+    assert proc.returncode == 0, proc.stderr
+    final = store.get_job(conn, job.id)
+    assert final.status is JobStatus.CANCELLED and final.result is None
+    assert store.events_since(conn, job.id) == []
+
+
+@pytest.mark.parametrize("how", ["project deleted", "failed elsewhere"])
+def test_worker_stops_when_its_job_is_gone_or_finished(
+    conn, enqueue, make_runner, owner, project, tmp_path, how
+):
+    make_runner()
+    job = enqueue("sleep", {"seconds": 60})
+    wait_event(conn, job.id, "started")
+    pid = job_pid(conn, job.id)
+    if how == "project deleted":
+        service.delete_project(conn, LocalStorage(tmp_path / "objects"), owner, project.id)
+    else:
+        assert store.finish_job(conn, job.id, JobStatus.FAILED, message="interrupted by restart")
+    wait_for(lambda: gone(pid), timeout=10)  # on its own, long before the 60 s sleep ends
+
+
+def fail_once(monkeypatch, status):
+    """Make the next ``store.finish_job`` to ``status`` in this process raise "locked"."""
+    real, failed = store.finish_job, []
+
+    def finish_job(conn, job_id, to, **kwargs):
+        if to is status and not failed:
+            failed.append(job_id)
+            raise sqlite3.OperationalError("database is locked")
+        return real(conn, job_id, to, **kwargs)
+
+    monkeypatch.setattr(store, "finish_job", finish_job)
+
+
+def test_cancel_whose_final_write_fails_is_settled_by_the_poller(
+    conn, enqueue, make_runner, monkeypatch
+):
+    runner = make_runner(cancel_grace_secs=0.2)
+    job = enqueue("ignore_stop")
+    wait_event(conn, job.id, "started")
+    fail_once(monkeypatch, JobStatus.CANCELLED)
+    with pytest.raises(sqlite3.OperationalError):
+        runner.cancel(job.id)
+    assert wait_done(conn, job.id).status is JobStatus.CANCELLED
+    assert not runner.cancel(job.id)
+
+
+def test_cancel_again_after_a_failed_final_write(conn, enqueue, make_runner, monkeypatch):
+    runner = make_runner(cancel_grace_secs=0.2)
+    job = enqueue("ignore_stop")
+    wait_event(conn, job.id, "started")
+    runner.stop()  # nobody else settles it
+    fail_once(monkeypatch, JobStatus.CANCELLED)
+    with pytest.raises(sqlite3.OperationalError):
+        runner.cancel(job.id)
+    assert store.get_job(conn, job.id).status is JobStatus.RUNNING
+    assert runner.cancel(job.id)
+    assert store.get_job(conn, job.id).status is JobStatus.CANCELLED
+
+
+@pytest.mark.parametrize("failed_write_too", [False, True])
+def test_launch_failure_after_claim_fails_the_job(
+    conn, enqueue, make_runner, monkeypatch, failed_write_too
+):
+    real, broken = runner_module.worker_env, []
+
+    def worker_env_once_broken(*args):
+        if not broken:
+            broken.append(True)
+            raise ValueError("embedded null byte")
+        return real(*args)
+
+    monkeypatch.setattr(runner_module, "worker_env", worker_env_once_broken)
+    if failed_write_too:
+        fail_once(monkeypatch, JobStatus.FAILED)
+    job = enqueue("echo")
+    make_runner()
+    final = wait_done(conn, job.id)
+    assert final.status is JobStatus.FAILED
+    if failed_write_too:  # left running and untracked; the next poll settled it
+        assert final.message == "worker exited unexpectedly"
+    else:
+        assert final.message == "could not start worker: ValueError: embedded null byte"
+    assert wait_done(conn, enqueue("echo").id).status is JobStatus.DONE  # still polling
+
+
+def test_poller_settles_running_jobs_without_a_worker(conn, enqueue, make_runner):
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    with_pid, without_pid = enqueue("sleep"), enqueue("sleep")
+    claim(conn, with_pid.id, "tok-a", dead.pid)
+    assert store.claim_job(conn, without_pid.id, "tok-b")
+    make_runner()
+    for job in (with_pid, without_pid):
+        final = wait_done(conn, job.id)
+        assert final.status is JobStatus.FAILED and final.message == "worker exited unexpectedly"
+
+
+def test_recover_orphans_flags_jobs_it_cannot_kill(conn, enqueue, make_runner):
+    job = enqueue("sleep")
+    assert store.claim_job(conn, job.id, "tok")  # no pid recorded
+    make_runner(start=False).recover_orphans()
+    assert store.get_job(conn, job.id).status is JobStatus.FAILED
+    assert store.cancel_requested(conn, job.id)
