@@ -444,3 +444,104 @@ def test_profile_module_exports():
     assert hasattr(profile_module, "ColumnProfile")
     assert hasattr(profile_module, "DatasetProfile")
     assert hasattr(profile_module, "LeakSuspect")
+
+
+# --- review round 1: timezones, sparse correlations, date heuristic ----------
+
+MIXED_OFFSETS = ["2024-03-05T10:00:00-05:00", "2024-07-05T10:00:00-04:00"] * 10
+
+
+def test_mixed_utc_offset_timestamps_profile_as_datetime():
+    p = profile_dataset(pd.DataFrame({"ts": MIXED_OFFSETS, "n": np.arange(20.0)}))
+    assert _col(p, "ts").kind == "datetime"
+
+
+def test_change_to_datetime_handles_mixed_offsets_as_utc():
+    out = change_column_type(pd.DataFrame({"ts": MIXED_OFFSETS}), "ts", "datetime")
+    assert str(out["ts"].dt.tz) == "UTC"
+    assert out["ts"].iloc[0] == pd.Timestamp("2024-03-05T15:00:00Z")
+
+
+def test_change_to_datetime_with_mixed_offsets_still_rejects_garbage():
+    with pytest.raises(ValueError, match="1 values in 'ts' cannot be converted to datetime"):
+        change_column_type(pd.DataFrame({"ts": [*MIXED_OFFSETS, "oops"]}), "ts", "datetime")
+
+
+def test_change_to_datetime_parses_japanese_dates():
+    out = change_column_type(
+        pd.DataFrame({"d": ["2024年3月5日", "2024年12月25日"]}), "d", "datetime"
+    )
+    assert out["d"].tolist() == [pd.Timestamp("2024-03-05"), pd.Timestamp("2024-12-25")]
+
+
+def test_sparse_overlap_does_not_produce_spurious_correlation():
+    x = np.full(100, np.nan)
+    y = np.full(100, np.nan)
+    x[:3], y[:3] = [1.0, 2.0, 3.0], [2.0, 4.0, 6.0]
+    x[3:60] = RNG.normal(size=57)
+    y[60:] = RNG.normal(size=40)
+    assert profile_dataset(pd.DataFrame({"x": x, "y": y})).correlations == []
+
+
+def test_fully_populated_perfect_correlation_is_reported():
+    x = RNG.normal(size=50)
+    [(a, b, r)] = profile_dataset(pd.DataFrame({"x": x, "y": 3 * x + 1})).correlations
+    assert {a, b} == {"x", "y"} and r == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        ["1-2", "3-4", "5-6", "2-7", "8-9", "1-9"] * 5,
+        ["1/2", "3/4", "1/3", "2/3", "5/8", "7/8"] * 5,
+        ["3:2", "1:0", "2:2", "0:0", "4:1", "1:1"] * 5,
+        ["12-100", "13-200", "14-300", "15-400", "16-500", "17-600"] * 5,
+        ["-1", "-2", "-3", "-4", "-5", "-6"] * 5,
+        ["1.5", "2.5", "-3.5", "4.5", "5.5", "6.5"] * 5,
+    ],
+)
+def test_number_like_strings_are_not_datetime(values):
+    assert _kind(pd.Series(values)) != "datetime"
+
+
+def test_mostly_null_column_of_pair_strings_is_not_datetime():
+    assert _kind(pd.Series(["1-2", "3-4", None, None, None, None, None, None])) != "datetime"
+
+
+def test_too_few_non_null_values_are_not_datetime():
+    assert _kind(pd.Series(["2024-03-05", "2024-03-06", "2024-03-07", None, None])) != "datetime"
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        ["2024-03-05", "2024-04-06", "2023-12-25", "2022-01-31", "2024-07-04", "2021-09-09"],
+        ["2024/03/05", "2024/04/06", "2023/12/25", "2022/01/31", "2024/07/04", "2021/09/09"],
+        [f"2024-03-05 10:11:{s:02d}" for s in range(6)],
+        [
+            "March 5, 2024",
+            "April 6, 2023",
+            "May 7, 2022",
+            "June 8, 2021",
+            "July 9, 2020",
+            "Dec 1, 2019",
+        ],
+        [
+            "2024年3月5日",
+            "2024年4月6日",
+            "2023年12月25日",
+            "2022年1月31日",
+            "2024年7月4日",
+            "2021年9月9日",
+        ],
+        ["2023-01", "2023-02", "2023-03", "2023-04", "2023-05", "2023-06"],
+    ],
+)
+def test_date_strings_are_datetime_across_formats(values):
+    assert _kind(pd.Series(values * 5)) == "datetime"
+
+
+def test_date_detection_samples_beyond_the_head_of_a_sorted_column():
+    # head looks like dates, the rest like pairs: a head-only sample would say datetime
+    values = ["2024-03-05"] * 1000 + ["1-2"] * 3000
+    assert _kind(pd.Series(values)) != "datetime"

@@ -4,9 +4,11 @@ Kind inference (first matching rule wins; ``n`` = non-null values, ``u`` = disti
 
 1. ``constant``: ``u <= 1`` (all-null columns, and every column of a single-row frame).
 2. ``categorical``: bool and ``category`` dtypes.
-3. ``datetime``: datetime64 dtype; also string/object columns where at least 95% of the first
-   1000 non-null values parse as dates and at least one of them contains a date separator
-   (``-``, ``/`` or ``:``), so bare digit strings such as ``20240101`` are never dates.
+3. ``datetime``: datetime64 dtype; also string/object columns, judged on a deterministic spread
+   sample of at most 1000 non-null values (at least 5 required), where at least 95% parse as
+   dates, none of the counted ones is a plain number or fraction (``-1``, ``1.5``, ``1/2``),
+   and at least 50% show a date signal: a 4-digit year (19xx/20xx), an English month name,
+   ``<n>月`` or a ``hh:mm:ss`` time. So ``1-2``, ``3:2``, ``12-100`` and ``20240101`` are not dates.
 4. Integer dtype: ``id`` if ``u == n`` and ``n >= 20``; ``categorical`` if ``u <= 10`` and
    ``u / n <= 0.05`` (0/1 flags, small codes); otherwise ``numeric``.
 5. Other numeric dtype (floats): ``numeric``. Floats are never ``id``.
@@ -17,7 +19,12 @@ Kind inference (first matching rule wins; ``n`` = non-null values, ``u`` = disti
 Statistics (``stats``, ``histogram``, ``outlier_rate``) are filled for ``numeric`` columns and for
 integer-coded ``categorical`` columns (their numeric dtype makes the mean of a 0/1 flag
 meaningful); non-finite values are ignored there. Missing values never count as values.
-The outlier rate uses the IQR rule: values outside ``[Q1 - 1.5 IQR, Q3 + 1.5 IQR]``.
+The outlier rate uses the IQR rule: values outside ``[Q1 - 1.5 IQR, Q3 + 1.5 IQR]``. Consumers
+must ignore ``outlier_rate`` unless ``kind == "numeric"``: for a 0/1 flag with a minority below 25%
+the IQR is 0, so the rate merely equals the minority fraction.
+
+Correlations need at least ``_CORR_MIN_PERIODS`` rows where both columns are present, so two sparse
+columns that overlap on a couple of rows cannot report a spurious ``r = +-1``.
 """
 
 from dataclasses import dataclass
@@ -27,6 +34,8 @@ import numpy as np
 import pandas as pd
 from pandas.api import types as pdt
 
+from fione.data.frames import parse_datetimes
+
 Kind = Literal["numeric", "categorical", "text", "datetime", "id", "constant"]
 
 _HISTOGRAM_BINS = 20
@@ -35,7 +44,16 @@ _TOP_CORRELATIONS = 20
 _ID_MIN_ROWS = 20
 _DATE_SAMPLE = 1000
 _DATE_MIN_PARSED = 0.95
-_DATE_SEPARATORS = r"[-/:]"
+_DATE_MIN_VALUES = 5
+_DATE_MIN_SIGNAL = 0.5
+_PLAIN_NUMBER = r"^\s*(?:[-+]?\d+(?:\.\d+)?|\d+/\d+)\s*$"
+_DATE_SIGNAL = (
+    r"(?<!\d)(?:19|20)\d{2}(?!\d)"
+    r"|(?i:\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
+    r"|\d+月"
+    r"|\d{1,2}:\d{2}:\d{2}"
+)
+_CORR_MIN_PERIODS = 10
 _LEAK_CORRELATION = 0.99
 _LEAK_MIN_ROWS = 20
 
@@ -79,11 +97,17 @@ def _as_float(s: pd.Series) -> np.ndarray:
 
 
 def _looks_like_dates(nonnull: pd.Series) -> bool:
-    sample = nonnull.iloc[:_DATE_SAMPLE].astype(str)
-    if not sample.str.contains(_DATE_SEPARATORS, regex=True).any():
+    n = len(nonnull)
+    if n < _DATE_MIN_VALUES:
         return False
-    parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
-    return bool(parsed.notna().mean() >= _DATE_MIN_PARSED)
+    # spread over the whole column: the head of a sorted file is not representative
+    picks = np.linspace(0, n - 1, min(n, _DATE_SAMPLE)).astype(int)
+    sample = nonnull.iloc[picks].astype(str)
+    if sample.str.contains(_DATE_SIGNAL, regex=True).mean() < _DATE_MIN_SIGNAL:
+        return False
+    plain = sample.str.match(_PLAIN_NUMBER)
+    parsed = parse_datetimes(sample)
+    return bool((parsed.notna() & ~plain).mean() >= _DATE_MIN_PARSED)
 
 
 def _infer_kind(nonnull: pd.Series, n_unique: int) -> Kind:
@@ -170,7 +194,11 @@ def _correlations(df: pd.DataFrame, columns: list[ColumnProfile]) -> list[tuple[
     names = [c.name for c in columns if c.kind == "numeric"]
     if len(names) < 2:
         return []
-    matrix = pd.DataFrame({n: _as_float(df[n]) for n in names}).corr().to_numpy()
+    matrix = (
+        pd.DataFrame({n: _as_float(df[n]) for n in names})
+        .corr(min_periods=_CORR_MIN_PERIODS)
+        .to_numpy()
+    )
     rows, cols = np.triu_indices(len(names), k=1)
     pairs = [
         (names[i], names[j], float(r))
