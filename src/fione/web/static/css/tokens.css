@@ -1,0 +1,110 @@
+/*
+ * Fione design tokens. Colours are light-dark() pairs: the light value applies under
+ * `color-scheme: light`, the dark one under `color-scheme: dark`. The scheme follows
+ * prefers-color-scheme unless the theme toggle has set data-theme on <html>.
+ * Text/background pairs meet WCAG AA (ratios are listed in the Task 18a report);
+ * keep them so when changing a value.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces */
+  --color-bg: light-dark(#f5f6f8, #0e1116);
+  --color-surface: light-dark(#ffffff, #161a21);
+  --color-surface-2: light-dark(#eef0f4, #1e232c);
+  --color-border: light-dark(#dde1e7, #2b313b);
+  --color-border-strong: light-dark(#7a8292, #6e7889);
+
+  /* Text */
+  --color-text: light-dark(#1a1e26, #e7eaf0);
+  --color-text-muted: light-dark(#566070, #a3acba);
+  --color-link: light-dark(#2a4fc0, #9cb2ff);
+
+  /* Brand and actions */
+  --color-primary: light-dark(#2f54c8, #8ea7ff);
+  --color-primary-hover: light-dark(#2546a8, #aabdff);
+  --color-on-primary: light-dark(#ffffff, #0b1230);
+  --color-primary-subtle: light-dark(#e9eefc, #1c2648);
+  --color-danger: light-dark(#c0302f, #ff8e8b);
+  --color-danger-hover: light-dark(#a02525, #ffaba8);
+  --color-on-danger: light-dark(#ffffff, #2a0a0a);
+
+  /* Status (pills, alerts): text on its subtle background */
+  --color-info-subtle: var(--color-primary-subtle);
+  --color-info-text: light-dark(#2846a8, #b4c4ff);
+  --color-success-subtle: light-dark(#e4f4ea, #12301f);
+  --color-success-text: light-dark(#1a673c, #8fdcab);
+  --color-warning-subtle: light-dark(#fcf1dc, #33260e);
+  --color-warning-text: light-dark(#87500a, #f2c46e);
+  --color-danger-subtle: light-dark(#fcebeb, #3a1616);
+  --color-danger-text: light-dark(#a52524, #ffb4b1);
+  --color-neutral-subtle: var(--color-surface-2);
+  --color-neutral-text: light-dark(#454e5c, #c3cad5);
+
+  /* Focus ring: at least 3:1 against every surface */
+  --color-focus: light-dark(#2f6bf0, #9ab6ff);
+  --focus-ring: 0 0 0 3px var(--color-focus);
+
+  /* Spacing (4 px grid) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Type: system fonts only (no downloads); Japanese falls back to the platform's fonts */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", Meiryo,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --leading-tight: 1.3;
+  --leading-normal: 1.6;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px light-dark(rgb(16 24 40 / 0.06), rgb(0 0 0 / 0.4));
+  --shadow-md: 0 2px 4px light-dark(rgb(16 24 40 / 0.06), rgb(0 0 0 / 0.4)),
+    0 6px 16px light-dark(rgb(16 24 40 / 0.08), rgb(0 0 0 / 0.45));
+  --shadow-lg: 0 12px 32px light-dark(rgb(16 24 40 / 0.14), rgb(0 0 0 / 0.6));
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout */
+  --container-max: 72rem;
+  --header-height: 3.75rem;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}

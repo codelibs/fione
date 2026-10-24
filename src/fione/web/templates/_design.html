@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, toast %}
+{% block title %}{{ t('design.title') }}{% endblock %}
+
+{% macro gallery(scheme) %}
+<section class="design-panel" data-scheme="{{ scheme }}" aria-labelledby="{{ scheme }}-title">
+  <h2 class="design-panel__title" id="{{ scheme }}-title">{{ t('design.' ~ scheme) }}</h2>
+
+  <h3 class="design-section">{{ t('design.tokens') }}</h3>
+  <ul class="swatches" role="list">
+    {% for name in ["bg", "surface", "surface-2", "border", "text", "text-muted", "primary", "danger", "success-text", "warning-text", "focus"] %}
+    <li class="swatch"><span class="swatch__chip swatch-{{ name }}"></span><code>--color-{{ name }}</code></li>
+    {% endfor %}
+  </ul>
+
+  <h3 class="design-section">{{ t('design.buttons') }}</h3>
+  <div class="cluster">
+    <button type="button" class="btn btn-primary">{{ t('design.primary') }}</button>
+    <button type="button" class="btn btn-secondary">{{ t('design.secondary') }}</button>
+    <button type="button" class="btn btn-danger">{{ t('design.danger') }}</button>
+    <button type="button" class="btn btn-ghost">{{ t('design.ghost') }}</button>
+    <button type="button" class="btn btn-primary" disabled>{{ t('design.disabled') }}</button>
+    <button type="button" class="btn btn-primary" aria-busy="true" disabled><span class="spinner" aria-hidden="true"></span>{{ t('design.loading') }}</button>
+    <button type="button" class="btn btn-secondary btn-sm">{{ icon("plus", "icon icon-sm") }}{{ t('design.secondary') }}</button>
+  </div>
+
+  <h3 class="design-section">{{ t('design.badges') }}</h3>
+  <div class="cluster">
+    <span class="badge badge-neutral">{{ t('status.queued') }}</span>
+    <span class="badge badge-info"><span class="dot dot-pulse" aria-hidden="true"></span>{{ t('status.running') }}</span>
+    <span class="badge badge-success">{{ t('status.done') }}</span>
+    <span class="badge badge-danger">{{ t('status.failed') }}</span>
+    <span class="badge badge-warning">{{ t('status.cancelled') }}</span>
+  </div>
+
+  <h3 class="design-section">{{ t('design.alert') }}</h3>
+  <div class="stack">
+    <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('design.alert_info') }}</span></div>
+    <div class="alert alert-danger" role="note">{{ icon("alert") }}<span>{{ t('design.alert_danger') }}</span></div>
+  </div>
+
+  <h3 class="design-section">{{ t('design.card') }}</h3>
+  <div class="card card-padded">
+    <h4 class="card__title">{{ t('design.card_title') }}</h4>
+    <p class="text-muted">{{ t('design.card_text') }}</p>
+  </div>
+
+  <h3 class="design-section">{{ t('design.form') }}</h3>
+  <div class="card card-padded stack">
+    <div class="field">
+      <label class="field__label" for="{{ scheme }}-runtime">{{ t('design.field_label') }}</label>
+      <input class="input" id="{{ scheme }}-runtime" type="number" value="60" min="10" aria-describedby="{{ scheme }}-runtime-hint">
+      <p class="field__hint" id="{{ scheme }}-runtime-hint">{{ t('design.field_hint') }}</p>
+    </div>
+    <div class="field">
+      <label class="field__label" for="{{ scheme }}-target">{{ t('design.field_error_label') }}</label>
+      <select class="input" id="{{ scheme }}-target" aria-invalid="true" aria-describedby="{{ scheme }}-target-error">
+        <option value="">{{ t('design.choose') }}</option>
+        <option>species</option>
+      </select>
+      <p class="field__error" id="{{ scheme }}-target-error">{{ icon("alert", "icon icon-sm") }}{{ t('design.field_error') }}</p>
+    </div>
+  </div>
+
+  <h3 class="design-section">{{ t('design.table') }}</h3>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th scope="col">#</th><th scope="col">{{ t('design.col_model') }}</th><th scope="col" class="num">{{ t('design.col_score') }}</th><th scope="col">{{ t('design.col_status') }}</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>LightGBM</td><td class="num">0.9733</td><td><span class="badge badge-success">{{ t('status.done') }}</span></td></tr>
+        <tr><td>2</td><td>XGBoost</td><td class="num">0.9667</td><td><span class="badge badge-success">{{ t('status.done') }}</span></td></tr>
+        <tr><td>3</td><td>CatBoost</td><td class="num">—</td><td><span class="badge badge-info">{{ t('status.running') }}</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="design-section">{{ t('design.tabs') }}</h3>
+  <div class="tabs" data-tabs>
+    <div class="tabs__list" role="tablist" aria-label="{{ t('design.tabs') }}">
+      {% for key in ["overview", "columns", "jobs"] %}
+      <button type="button" class="tabs__tab" role="tab" id="{{ scheme }}-tab-{{ key }}" aria-controls="{{ scheme }}-panel-{{ key }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ '0' if loop.first else '-1' }}">{{ t('design.tab_' ~ key) }}</button>
+      {% endfor %}
+    </div>
+    {% for key in ["overview", "columns", "jobs"] %}
+    <div class="tabs__panel" role="tabpanel" id="{{ scheme }}-panel-{{ key }}" aria-labelledby="{{ scheme }}-tab-{{ key }}" tabindex="0"{% if not loop.first %} hidden{% endif %}>
+      <p>{{ t('design.tab_text_' ~ key) }}</p>
+    </div>
+    {% endfor %}
+  </div>
+
+  <h3 class="design-section">{{ t('design.toast') }}</h3>
+  <div class="stack">
+    {{ toast(t, t('design.toast_text')) }}
+    <div><button type="button" class="btn btn-secondary" data-toast-demo="{{ t('design.toast_text') }}">{{ t('design.toast_show') }}</button></div>
+  </div>
+
+  <h3 class="design-section">{{ t('design.empty') }}</h3>
+  <div class="empty-state">
+    <div class="empty-state__icon">{{ icon("folder") }}</div>
+    <h4 class="empty-state__title">{{ t('home.empty_title') }}</h4>
+    <p class="empty-state__text text-muted">{{ t('home.empty_text') }}</p>
+  </div>
+
+  <h3 class="design-section">{{ t('design.progress') }}</h3>
+  <div class="stack">
+    <div class="field">
+      <label class="field__label" for="{{ scheme }}-progress">{{ t('design.progress_label') }}</label>
+      <progress class="progress" id="{{ scheme }}-progress" max="100" value="40">40%</progress>
+    </div>
+    <div class="field">
+      <label class="field__label" for="{{ scheme }}-progress2">{{ t('design.progress_unknown') }}</label>
+      <progress class="progress" id="{{ scheme }}-progress2"></progress>
+    </div>
+  </div>
+
+  <h3 class="design-section">{{ t('design.steps') }}</h3>
+  <ol class="steps" aria-label="{{ t('wizard.steps') }}">
+    {% for key in ["upload", "analysis", "run", "summary", "predict"] %}
+    {% set state = "done" if loop.index < 3 else ("current" if loop.index == 3 else "todo") %}
+    <li class="steps__item steps__item-{{ state }}"{% if state == "current" %} aria-current="step"{% endif %}>
+      <span class="steps__marker" aria-hidden="true">{% if state == "done" %}{{ icon("check", "icon icon-sm") }}{% else %}{{ loop.index }}{% endif %}</span>
+      <span class="steps__label">{{ t('wizard.step.' ~ key) }}{% if state != "todo" %}<span class="visually-hidden"> ({{ t('wizard.step_state.' ~ state) }})</span>{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <h3 class="design-section">{{ t('design.skeleton') }}</h3>
+  <div class="card card-padded stack" aria-busy="true">
+    <span class="visually-hidden">{{ t('loading') }}</span>
+    <div class="skeleton skeleton-title"></div>
+    <div class="skeleton skeleton-line"></div>
+    <div class="skeleton skeleton-line skeleton-short"></div>
+  </div>
+</section>
+{% endmacro %}
+
+{% block content %}
+<div class="container page">
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('design.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('design.intro') }}</p>
+  </header>
+  <div class="design-grid">
+    {{ gallery("light") }}
+    {{ gallery("dark") }}
+  </div>
+</div>
+{% endblock %}

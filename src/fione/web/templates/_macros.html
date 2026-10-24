@@ -1,0 +1,57 @@
+{# Shared macros: icons (inline SVG, decorative unless labelled) and small components. #}
+{% macro icon(name, cls="icon") %}
+<svg class="{{ cls }}" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+{% if name == "sun" %}<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+{% elif name == "moon" %}<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/>
+{% elif name == "menu" %}<path d="M4 6h16M4 12h16M4 18h16"/>
+{% elif name == "close" %}<path d="M6 6l12 12M18 6L6 18"/>
+{% elif name == "folder" %}<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+{% elif name == "plus" %}<path d="M12 5v14M5 12h14"/>
+{% elif name == "check" %}<path d="M5 12.5l4.5 4.5L19 7.5"/>
+{% elif name == "info" %}<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>
+{% elif name == "alert" %}<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17h.01"/>
+{% elif name == "chevron" %}<path d="M6 9l6 6 6-6"/>
+{% elif name == "globe" %}<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+{% elif name == "key" %}<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M16 7l3 3M14 9l2 2"/>
+{% elif name == "terminal" %}<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>
+{% endif %}
+</svg>
+{% endmacro %}
+
+{% macro logo(cls="logo") %}
+<svg class="{{ cls }}" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false">
+<rect width="32" height="32" rx="8" class="logo__bg"/>
+<path d="M10 23V9h12M10 16h9" class="logo__mark" fill="none" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="22.5" cy="22" r="2.4" class="logo__dot"/>
+</svg>
+{% endmacro %}
+
+{% macro theme_toggle(t) %}
+<button type="button" class="btn btn-ghost btn-icon" data-theme-toggle aria-pressed="false" title="{{ t('theme.toggle') }}">
+  {{ icon("moon", "icon icon-moon") }}{{ icon("sun", "icon icon-sun") }}
+  <span class="visually-hidden">{{ t('theme.toggle') }}</span>
+</button>
+{% endmacro %}
+
+{% macro lang_switch(t, lang, here) %}
+<form class="segmented" method="post" action="/ui/lang" aria-label="{{ t('lang.label') }}">
+  <input type="hidden" name="next" value="{{ here }}">
+  <button type="submit" name="lang" value="en" lang="en" aria-pressed="{{ 'true' if lang == 'en' else 'false' }}">{{ t('lang.en') }}</button>
+  <button type="submit" name="lang" value="ja" lang="ja" aria-pressed="{{ 'true' if lang == 'ja' else 'false' }}">{{ t('lang.ja') }}</button>
+</form>
+{% endmacro %}
+
+{% macro toast(t, message, kind="success") %}
+<div class="toast toast-{{ kind }}" role="status">
+  {{ icon("check" if kind == "success" else "info") }}
+  <p class="toast__text">{{ message }}</p>
+  <button type="button" class="btn btn-ghost btn-icon btn-sm" data-toast-close>
+    {{ icon("close") }}<span class="visually-hidden">{{ t('toast.close') }}</span>
+  </button>
+</div>
+{% endmacro %}
+
+{% macro access_badge(t, access) %}
+{% set kind = {"owner": "info", "editor": "success", "viewer": "neutral"}[access.value] %}
+<span class="badge badge-{{ kind }}">{{ t('access.' ~ access.value) }}</span>
+{% endmacro %}

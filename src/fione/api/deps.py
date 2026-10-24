@@ -51,6 +51,20 @@ def _unauthorized(message: str) -> ApiError:
     return ApiError(401, "unauthorized", message, {"WWW-Authenticate": "Bearer"})
 
 
+def cookie_auth(request: Request, conn: sqlite3.Connection) -> Auth | None:
+    """The user of a valid session cookie, else None; the CSRF token is not checked here."""
+    cookie = request.cookies.get(SESSION_COOKIE)
+    if not cookie:
+        return None
+    signer = request.app.state.signer
+    user_id = signer.unverified_user_id(cookie)
+    found = None if user_id is None else auth_service.user_for_session(conn, user_id)
+    session = None if found is None else signer.verify(cookie, found[1])
+    if found is None or session is None:
+        return None
+    return Auth(found[0], "cookie", session)
+
+
 def get_auth(request: Request, conn: Conn) -> Auth:
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() == "bearer":
@@ -58,20 +72,16 @@ def get_auth(request: Request, conn: Conn) -> Auth:
         if user is None:
             raise _unauthorized("invalid or revoked API token")
         return Auth(user, "bearer", None)
-    cookie = request.cookies.get(SESSION_COOKIE)
-    if not cookie:
+    if not request.cookies.get(SESSION_COOKIE):
         raise _unauthorized("authentication required")
-    signer = request.app.state.signer
-    user_id = signer.unverified_user_id(cookie)
-    found = None if user_id is None else auth_service.user_for_session(conn, user_id)
-    session = None if found is None else signer.verify(cookie, found[1])
-    if found is None or session is None:
+    auth = cookie_auth(request, conn)
+    if auth is None:
         raise _unauthorized("session expired or invalid; log in again")
     if request.method in UNSAFE_METHODS and not tokens_equal(
-        session.csrf, request.headers.get("x-csrf-token")
+        auth.session.csrf, request.headers.get("x-csrf-token")
     ):
         raise ApiError(403, "csrf", "missing or wrong X-CSRF-Token header")
-    return Auth(found[0], "cookie", session)
+    return auth
 
 
 AuthDep = Annotated[Auth, Depends(get_auth)]

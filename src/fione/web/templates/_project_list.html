@@ -1,0 +1,29 @@
+{% from "_macros.html" import icon, access_badge %}
+<section class="project-list" id="project-list" aria-labelledby="project-list-title"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <div class="section-header">
+    <h2 class="section-header__title" id="project-list-title">{{ t('home.list') }}</h2>
+    {% if rows %}<span class="text-muted text-sm">{{ t('home.count_one') if rows|length == 1 else t('home.count', n=rows|length) }}</span>{% endif %}
+  </div>
+  {% if rows %}
+  <ul class="project-grid" role="list">
+    {% for row in rows %}
+    <li class="card project-card">
+      <div class="project-card__icon">{{ icon("folder") }}</div>
+      <div class="project-card__body">
+        <h3 class="project-card__name">{{ row.project.name }}</h3>
+        <p class="project-card__meta text-muted text-sm">
+          {{ t('home.created_on', date=row.created) }}{% if not row.own and row.owner %} · {{ t('home.owner', name=row.owner) }}{% endif %}
+        </p>
+      </div>
+      {{ access_badge(t, row.access) }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-state__icon">{{ icon("folder") }}</div>
+    <h3 class="empty-state__title">{{ t('home.empty_title') }}</h3>
+    <p class="empty-state__text text-muted">{{ t('home.empty_text') if can_create else t('home.empty_viewer') }}</p>
+  </div>
+  {% endif %}
+</section>

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ t('home.title') }}{% endblock %}
+{% block content %}
+<div class="container page">
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('home.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('home.subtitle') }}</p>
+  </header>
+  {% if can_create %}
+  {% include "_project_form.html" %}
+  {% else %}
+  <div class="alert alert-info" role="note">{{ t('home.viewer_note') }}</div>
+  {% endif %}
+  {% include "_project_list.html" %}
+</div>
+{% endblock %}

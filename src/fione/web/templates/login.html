@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_macros.html" import logo %}
+{% block title %}{{ t('login.title') }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/auth-form.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="auth-layout">
+  <section class="card auth-card" aria-labelledby="login-heading">
+    {{ logo("logo logo-lg") }}
+    <h1 id="login-heading" class="auth-card__title">{{ t('login.heading') }}</h1>
+    <p class="text-muted">{{ t('app.tagline') }}</p>
+    <div class="alert alert-danger" role="alert" id="login-error" data-form-error hidden></div>
+    <form class="stack" data-json-form
+          data-endpoint="/api/v1/auth/login"
+          data-next="{{ next }}"
+          data-error-invalid_credentials="{{ t('login.error.invalid') }}"
+          data-error-throttled="{{ t('error.throttled') }}"
+          data-error-default="{{ t('error.generic') }}"
+          data-error-network="{{ t('error.network') }}">
+      <div class="field">
+        <label class="field__label" for="login-username">{{ t('login.username') }}</label>
+        <input class="input" id="login-username" name="username" type="text" required maxlength="64"
+               autocomplete="username" autocapitalize="none" spellcheck="false" autofocus>
+      </div>
+      <div class="field">
+        <label class="field__label" for="login-password">{{ t('login.password') }}</label>
+        <input class="input" id="login-password" name="password" type="password" required maxlength="1024"
+               autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block btn-lg">
+        <span class="spinner" aria-hidden="true"></span>{{ t('login.submit') }}
+      </button>
+    </form>
+    <p class="auth-card__help text-muted text-sm">{{ t('login.help') }}</p>
+  </section>
+</div>
+{% endblock %}

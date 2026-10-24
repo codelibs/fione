@@ -1,6 +1,8 @@
 import pytest
 
+from api_helpers import add_user
 from fione import i18n
+from fione.auth.roles import Role
 from fione.i18n import parse_accept_language, resolve_language, t
 
 
@@ -88,3 +90,18 @@ def test_cookie_wins_over_header():
     assert resolve_language("ja", "en") == "ja"
     assert resolve_language("xx", "ja") == "ja"
     assert resolve_language(None, None) == "en"
+
+
+def test_login_page_in_japanese(client):
+    add_user(client, "admin", Role.ADMIN)
+    r = client.get("/login", headers={"Accept-Language": "ja,en;q=0.5"})
+    assert r.status_code == 200
+    assert '<html lang="ja"' in r.text
+    assert "Fione にログイン" in r.text and "ユーザー名" in r.text
+
+
+def test_language_cookie_overrides_the_header(client):
+    add_user(client, "admin", Role.ADMIN)
+    client.cookies.set("fione_lang", "en")
+    r = client.get("/login", headers={"Accept-Language": "ja"})
+    assert '<html lang="en"' in r.text and "Sign in to Fione" in r.text

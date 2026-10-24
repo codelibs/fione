@@ -1,4 +1,5 @@
-"""The FastAPI application: state, lifespan, body limits, error handlers and routers.
+"""The FastAPI application: state, lifespan, body limits, error handlers, routers and the
+web UI (``fione.web``, served outside ``/api``).
 
 A new router is one more entry in ``ROUTERS``; a route that accepts uploads also adds its
 path pattern to ``UPLOAD_PATHS`` (other requests are limited to ``MAX_BODY_BYTES``).
@@ -32,6 +33,8 @@ from fione.config import Settings, get_settings, load_secret
 from fione.jobs.runner import JobRunner
 from fione.storage import open_storage
 from fione.version import __version__
+from fione.web import views as web
+from fione.web.headers import UIHeaders
 
 API_PREFIX = "/api/v1"
 DB_FILE = "fione.db"
@@ -155,6 +158,9 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.setup_throttle = _throttle(settings)
     install_error_handlers(app)
     app.add_middleware(BodyLimit, upload_limit=settings.max_upload_bytes + UPLOAD_SLACK_BYTES)
+    # Outermost, so the UI's security headers are on every non-API response, 413s included.
+    app.add_middleware(UIHeaders)
     for router in ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
+    web.install(app)
     return app
