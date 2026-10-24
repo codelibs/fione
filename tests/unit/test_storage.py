@@ -1,7 +1,10 @@
 import io
 import os
+import stat
 import uuid
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from fione.config import Settings
@@ -101,11 +104,55 @@ def test_delete_prefix_removes_nested_keys_only(storage):
     assert storage.list("") == ["other", "pp/4"]
 
 
-def test_delete_prefix_rejects_empty_prefix(storage):
-    storage.put("keep", b"x")
+@pytest.mark.parametrize("prefix", ["", "p", "p/q", "/"])
+def test_delete_prefix_requires_trailing_slash(storage, prefix):
+    storage.put("p/q/1", b"x")
     with pytest.raises(ValueError):
-        storage.delete_prefix("")
-    assert storage.exists("keep")
+        storage.delete_prefix(prefix)
+    assert storage.exists("p/q/1")
+
+
+def test_delete_prefix_does_not_touch_sibling_with_same_leading_chars(storage):
+    storage.put("projects/1/a", b"x")
+    storage.put("projects/10/a", b"x")
+    storage.delete_prefix("projects/1/")
+    assert storage.list("") == ["projects/10/a"]
+
+
+def test_open_read_is_seekable(storage):
+    data = bytes(range(256)) * 40
+    storage.put("seek", data)
+    with storage.open_read("seek") as f:
+        assert f.seekable()
+        assert f.seek(-10, os.SEEK_END) == len(data) - 10
+        assert f.read() == data[-10:]
+        assert f.read() == b""
+        assert f.seek(0) == 0
+        assert f.read(5) == data[:5]
+        assert f.tell() == 5
+        f.seek(100)
+        f.seek(7, os.SEEK_CUR)
+        assert f.read(3) == data[107:110]
+        assert f.seek(len(data) + 50) == len(data) + 50
+        assert f.read() == b""
+
+
+def test_open_read_empty_object(storage):
+    storage.put("empty", b"")
+    with storage.open_read("empty") as f:
+        assert f.read() == b""
+        assert f.seek(0, os.SEEK_END) == 0
+
+
+def test_open_read_parquet(storage):
+    table = pa.table({"x": list(range(1000)), "y": [str(i) for i in range(1000)]})
+    buf = io.BytesIO()
+    pq.write_table(table, buf)
+    storage.put("data/t.parquet", buf.getvalue())
+    with storage.open_read("data/t.parquet") as f:
+        assert pq.ParquetFile(f).metadata.num_rows == 1000
+    with storage.open_read("data/t.parquet") as f:
+        assert pq.read_table(f).equals(table)
 
 
 def test_missing_key_raises_key_error(storage):
@@ -117,7 +164,22 @@ def test_missing_key_raises_key_error(storage):
         storage.size("nope")
 
 
-BAD_KEYS = ["", "/abs", "../x", "a/../b", "a/..", "a//b", "a/", "./a", "a/./b", "a\\b", "a\x00b"]
+BAD_KEYS = [
+    "",
+    ".tmp/x",
+    ".TMP/q",
+    ".Tmp",
+    "/abs",
+    "../x",
+    "a/../b",
+    "a/..",
+    "a//b",
+    "a/",
+    "./a",
+    "a/./b",
+    "a\\b",
+    "a\x00b",
+]
 
 
 @pytest.mark.parametrize("key", BAD_KEYS)
@@ -136,7 +198,9 @@ def test_invalid_keys_rejected(storage, key):
         storage.delete(key)
 
 
-@pytest.mark.parametrize("prefix", ["/abs", "../x", "a/../b", "a//", "a\\b", "a\x00"])
+@pytest.mark.parametrize(
+    "prefix", ["/abs", "../x", "a/../b", "a//", "a\\b", "a\x00", ".tmp/", ".TMP", ".Tmp/x"]
+)
 def test_invalid_prefixes_rejected(storage, prefix):
     with pytest.raises(ValueError):
         storage.list(prefix)
@@ -174,10 +238,28 @@ def test_local_failed_put_leaves_no_partial_object(tmp_path):
     assert not any((tmp_path / "objects" / ".tmp").iterdir())
 
 
-def test_local_reserved_tmp_segment_rejected(tmp_path):
+def test_local_object_mode_follows_umask(tmp_path):
     s = LocalStorage(tmp_path / "objects")
-    with pytest.raises(ValueError):
-        s.put(".tmp/x", b"x")
+    old = os.umask(0o027)
+    try:
+        s.put("m", b"x")
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE((tmp_path / "objects" / "m").stat().st_mode) == 0o640
+
+
+def test_local_delete_prunes_empty_directories(tmp_path):
+    s = LocalStorage(tmp_path / "objects")
+    s.put("p/q/r/1", b"x")
+    s.put("p/keep", b"x")
+    s.delete("p/q/r/1")
+    assert not (tmp_path / "objects" / "p" / "q").exists()
+    assert s.list("") == ["p/keep"]
+    s.delete_prefix("p/")
+    assert not (tmp_path / "objects" / "p").exists()
+    assert (tmp_path / "objects").is_dir()
+    s.put("p", b"now a file")
+    assert s.get("p") == b"now a file"
 
 
 def test_local_stays_under_root(tmp_path):
@@ -201,6 +283,18 @@ def test_local_delete_on_directory_key_is_noop(tmp_path):
     s.put("dir/file", b"x")
     s.delete("dir")
     assert s.get("dir/file") == b"x"
+
+
+@pytest.mark.s3
+def test_s3_delete_prefix_batches(monkeypatch):
+    s = _s3_storage()
+    monkeypatch.setattr("fione.storage.s3._DELETE_BATCH", 3)
+    for i in range(10):
+        s.put(f"b/{i}", b"x")
+    s.put("keep", b"x")
+    s.delete_prefix("b/")
+    assert s.list("") == ["keep"]
+    s.delete("keep")
 
 
 # -- open_storage ----------------------------------------------------------------

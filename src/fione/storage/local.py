@@ -1,17 +1,22 @@
 import os
+import secrets
 import shutil
-import tempfile
 from pathlib import Path
 from typing import BinaryIO
 
-from fione.storage.base import validate_key, validate_prefix
-
-# Top-level directory under the root that holds in-flight writes. Keys may not use it.
-_TMP_DIR = ".tmp"
+from fione.storage.base import (
+    RESERVED_SEGMENT,
+    validate_delete_prefix,
+    validate_key,
+    validate_prefix,
+)
 
 
 class LocalStorage:
-    """``Storage`` on a local directory. Writes are atomic: temp file, fsync, ``os.replace``.
+    """``Storage`` on a local directory.
+
+    Writes are atomic: temp file, fsync, ``os.replace``, directory fsync. Directories left
+    empty by a delete are removed.
 
     A key and a prefix of another key cannot coexist here (``a`` and ``a/b``), because
     a path cannot be both a file and a directory; S3 allows it.
@@ -23,16 +28,16 @@ class LocalStorage:
 
     def _path(self, key: str) -> Path:
         validate_key(key)
-        if key.split("/", 1)[0] == _TMP_DIR:
-            raise ValueError(f"{_TMP_DIR!r} is a reserved storage key segment: {key!r}")
         return self.root / key
 
     def put(self, key: str, data: bytes | BinaryIO) -> None:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_dir = self.root / _TMP_DIR
+        tmp_dir = self.root / RESERVED_SEGMENT
         tmp_dir.mkdir(exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=tmp_dir)
+        tmp = tmp_dir / secrets.token_hex(16)
+        # Mode 0o666 lets the process umask decide, so other uids on a shared volume can read.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
         try:
             with os.fdopen(fd, "wb") as f:
                 if isinstance(data, bytes):
@@ -41,9 +46,15 @@ class LocalStorage:
                     shutil.copyfileobj(data, f)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_name, path)
+            try:
+                os.replace(tmp, path)
+            except FileNotFoundError:
+                # A concurrent delete pruned the (then empty) parent directory.
+                path.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(tmp, path)
+            _fsync_dir(path.parent)
         except BaseException:
-            Path(tmp_name).unlink(missing_ok=True)
+            tmp.unlink(missing_ok=True)
             raise
 
     def open_read(self, key: str) -> BinaryIO:
@@ -72,7 +83,7 @@ class LocalStorage:
         keys = []
         for dirpath, dirnames, filenames in os.walk(start):
             if Path(dirpath) == self.root:
-                dirnames[:] = [d for d in dirnames if d != _TMP_DIR]
+                dirnames[:] = [d for d in dirnames if d != RESERVED_SEGMENT]
             for name in filenames:
                 key = (Path(dirpath) / name).relative_to(self.root).as_posix()
                 if key.startswith(prefix):
@@ -83,10 +94,26 @@ class LocalStorage:
         path = self._path(key)
         if path.is_file():  # a directory (a prefix of other keys) is not an object
             path.unlink(missing_ok=True)
+            self._prune(path.parent)
 
     def delete_prefix(self, prefix: str) -> None:
-        validate_prefix(prefix)
-        if not prefix:
-            raise ValueError("delete_prefix requires a non-empty prefix")
+        validate_delete_prefix(prefix)
         for key in self.list(prefix):
             self.delete(key)
+
+    def _prune(self, directory: Path) -> None:
+        """Remove now-empty directories up to, not including, the root."""
+        while directory != self.root:
+            try:
+                directory.rmdir()
+            except OSError:  # not empty (or already gone)
+                return
+            directory = directory.parent
+
+
+def _fsync_dir(directory: Path) -> None:
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)

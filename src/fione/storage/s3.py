@@ -1,13 +1,15 @@
+import io
 from typing import BinaryIO
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from fione.storage.base import validate_key, validate_prefix
+from fione.storage.base import validate_delete_prefix, validate_key, validate_prefix
 
 _NOT_FOUND = {"404", "NoSuchKey", "NotFound"}
 _DELETE_BATCH = 1000  # S3 DeleteObjects limit
+_READ_BUFFER = 4 * 1024 * 1024
 
 
 class S3Storage:
@@ -68,14 +70,17 @@ class S3Storage:
             self._client.upload_fileobj(data, self.bucket, full)
 
     def open_read(self, key: str) -> BinaryIO:
-        try:
-            return self._client.get_object(Bucket=self.bucket, Key=self._key(key))["Body"]
-        except ClientError as e:
-            raise _key_error(e, key) from None
+        """Seekable file: ranged GETs behind a buffer, so Parquet-style readers can seek."""
+        raw = _RangeReader(self._client, self.bucket, self._key(key), self.size(key))
+        return io.BufferedReader(raw, buffer_size=_READ_BUFFER)
 
     def get(self, key: str) -> bytes:
-        with self.open_read(key) as f:
-            return f.read()
+        try:
+            body = self._client.get_object(Bucket=self.bucket, Key=self._key(key))["Body"]
+        except ClientError as e:
+            raise _key_error(e, key) from None
+        with body:
+            return body.read()
 
     def exists(self, key: str) -> bool:
         try:
@@ -105,9 +110,7 @@ class S3Storage:
         self._client.delete_object(Bucket=self.bucket, Key=self._key(key))
 
     def delete_prefix(self, prefix: str) -> None:
-        validate_prefix(prefix)
-        if not prefix:
-            raise ValueError("delete_prefix requires a non-empty prefix")
+        validate_delete_prefix(prefix)
         keys = self.list(prefix)
         for i in range(0, len(keys), _DELETE_BATCH):
             objects = [{"Key": self._prefix + k} for k in keys[i : i + _DELETE_BATCH]]
@@ -116,6 +119,58 @@ class S3Storage:
             )
             if result.get("Errors"):
                 raise OSError(f"failed to delete objects: {result['Errors']}")
+
+
+class _RangeReader(io.RawIOBase):
+    """Read-only, seekable view of one object using ``GetObject`` with a ``Range`` header."""
+
+    def __init__(self, client, bucket: str, key: str, size: int):
+        self._client = client
+        self._bucket = bucket
+        self._key = key
+        self._size = size
+        self._pos = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        base = {io.SEEK_SET: 0, io.SEEK_CUR: self._pos, io.SEEK_END: self._size}.get(whence)
+        if base is None:
+            raise ValueError(f"invalid whence: {whence}")
+        if base + offset < 0:
+            raise ValueError("negative seek position")
+        self._pos = base + offset
+        return self._pos
+
+    def _fetch(self, end: int) -> bytes:
+        """Bytes from the current position up to and including ``end``."""
+        resp = self._client.get_object(
+            Bucket=self._bucket, Key=self._key, Range=f"bytes={self._pos}-{end}"
+        )
+        with resp["Body"] as body:
+            data = body.read()
+        self._pos += len(data)
+        return data
+
+    def readinto(self, b) -> int:
+        want = min(len(b), self._size - self._pos)
+        if want <= 0:
+            return 0
+        data = self._fetch(self._pos + want - 1)
+        b[: len(data)] = data
+        return len(data)
+
+    def readall(self) -> bytes:
+        if self._pos >= self._size:
+            return b""
+        return self._fetch(self._size - 1)
 
 
 def _code(e: ClientError) -> str:
