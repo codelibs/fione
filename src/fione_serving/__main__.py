@@ -16,7 +16,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     try:
         app = create_app()
-    except ModelLoadError as e:
+    except (ModelLoadError, ValueError) as e:  # ValueError: a bad FIONE_SERVING_* setting
         log.error("%s", e)
         return 1
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8080")), log_config=None)  # noqa: S104

@@ -426,6 +426,30 @@ def test_a_binomial_model_is_reported_as_binomial(stored):
     assert row["label"] in ("no", "yes") and len(row["class_probabilities"]) == 2
 
 
+@pytest.mark.parametrize(
+    ("make_target", "first", "classes"),
+    [
+        (lambda s: s.map({"良": 10, "悪": 20, "普通": 30}), '"label":', [10, 20, 30]),
+        (lambda s: s == "良", '"label":', [False, True]),
+    ],
+    ids=["int", "bool"],
+)
+def test_class_labels_keep_their_json_type(stored, make_target, first, classes):
+    frame = _japanese_frame().drop(columns=["value"])
+    frame["判定"] = make_target(frame["判定"])
+    client = client_for(stored(_fit(frame, "判定"))[1])
+    assert client.get("/model").json()["domains"][-1] == classes
+    r = invoke(client, [JP_ROW])
+    (row,) = strict(r.text)["predictions"]
+    assert type(row["label"]) is type(classes[0]) and row["label"] == classes[row["index"]]
+    literal = json.dumps(row["label"])
+    assert f'{first}{literal},"index"' in r.text and literal in (
+        "true",
+        "false",
+        *map(str, classes),
+    )
+
+
 # --- loading ----------------------------------------------------------------------------------
 
 
@@ -491,6 +515,15 @@ def test_the_server_exits_1_with_one_line_on_a_bad_model_dir(tmp_path):
     assert done.returncode == 1
     assert "Traceback" not in done.stderr
     assert len(done.stderr.strip().splitlines()) == 1 and "model" in done.stderr
+
+
+def test_the_server_exits_1_on_a_bad_limit_setting(tmp_path):
+    env = {**os.environ, "PYTHONPATH": str(SRC), "FIONE_SERVING_MAX_BODY": "lots"}
+    done = subprocess.run(
+        [sys.executable, "-m", "fione_serving"], env=env, capture_output=True, text=True, timeout=60
+    )
+    assert done.returncode == 1 and "Traceback" not in done.stderr
+    assert "FIONE_SERVING_MAX_BODY" in done.stderr
 
 
 def test_the_server_exits_1_on_an_image_tag_mismatch(jp_model, stored):
@@ -574,6 +607,12 @@ def test_the_example_curl_is_valid_json_with_the_feature_names(jp_model, stored,
     assert payload == {"instances": [{name: "?" for name in jp_model.columns}]}
     assert "幅" in payload["instances"][0]
     assert "Content-Type: application/json" in words
+
+
+def test_the_example_curl_is_compact_json(jp_model, stored, tmp_path):
+    storage, _ = stored(jp_model)
+    words = shlex.split(bundle_of(storage, tmp_path).example_curl)
+    assert words[words.index("-d") + 1].startswith('{"instances":[{"')
 
 
 def test_the_example_curl_survives_a_quote_in_a_column_name(tmp_path):

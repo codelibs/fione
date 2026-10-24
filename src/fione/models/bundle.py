@@ -36,7 +36,9 @@ def _filename(record: ModelRecord) -> str:
 
 def example_curl(columns: Sequence[str]) -> str:
     """A ``curl`` call to ``/invocations`` with one instance of ``"?"`` placeholders."""
-    body = json.dumps({"instances": [{c: "?" for c in columns}]}, ensure_ascii=False)
+    body = json.dumps(
+        {"instances": [{c: "?" for c in columns}]}, ensure_ascii=False, separators=(",", ":")
+    )
     return (
         f"curl -s -X POST localhost:{HOST_PORT}/invocations"
         f" -H 'Content-Type: application/json' -d {shlex.quote(body)}"
