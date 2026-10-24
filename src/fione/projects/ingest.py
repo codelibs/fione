@@ -115,7 +115,7 @@ def _unique_names(raw: list[str]) -> list[str]:
 
 
 def _open_csv(
-    path: Path, encoding: str, delimiter: str, block_size: int, string_columns: set[str]
+    path: Path, encoding: str, delimiter: str, block_size: int, column_types: dict[str, pa.DataType]
 ) -> pacsv.CSVStreamingReader:
     return pacsv.open_csv(
         path,
@@ -123,7 +123,7 @@ def _open_csv(
         parse_options=pacsv.ParseOptions(delimiter=delimiter),
         convert_options=pacsv.ConvertOptions(
             strings_can_be_null=True,
-            column_types={name: pa.string() for name in string_columns},
+            column_types=column_types,
         ),
     )
 
@@ -153,50 +153,68 @@ def _write_parquet(
     return rows, schema
 
 
-def _find_string_columns(
+def _widen_columns(
     path: Path, encoding: str, delimiter: str, block_size: int, inferred: pa.Schema
-) -> set[str]:
-    """Names of columns whose inferred type some later value does not fit.
+) -> dict[str, pa.DataType]:
+    """The wider type for each column whose inferred type some later value does not fit.
 
     Re-reads every column as text and tries the cast to the type inferred from the first
-    block, so the whole file is never held in memory.
+    block, so the whole file is never held in memory. An integer column that only fails
+    on non-integers becomes float64; anything else that fails becomes string.
     """
-    as_text = set(inferred.names)
-    bad: set[str] = set()
+    as_text = {name: pa.string() for name in inferred.names}
+    fails: set[str] = set()
+    float_fails: set[str] = set()
     with _open_csv(path, encoding, delimiter, block_size, as_text) as reader:
         for batch in reader:
             for index, field in enumerate(inferred):
-                if field.name in bad or pa.types.is_string(field.type):
+                if pa.types.is_string(field.type):
                     continue
-                try:
-                    batch.column(index).cast(field.type)
-                except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
-                    bad.add(field.name)
-    return bad
+                column = batch.column(index)
+                if field.name not in fails:
+                    try:
+                        column.cast(field.type)
+                    except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+                        fails.add(field.name)
+                if (
+                    pa.types.is_integer(field.type)
+                    and field.name not in float_fails
+                    and field.name in fails
+                ):
+                    try:
+                        column.cast(pa.float64())
+                    except pa.ArrowInvalid:
+                        float_fails.add(field.name)
+    int_columns = {field.name for field in inferred if pa.types.is_integer(field.type)}
+    return {
+        name: pa.float64() if name in int_columns and name not in float_fails else pa.string()
+        for name in fails
+    }
 
 
 def _convert(
     path: Path, out: Path, encoding: str, delimiter: str, block_size: int
 ) -> tuple[int, pa.Schema]:
-    """CSV to Parquet in one streaming pass; columns that hit a type mismatch become strings.
+    """CSV to Parquet in one streaming pass; columns that hit a type mismatch are widened.
 
     pyarrow infers types from the first block, so a later value that does not fit makes
-    the pass fail. Those columns are found and the pass is retried with them as strings.
+    the pass fail. Those columns are found and the pass is retried with them widened
+    (integer to float64 to string); each retry changes at least one column's type.
     """
-    string_columns: set[str] = set()
+    forced: dict[str, pa.DataType] = {}
     while True:
         inferred = None
         try:
-            with _open_csv(path, encoding, delimiter, block_size, string_columns) as reader:
+            with _open_csv(path, encoding, delimiter, block_size, forced) as reader:
                 inferred = reader.schema
                 return _write_parquet(reader, _unique_names(inferred.names), out)
         except pa.ArrowInvalid:
             if inferred is None:
                 raise
-            more = _find_string_columns(path, encoding, delimiter, block_size, inferred)
-            if not more - string_columns:
+            widened = _widen_columns(path, encoding, delimiter, block_size, inferred)
+            if all(forced.get(name) == dtype for name, dtype in widened.items()):
                 raise
-            string_columns |= more
+            forced |= widened
 
 
 def ingest_csv(

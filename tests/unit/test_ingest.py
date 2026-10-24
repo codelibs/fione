@@ -268,3 +268,31 @@ def test_invalid_utf8_in_later_block_raises_ingest_error(conn, storage, project)
     with pytest.raises(IngestError):
         load(conn, storage, project, data, block_size=4096)
     assert storage.list("") == []
+
+
+def test_int_then_float_in_later_block_is_double(conn, storage, project):
+    rows = [f"{i},{i}" for i in range(3000)] + ["1.5,x", "2.5,y"]
+    data = ("a,b\n" + "\n".join(rows) + "\n").encode()
+    ds, df = load(conn, storage, project, data, block_size=4096)
+    assert ds.schema == [("a", "double"), ("b", "string")]
+    assert df["a"].dtype.kind == "f"
+    assert df["a"].iloc[0] == 0.0 and df["a"].iloc[3000] == 1.5 and df["a"].iloc[3001] == 2.5
+
+
+def test_int_float_and_int_text_columns_in_one_file(conn, storage, project):
+    rows = [f"{i},{i},{i}" for i in range(3000)] + ["1.5,x,7"]
+    data = ("f,t,i\n" + "\n".join(rows) + "\n").encode()
+    ds, df = load(conn, storage, project, data, block_size=4096)
+    assert ds.schema == [("f", "double"), ("t", "string"), ("i", "int64")]
+    assert df["f"].iloc[-1] == 1.5 and df["t"].iloc[-1] == "x" and df["t"].iloc[0] == "0"
+    parquet_schema = pq.ParquetFile(storage.open_read(ds.key)).schema_arrow
+    assert [(f.name, str(f.type)) for f in parquet_schema] == ds.schema
+
+
+def test_int_then_float_and_text_is_string(conn, storage, project):
+    rows = [str(i) for i in range(3000)] + ["1.5", "abc"]
+    ds, df = load(
+        conn, storage, project, ("a\n" + "\n".join(rows) + "\n").encode(), block_size=4096
+    )
+    assert ds.schema == [("a", "string")]
+    assert df["a"].iloc[3000] == "1.5" and df["a"].iloc[3001] == "abc"
