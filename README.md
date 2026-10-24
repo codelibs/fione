@@ -1,43 +1,23 @@
-Fione: Fess AutoML
-[![Java CI with Maven](https://github.com/codelibs/fione/actions/workflows/maven.yml/badge.svg)](https://github.com/codelibs/fione/actions/workflows/maven.yml)
-=========
+# Fione
 
-## Overview
+Fione is an open-source AutoML server. This branch is the Python rewrite (v2) of the original
+Java implementation.
 
-Fione is AutoML extension for Fess.
-
-## Documents
-
-- [fione.codelibs.org](https://fione.codelibs.org/)
-- [docker-fione](https://github.com/codelibs/docker-fione/blob/master/README.md#getting-started)
-- [discuss.codelibs.org](https://discuss.codelibs.org/c/FioneEN)
-
-## Getting Started
-
-See [Quick Start](https://fione.codelibs.org/quick-start.html) guide.
+**Status: v2 in development.** The v1 sources are preserved at the `v1-final` tag.
 
 ## Development
 
-### Create Source Code For Development
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.12.
 
-    git clone https://github.com/codelibs/fione.git
-    git clone https://github.com/codelibs/fess.git
-    cd fione
-    bash ./tools/devcmd.sh copy
-    bash ./tools/devcmd.sh start
-    cd ../fess
+    uv sync
+    uv run pytest
+    uv run ruff check .
 
-See [Development Guide](https://fess.codelibs.org/dev/getting-started.html) for Fess.
+## 日本語
 
-### Generate Source Code
+Fione は AutoML サーバーです。v2 は Python で書き直し中です (開発中)。
+開発コマンドは上記の `uv sync` / `uv run pytest` / `uv run ruff check .` を参照してください。
 
-For updating fione\_message, use dbflute:freegen
+## License
 
-    mvn dbflute:download # (one time command)
-    mvn dbflute:freegen
-
-### Build package
-
-    mvn package
-    mvn rpm:rpm   # .rpm package
-    mvn jdeb:jdeb # .deb package
+Apache License 2.0. See [LICENSE](LICENSE).

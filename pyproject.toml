@@ -1,0 +1,30 @@
+[project]
+name = "fione"
+dynamic = ["version"]
+description = "Fione: AutoML server"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12,<3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "playwright",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/fione/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fione"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

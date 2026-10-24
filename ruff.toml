@@ -1,0 +1,7 @@
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["tmp", "dbflute_fess"]  # untracked local v1 leftovers
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
