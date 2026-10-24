@@ -129,6 +129,18 @@ def test_transform_coerces_numeric_and_datetime_strings():
     assert prep.tree(df)["f0"].isna().tolist() == [False, False, True]  # inf becomes NaN
 
 
+@pytest.mark.parametrize(
+    "df",
+    [
+        pd.DataFrame({"empty": [np.nan] * 5, "const": ["a"] * 5}),
+        pd.DataFrame(index=range(5)),
+    ],
+)
+def test_fit_without_usable_columns_raises_config_error(df):
+    with pytest.raises(ConfigError, match="no usable feature columns"):
+        Prep().fit(df)
+
+
 def test_prep_pickles(tmp_path):
     prep = Prep().fit(_frame())
     joblib.dump(prep, tmp_path / "prep.joblib")
@@ -198,7 +210,15 @@ def test_validate_target_names_classes_with_one_row():
 
 def test_validate_target_rejects_very_high_cardinality_classification():
     y = pd.Series([f"label-{i % 250}" for i in range(300)])
-    with pytest.raises(ConfigError, match="250 distinct values.*regression"):
+    with pytest.raises(ConfigError, match="250 distinct values") as raised:
+        validate_target(y, "classification", 5)
+    assert "regression" not in str(raised.value)  # a string target cannot be regressed
+    assert "choose another column" in str(raised.value)
+
+
+def test_validate_target_suggests_regression_for_high_cardinality_numbers():
+    y = pd.Series([i % 250 for i in range(300)])
+    with pytest.raises(ConfigError, match="250 distinct values.*use regression"):
         validate_target(y, "classification", 5)
 
 

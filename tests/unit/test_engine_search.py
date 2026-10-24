@@ -8,7 +8,7 @@ import pytest
 from sklearn.datasets import make_classification, make_regression
 
 from fione.engine.config import Deadline, DeadlineExceeded, NoModelError
-from fione.engine.families import FAMILIES, n_threads
+from fione.engine.families import FAMILIES, UNIT_SAFETY, FamilySpec, n_threads
 from fione.engine.prep import Prep, validate_target
 from fione.engine.search import make_folds, run_family
 
@@ -51,6 +51,39 @@ def _titanic_like(n=1300, seed=0):
     return X, survived
 
 
+class _ConstantModel:
+    classes_ = np.array([0, 1])
+
+    def predict_proba(self, X):
+        return np.full((len(X), 2), 0.5)
+
+
+class _SlowFamily(FamilySpec):
+    """Every fit spends ``unit`` seconds before it first consults its deadline."""
+
+    name = "Slow"
+    view = "dense"
+    defaults = {}
+    unit = 0.2
+    starts: list[float] = []
+
+    def space(self, trial):
+        return {}
+
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline):
+        self.starts.append(time.monotonic())
+        time.sleep(self.unit)
+        deadline.expired()
+        return _ConstantModel()
+
+
+@pytest.fixture
+def slow(monkeypatch):
+    monkeypatch.setitem(FAMILIES, "Slow", _SlowFamily)
+    monkeypatch.setattr(_SlowFamily, "starts", [])
+    return _SlowFamily
+
+
 # --- families -----------------------------------------------------------------
 
 
@@ -83,6 +116,17 @@ def test_fit_stops_at_deadline_with_usable_model(name):
     proba = spec.predict(model, view.iloc[40_000:])
     assert proba.shape == (10_000, 2)
     assert np.allclose(proba.sum(axis=1), 1)
+
+
+def test_fit_refuses_to_start_a_unit_that_cannot_finish(slow):
+    spec = slow("classification", 2)
+    X = pd.DataFrame({"a": range(20)})
+    y = np.array([0, 1] * 10)
+    spec.fit({}, X, y, X, y, Deadline(5))
+    assert spec.unit_secs == pytest.approx(slow.unit, abs=0.05)
+    with pytest.raises(DeadlineExceeded):
+        spec.fit({}, X, y, X, y, Deadline(UNIT_SAFETY * slow.unit * 0.9))
+    assert len(slow.starts) == 1
 
 
 # --- run_family -----------------------------------------------------------------
@@ -197,6 +241,33 @@ def test_cancelling_mid_trial_discards_it_and_returns_promptly():
     assert time.monotonic() - start < 1.0
     assert result.trials == 0 and result.models == []
     assert [e.data["reason"] for e in events if e.type == "stopped"] == ["cancelled"]
+
+
+def test_later_trials_never_start_a_fit_that_would_straddle_the_deadline(slow):
+    X, y = _classification(40, 4)
+    prep, y, folds = _setup(X, y, nfolds=2)
+    budget = 1.5
+    start = time.monotonic()
+    run_family(
+        "Slow", X, y, folds, "classification", prep, Deadline(budget), lambda e: None, lambda: False
+    )
+    elapsed = time.monotonic() - start
+    assert len(slow.starts) >= 4  # several trials ran
+    assert all(start + budget - t >= UNIT_SAFETY * slow.unit for t in slow.starts)
+    assert elapsed <= budget
+
+
+def test_first_trial_gives_up_as_soon_as_its_folds_cannot_fit(slow, monkeypatch):
+    monkeypatch.setattr(slow, "unit", 0.3)
+    X, y = _classification(50, 4)
+    prep, y, folds = _setup(X, y)
+    start = time.monotonic()
+    with pytest.raises(NoModelError):  # 5 folds x 0.3 s cannot fit in 1 s
+        run_family(
+            "Slow", X, y, folds, "classification", prep, Deadline(1), lambda e: None, lambda: False
+        )
+    assert time.monotonic() - start < 0.5
+    assert len(slow.starts) == 1
 
 
 def test_expired_deadline_raises_no_model_error():
@@ -411,3 +482,52 @@ def test_small_data_completes_many_lightgbm_trials():
     )
     assert result.trials >= 3
     assert time.monotonic() - start < 20
+
+
+@pytest.fixture(scope="module")
+def wide():
+    """400k rows x 102 features (two categoricals) with a binary and a 30-class target."""
+    rng = np.random.default_rng(0)
+    n = 400_000
+    X = pd.DataFrame(rng.normal(size=(n, 100)), columns=[f"c{i}" for i in range(100)])
+    X["cat1"] = rng.choice([f"a{i}" for i in range(50)], n)
+    X["cat2"] = rng.choice([f"b{i}" for i in range(150)], n)
+    signal = X.iloc[:, :10].sum(axis=1).to_numpy() + rng.normal(size=n)
+    binary = (signal > 0).astype(np.int64)
+    classes = np.searchsorted(np.quantile(signal, np.linspace(0, 1, 31)[1:-1]), signal)
+    return X, Prep().fit(X), binary, classes
+
+
+def _returns_or_raises_within(name, X, y, prep, budget, slack):
+    folds = make_folds(y, "classification", 5, 0)
+    start = time.monotonic()
+    try:
+        result = run_family(
+            name,
+            X,
+            y,
+            folds,
+            "classification",
+            prep,
+            Deadline(budget),
+            lambda e: None,
+            lambda: False,
+        )
+    except NoModelError:
+        pass
+    else:
+        assert result.trials >= 1 and len(result.models) == len(folds)
+    assert time.monotonic() - start <= budget + slack
+
+
+@pytest.mark.timing
+@pytest.mark.parametrize("name", list(FAMILIES))
+def test_wide_data_does_not_blow_a_two_second_budget(wide, name):
+    X, prep, binary, _ = wide
+    _returns_or_raises_within(name, X, binary, prep, budget=2, slack=1.0)
+
+
+@pytest.mark.timing
+def test_wide_thirty_class_catboost_does_not_blow_a_two_second_budget(wide):
+    X, prep, _, classes = wide
+    _returns_or_raises_within("CatBoost", X, classes, prep, budget=2, slack=1.5)

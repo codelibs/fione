@@ -4,9 +4,11 @@
 true. Each trial fits every fold; its score is the out-of-fold loss (lower is better): log loss
 for classification, RMSE for regression. The first trial uses the family defaults and splits the
 remaining time evenly over its folds, so it always completes, with truncated models if need be;
-if even that is impossible, ``NoModelError`` is raised. Later trials run their folds to the end
-and are discarded when the deadline or a cancellation interrupts them. Optuna's median pruner
-abandons trials whose running fold loss is clearly behind.
+if even that is impossible, ``NoModelError`` is raised, as soon as a fold's time share is
+shorter than the family's first unit (see ``families``) rather than after burning the budget.
+Later trials run their folds to the end and are discarded when the deadline or a cancellation
+interrupts them; one is not started when the time left cannot cover a unit per fold. Optuna's
+median pruner abandons trials whose running fold loss is clearly behind.
 
 ``max_trial_secs`` caps every trial; its time is also split over the folds, so a capped trial is
 kept with truncated models instead of being discarded.
@@ -26,7 +28,7 @@ from sklearn.model_selection import KFold, StratifiedKFold
 
 from fione.engine.config import Deadline, DeadlineExceeded, NoModelError
 from fione.engine.events import Event, EventSink
-from fione.engine.families import FAMILIES, FamilySpec, n_threads
+from fione.engine.families import FAMILIES, UNIT_SAFETY, FamilySpec, n_threads
 from fione.engine.prep import Prep, Task
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -154,7 +156,10 @@ def run_family(
         if should_stop():
             reason = "cancelled"
             break
-        if deadline.expired():
+        unit = spec.unit_secs
+        if deadline.expired() or (
+            finished and unit and deadline.remaining() < len(folds) * UNIT_SAFETY * unit
+        ):
             reason = "time"
             break
         if view is None:

@@ -1,10 +1,19 @@
 """Model families: their default parameters, search spaces and deadline-bounded fits.
 
 Every ``fit`` checks ``deadline.expired()`` after each boosting iteration (ExtraTrees: between
-chunks of trees sized from the measured throughput) and returns the model trained so far when it
-fires. It raises ``DeadlineExceeded`` only when the deadline has already passed at the start, so
-a returned model always has at least one iteration. ``deadline`` needs ``expired()`` and
-``remaining()``; the search passes an object that also reports cancellation as expiry.
+rounds of trees sized from the measured throughput) and returns the model trained so far when it
+fires, so a returned model always has at least one iteration. ``deadline`` needs ``expired()``
+and ``remaining()``; the search passes an object that also reports cancellation as expiry.
+
+The first *unit* of a fit (dataset construction plus the first iteration; for ExtraTrees the
+first round of trees) cannot be interrupted, so ``fit`` refuses to start, raising
+``DeadlineExceeded``, when less than ``UNIT_SAFETY`` times the family's unit time remains. The
+unit time is the slowest one measured by this instance's earlier fits. Before the first fit on
+more than ``PROBE_ROWS`` rows it is estimated from one unit on a ``PROBE_ROWS`` subsample,
+scaled by n·log(n) (measured at 400k rows: right for ExtraTrees, 2-8x too high for boosting).
+
+Still unprotected: that probe (about 0.1-0.3 s), the first fit on at most ``PROBE_ROWS`` rows,
+and an iteration that runs slower than the measured ones. Callers should reserve headroom.
 
 Size caps (artifact target, spec 5.2): at most 2,000 boosting rounds with 50-round early
 stopping, 256 leaves per tree, XGBoost depth 10, CatBoost depth 8; ExtraTrees 100 trees of at
@@ -31,6 +40,8 @@ EARLY_STOPPING_ROUNDS = 50
 MAX_LEAVES = 256
 SMALL_DATA_ROWS = 20_000
 SMALL_DATA_THREADS = 4
+PROBE_ROWS = 20_000
+UNIT_SAFETY = 1.2
 
 
 def n_threads(n_rows: int) -> int:
@@ -56,6 +67,8 @@ class FamilySpec:
         self.n_classes = n_classes
         self.seed = seed
         self.n_jobs = n_jobs
+        self.unit_secs: float | None = None  # see the module docstring
+        self._measured = False  # unit_secs comes from a real fit, not the probe
 
     @property
     def classification(self) -> bool:
@@ -75,9 +88,30 @@ class FamilySpec:
     ):
         if deadline.expired():
             raise DeadlineExceeded
-        return self._fit(params, X_tr, y_tr, X_va, y_va, deadline)
+        if self.unit_secs is None and len(X_tr) > PROBE_ROWS:
+            self.unit_secs = self._probe(params, X_tr, y_tr)
+        if self.unit_secs is not None and deadline.remaining() < UNIT_SAFETY * self.unit_secs:
+            raise DeadlineExceeded
+        timer = _UnitTimer(deadline)
+        model = self._fit(params, X_tr, y_tr, X_va, y_va, timer)
+        if timer.unit is not None:
+            self.unit_secs = max(self.unit_secs, timer.unit) if self._measured else timer.unit
+            self._measured = True
+        return model
+
+    def _probe(self, params: dict, X: pd.DataFrame, y: np.ndarray) -> float:
+        """Estimated unit time on ``X``, from one unit on a subsample."""
+        rows = np.random.default_rng(self.seed).choice(len(X), PROBE_ROWS, replace=False)
+        if self.classification:  # keep every class: XGBoost needs the labels 0..k-1
+            rows = np.union1d(rows, np.unique(y, return_index=True)[1])
+        X_sub, y_sub = X.iloc[rows], y[rows]
+        start = time.monotonic()
+        self._fit(params, X_sub, y_sub, X_sub, y_sub, _Expired())
+        n, m = len(X), len(rows)
+        return (time.monotonic() - start) * n * np.log(n) / (m * np.log(m))
 
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline):
+        """Fit; training folds hold every class (stratified folds), as XGBoost requires."""
         raise NotImplementedError
 
     def predict(self, model, X: pd.DataFrame) -> np.ndarray:
@@ -90,6 +124,37 @@ class FamilySpec:
         full = np.zeros((len(X), self.n_classes))  # a class missing from the training fold
         full[:, np.asarray(model.classes_, dtype=int)] = proba
         return full
+
+
+class _Expired:
+    """A deadline that has passed: the fit stops after its first unit."""
+
+    def expired(self) -> bool:
+        return True
+
+    def remaining(self) -> float:
+        return 0.0
+
+
+class _UnitTimer:
+    """Passes a deadline through, noting when the fit first consults it: after its first unit."""
+
+    def __init__(self, deadline):
+        self.deadline = deadline
+        self.start = time.monotonic()
+        self.unit: float | None = None
+
+    def _note(self) -> None:
+        if self.unit is None:
+            self.unit = time.monotonic() - self.start
+
+    def expired(self) -> bool:
+        self._note()
+        return self.deadline.expired()
+
+    def remaining(self) -> float:
+        self._note()
+        return self.deadline.remaining()
 
 
 class _LightGBMDeadline:
@@ -268,7 +333,7 @@ class ExtraTrees(FamilySpec):
             added = model.n_estimators - len(getattr(model, "estimators_", []))
             model.fit(X_tr, y_tr)
             rounds = -(-added // chunk)  # a round grows one tree per thread
-            per_round = (time.monotonic() - start) / rounds
+            per_round = max((time.monotonic() - start) / rounds, 1e-3)
             affordable = int(deadline.remaining() / per_round) * chunk
             grow = min(self.n_trees - model.n_estimators, affordable, 4 * chunk)
             if grow < 1 or deadline.expired():

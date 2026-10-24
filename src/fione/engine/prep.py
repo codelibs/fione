@@ -69,6 +69,8 @@ class Prep:
                     self._plan.append((column, "category"))
             else:
                 self._plan.append((column, "numeric"))
+        if not self._plan:
+            raise ConfigError("no usable feature columns: every column is empty or constant")
         self.feature_names: list[str] = []
         self._category_at: dict[str, str] = {}  # view column -> categorical source column
         for column, kind in self._plan:
@@ -199,9 +201,10 @@ def validate_target(
         classes = []
     else:
         if distinct > max(100, 0.5 * n):
+            advice = "use regression or " if not _is_categorical(y) else ""
             raise ConfigError(
                 f"target has {distinct} distinct values, too many for classification; "
-                "use regression or choose another column"
+                f"{advice}choose another column"
             )
         classes = _sorted_labels(y)
         encoded = pd.Categorical(y, categories=classes).codes.astype(np.int64)
