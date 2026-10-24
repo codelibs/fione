@@ -42,7 +42,7 @@
 {% endmacro %}
 
 {% macro toast(t, message, kind="success") %}
-<div class="toast toast-{{ kind }}" role="status">
+<div class="toast toast-{{ kind }}" role="{{ 'alert' if kind == 'danger' else 'status' }}">
   {{ icon("check" if kind == "success" else "info") }}
   <p class="toast__text">{{ message }}</p>
   <button type="button" class="btn btn-ghost btn-icon btn-sm" data-toast-close>

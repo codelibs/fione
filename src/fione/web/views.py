@@ -9,7 +9,7 @@ which HTMX sends from ``hx-headers`` on ``<body>``, or a ``csrf_token`` form fie
 import sqlite3
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 
 from fastapi import APIRouter, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
@@ -30,6 +30,9 @@ WEB_DIR = Path(__file__).parent
 STATIC_PREFIX = "/static"
 LANG_COOKIE_MAX_AGE = 365 * 24 * 3600
 MAX_NEXT_LENGTH = 2048
+# Percent-decoding rounds a ``next`` value is checked through (a proxy or app that decodes
+# once more must not turn it into ``//host``).
+NEXT_DECODE_ROUNDS = 3
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(
@@ -51,18 +54,26 @@ class UiError(Exception):
         self.key = key
 
 
+def _same_site_path(value: str) -> bool:
+    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return False
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
+        return False
+    parts = urlsplit(value)
+    return not (parts.scheme or parts.netloc)
+
+
 def safe_next(value: str | None) -> str:
     """``value`` if it is a path on this site, else ``/``: one leading slash, no backslash
-    or control character (browsers read ``/\\host`` and ``/<tab>/host`` as ``//host``)."""
-    if not value or len(value) > MAX_NEXT_LENGTH or not value.startswith("/"):
+    or control character (browsers read ``/\\host`` and ``/<tab>/host`` as ``//host``),
+    also after percent-decoding it (``/%2F%2Fhost``, double-encoded too)."""
+    if not value or len(value) > MAX_NEXT_LENGTH:
         return "/"
-    if value.startswith("//") or "\\" in value:
-        return "/"
-    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
-        return "/"
-    parts = urlsplit(value)
-    if parts.scheme or parts.netloc:
-        return "/"
+    decoded = value
+    for _ in range(NEXT_DECODE_ROUNDS):
+        if not _same_site_path(decoded):
+            return "/"
+        decoded = unquote(decoded)
     return value
 
 
@@ -100,7 +111,7 @@ def render(
             "here": _here(request),
             "static": _static,
             "version": __version__,
-            **context,
+            **context,  # may override ``here``: where the language switch returns to
         },
         status_code=status,
     )
@@ -128,14 +139,18 @@ def login_page(request: Request, conn: Conn, next: str = "/") -> Response:
     target = safe_next(next)
     if cookie_auth(request, conn) is not None:
         return RedirectResponse(target, 303)
-    return render(request, "login.html", next=target)
+    # The language switch returns here with ``next`` only, never echoing other query fields.
+    here = "/login" + ("?" + urlencode({"next": target}) if target != "/" else "")
+    return render(request, "login.html", next=target, here=here)
 
 
 @router.get("/first-admin")
 def first_admin_page(request: Request, conn: Conn) -> Response:
     if not auth_service.needs_first_admin(conn):
         return RedirectResponse("/login", 303)
-    return render(request, "first_admin.html", min_password=MIN_PASSWORD_LENGTH)
+    return render(
+        request, "first_admin.html", min_password=MIN_PASSWORD_LENGTH, here="/first-admin"
+    )
 
 
 @router.post("/logout")
@@ -182,9 +197,11 @@ def _project_rows(conn: sqlite3.Connection, auth: Auth) -> list[dict]:
             "access": effective_access(conn, auth.user, p.id),
             "owner": owners.get(p.owner_id),
             "own": p.owner_id == auth.user.id,
+            # SQLite's CURRENT_TIMESTAMP is UTC ("YYYY-MM-DD HH:MM:SS"); shown as such.
             "created": p.created_at[:10],
+            "iso": p.created_at.replace(" ", "T") + "Z",
         }
-        for p in reversed(projects.list_projects(conn, auth.user))
+        for p in projects.list_projects(conn, auth.user, newest_first=True)
     ]
 
 
@@ -243,7 +260,8 @@ async def _ui_error(request: Request, exc: UiError) -> Response:
             back = safe_next(current.path + (f"?{current.query}" if current.query else ""))
             response.headers["HX-Redirect"] = "/login?" + urlencode({"next": back})
         return response
-    return render(request, "error.html", status=exc.status, message=message)
+    # here="/": the language switch must not return to a POST-only path.
+    return render(request, "error.html", status=exc.status, message=message, here="/")
 
 
 def install(app: FastAPI) -> None:

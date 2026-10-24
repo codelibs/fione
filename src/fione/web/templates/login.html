@@ -9,7 +9,8 @@
     <h1 id="login-heading" class="auth-card__title">{{ t('login.heading') }}</h1>
     <p class="text-muted">{{ t('app.tagline') }}</p>
     <div class="alert alert-danger" role="alert" id="login-error" data-form-error hidden></div>
-    <form class="stack" data-json-form
+    <noscript><p class="alert alert-danger">{{ t('auth.noscript') }}</p></noscript>
+    <form class="stack" method="post" action="/login" data-json-form
           data-endpoint="/api/v1/auth/login"
           data-next="{{ next }}"
           data-error-invalid_credentials="{{ t('login.error.invalid') }}"
@@ -26,7 +27,7 @@
         <input class="input" id="login-password" name="password" type="password" required maxlength="1024"
                autocomplete="current-password">
       </div>
-      <button type="submit" class="btn btn-primary btn-block btn-lg">
+      <button type="submit" class="btn btn-primary btn-block btn-lg" disabled>
         <span class="spinner" aria-hidden="true"></span>{{ t('login.submit') }}
       </button>
     </form>

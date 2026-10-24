@@ -118,27 +118,20 @@
         dismiss(toast);
       });
     }
-    if (toast.parentNode === toasts) {
+    // Errors stay until closed (WCAG 2.2.1); confirmations go away by themselves.
+    if (toast.parentNode === toasts && !toast.classList.contains("toast-danger")) {
       window.setTimeout(function () {
         dismiss(toast);
       }, TOAST_MS);
     }
   }
 
+  // Built from the server-rendered <template data-toast-template="success|danger">.
   function showToast(message, kind) {
-    var toast = document.createElement("div");
-    toast.className = "toast toast-" + (kind || "success");
-    toast.setAttribute("role", kind === "danger" ? "alert" : "status");
-    var text = document.createElement("p");
-    text.className = "toast__text";
-    text.textContent = message;
-    var close = document.createElement("button");
-    close.type = "button";
-    close.className = "btn btn-ghost btn-sm";
-    close.setAttribute("data-toast-close", "");
-    close.textContent = body.dataset.msgClose || "×";
-    toast.appendChild(text);
-    toast.appendChild(close);
+    var template = document.querySelector('template[data-toast-template="' + kind + '"]');
+    if (!template || !toasts) return;
+    var toast = template.content.firstElementChild.cloneNode(true);
+    toast.querySelector(".toast__text").textContent = message;
     toasts.appendChild(toast);
   }
 

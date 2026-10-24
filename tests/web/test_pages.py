@@ -142,6 +142,12 @@ def test_garbage_session_cookie_redirects_to_login(admin_client):
         ("javascript:alert(1)", "/"),
         ("evil.example", "/"),
         ("", "/"),
+        ("/%2F%2Fevil.example", "/"),
+        ("/%2f/evil.example", "/"),
+        ("/%5Cevil.example", "/"),
+        ("/%252F%252Fevil.example", "/"),
+        ("/%09/evil.example", "/"),
+        ("/?q=a%2Fb", "/?q=a%2Fb"),
     ],
 )
 def test_next_is_only_a_same_site_path(admin_client, target, expected):
@@ -317,7 +323,17 @@ def test_language_switch_sets_the_cookie(admin_client):
     assert '<html lang="ja"' in r.text and "Fione にログイン" in r.text
 
 
-@pytest.mark.parametrize("target", ["//evil.example", "https://evil.example", "/\\x"])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "//evil.example",
+        "https://evil.example",
+        "/\\x",
+        "/%2F%2Fevil.example",
+        "/%5Cevil.example",
+        "/%252F%252Fevil.example",
+    ],
+)
 def test_language_switch_next_stays_on_site(admin_client, target):
     r = admin_client.post("/ui/lang", data={"lang": "en", "next": target}, follow_redirects=False)
     assert location(r) == "/"
@@ -453,3 +469,111 @@ def test_html_lang_follows_the_language(admin_client):
 def test_password_is_never_rendered(admin_client):
     login(admin_client, "admin")
     assert PW not in admin_client.get("/").text
+
+
+# --- fix round 1 ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path,client_name", [("/login", "admin"), ("/first-admin", "setup")])
+def test_auth_forms_post_so_nothing_lands_in_the_url(make_client, path, client_name):
+    """Without JavaScript the native submit must not put the password in the URL: it is a
+    POST (refused, 405), and the button only works once the script enables it."""
+    client = make_client(setup_token=SETUP_TOKEN)
+    if client_name == "admin":
+        add_user(client, "admin", Role.ADMIN)
+    page = Page(client.get(path).text)
+    form = page.find("form", **{"data-json-form": ""})[0]
+    assert form["method"] == "post"
+    assert form["action"] == path
+    assert "disabled" in page.find("button", type="submit")[-1]
+    assert "noscript" in [t for t, _ in page.tags]
+    assert client.post(path).status_code == 405
+
+
+def test_login_does_not_echo_credentials_from_the_query(admin_client):
+    r = admin_client.get("/login", params={"username": "x-user", "password": "secret-pw-9"})
+    assert r.status_code == 200
+    assert "secret-pw-9" not in r.text and "x-user" not in r.text
+
+
+def test_first_admin_does_not_echo_the_query(setup_client):
+    r = setup_client.get("/first-admin", params={"setup_token": "tok-123-xyz"})
+    assert "tok-123-xyz" not in r.text
+
+
+def test_noscript_note_in_both_languages(admin_client):
+    assert "needs JavaScript" in admin_client.get("/login").text
+    ja = admin_client.get("/login", headers={"Accept-Language": "ja"}).text
+    assert "JavaScript を有効" in ja
+
+
+def test_projects_newest_first_even_within_one_second(admin_client):
+    for name in ("Charlie", "Alpha", "Bravo"):  # within one second: same created_at
+        make_project(admin_client, "admin", name)
+    login(admin_client, "admin")
+    html = admin_client.get("/").text
+    names = re.findall(r'<h3 class="project-card__name">([^<]+)</h3>', html)
+    assert names == ["Bravo", "Alpha", "Charlie"]
+
+
+def test_project_dates_say_utc(admin_client):
+    project = make_project(admin_client, "admin", "Dated")
+    login(admin_client, "admin")
+    html = admin_client.get("/").text
+    times = Page(html).find("time")
+    assert times and times[0]["datetime"] == project.created_at.replace(" ", "T") + "Z"
+    assert f"Created {project.created_at[:10]} UTC" in html
+
+
+def test_invalid_project_name_is_announced(admin_client):
+    csrf = login(admin_client, "admin")
+    r = admin_client.post("/ui/projects", data={"name": " "}, headers=hx(csrf))
+    page = Page(r.text)
+    assert page.find("p", **{"class": "field__error", "role": "alert"})
+    field = page.find("input", id="project-name")[0]
+    assert "autofocus" in field and field["aria-invalid"] == "true"
+
+
+def test_toast_templates_for_scripts(admin_client):
+    """JS-built toasts clone server-rendered templates (same icon close button); a danger
+    toast is an alert (and app.js never auto-dismisses it)."""
+    login(admin_client, "admin")
+    html = admin_client.get("/").text
+    page = Page(html)
+    kinds = {a.get("data-toast-template") for t, a in page.tags if t == "template"}
+    assert kinds == {"success", "danger"}
+    danger = html[html.index('data-toast-template="danger"') :]
+    danger = danger[: danger.index("</template>")]
+    assert 'role="alert"' in danger and "data-toast-close" in danger
+
+
+def test_error_page_language_switch_goes_home(admin_client):
+    login(admin_client, "admin")
+    r = admin_client.post("/logout", data={"csrf_token": "wrong"})
+    assert r.status_code == 403
+    page = Page(r.text)
+    hidden = [a for t, a in page.tags if t == "input" and a.get("name") == "next"]
+    assert page.find("form", action="/ui/lang") and hidden[0]["value"] == "/"
+
+
+def other_responses(client):
+    """Responses that are not full GET pages: (label, response)."""
+    csrf = login(client, "admin")
+    yield "error page", client.post("/logout", data={"csrf_token": "wrong"})
+    yield "created fragment", client.post("/ui/projects", data={"name": "p"}, headers=hx(csrf))
+    yield "422 fragment", client.post("/ui/projects", data={"name": " "}, headers=hx(csrf))
+    yield "htmx refusal", client.post("/ui/projects", data={"name": "p"}, headers=hx("bad"))
+    yield "json 404", client.get("/no-such-page")
+
+
+def test_security_headers_on_other_responses(admin_client):
+    for label, r in other_responses(admin_client):
+        assert r.headers["content-security-policy"] == CSP, label
+        assert r.headers["x-content-type-options"] == "nosniff", label
+        assert r.headers["referrer-policy"] == "same-origin", label
+        assert r.headers["cache-control"] == "no-store", label
+        for tag, attrs in Page(r.text).tags:
+            assert tag != "style" and "style" not in attrs, (label, tag)
+            assert not [a for a in attrs if a.startswith("on")], (label, tag)
+            if tag == "script":
+                assert attrs.get("src", "").startswith("/static/"), (label, attrs)

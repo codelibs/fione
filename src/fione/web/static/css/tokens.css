@@ -102,6 +102,51 @@
   color-scheme: dark;
 }
 
+/*
+ * Browsers without light-dark() (before Chrome/Edge 123, Firefox 120, Safari 17.5) would
+ * drop every colour token: give them the light theme instead (no dark mode there).
+ * Keep in step with the light halves above (tests/web/test_contrast.py checks it).
+ */
+@supports not (color: light-dark(#000, #fff)) {
+  :root,
+  :root[data-theme="dark"] {
+    color-scheme: light;
+    --color-bg: #f5f6f8;
+    --color-surface: #ffffff;
+    --color-surface-2: #eef0f4;
+    --color-border: #dde1e7;
+    --color-border-strong: #7a8292;
+    --color-text: #1a1e26;
+    --color-text-muted: #566070;
+    --color-link: #2a4fc0;
+    --color-primary: #2f54c8;
+    --color-primary-hover: #2546a8;
+    --color-on-primary: #ffffff;
+    --color-primary-subtle: #e9eefc;
+    --color-danger: #c0302f;
+    --color-danger-hover: #a02525;
+    --color-on-danger: #ffffff;
+    --color-info-text: #2846a8;
+    --color-success-subtle: #e4f4ea;
+    --color-success-text: #1a673c;
+    --color-warning-subtle: #fcf1dc;
+    --color-warning-text: #87500a;
+    --color-danger-subtle: #fcebeb;
+    --color-danger-text: #a52524;
+    --color-neutral-text: #454e5c;
+    --color-focus: #2f6bf0;
+    --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.06);
+    --shadow-md: 0 2px 4px rgb(16 24 40 / 0.06), 0 6px 16px rgb(16 24 40 / 0.08);
+    --shadow-lg: 0 12px 32px rgb(16 24 40 / 0.14);
+  }
+}
+
+/* Japanese: the platform's Japanese fonts first */
+:root:lang(ja) {
+  --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP",
+    "Yu Gothic UI", "Yu Gothic", Meiryo, system-ui, sans-serif;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-fast: 0ms;

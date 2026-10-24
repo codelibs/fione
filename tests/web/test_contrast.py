@@ -58,3 +58,20 @@ def test_contrast(fg, bg, minimum, theme):
     colours = tokens()
     ratio = contrast(colours[fg][theme], colours[bg][theme])
     assert ratio >= minimum, f"--color-{fg} on --color-{bg}: {ratio:.2f}"
+
+
+def test_light_fallback_matches_the_light_theme():
+    """Browsers without light-dark() get the light theme from an @supports block: every
+    light-dark() token must be there with its light value (shadows included)."""
+    css = TOKENS.read_text(encoding="utf-8")
+    start = css.index("@supports not (color: light-dark(#000, #fff))")
+    block = css[start : css.index("\n}\n", start)]
+    fallback = dict(re.findall(r"--([\w-]+): ([^;]+);", block))
+    assert "color-scheme: light;" in block
+    for name, (light, _dark) in tokens().items():
+        if f"--color-{name}: light-dark(" in css:
+            assert fallback.get(f"color-{name}") == light, name
+    for name, value in re.findall(r"--(shadow-[\w-]+): ([^;]+);", css[:start]):
+        if "light-dark(" in value:
+            expected = re.sub(r"light-dark\(([^,]+\)), [^)]+\)\)", r"\1", value)
+            assert " ".join(fallback[name].split()) == " ".join(expected.split()), name

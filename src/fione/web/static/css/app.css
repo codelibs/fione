@@ -25,10 +25,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-:lang(ja) body,
 body:lang(ja) {
   line-height: 1.7;
   letter-spacing: 0.01em;
+  /* Wrap between phrases, not inside words, where supported (progressive enhancement) */
+  word-break: auto-phrase;
 }
 
 h1,
@@ -519,6 +520,13 @@ form[data-busy] .btn .spinner {
 
 [data-theme-toggle][aria-pressed="true"] .icon-moon {
   display: none;
+}
+
+/* Without light-dark() only the light theme exists (tokens.css): nothing to toggle */
+@supports not (color: light-dark(#000, #fff)) {
+  [data-theme-toggle] {
+    display: none;
+  }
 }
 
 /* ---------- Menu (user menu) ---------- */

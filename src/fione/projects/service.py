@@ -107,14 +107,19 @@ def create_project(conn: sqlite3.Connection, owner: User, name: str) -> Project:
     return require_project(conn, project_id)
 
 
-def list_projects(conn: sqlite3.Connection, user: User) -> list[Project]:
+def list_projects(
+    conn: sqlite3.Connection, user: User, *, newest_first: bool = False
+) -> list[Project]:
+    """Oldest first (by creation time, then id), or newest first in insertion order (rowid:
+    several projects created within one second keep their order)."""
+    order = "rowid DESC" if newest_first else "created_at, id"
     if user.role == Role.ADMIN:
-        rows = conn.execute("SELECT * FROM projects ORDER BY created_at, id").fetchall()
+        rows = conn.execute(f"SELECT * FROM projects ORDER BY {order}").fetchall()
     else:
         rows = conn.execute(
             "SELECT * FROM projects WHERE owner_id = ?"
             " OR id IN (SELECT project_id FROM project_members WHERE user_id = ?)"
-            " ORDER BY created_at, id",
+            f" ORDER BY {order}",
             (user.id, user.id),
         ).fetchall()
     return [_project(r) for r in rows]

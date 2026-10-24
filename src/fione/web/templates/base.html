@@ -1,4 +1,4 @@
-{% from "_macros.html" import icon, logo, theme_toggle, lang_switch %}
+{% from "_macros.html" import icon, logo, theme_toggle, lang_switch, toast %}
 <!doctype html>
 <html lang="{{ lang }}">
 <head>
@@ -16,7 +16,7 @@
   <script src="{{ static('js/app.js') }}" defer></script>
   {% block scripts %}{% endblock %}
 </head>
-<body{% if csrf %} hx-headers='{{ {"X-CSRF-Token": csrf}|tojson }}'{% endif %} data-msg-error="{{ t('error.generic') }}" data-msg-network="{{ t('error.network') }}" data-msg-close="{{ t('toast.close') }}">
+<body{% if csrf %} hx-headers='{{ {"X-CSRF-Token": csrf}|tojson }}'{% endif %} data-msg-error="{{ t('error.generic') }}" data-msg-network="{{ t('error.network') }}">
   <a class="skip-link" href="#main">{{ t('nav.skip') }}</a>
   <header class="app-header">
     <div class="app-header__inner container">
@@ -63,5 +63,7 @@
   </main>
   <footer class="app-footer container">Fione {{ version }}</footer>
   <div id="toasts" class="toasts" role="region" aria-label="{{ t('toast.region') }}" aria-live="polite"></div>
+  <template data-toast-template="success">{{ toast(t, "", "success") }}</template>
+  <template data-toast-template="danger">{{ toast(t, "", "danger") }}</template>
 </body>
 </html>

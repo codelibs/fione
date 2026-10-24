@@ -17,7 +17,8 @@
     </div>
 
     <div class="alert alert-danger" role="alert" data-form-error hidden></div>
-    <form class="stack" data-json-form
+    <noscript><p class="alert alert-danger">{{ t('auth.noscript') }}</p></noscript>
+    <form class="stack" method="post" action="/first-admin" data-json-form
           data-endpoint="/api/v1/auth/first-admin"
           data-next="/"
           data-error-invalid_setup_token="{{ t('setup.error.token') }}"
@@ -51,7 +52,7 @@
         <input class="input" id="setup-password2" type="password" required maxlength="1024"
                autocomplete="new-password" data-confirm="password">
       </div>
-      <button type="submit" class="btn btn-primary btn-block btn-lg">
+      <button type="submit" class="btn btn-primary btn-block btn-lg" disabled>
         <span class="spinner" aria-hidden="true"></span>{{ t('setup.submit') }}
       </button>
     </form>

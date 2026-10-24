@@ -7,6 +7,7 @@
   document.querySelectorAll("form[data-json-form]").forEach(function (form) {
     var alertBox = form.parentNode.querySelector("[data-form-error]");
     var button = form.querySelector('button[type="submit"]');
+    button.disabled = false; // rendered disabled: without this script the form must not submit
 
     function message(code) {
       return form.getAttribute("data-error-" + code) || form.getAttribute("data-error-default");

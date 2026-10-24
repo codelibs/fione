@@ -12,7 +12,7 @@
       <div class="project-card__body">
         <h3 class="project-card__name">{{ row.project.name }}</h3>
         <p class="project-card__meta text-muted text-sm">
-          {{ t('home.created_on', date=row.created) }}{% if not row.own and row.owner %} · {{ t('home.owner', name=row.owner) }}{% endif %}
+          <time datetime="{{ row.iso }}">{{ t('home.created_on', date=row.created) }}</time>{% if not row.own and row.owner %} · {{ t('home.owner', name=row.owner) }}{% endif %}
         </p>
       </div>
       {{ access_badge(t, row.access) }}
