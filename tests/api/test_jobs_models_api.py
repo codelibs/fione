@@ -467,7 +467,15 @@ def test_non_admins_see_error_messages_without_tracebacks(env):
     try:
         data = {"error": message, "traceback": traceback, "log_tail": "secret log"}
         store.append_event(conn, job_id, Event("error", data=data))
-        store.append_event(conn, job_id, Event("notice", data={"message": "kept"}))
+        store.append_event(conn, job_id, Event("notice", data={"message": "kept /a/b c"}))
+        # What the engine emits when a model family fails (fione.engine.search.error_notice).
+        notice = {
+            "kind": "family_error",
+            "family": "XGBoost",
+            "exception": "OSError",
+            "message": "cannot write /var/tmp/joblib_x/f.pkl\nsecond line",
+        }
+        store.append_event(conn, job_id, Event("notice", data=notice))
     finally:
         conn.close()
     shown = "RuntimeError: boom in <path>"
@@ -477,13 +485,28 @@ def test_non_admins_see_error_messages_without_tracebacks(env):
         listed = env.client.get("/api/v1/jobs", headers=env.h[persona]).json()
         assert listed[0]["message"] == shown
         events = env.client.get(f"/api/v1/jobs/{job_id}/events", headers=env.h[persona]).json()
-        assert [e["data"] for e in events["events"]] == [{"error": shown}, {"message": "kept"}]
+        assert [e["data"] for e in events["events"]] == [
+            {"error": shown},
+            {"message": "kept /a/b c"},  # not an error: left alone
+            {**notice, "message": "cannot write <path>"},
+        ]
         assert "Traceback" not in str(events) and "/tmp" not in str(job)
 
     admin = env.client.get(f"/api/v1/jobs/{job_id}", headers=env.h["admin"]).json()
     assert admin["message"] == message
     events = env.client.get(f"/api/v1/jobs/{job_id}/events", headers=env.h["admin"]).json()
     assert events["events"][0]["data"] == data
+    assert events["events"][2]["data"] == notice
+
+
+def test_a_degraded_training_job_says_so(env):
+    result = {"model_id": 1, "stop_reason": "error", "best_model": "XGBoost", "degraded": True}
+    job_id = finished_job(env, env.p, result=result)
+    job = env.client.get(f"/api/v1/jobs/{job_id}", headers=env.h["viewer"]).json()
+    assert (job["stop_reason"], job["degraded"]) == ("error", True)
+    plain = finished_job(env, env.p, result={**result, "stop_reason": "time", "degraded": False})
+    job = env.client.get(f"/api/v1/jobs/{plain}", headers=env.h["viewer"]).json()
+    assert (job["stop_reason"], job["degraded"]) == ("time", False)
 
 
 # --- models -------------------------------------------------------------------------------------

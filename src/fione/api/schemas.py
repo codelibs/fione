@@ -169,13 +169,19 @@ def job_out(job: Job, *, admin: bool) -> dict:
     }
 
 
+_ADMIN_ONLY_FIELDS = ("traceback", "log_tail")
+
+
 def event_out(event_id: int, event: Event, *, admin: bool) -> dict:
-    """The event; for non-admins an ``error`` event keeps only the first line of its
-    message (no traceback, no worker log tail)."""
+    """The event. Non-admins get no traceback or worker log tail, and only the first line of
+    an error: the ``error`` field, and the ``message`` of an engine error notice (one that
+    names its ``exception``)."""
     data = event.data
-    if event.type == "error" and not admin:
-        error = data.get("error") if isinstance(data, dict) else None
-        data = {"error": _first_line(error) if isinstance(error, str) else None}
+    if not admin and isinstance(data, dict):
+        data = {k: v for k, v in data.items() if k not in _ADMIN_ONLY_FIELDS}
+        for key in ("error", "message") if "exception" in data else ("error",):
+            if isinstance(data.get(key), str):
+                data[key] = _first_line(data[key])
     return {"id": event_id, "type": event.type, "ts": event.ts, "data": data}
 
 
