@@ -20,7 +20,7 @@ from check_licenses import classify
         "MIT AND PSF-2.0",
         "(MIT OR Apache-2.0)",
         "Apache-2.0 OR GPL-2.0",
-        "gpl-2.0 or mit",
+        "MIT OR Apache-2.0",
     ],
 )
 def test_allowed(expr):
@@ -41,6 +41,10 @@ def test_allowed(expr):
         "Non-Commercial Use Only",
         "GPL-2.0 OR LGPL-2.1",
         "MIT AND GPL-3.0",
+        "gpl-2.0 or mit",
+        "GPLv2 or later",
+        "GPL v3 or later",
+        "GNU General Public License v2 or later",
     ],
 )
 def test_forbidden(expr):

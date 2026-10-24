@@ -21,7 +21,8 @@ _ALLOWED = re.compile(r"\b(apache|mit|bsd|0bsd|isc|psf|python software foundatio
 _FORBIDDEN = re.compile(
     r"(?<![a-z])[al]?gpl|general public license|non-?commercial|(?<![a-z])cc-by-nc"
 )
-_TOKEN = re.compile(r"\s+(AND|OR)\s+|([()])", re.IGNORECASE)
+# SPDX operators are uppercase; lowercase "or later" etc. is free text.
+_TOKEN = re.compile(r"\s+(AND|OR)\s+|([()])")
 _SEVERITY = {"allowed": 0, "review": 1, "forbidden": 2}
 
 
@@ -49,7 +50,7 @@ class _Parser:
 
     def __init__(self, expr: str):
         parts = [p.strip() for p in _TOKEN.split(expr) if p and p.strip()]
-        self.tokens = [p.upper() if p.upper() in ("AND", "OR") else p for p in parts]
+        self.tokens = parts
         self.pos = 0
 
     def _peek(self) -> str | None:
@@ -100,7 +101,7 @@ def classify(license_expr: str) -> Verdict:
     expr = license_expr.strip()
     if not expr:
         return "review"
-    if not re.search(r"\s(AND|OR)\s", expr, re.IGNORECASE):
+    if not re.search(r"\s(AND|OR)\s", expr):
         # Free text such as "GNU ... License v3 (GPLv3)": parentheses are not grouping.
         return _term(expr)
     try:
