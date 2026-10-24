@@ -15,7 +15,10 @@ from typing import Literal
 Verdict = Literal["allowed", "forbidden", "review"]
 
 # Package (normalized name) -> reason why its verdict is overridden to "allowed".
-EXCEPTIONS: dict[str, str] = {}
+EXCEPTIONS: dict[str, str] = {
+    # MPL-2.0 AND MIT, a transitive dependency of optuna.
+    "tqdm": "weak file-level copyleft; unmodified library use is compatible with Apache-2.0",
+}
 
 _ALLOWED = re.compile(r"\b(apache|mit|bsd|0bsd|isc|psf|python software foundation)\b")
 _FORBIDDEN = re.compile(

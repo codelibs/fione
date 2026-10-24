@@ -127,3 +127,11 @@ def test_exception_overrides_forbidden(monkeypatch, capsys):
     monkeypatch.setattr(check_licenses, "EXCEPTIONS", {"bad-pkg": "dev-only tool, not shipped"})
     assert check_licenses.main() == 0
     assert "dev-only tool, not shipped" in capsys.readouterr().out
+
+
+def test_tqdm_is_allowed_by_exception(monkeypatch, capsys):
+    dists = [FakeDist("tqdm", **{"License-Expression": "MPL-2.0 AND MIT"})]
+    monkeypatch.setattr(check_licenses, "installed_distributions", lambda: dists)
+    assert check_licenses.main() == 0
+    out = capsys.readouterr().out
+    assert out.startswith("allowed") and "weak file-level copyleft" in out
