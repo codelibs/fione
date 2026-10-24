@@ -296,3 +296,33 @@ def test_int_then_float_and_text_is_string(conn, storage, project):
     )
     assert ds.schema == [("a", "string")]
     assert df["a"].iloc[3000] == "1.5" and df["a"].iloc[3001] == "abc"
+
+
+def _int_then_float(conn, storage, project, values):
+    rows = [str(v) for v in values] + ["1.5"]
+    return load(conn, storage, project, ("a\n" + "\n".join(rows) + "\n").encode(), block_size=4096)
+
+
+def test_big_ints_then_float_stay_exact_strings(conn, storage, project):
+    ds, df = _int_then_float(conn, storage, project, [9007199254740993] * 3000)
+    assert ds.schema == [("a", "string")]
+    assert df["a"].iloc[0] == "9007199254740993" and df["a"].iloc[-1] == "1.5"
+
+
+def test_distinct_64bit_ids_then_float_are_preserved(conn, storage, project):
+    ids = [2**62 + i for i in range(3000)]
+    ds, df = _int_then_float(conn, storage, project, ids)
+    assert ds.schema == [("a", "string")]
+    assert df["a"].iloc[:3000].tolist() == [str(i) for i in ids]
+
+
+def test_big_int_only_in_early_block_still_blocks_widening(conn, storage, project):
+    ds, df = _int_then_float(conn, storage, project, [2**60] + list(range(3000)))
+    assert ds.schema == [("a", "string")]
+    assert df["a"].iloc[0] == str(2**60)
+
+
+def test_ints_at_float_limit_then_float_are_double(conn, storage, project):
+    ds, df = _int_then_float(conn, storage, project, [2**53, -(2**53)] + [5] * 3000)
+    assert ds.schema == [("a", "double")]
+    assert df["a"].iloc[0] == 2.0**53 and df["a"].iloc[1] == -(2.0**53) and df["a"].iloc[-1] == 1.5

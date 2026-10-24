@@ -10,6 +10,7 @@ from typing import BinaryIO
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 
@@ -24,6 +25,7 @@ _ROW_GROUP_ROWS = 128 * 1024
 _EXPORT_BATCH_ROWS = 50_000
 _DELIMITERS = ",;\t|"
 _SNIFF_ROWS = 20
+_MAX_EXACT_FLOAT_INT = 2**53  # integers up to this magnitude survive a float64 round trip
 
 
 class IngestError(Exception):
@@ -153,6 +155,18 @@ def _write_parquet(
     return rows, schema
 
 
+def _ints_fit_float64(text: pa.Array) -> bool:
+    """True if every integer-looking value in the text column is exactly representable."""
+    ints = pc.filter(text, pc.match_substring_regex(text, r"^[+-]?[0-9]+$"))
+    try:
+        bounds = pc.min_max(ints.cast(pa.int64())).as_py()
+    except pa.ArrowInvalid:  # beyond int64
+        return False
+    if bounds["min"] is None:
+        return True
+    return -_MAX_EXACT_FLOAT_INT <= bounds["min"] and bounds["max"] <= _MAX_EXACT_FLOAT_INT
+
+
 def _widen_columns(
     path: Path, encoding: str, delimiter: str, block_size: int, inferred: pa.Schema
 ) -> dict[str, pa.DataType]:
@@ -176,11 +190,12 @@ def _widen_columns(
                         column.cast(field.type)
                     except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
                         fails.add(field.name)
-                if (
-                    pa.types.is_integer(field.type)
-                    and field.name not in float_fails
-                    and field.name in fails
-                ):
+                if not pa.types.is_integer(field.type) or field.name in float_fails:
+                    continue
+                # Checked on every batch, not just failing ones: widening must be lossless.
+                if not _ints_fit_float64(column):
+                    float_fails.add(field.name)
+                elif field.name in fails:
                     try:
                         column.cast(pa.float64())
                     except pa.ArrowInvalid:
@@ -199,7 +214,7 @@ def _convert(
 
     pyarrow infers types from the first block, so a later value that does not fit makes
     the pass fail. Those columns are found and the pass is retried with them widened
-    (integer to float64 to string); each retry changes at least one column's type.
+    (integer to float64 when lossless, then string); each retry changes at least one column's type.
     """
     forced: dict[str, pa.DataType] = {}
     while True:
