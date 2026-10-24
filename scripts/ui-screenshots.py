@@ -490,7 +490,7 @@ def automl(s: "Shooter", base: str, project: str) -> None:
     shoot_all(s, base, project + "/datasets", "datasets")
     shoot_all(s, base, dataset, "dataset-summary", ("en", "ja"))
     for tab in ("columns", "data"):
-        shoot_all(s, base, f"{dataset}?tab={tab}", f"dataset-{tab}")
+        shoot_all(s, base, f"{dataset}?tab={tab}", f"dataset-{tab}", ("en", "ja"))
     shoot_all(
         s, base, f"{dataset}?tab=correlation", "dataset-correlation", ("en", "ja"), charts=True
     )
@@ -499,6 +499,16 @@ def automl(s: "Shooter", base: str, project: str) -> None:
     shoot_all(s, base, dataset + "/columns/species", "column-categorical", charts=True)
     shoot_all(s, base, dataset + "/train", "train", ("en", "ja"))
     shoot_all(s, base, project + "/jobs", "jobs")
+
+    # The chart's accessible name stays the translated one (ECharts' aria writes English).
+    page = s.page("light", "desktop", "ja")
+    sign_in(page, base)
+    page.goto(f"{base}{dataset}?tab=correlation")
+    charts_drawn(s, page, "dataset-correlation-ja-label")
+    label = page.get_attribute("#corr-chart", "aria-label")
+    if "相関" not in (label or ""):
+        s.errors.append(f"the Japanese chart lost its label: {label!r}")
+    page.context.close()
 
     page = s.page("dark", "desktop")
     sign_in(page, base)

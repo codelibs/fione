@@ -563,5 +563,6 @@
   "jobs.empty": "No jobs match.",
   "jobs.error.not_finished": "Only a finished job can be deleted. Stop it first.",
   "analysis.advanced": "Advanced settings: every training parameter",
-  "action.keep": "No, keep it"
+  "action.keep": "No, keep it",
+  "jobs.col.started": "Started"
 }

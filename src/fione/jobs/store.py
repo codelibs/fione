@@ -101,6 +101,43 @@ def list_jobs(
     return [_job(r) for r in conn.execute(sql, args).fetchall()]
 
 
+def _where(project_id: str | None, kind: str | None, statuses) -> tuple[str, list]:
+    sql, args = " WHERE project_id IS ?", [project_id]
+    if kind is not None:
+        sql += " AND kind = ?"
+        args.append(kind)
+    if statuses is not None:
+        sql += f" AND status IN ({', '.join('?' * len(statuses))})"
+        args += list(statuses)
+    return sql, args
+
+
+def page_jobs(
+    conn: sqlite3.Connection,
+    project_id: str | None,
+    *,
+    kind: str | None = None,
+    statuses: tuple | None = None,
+    limit: int,
+    offset: int = 0,
+) -> list[Job]:
+    """One page of the project's jobs of ``kind`` with one of ``statuses``, newest first."""
+    where, args = _where(project_id, kind, statuses)
+    sql = "SELECT * FROM jobs" + where + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+    return [_job(r) for r in conn.execute(sql, [*args, limit, offset]).fetchall()]
+
+
+def count_jobs(
+    conn: sqlite3.Connection,
+    project_id: str | None,
+    *,
+    kind: str | None = None,
+    statuses: tuple | None = None,
+) -> int:
+    where, args = _where(project_id, kind, statuses)
+    return conn.execute("SELECT COUNT(*) FROM jobs" + where, args).fetchone()[0]
+
+
 def append_event(conn: sqlite3.Connection, job_id: int, event: Event) -> None:
     """Store ``event``; data whose JSON exceeds 64 KB is replaced by a size marker.
 

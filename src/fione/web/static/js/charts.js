@@ -58,7 +58,8 @@
     };
     return {
       animation: !reduceMotion.matches,
-      aria: { enabled: true },
+      // ECharts writes its description into the element's aria-label, in English: keep ours.
+      aria: { enabled: true, label: { description: spec.label } },
       textStyle: { color: c.text, fontFamily: window.getComputedStyle(document.body).fontFamily },
       // Horizontal bars: room for the labels set aside explicitly (they are truncated to it).
       grid: horizontal

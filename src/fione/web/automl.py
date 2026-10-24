@@ -610,40 +610,42 @@ def _job_row(ctx: Ctx, job: Job, now: float) -> dict:
         "job": job,
         "link": link if job.kind in ("automl", "batch_predict") else None,
         "duration": _clock(duration),
+        "started": started,
         "message": info["message"] if job.status == JobStatus.FAILED else None,
         "active": job.status not in TERMINAL,
     }
 
 
 def _jobs_context(request: Request, conn, ctx: Ctx) -> dict:
+    """One page of the filtered jobs and the counts, each read in SQL (polled every 5 s)."""
     q = request.query_params
     kind = q.get("kind") if q.get("kind") in JOB_KINDS else ""
     status = q.get("status") if q.get("status") in {s.value for s in JobStatus} else ""
-    every = store.list_jobs(conn, ctx.project.id)
-    shown = [
-        j for j in every if (not kind or j.kind == kind) and (not status or j.status == status)
-    ]
-    pages = max(1, math.ceil(len(shown) / JOBS_PER_PAGE))
+    pid = ctx.project.id
+    filters = {"kind": kind or None, "statuses": (status,) if status else None}
+    total = store.count_jobs(conn, pid, **filters)
+    pages = max(1, math.ceil(total / JOBS_PER_PAGE))
     number = _int_param(q.get("page"), 1, 1, pages)
+    window = store.page_jobs(
+        conn, pid, **filters, limit=JOBS_PER_PAGE, offset=(number - 1) * JOBS_PER_PAGE
+    )
     now = time.time()
-    rows = [
-        _job_row(ctx, j, now) for j in shown[(number - 1) * JOBS_PER_PAGE : number * JOBS_PER_PAGE]
-    ]
-    active = [j for j in every if j.status not in TERMINAL]
+    n_running = store.count_jobs(conn, pid, statuses=(JobStatus.RUNNING,))
+    n_queued = store.count_jobs(conn, pid, statuses=(JobStatus.QUEUED,))
     query = urlencode({k: v for k, v in (("kind", kind), ("status", status)) if v})
     return {
-        "rows": rows,
-        "total": len(shown),
+        "rows": [_job_row(ctx, j, now) for j in window],
+        "total": total,
         "kind_filter": kind,
         "status_filter": status,
         "kinds": JOB_KINDS,
         "statuses": [s.value for s in JobStatus],
         "page_number": number,
         "pages": pages,
-        "polling": bool(active),  # any active job of the project, whatever the filter
-        "n_running": sum(j.status == JobStatus.RUNNING for j in active),
-        "n_queued": sum(j.status == JobStatus.QUEUED for j in active),
-        "n_finished": sum(j.status in TERMINAL for j in every),
+        "polling": bool(n_running + n_queued),  # any active job of the project
+        "n_running": n_running,
+        "n_queued": n_queued,
+        "n_finished": store.count_jobs(conn, pid, statuses=TERMINAL),
         "query": query,
     }
 

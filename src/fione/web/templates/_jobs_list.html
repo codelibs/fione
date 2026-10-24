@@ -15,6 +15,7 @@
           <th scope="col">{{ t('jobs.col.job') }}</th>
           <th scope="col">{{ t('jobs.col.status') }}</th>
           <th scope="col">{{ t('jobs.col.created') }}</th>
+          <th scope="col">{{ t('jobs.col.started') }}</th>
           <th scope="col" class="num">{{ t('jobs.col.duration') }}</th>
           <th scope="col"><span class="visually-hidden">{{ t('datasets.col.actions') }}</span></th>
         </tr>
@@ -29,6 +30,7 @@
           </td>
           <td>{{ status_pill(t, job.status.value) }}</td>
           <td><time datetime="{{ job.created_at|iso }}">{{ t('time.utc', time=job.created_at|utc) }}</time></td>
+          <td>{% if row.started %}<time datetime="{{ row.started|iso }}">{{ t('time.utc', time=row.started|utc) }}</time>{% else %}—{% endif %}</td>
           <td class="num">{{ row.duration or "—" }}</td>
           <td>
             {% if ctx.can_write %}

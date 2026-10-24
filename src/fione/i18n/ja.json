@@ -563,5 +563,6 @@
   "jobs.empty": "該当するジョブはありません。",
   "jobs.error.not_finished": "削除できるのは終了したジョブだけです。先に中止してください。",
   "analysis.advanced": "詳細設定(すべての学習パラメーター)",
-  "action.keep": "いいえ、残します"
+  "action.keep": "いいえ、残します",
+  "jobs.col.started": "開始日時"
 }
