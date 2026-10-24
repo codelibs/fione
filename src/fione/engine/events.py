@@ -12,7 +12,9 @@ from typing import Literal
 
 import numpy as np
 
-EventType = Literal["started", "notice", "trial", "family_done", "ensemble", "stopped", "finished"]
+EventType = Literal[
+    "started", "notice", "trial", "family_done", "ensemble", "stopped", "finished", "error"
+]
 
 
 @dataclass(frozen=True)

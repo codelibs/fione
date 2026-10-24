@@ -52,6 +52,35 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX datasets_project_id ON datasets(project_id);
     """,
+    """
+    CREATE TABLE jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+        owner_id INTEGER NOT NULL REFERENCES users(id),
+        status TEXT NOT NULL
+            CHECK (status IN ('queued', 'running', 'done', 'failed', 'cancelled')),
+        payload_json TEXT NOT NULL,
+        result_json TEXT,
+        message TEXT,
+        created_at REAL NOT NULL,
+        started_at REAL,
+        finished_at REAL,
+        pid INTEGER,
+        run_token TEXT,
+        cancel_requested INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX jobs_status_created_at ON jobs(status, created_at);
+    CREATE INDEX jobs_project_id ON jobs(project_id);
+    CREATE TABLE job_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        ts REAL NOT NULL,
+        type TEXT NOT NULL,
+        data_json TEXT NOT NULL
+    );
+    CREATE INDEX job_events_job_id ON job_events(job_id, id);
+    """,
 ]
 
 

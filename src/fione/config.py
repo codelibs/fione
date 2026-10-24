@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     s3_secret_key: str | None = None
     s3_region: str = "us-east-1"
     max_concurrent_train_jobs: int = 1
+    max_concurrent_short_jobs: int = 4
     image_tag: str = "dev"
 
     @model_validator(mode="after")
