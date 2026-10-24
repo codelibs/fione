@@ -57,6 +57,8 @@ UPLOAD_PATHS = [
     # The web UI's training-data and prediction-data uploads (fione.web.easyml).
     re.compile(r"^/projects/[^/]+/upload$"),
     re.compile(r"^/projects/[^/]+/datasets$"),  # fione.web.automl
+    re.compile(r"^/projects/[^/]+/models/import$"),  # fione.web.models_ui
+    re.compile(r"^/modules/upload$"),  # fione.web.modules_ui
     re.compile(r"^/projects/[^/]+/models/[^/]+/predict$"),
 ]
 

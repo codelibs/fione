@@ -25,6 +25,7 @@ class World:
     p: str
     q: str
     ids: dict  # project id -> {"train", "test", "model", "job", "predict_job"}
+    mode: str | None = None  # the fione_mode cookie set at each login ("detailed")
 
     def path(self, template: str, project: str | None = None, objects: str | None = None) -> str:
         """``template`` with ``{p}`` and the object ids filled in (``objects``: whose ids)."""
@@ -33,6 +34,8 @@ class World:
 
     def login(self, username: str | None) -> str | None:
         self.client.cookies.clear()
+        if self.mode:
+            self.client.cookies.set("fione_mode", self.mode)
         return login(self.client, username) if username else None
 
 

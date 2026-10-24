@@ -134,11 +134,14 @@
 {% endmacro %}
 
 {% macro project_nav(t, project, section=None) %}
-{# The project's sections; 18c-ii adds Models and Modules here. #}
+{# The project's sections. The simple view (``mode``, from the context) leaves out the
+   detailed sections, except the one being shown. #}
 <nav class="subnav" aria-label="{{ t('nav.project') }}">
   <ul role="list">
-    {% for key, path in [("overview", ""), ("datasets", "/datasets"), ("jobs", "/jobs")] %}
+    {% for key, path, detailed in [("overview", "", False), ("datasets", "/datasets", False), ("models", "/models", True), ("jobs", "/jobs", True)] %}
+    {% if not detailed or mode == "detailed" or section == key %}
     <li><a href="/projects/{{ project.id }}{{ path }}"{% if section == key %} aria-current="page"{% endif %}>{{ t('nav.section.' ~ key) }}</a></li>
+    {% endif %}
     {% endfor %}
   </ul>
 </nav>
@@ -223,6 +226,9 @@
   <span class="chart-probe chart-probe-grid" aria-hidden="true"></span>
   <span class="chart-probe chart-probe-axis" aria-hidden="true"></span>
   <span class="chart-probe chart-probe-surface" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-c2" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-c3" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-c4" aria-hidden="true"></span>
 </figure>
 {% endmacro %}
 

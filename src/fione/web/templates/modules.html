@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}{{ t('modules.title') }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="container page">
+  <header class="page-header page-header-row">
+    <div class="page-header__main">
+      <h1 class="page-header__title">{{ t('modules.title') }}</h1>
+      <p class="page-header__lead text-muted">{{ t('modules.lead') }}</p>
+    </div>
+    {% if admin %}<a class="btn btn-primary" href="/modules/upload">{{ icon("upload") }}{{ t('modules.upload') }}</a>{% endif %}
+  </header>
+  <div class="alert alert-danger" role="note">{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('modules.warning_title') }}</strong></p><p>{{ t('modules.warning') }}</p></div></div>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="{{ t('modules.title') }}">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">{{ t('modules.col.id') }}</th>
+          <th scope="col">{{ t('modules.col.name') }}</th>
+          <th scope="col">{{ t('modules.col.kind') }}</th>
+          <th scope="col">{{ t('modules.col.params') }}</th>
+          <th scope="col">{{ t('modules.col.source') }}</th>
+          <th scope="col">{{ t('modules.col.uploaded') }}</th>
+          <th scope="col" class="num">{{ t('datasets.col.size') }}</th>
+          {% if admin %}<th scope="col"><span class="visually-hidden">{{ t('datasets.col.actions') }}</span></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set m = row.info %}
+        <tr>
+          <th scope="row" class="cell-name"><code>{{ m.id }}</code></th>
+          <td class="cell-value">{{ m.name }}</td>
+          <td>{{ t('modules.kind.' ~ m.kind) if m.kind in ("frame", "train", "predict") else m.kind }}</td>
+          <td class="cell-value text-sm">{{ (m.params.get("properties") or {}).keys()|join(", ") or "—" }}</td>
+          <td>{% if m.builtin %}<span class="badge badge-neutral">{{ t('modules.builtin') }}</span>{% else %}<span class="badge badge-warning">{{ t('modules.uploaded') }}</span>{% endif %}</td>
+          <td>{% if row.uploaded %}<time datetime="{{ row.uploaded|iso }}">{{ t('time.utc', time=row.uploaded|utc) }}</time>{% else %}—{% endif %}</td>
+          <td class="num">{{ row.size or "—" }}</td>
+          {% if admin %}
+          <td>
+            {% if not m.builtin %}
+            <details class="confirm confirm-inline" data-confirm-panel>
+              <summary class="btn btn-ghost btn-sm">{{ t('datasets.delete') }}<span class="visually-hidden">: {{ m.id }}</span></summary>
+              <div class="confirm__panel" role="group" aria-labelledby="del-q-{{ loop.index }}">
+                <p id="del-q-{{ loop.index }}"><strong>{{ t('modules.delete_question', id=m.id) }}</strong></p>
+                <p class="text-muted text-sm">{{ t('modules.delete_effect') }}</p>
+                <form class="cluster" method="post" action="/modules/{{ m.id }}/delete" data-busy-form>
+                  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                  <button type="submit" class="btn btn-danger btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('datasets.delete_yes') }}</button>
+                  <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('action.keep') }}</button>
+                </form>
+              </div>
+            </details>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted text-sm">{{ t('modules.run_note') }}</p>
+</div>
+{% endblock %}

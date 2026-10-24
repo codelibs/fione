@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}{{ t('modules.upload') }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="container page page-narrow">
+  <p><a href="/modules">{{ icon("back", "icon icon-sm") }} {{ t('modules.title') }}</a></p>
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('modules.upload') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('modules.upload_lead') }}</p>
+  </header>
+  <div class="alert alert-danger" role="note">{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('modules.warning_title') }}</strong></p><p>{{ t('modules.warning') }}</p></div></div>
+  {% if error %}
+  <div class="alert alert-danger" role="alert" id="upload-error" tabindex="-1" autofocus>{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t(error) }}</strong></p>{% if detail %}<p class="alert__detail">{{ t('upload.error.detail', detail=detail) }}</p>{% endif %}</div></div>
+  {% endif %}
+  <form class="card card-padded stack" method="post" action="/modules/upload" enctype="multipart/form-data" data-upload-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <div class="field">
+      <label class="field__label" for="module-id">{{ t('modules.col.id') }}</label>
+      <input class="input input-mono" id="module-id" name="id" value="{{ module_id }}" required pattern="{{ pattern }}" maxlength="40" aria-describedby="module-id-hint">
+      <p class="field__hint" id="module-id-hint">{{ t('modules.id_hint') }}</p>
+    </div>
+    <div class="field">
+      <label class="field__label" for="module-file">{{ t('modules.file') }}</label>
+      <input class="input" type="file" id="module-file" name="file" accept=".py,text/x-python" required aria-describedby="module-file-hint">
+      <p class="field__hint" id="module-file-hint">{{ t('modules.file_hint', kb=max_kb) }}</p>
+    </div>
+    <div class="check-field">
+      <input class="checkbox" type="checkbox" id="acknowledge" name="acknowledge" value="yes" required>
+      <label class="field__label" for="acknowledge">{{ t('modules.acknowledge') }}</label>
+    </div>
+    <div class="form-actions">
+      <a class="btn btn-ghost" href="/modules">{{ icon("back") }}{{ t('modules.title') }}</a>
+      <button type="submit" class="btn btn-danger"><span class="spinner" aria-hidden="true"></span>{{ icon("upload") }}{{ t('modules.upload_submit') }}</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

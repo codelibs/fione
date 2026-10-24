@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import icon, steps, breadcrumb, preview_table, guide %}
+{% from "_macros.html" import icon, steps, breadcrumb, preview_table, guide with context %}
 {% block title %}{{ t('result.title') }} · {{ dataset.name }}{% endblock %}
 {% block content %}
 {% set pid = ctx.project.id %}

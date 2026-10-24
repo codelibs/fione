@@ -2545,7 +2545,27 @@ select.input {
 .chart-probe-grid { color: var(--color-border); }
 .chart-probe-axis { color: var(--color-border-strong); }
 .chart-probe-surface { color: var(--color-surface); }
+.chart-probe-c2 { color: var(--color-success-text); }
+.chart-probe-c3 { color: var(--color-warning-text); }
+.chart-probe-c4 { color: var(--color-danger-text); }
 
 .input-limited {
   max-width: 24rem;
+}
+
+.menu__label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.menu__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.text-xs {
+  font-size: var(--text-xs);
 }

@@ -609,7 +609,7 @@ def _job_row(ctx: Ctx, job: Job, now: float) -> dict:
     link = f"/projects/{pid}/jobs/{job.id}"
     result = job.result or {}
     if job.status == JobStatus.DONE and job.kind == "automl" and result.get("model_id"):
-        link = f"/projects/{pid}/models/{result['model_id']}/summary"
+        link = f"/projects/{pid}/models/{result['model_id']}"  # the model page
     elif job.status == JobStatus.DONE and job.kind == "batch_predict":
         link = f"/projects/{pid}/jobs/{job.id}/result"
     info = job_out(job, admin=ctx.admin)  # the message as the API shows it to this user

@@ -1,0 +1,17 @@
+{% from "_macros.html" import icon %}
+{# The serving bundle: download and the run command (selectable text; a Copy button with JS).
+   Needs ``record`` and ``bundle`` (None when it cannot be made). #}
+<div class="use-option">
+        <h3 class="use-option__title">{{ icon("terminal") }}{{ t('summary.serving_title') }}</h3>
+        <p class="text-muted text-sm">{{ t('summary.serving_text') }}</p>
+        {% if bundle %}
+        <a class="btn btn-secondary" href="/api/v1/models/{{ record.id }}/serving" download>{{ icon("download") }}{{ t('summary.serving_download') }}</a>
+        <div class="copy-box">
+          <p class="field__label" id="run-command-label">{{ t('summary.serving_run') }}</p>
+          <pre class="code-block" id="run-command" aria-labelledby="run-command-label">{{ bundle.run_command }}</pre>
+          <button type="button" class="btn btn-ghost btn-sm" data-copy="run-command" data-copied="{{ t('summary.copied') }}" hidden>{{ icon("copy", "icon icon-sm") }}{{ t('summary.copy') }}</button>
+        </div>
+        {% else %}
+        <p class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('summary.serving_unavailable') }}</span></p>
+        {% endif %}
+      </div>

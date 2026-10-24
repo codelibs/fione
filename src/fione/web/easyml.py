@@ -461,6 +461,8 @@ def _stage(job: Job, events: list) -> tuple[str, dict]:
     if job.status == JobStatus.QUEUED:
         return "job.stage.queued", {}
     last = events[-1][1] if events else None
+    if job.kind in ("export_models", "module"):
+        return f"job.stage.{job.kind}", {}
     if job.kind == "batch_predict":
         if last is None or last.type == "started":
             return "job.stage.reading", {}
@@ -516,6 +518,10 @@ def _job_view(request: Request, conn, ctx: Ctx, job: Job) -> dict:
             next_url = f"/projects/{pid}/jobs/{job.id}/result"
         if job.payload.get("model_id"):
             back_url = f"/projects/{pid}/models/{job.payload['model_id']}/predict"
+    elif job.kind == "export_models" and job.status == JobStatus.DONE:
+        next_url = f"/projects/{pid}/models#export"  # the download is offered there
+    elif job.kind == "module" and job.status == JobStatus.DONE:
+        next_url = f"/projects/{pid}/datasets"  # a module job's result is a new dataset
     if job.status == JobStatus.DONE:
         progress = 1.0
     stage, stage_vars = _stage(job, events)

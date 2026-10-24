@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import icon, breadcrumb, kind_badge %}
+{% from "_macros.html" import icon, breadcrumb, kind_badge with context %}
 {% block title %}{{ t('train.title') }} · {{ dataset.name }}{% endblock %}
 {% block scripts %}
 <script src="{{ static('js/easyml.js') }}" defer></script>

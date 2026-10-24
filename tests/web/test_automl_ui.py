@@ -41,7 +41,9 @@ def count(client, table: str, where: str = "1=1", args=()) -> int:
 
 @pytest.fixture
 def world(make_client):
-    return make_world(make_client())
+    world = make_world(make_client())
+    world.mode = "detailed"  # these screens and links are in the detailed view
+    return world
 
 
 def add_dataset(world, frame: pd.DataFrame, name="extra", kind=DatasetType.TRAIN) -> int:

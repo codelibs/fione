@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import icon, breadcrumb, dataset_type, upload_field, upload_problem, pager %}
+{% from "_macros.html" import icon, breadcrumb, dataset_type, upload_field, upload_problem, pager with context %}
 {% block title %}{{ t('datasets.title') }} · {{ ctx.project.name }}{% endblock %}
 {% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
 {% block content %}
@@ -68,7 +68,7 @@
             <td>
               <div class="row-actions">
                 <a class="btn btn-ghost btn-sm" href="/api/v1/projects/{{ pid }}/datasets/{{ d.id }}/download" download>{{ icon("download", "icon icon-sm") }}{{ t('project.action.download') }}<span class="visually-hidden">: {{ d.name }}</span></a>
-                {% if ctx.can_write and d.type.value == "train" %}
+                {% if ctx.can_write and d.type.value == "train" and mode == "detailed" %}
                 <a class="btn btn-ghost btn-sm" href="/projects/{{ pid }}/datasets/{{ d.id }}/train">{{ t('datasets.train') }}<span class="visually-hidden">: {{ d.name }}</span></a>
                 {% endif %}
                 {% if ctx.can_write %}

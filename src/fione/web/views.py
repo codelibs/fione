@@ -35,6 +35,8 @@ from fione.web.headers import ui_headers
 WEB_DIR = Path(__file__).parent
 STATIC_PREFIX = "/static"
 LANG_COOKIE_MAX_AGE = 365 * 24 * 3600
+MODE_COOKIE = "fione_mode"
+MODES = ("simple", "detailed")
 MAX_NEXT_LENGTH = 2048
 # Percent-decoding rounds a ``next`` value is checked through (a proxy or app that decodes
 # once more must not turn it into ``//host``).
@@ -137,6 +139,11 @@ def _static(path: str) -> str:
     return f"{STATIC_PREFIX}/{path}?v={__version__}"
 
 
+def ui_mode(request: Request) -> str:
+    """``simple`` (the default) or ``detailed``: what the screens show, never what is allowed."""
+    return "detailed" if request.cookies.get(MODE_COOKIE) == "detailed" else "simple"
+
+
 def render(
     request: Request, template: str, auth: Auth | None = None, *, status: int = 200, **context
 ) -> HTMLResponse:
@@ -156,6 +163,7 @@ def render(
             "here": _here(request),
             "static": _static,
             "version": __version__,
+            "mode": ui_mode(request),
             **context,  # may override ``here``: where the language switch returns to
         },
         status_code=status,
@@ -231,6 +239,31 @@ def set_language(
         httponly=True,
         samesite="lax",
     )
+    return response
+
+
+@router.post("/ui/mode")
+def set_mode(
+    request: Request,
+    conn: Conn,
+    csrf_token: Annotated[str, Form()] = "",
+    mode: Annotated[str, Form()] = "",
+    next: Annotated[str, Form()] = "/",
+) -> Response:
+    """Remember the simple or detailed view in the ``fione_mode`` cookie. Only what the screens
+    show changes; every route works the same in both. Another value changes nothing."""
+    action_auth(request, conn, csrf_token)
+    response = RedirectResponse(safe_next(next), 303)
+    if mode in MODES:
+        response.set_cookie(
+            MODE_COOKIE,
+            mode,
+            max_age=LANG_COOKIE_MAX_AGE,
+            path="/",
+            secure=request.app.state.settings.cookie_secure,
+            httponly=True,
+            samesite="lax",
+        )
     return response
 
 
@@ -349,12 +382,14 @@ def wants_html(request: Request) -> bool:
 def install(app: FastAPI) -> None:
     """Serve the UI's pages at ``/`` and its assets under ``/static``, and show errors of
     browser requests outside the API (unknown paths, oversized uploads) as HTML pages."""
-    from fione.web import automl, easyml  # import this module
+    from fione.web import automl, easyml, models_ui, modules_ui  # import this module
 
     app.mount(STATIC_PREFIX, StaticFiles(directory=WEB_DIR / "static"), name="static")
     app.include_router(router)
     app.include_router(easyml.router)
     app.include_router(automl.router)
+    app.include_router(models_ui.router)
+    app.include_router(modules_ui.router)
     app.add_exception_handler(UiError, _ui_error)
     api_http_error = app.exception_handlers[StarletteHTTPException]
 

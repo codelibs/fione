@@ -2,12 +2,18 @@
 (or refused, for actions), logged-in users get the page. The API's own matrix is in
 tests/api/test_permissions.py; this table covers the routes outside /api."""
 
+from contextlib import closing
+
 import pytest
 
-from api_helpers import add_user, iris_csv, login, make_settings
+from api_helpers import add_user, connect, iris_csv, login, make_settings
 from fione.api.app import create_app
+from fione.auth import service as auth_service
 from fione.auth.roles import Role
-from fione.web import automl, easyml, views
+from fione.models import service as models_service
+from fione.models.transfer import export_model
+from fione.modules import service as modules_service
+from fione.web import automl, easyml, models_ui, modules_ui, views
 from web_helpers import iris_test_csv, make_world
 
 # (method, path) -> (anonymous status, logged-in status); 303s for anonymous page views go
@@ -20,11 +26,13 @@ UI_ROUTES = {
     ("POST", "/logout"): (303, 303),
     ("POST", "/ui/lang"): (303, 303),
     ("POST", "/ui/projects"): (401, 200),
+    ("POST", "/ui/mode"): (401, 303),
 }
 FORMS = {
     "/logout": lambda csrf: {"csrf_token": csrf},
     "/ui/lang": lambda csrf: {"lang": "en", "next": "/"},
     "/ui/projects": lambda csrf: {"name": "p"},
+    "/ui/mode": lambda csrf: {"csrf_token": csrf or "", "mode": "detailed", "next": "/"},
 }
 
 
@@ -149,6 +157,58 @@ def automl_request(world, method, template, csrf, objects=None):
     return client.post(path, data=token | form, follow_redirects=False)
 
 
+# The model screens x the AutoML personas. Import is for administrators only, checked before
+# the project, as the API's admin dependency does: every other persona gets 403.
+ADMIN_PAGE = (303, 403, 403, 403, 403, 200)
+ADMIN_POST = (401, 403, 403, 403, 403, 303)
+MODEL_ROUTES = {
+    ("GET", P + "/models"): READ,
+    ("POST", P + "/models/export"): (401, 303, 303, 303, 404, 303),  # readers may export
+    ("GET", P + "/models/import"): ADMIN_PAGE,
+    ("POST", P + "/models/import"): ADMIN_POST,
+    ("GET", P + "/models/{model}"): READ,
+    ("GET", P + "/models/{model}/export"): (303, 200, 200, 200, 404, 200),
+    ("POST", P + "/models/{model}/delete"): WRITE_POST,
+}
+MODEL_PATHS = {
+    "/projects/{pid}/models": P + "/models",
+    "/projects/{pid}/models/export": P + "/models/export",
+    "/projects/{pid}/models/import": P + "/models/import",
+    "/projects/{pid}/models/{mid}": P + "/models/{model}",
+    "/projects/{pid}/models/{mid}/export": P + "/models/{model}/export",
+    "/projects/{pid}/models/{mid}/delete": P + "/models/{model}/delete",
+}
+# The global modules screens x anonymous and the global roles.
+MODULE_PERSONAS = {"anonymous": None, "viewer": "gv", "editor": "ed", "admin": "admin"}
+MODULE_ROUTES = {
+    ("GET", "/modules"): (303, 200, 200, 200),
+    ("GET", "/modules/upload"): (303, 403, 403, 200),
+    ("POST", "/modules/upload"): (401, 403, 403, 303),
+    ("POST", "/modules/{module_id}/delete"): (401, 403, 403, 303),
+}
+MODULE_SOURCE = b"""
+MODULE = {"name": "Add", "kind": "frame", "params": {"type": "object", "properties": {}}}
+
+
+def run(df, params, ctx):
+    return df
+"""
+
+
+def model_request(world, method, template, csrf, objects=None):
+    client, path = world.client, world.path(template, None, objects)
+    if method == "GET":
+        return client.get(path, follow_redirects=False)
+    token = {"csrf_token": csrf or ""}
+    if path.endswith("/import"):
+        with closing(connect(client)) as conn:
+            record = models_service.get_model(conn, world.ids[world.q]["model"])
+        archive = b"".join(export_model(client.app.state.storage, record))
+        files = {"file": ("model.zip", archive, "application/zip")}
+        return client.post(path, data=token, files=files, follow_redirects=False)
+    return client.post(path, data=token, follow_redirects=False)
+
+
 def test_table_covers_every_ui_route():
     """Adding a UI route without a row fails here."""
     routes = {(m, r.path) for r in views.router.routes for m in r.methods - {"HEAD"}}
@@ -157,6 +217,66 @@ def test_table_covers_every_ui_route():
     assert routes == set(EASYML_ROUTES)
     routes = {(m, AUTOML_PATHS[r.path]) for r in automl.router.routes for m in r.methods - {"HEAD"}}
     assert routes == set(AUTOML_ROUTES)
+    routes = {
+        (m, MODEL_PATHS[r.path]) for r in models_ui.router.routes for m in r.methods - {"HEAD"}
+    }
+    assert routes == set(MODEL_ROUTES)
+    routes = {(m, r.path) for r in modules_ui.router.routes for m in r.methods - {"HEAD"}}
+    assert routes == set(MODULE_ROUTES)
+
+
+@pytest.mark.parametrize("persona", list(AUTOML_PERSONAS))
+@pytest.mark.parametrize("route", sorted(MODEL_ROUTES))
+def test_model_route(make_client, route, persona):
+    world = make_world(make_client())
+    csrf = world.login(AUTOML_PERSONAS[persona])
+    expected = MODEL_ROUTES[route][list(AUTOML_PERSONAS).index(persona)]
+    r = model_request(world, *route, csrf)
+    assert r.status_code == expected, r.text
+    if expected == 303 and persona == "anonymous":
+        assert r.headers["location"].startswith("/login?next=")
+    if expected in (403, 404):
+        assert "text/html" in r.headers["content-type"]
+
+
+@pytest.mark.parametrize("route", sorted(MODEL_ROUTES))
+def test_model_ids_of_another_project_are_404(make_client, route):
+    world = make_world(make_client())
+    csrf = world.login("admin")  # may see every project: only the id/project pairing refuses
+    method, template = route
+    if "{" not in template.removeprefix(P):
+        pytest.skip("no object id in the path")
+    r = model_request(world, method, template, csrf, objects=world.q)
+    assert r.status_code == 404, r.text
+
+
+@pytest.mark.parametrize("persona", list(MODULE_PERSONAS))
+@pytest.mark.parametrize("route", sorted(MODULE_ROUTES))
+def test_module_route(make_client, route, persona):
+    client = make_client()
+    add_user(client, "gv", Role.VIEWER)
+    add_user(client, "ed", Role.EDITOR)
+    admin = add_user(client, "admin", Role.ADMIN)
+    with closing(connect(client)) as conn:
+        modules_service.upload_module(conn, client.app.state.storage, admin, "mine", MODULE_SOURCE)
+        assert auth_service.list_users(conn)
+    username = MODULE_PERSONAS[persona]
+    csrf = login(client, username) if username else None
+    method, path = route
+    path = path.replace("{module_id}", "mine")
+    expected = MODULE_ROUTES[route][list(MODULE_PERSONAS).index(persona)]
+    token = {"csrf_token": csrf or ""}
+    if method == "GET":
+        r = client.get(path, follow_redirects=False)
+    elif path == "/modules/upload":
+        files = {"file": ("m.py", MODULE_SOURCE, "text/x-python")}
+        data = token | {"id": "other", "acknowledge": "yes"}
+        r = client.post(path, data=data, files=files, follow_redirects=False)
+    else:
+        r = client.post(path, data=token, follow_redirects=False)
+    assert r.status_code == expected, r.text
+    if expected in (403, 404):
+        assert "text/html" in r.headers["content-type"]
 
 
 @pytest.mark.parametrize("persona", list(AUTOML_PERSONAS))

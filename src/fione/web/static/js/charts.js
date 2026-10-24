@@ -26,6 +26,64 @@
       grid: probe("grid"),
       axis: probe("axis"),
       surface: probe("surface"),
+      series: [probe("primary"), probe("c2"), probe("c3"), probe("c4")],
+    };
+  }
+
+  // Several point series (one per model family) and a line (the best score so far). Each
+  // series has its own symbol as well as its own colour, and a legend names them.
+  var SYMBOLS = ["circle", "rect", "triangle", "diamond", "pin", "arrow", "roundRect"];
+  function scatterOption(spec, c) {
+    var axis = function (name) {
+      return {
+        type: "value",
+        name: name,
+        nameLocation: "middle",
+        nameGap: 32,
+        nameTextStyle: { color: c.muted },
+        scale: true,
+        axisLine: { lineStyle: { color: c.axis } },
+        axisLabel: { color: c.muted },
+        splitLine: { lineStyle: { color: c.grid } },
+      };
+    };
+    var series = spec.series.map(function (s, i) {
+      return {
+        type: "scatter",
+        name: s.name,
+        data: s.points,
+        symbol: SYMBOLS[i % SYMBOLS.length],
+        symbolSize: 8,
+        itemStyle: { color: c.series[i % c.series.length] },
+      };
+    });
+    if (spec.line) {
+      series.push({
+        type: "line",
+        name: spec.line.name,
+        data: spec.line.points,
+        step: "end",
+        symbol: "none",
+        lineStyle: { color: c.text, width: 2, type: "dashed" },
+        itemStyle: { color: c.text },
+      });
+    }
+    return {
+      animation: !reduceMotion.matches,
+      aria: { enabled: true, label: { description: spec.label } },
+      textStyle: { color: c.text, fontFamily: window.getComputedStyle(document.body).fontFamily },
+      legend: { top: 0, textStyle: { color: c.text } },
+      grid: { left: 12, right: 24, top: 40, bottom: 44, containLabel: true },
+      tooltip: {
+        trigger: "item",
+        renderMode: "richText",
+        backgroundColor: c.surface,
+        borderColor: c.axis,
+        textStyle: { color: c.text },
+      },
+      xAxis: axis(spec.x_name),
+      yAxis: axis(spec.y_name),
+      series: series,
     };
   }
 
@@ -87,7 +145,12 @@
   }
 
   function draw(entry) {
-    entry.chart.setOption(option(entry.spec, colours(entry.figure), entry.el.clientWidth), true);
+    var c = colours(entry.figure);
+    var built =
+      entry.spec.type === "scatter"
+        ? scatterOption(entry.spec, c)
+        : option(entry.spec, c, entry.el.clientWidth);
+    entry.chart.setOption(built, true);
   }
 
   document.querySelectorAll("[data-chart]").forEach(function (el) {

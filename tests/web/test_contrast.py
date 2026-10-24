@@ -30,6 +30,13 @@ PAIRS = [
     ("primary", "surface", 3.0),
     ("danger", "surface", 3.0),
     ("star", "surface", 3.0),
+    # chart series (graphics: 3:1), on cards and on the page
+    ("success-text", "surface", 3.0),
+    ("warning-text", "surface", 3.0),
+    ("success-text", "bg", 3.0),
+    ("warning-text", "bg", 3.0),
+    ("danger-text", "bg", 3.0),
+    ("primary", "bg", 3.0),
     ("star", "surface-2", 3.0),
 ]
 

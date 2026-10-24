@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import icon, steps, breadcrumb, stars, mascot %}
+{% from "_macros.html" import icon, steps, breadcrumb, stars, mascot with context %}
 {% block title %}{{ t('summary.title') }} · {{ record.name }}{% endblock %}
 {% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
 {% block content %}
@@ -78,20 +78,7 @@
         <p class="text-muted text-sm">{{ t('summary.predict_viewer') }}</p>
         {% endif %}
       </div>
-      <div class="use-option">
-        <h3 class="use-option__title">{{ icon("terminal") }}{{ t('summary.serving_title') }}</h3>
-        <p class="text-muted text-sm">{{ t('summary.serving_text') }}</p>
-        {% if bundle %}
-        <a class="btn btn-secondary" href="/api/v1/models/{{ record.id }}/serving" download>{{ icon("download") }}{{ t('summary.serving_download') }}</a>
-        <div class="copy-box">
-          <p class="field__label" id="run-command-label">{{ t('summary.serving_run') }}</p>
-          <pre class="code-block" id="run-command" aria-labelledby="run-command-label">{{ bundle.run_command }}</pre>
-          <button type="button" class="btn btn-ghost btn-sm" data-copy="run-command" data-copied="{{ t('summary.copied') }}" hidden>{{ icon("copy", "icon icon-sm") }}{{ t('summary.copy') }}</button>
-        </div>
-        {% else %}
-        <p class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('summary.serving_unavailable') }}</span></p>
-        {% endif %}
-      </div>
+      {% include "_serving.html" %}
     </div>
   </section>
 
@@ -104,6 +91,9 @@
     </div>
   </details>
 
-  <p><a class="btn btn-ghost" href="/projects/{{ pid }}">{{ icon("back") }}{{ t('action.back_project') }}</a></p>
+  <p class="cluster">
+    <a class="btn btn-ghost" href="/projects/{{ pid }}">{{ icon("back") }}{{ t('action.back_project') }}</a>
+    {% if mode == "detailed" %}<a class="btn btn-secondary" href="/projects/{{ pid }}/models/{{ record.id }}">{{ t('summary.advanced') }}</a>{% endif %}
+  </p>
 </div>
 {% endblock %}

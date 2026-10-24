@@ -42,6 +42,19 @@
             <div class="menu__panel">
               <p class="menu__who">{{ t('user.signed_in_as', username=user.username) }}</p>
               <p><span class="badge badge-neutral">{{ t('role.' ~ user.role.value) }}</span></p>
+              <form class="stack-tight" method="post" action="/ui/mode" aria-labelledby="mode-label">
+                <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                <input type="hidden" name="next" value="{{ here }}">
+                <p class="menu__label" id="mode-label">{{ t('mode.label') }}</p>
+                <div class="segmented">
+                  <button type="submit" name="mode" value="simple" aria-pressed="{{ 'true' if mode == 'simple' else 'false' }}">{{ t('mode.simple') }}</button>
+                  <button type="submit" name="mode" value="detailed" aria-pressed="{{ 'true' if mode == 'detailed' else 'false' }}">{{ t('mode.detailed') }}</button>
+                </div>
+                <p class="text-muted text-xs">{{ t('mode.hint') }}</p>
+              </form>
+              {% if user.role.value == "admin" or mode == "detailed" %}
+              <a class="menu__link" href="/modules">{{ icon("terminal", "icon icon-sm") }}{{ t('modules.title') }}</a>
+              {% endif %}
               <form method="post" action="/logout">
                 <input type="hidden" name="csrf_token" value="{{ csrf }}">
                 <button type="submit" class="btn btn-secondary btn-block">{{ t('auth.logout') }}</button>

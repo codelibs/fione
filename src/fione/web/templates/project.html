@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import icon, access_badge, stars, status_pill, dataset_type, breadcrumb, guide %}
+{% from "_macros.html" import icon, access_badge, stars, status_pill, dataset_type, breadcrumb, guide with context %}
 {% block title %}{{ ctx.project.name }}{% endblock %}
 {% block content %}
 {% set pid = ctx.project.id %}
@@ -65,7 +65,10 @@
           <a class="row-list__title" href="/projects/{{ pid }}/models/{{ record.id }}/summary">{{ record.name }}</a>
           <p class="text-muted text-sm">{{ t('task.' ~ record.task) }} · {{ t('project.model_target', target=record.target) }} · <time datetime="{{ record.created_at|iso }}">{{ t('time.utc', time=record.created_at|utc) }}</time></p>
         </div>
-        {{ stars(t, ratings[record.id], "stars-sm") }}
+        <div class="row-list__side">
+          {{ stars(t, ratings[record.id], "stars-sm") }}
+          {% if mode == "detailed" %}<a class="btn btn-ghost btn-sm" href="/projects/{{ pid }}/models/{{ record.id }}">{{ t('models.details') }}<span class="visually-hidden">: {{ record.name }}</span></a>{% endif %}
+        </div>
       </li>
       {% endfor %}
     </ul>

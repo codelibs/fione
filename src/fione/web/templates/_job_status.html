@@ -28,7 +28,7 @@
   {% if job.kind == "automl" and best %}<p class="text-muted text-sm">{{ t('job.best_hint') }}</p>{% endif %}
 
   {% if job.status.value == "done" %}
-    {{ guide(t, t('job.done.' ~ job.kind) if job.kind in ("automl", "batch_predict") else t('job.stage.done')) }}
+    {{ guide(t, t('job.done.' ~ job.kind) if job.kind in ("automl", "batch_predict", "export_models", "module") else t('job.stage.done')) }}
     {% if next_url %}
     <div class="form-actions">
       <a class="btn btn-primary btn-lg" href="{{ next_url }}">{{ icon("arrow") }}{{ t('job.see_result.' ~ job.kind) }}</a>

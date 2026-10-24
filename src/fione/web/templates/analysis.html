@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import icon, steps, breadcrumb, kind_badge, preview_table, guide %}
+{% from "_macros.html" import icon, steps, breadcrumb, kind_badge, preview_table, guide with context %}
 {% block title %}{{ t('analysis.title') }} · {{ dataset.name }}{% endblock %}
 {% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
 {% block content %}
@@ -151,7 +151,7 @@
         <p>{{ t('analysis.what_background') }}</p>
       </section>
 
-      <p class="text-sm"><a href="{{ base }}/train?target={{ target.name|urlencode }}">{{ t('analysis.advanced') }}</a></p>
+      {% if mode == "detailed" %}<p class="text-sm"><a href="{{ base }}/train?target={{ target.name|urlencode }}">{{ t('analysis.advanced') }}</a></p>{% endif %}
       <div class="form-actions">
         <a class="btn btn-ghost" href="/projects/{{ ctx.project.id }}">{{ icon("back") }}{{ t('action.back_project') }}</a>
         <button type="submit" class="btn btn-primary btn-lg" id="run-button"><span class="spinner" aria-hidden="true"></span>{{ icon("play") }}{{ t('analysis.run') }}</button>

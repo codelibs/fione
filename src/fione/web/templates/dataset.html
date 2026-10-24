@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import icon, breadcrumb, dataset_type, kind_badge, chart, pager %}
+{% from "_macros.html" import icon, breadcrumb, dataset_type, kind_badge, chart, pager with context %}
 {% block title %}{{ dataset.name }} · {{ t('datasets.title') }}{% endblock %}
 {% block scripts %}
 <script src="{{ static('vendor/echarts/echarts.min.js') }}" defer></script>
@@ -19,8 +19,8 @@
   </header>
   <div class="cluster">
     {% if ctx.can_write and dataset.type.value == "train" %}
-    <a class="btn btn-primary" href="{{ base }}/train">{{ icon("play") }}{{ t('dataset.train') }}</a>
-    <a class="btn btn-secondary" href="{{ base }}/analyze">{{ t('dataset.guided') }}</a>
+    {% if mode == "detailed" %}<a class="btn btn-primary" href="{{ base }}/train">{{ icon("play") }}{{ t('dataset.train') }}</a>{% endif %}
+    <a class="btn {{ 'btn-secondary' if mode == 'detailed' else 'btn-primary' }}" href="{{ base }}/analyze">{{ t('dataset.guided') }}</a>
     {% endif %}
     <a class="btn btn-ghost" href="/api/v1/projects/{{ pid }}/datasets/{{ dataset.id }}/download" download>{{ icon("download") }}{{ t('dataset.download') }}</a>
   </div>
