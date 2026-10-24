@@ -17,7 +17,9 @@ from fione.engine.artifact import (
     load_model,
     load_model_unverified_hash_only,
     read_manifest,
+    resign_manifest,
     save_model,
+    verify_artifact,
     verify_manifest_hmac,
 )
 from fione.engine.automl import AutoML
@@ -485,3 +487,40 @@ def test_a_good_signature_with_a_wrong_model_hash_is_not_unpickled(saved, storag
     with pytest.raises(UntrustedArtifactError):
         load_model(spy, PREFIX, SECRET)
     assert spy.reads == [MANIFEST_KEY, MODEL_KEY]  # the hash check was reached, then it stopped
+
+
+# --- verify_artifact and resign_manifest: checks that never unpickle ----------------------
+
+
+def test_verify_artifact_accepts_a_valid_artifact_without_unpickling(saved, storage, load_spy):
+    model, test, manifest = saved
+    assert verify_artifact(storage, PREFIX, SECRET) == manifest
+
+
+def test_verify_artifact_needs_the_signature_unless_told_not_to(saved, storage, load_spy):
+    with pytest.raises(UntrustedArtifactError):
+        verify_artifact(storage, PREFIX, OTHER_SECRET)
+    assert verify_artifact(storage, PREFIX, OTHER_SECRET, require_hmac=False).files
+
+
+def test_verify_artifact_always_checks_the_file_hashes(saved, storage, load_spy):
+    _flip_byte(storage, MODEL_KEY)
+    for require_hmac in (True, False):
+        with pytest.raises(UntrustedArtifactError):
+            verify_artifact(storage, PREFIX, SECRET, require_hmac=require_hmac)
+
+
+def test_verify_artifact_rejects_missing_files_and_manifests(saved, storage, load_spy):
+    storage.delete(MODEL_KEY)
+    with pytest.raises(UntrustedArtifactError):
+        verify_artifact(storage, PREFIX, SECRET, require_hmac=False)
+    storage.delete(MANIFEST_KEY)
+    with pytest.raises(UntrustedArtifactError):
+        verify_artifact(storage, PREFIX, SECRET, require_hmac=False)
+
+
+def test_resign_manifest_changes_only_the_signature(saved):
+    _, _, manifest = saved
+    signed = resign_manifest(manifest, OTHER_SECRET)
+    assert verify_manifest_hmac(signed, OTHER_SECRET) and not verify_manifest_hmac(signed, SECRET)
+    assert dataclasses.replace(signed, hmac=manifest.hmac) == manifest

@@ -95,6 +95,46 @@ def add_model(
 ) -> ModelRecord:
     """Record a model whose artifact is already saved under ``storage_prefix``."""
     leaderboard = jsonable(model.leaderboard.to_dict("records"))
+    return insert_model(
+        conn,
+        project_id=project_id,
+        dataset_id=dataset_id,
+        job_id=job_id,
+        name=name,
+        task=model.task,
+        target=model.target,
+        best_model=best_model_name(leaderboard),
+        stop_reason=model.stop_reason,
+        storage_prefix=storage_prefix,
+        trusted=trusted,
+        config=model.config.to_dict(),
+        leaderboard=leaderboard,
+        trials=model.trials.to_dict("records"),
+        metrics=model.metrics,
+        importance=model.feature_importance.to_dict(),
+    )
+
+
+def insert_model(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    dataset_id: int | None,
+    job_id: int | None,
+    name: str,
+    task: str,
+    target: str,
+    best_model: str,
+    stop_reason: str,
+    storage_prefix: str,
+    trusted: bool,
+    config: dict,
+    leaderboard: list[dict],
+    trials: list[dict],
+    metrics: dict,
+    importance: dict,
+) -> ModelRecord:
+    """Insert a ``models`` row from already-validated fields."""
     cur = conn.execute(
         "INSERT INTO models (project_id, dataset_id, job_id, name, task, target, best_model,"
         " stop_reason, storage_prefix, trusted, config_json, leaderboard_json, trials_json,"
@@ -105,17 +145,17 @@ def add_model(
             dataset_id,
             job_id,
             name,
-            model.task,
-            model.target,
-            best_model_name(leaderboard),
-            model.stop_reason,
+            task,
+            target,
+            best_model,
+            stop_reason,
             storage_prefix,
             int(trusted),
-            _dumps(model.config.to_dict()),
+            _dumps(config),
             _dumps(leaderboard),
-            _dumps(model.trials.to_dict("records")),
-            _dumps(model.metrics),
-            _dumps(model.feature_importance.to_dict()),
+            _dumps(trials),
+            _dumps(metrics),
+            _dumps(importance),
             time.time(),
         ),
     )

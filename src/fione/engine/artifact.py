@@ -18,7 +18,7 @@ import json
 import os
 import re
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -229,6 +229,36 @@ def _unpickle(data: bytes) -> TrainedModel:
     # The bytes that were hashed are the bytes that are loaded, so the file cannot change
     # between the check and the use.
     return joblib.load(io.BytesIO(data))
+
+
+def resign_manifest(manifest: Manifest, secret: bytes) -> Manifest:
+    """``manifest`` with a fresh HMAC under ``secret``; every other field is kept."""
+    return replace(manifest, hmac=_sign(asdict(manifest), secret))
+
+
+def verify_artifact(
+    storage: Storage, prefix: str, secret: bytes, *, require_hmac: bool = True
+) -> Manifest:
+    """Check an artifact without unpickling anything; ``UntrustedArtifactError`` if it fails.
+
+    The manifest must parse, its HMAC must match ``secret`` (unless ``require_hmac`` is
+    false), and every file it lists must exist and match its sha256, which is computed by
+    streaming. Returns the manifest.
+    """
+    manifest = read_manifest(storage, prefix)
+    if require_hmac and not verify_manifest_hmac(manifest, secret):
+        raise UntrustedArtifactError("manifest signature does not match")
+    if MODEL_FILE not in manifest.files:
+        raise UntrustedArtifactError(f"{MODEL_FILE} is not part of the artifact")
+    for name, expected in manifest.files.items():
+        try:
+            with storage.open_read(prefix + name) as f:
+                actual = _sha256_of(f)
+        except (KeyError, ValueError) as e:
+            raise UntrustedArtifactError(f"{name} is missing") from e
+        if not hmac.compare_digest(actual, expected):
+            raise UntrustedArtifactError(f"{name} does not match its recorded hash")
+    return manifest
 
 
 def load_model(storage: Storage, prefix: str, secret: bytes) -> TrainedModel:
