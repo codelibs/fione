@@ -1,0 +1,48 @@
+# Fione Serving: the prediction API for one model, mounted at /model (spec section 8).
+#
+#   docker build -f docker/Dockerfile.serving --build-arg IMAGE_TAG=<tag> -t fione-serving:<tag> .
+#   docker run --rm -p 8081:8080 -v "$PWD/model:/model:ro" fione-serving:<tag>
+#
+# Built from the same uv.lock and src/ as the main image, because a model is a pickle of
+# fione.engine classes; the tag is recorded in each model's manifest and checked at startup.
+FROM python:3.12-slim
+
+ARG IMAGE_TAG=dev
+
+# libgomp1: the OpenMP runtime LightGBM and XGBoost need.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /usr/local/bin/uv
+
+WORKDIR /app
+ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_NO_CACHE=1
+
+# The dependencies first, so that a source change does not reinstall them. No dev group
+# (pytest, Playwright), and the project itself is used from src/ through PYTHONPATH.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY src/ src/
+RUN python -m compileall -q src
+
+# Not root, and nothing writable but a tmp dir (the model is mounted read-only at /model).
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin serving \
+    && install -d -o serving /tmp/serving
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH=/app/src \
+    PYTHONUNBUFFERED=1 \
+    TMPDIR=/tmp/serving \
+    HOME=/tmp/serving \
+    FIONE_IMAGE_TAG=${IMAGE_TAG} \
+    FIONE_MODEL_DIR=/model
+
+USER 10001
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["python", "-c", "import os, urllib.request as u; u.urlopen('http://127.0.0.1:%s/ping' % os.environ.get('PORT', '8080'), timeout=3)"]
+
+CMD ["python", "-m", "fione_serving"]
