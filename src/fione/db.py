@@ -81,6 +81,28 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX job_events_job_id ON job_events(job_id, id);
     """,
+    """
+    CREATE TABLE models (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        dataset_id INTEGER REFERENCES datasets(id) ON DELETE SET NULL,
+        job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+        name TEXT NOT NULL,
+        task TEXT NOT NULL,
+        target TEXT NOT NULL,
+        best_model TEXT NOT NULL,
+        stop_reason TEXT NOT NULL,
+        storage_prefix TEXT NOT NULL,
+        trusted INTEGER NOT NULL DEFAULT 1,
+        config_json TEXT NOT NULL,
+        leaderboard_json TEXT NOT NULL,
+        trials_json TEXT NOT NULL,
+        metrics_json TEXT NOT NULL,
+        importance_json TEXT NOT NULL,
+        created_at REAL NOT NULL
+    );
+    CREATE INDEX models_project_id_created_at ON models(project_id, created_at);
+    """,
 ]
 
 

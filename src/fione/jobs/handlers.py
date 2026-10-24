@@ -10,6 +10,10 @@ from fione.jobs.store import Job
 from fione.storage import Storage
 
 
+class JobUserError(Exception):
+    """A problem with the user's input; the message is stored on the job as it is."""
+
+
 @dataclass(frozen=True)
 class JobContext:
     conn: sqlite3.Connection

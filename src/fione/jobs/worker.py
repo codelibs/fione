@@ -20,7 +20,7 @@ from fione import db
 from fione.config import Settings
 from fione.engine.events import Event
 from fione.jobs import store
-from fione.jobs.handlers import HANDLERS, JobContext
+from fione.jobs.handlers import HANDLERS, JobContext, JobUserError
 from fione.jobs.store import Job, JobStatus
 from fione.storage import open_storage
 
@@ -64,6 +64,7 @@ class _StopFlag:
 
 
 def _import_handler_modules() -> None:
+    importlib.import_module("fione.jobs.builtin")
     for name in os.environ.get("FIONE_JOB_HANDLER_MODULES", "").split(","):
         if name.strip():
             importlib.import_module(name.strip())
@@ -114,6 +115,9 @@ def _run(conn: sqlite3.Connection, job: Job, settings: Settings) -> None:
     except JobAbort as e:
         status, message = JobStatus.FAILED, f"could not record progress: {e}"
         print(f"job {job.id}: {message}", file=sys.stderr, flush=True)
+    except JobUserError as e:  # the user's input is at fault: no class name, no traceback
+        status, message = JobStatus.FAILED, str(e)
+        error_event = Event("error", data={"error": message})
     except Exception as e:
         status, message = JobStatus.FAILED, f"{type(e).__name__}: {e}"
         tb = traceback.format_exc()

@@ -29,8 +29,8 @@ def sleep(ctx: JobContext) -> None:
     _sleep(ctx, ctx.job.payload.get("seconds", 60))
 
 
-@register_handler("automl")
-def automl(ctx: JobContext) -> None:
+@register_handler("slow_train")
+def slow_train(ctx: JobContext) -> None:
     _sleep(ctx, ctx.job.payload.get("seconds", 1.0))
 
 

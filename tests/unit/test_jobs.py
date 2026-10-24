@@ -259,8 +259,14 @@ def test_emit_flood_keeps_every_event_in_order(conn, enqueue, make_runner):
     assert [e.data["i"] for _, e in store.events_since(conn, job.id)] == list(range(500))
 
 
-def test_training_jobs_run_one_at_a_time(conn, enqueue, make_runner):
-    first, second = enqueue("automl", {"seconds": 1.0}), enqueue("automl", {"seconds": 1.0})
+@pytest.fixture
+def slow_train_is_training(monkeypatch):
+    monkeypatch.setattr(runner_module, "TRAINING_KINDS", frozenset({"slow_train"}))
+
+
+def test_training_jobs_run_one_at_a_time(conn, enqueue, make_runner, slow_train_is_training):
+    first = enqueue("slow_train", {"seconds": 1.0})
+    second = enqueue("slow_train", {"seconds": 1.0})
     make_runner(max_concurrent_train_jobs=1)
     a, b = wait_done(conn, first.id), wait_done(conn, second.id)
     assert a.status is b.status is JobStatus.DONE
@@ -276,8 +282,8 @@ def max_overlap(jobs):
     return peak
 
 
-def test_short_jobs_have_their_own_limit(conn, enqueue, make_runner):
-    train = enqueue("automl", {"seconds": 3.0})
+def test_short_jobs_have_their_own_limit(conn, enqueue, make_runner, slow_train_is_training):
+    train = enqueue("slow_train", {"seconds": 3.0})
     shorts = [enqueue("ignore_stop", {"seconds": 0.6}) for _ in range(3)]
     make_runner(max_concurrent_train_jobs=1, max_concurrent_short_jobs=2)
     done = [wait_done(conn, j.id) for j in shorts]
