@@ -140,7 +140,7 @@ def run_family(
     start = time.monotonic()
     n_classes = int(y.max()) + 1 if task == "classification" else 0
     spec = FAMILIES[name](task, n_classes, seed=seed, n_jobs=n_threads(len(X)))
-    view = getattr(prep, spec.view)(X)
+    view = None
     study = optuna.create_study(
         direction="minimize",
         sampler=optuna.samplers.TPESampler(seed=seed),
@@ -157,6 +157,8 @@ def run_family(
         if deadline.expired():
             reason = "time"
             break
+        if view is None:
+            view = getattr(prep, spec.view)(X)
         trial = study.ask()
         params = spec.space(trial)
         first = finished == 0

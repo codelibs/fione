@@ -1,3 +1,4 @@
+import json
 import time
 
 import joblib
@@ -113,14 +114,17 @@ def test_every_trial_emits_an_event_with_the_listed_keys():
         e.data["score"] for e in trials if e.data["state"] == "complete"
     )
     assert [e.type for e in events][-2:] == ["stopped", "family_done"]
+    for e in events:
+        json.dumps(e.data, allow_nan=False)
 
 
-def test_classification_oof_holds_probabilities_and_models_pickle(tmp_path):
+@pytest.mark.parametrize("name", list(FAMILIES))
+def test_classification_oof_holds_probabilities_and_models_pickle(name, tmp_path):
     X, y = _classification(300, 5)
     prep, y, folds = _setup(X, y)
     events = []
     result = run_family(
-        "CatBoost",
+        name,
         X,
         y,
         folds,
@@ -135,8 +139,8 @@ def test_classification_oof_holds_probabilities_and_models_pickle(tmp_path):
     assert len(result.models) == len(folds)
     joblib.dump(result.models, tmp_path / "models.joblib")
     models = joblib.load(tmp_path / "models.joblib")  # a file this test wrote itself
-    spec = FAMILIES["CatBoost"]("classification", 2)
-    view = prep.catboost(X)
+    spec = FAMILIES[name]("classification", 2)
+    view = getattr(prep, spec.view)(X)
     assert np.allclose(spec.predict(models[0], view), spec.predict(result.models[0], view))
 
 
@@ -172,6 +176,27 @@ def test_should_stop_returns_promptly_with_cancelled_event():
     assert result.trials == 0 and result.models == []
     stopped = [e for e in events if e.type == "stopped"]
     assert stopped[0].data == {"family": "LightGBM", "reason": "cancelled"}
+
+
+def test_cancelling_mid_trial_discards_it_and_returns_promptly():
+    X, y = _classification(50_000, 30)
+    prep, y, folds = _setup(X, y)
+    events = []
+    start = time.monotonic()
+    result = run_family(
+        "LightGBM",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(60),
+        events.append,
+        lambda: time.monotonic() - start > 0.3,
+    )
+    assert time.monotonic() - start < 1.0
+    assert result.trials == 0 and result.models == []
+    assert [e.data["reason"] for e in events if e.type == "stopped"] == ["cancelled"]
 
 
 def test_expired_deadline_raises_no_model_error():

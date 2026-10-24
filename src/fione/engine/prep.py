@@ -13,13 +13,8 @@ Task = Literal["classification", "regression"]
 
 HIGH_CARDINALITY = 200  # categorical columns with more categories are frequency encoded
 MIN_ROWS = 10
-_DATE_PARTS = (
-    "year",
-    "month",
-    "day",
-    "dayofweek",
-    "ordinal",
-)  # ordinal: seconds since the Unix epoch
+# ordinal: seconds since the Unix epoch
+_DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
 _EPOCH = pd.Timestamp("1970-01-01")
 
 

@@ -190,9 +190,8 @@ class XGBoost(FamilySpec):
             **params,
         )
         model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
-        model.set_params(
-            callbacks=None
-        )  # the callback holds the deadline; keep the model picklable
+        # XGBoost keeps constructor callbacks; ours holds the deadline, which may not pickle.
+        model.set_params(callbacks=None)
         return model
 
 
@@ -268,9 +267,8 @@ class ExtraTrees(FamilySpec):
             start = time.monotonic()
             added = model.n_estimators - len(getattr(model, "estimators_", []))
             model.fit(X_tr, y_tr)
-            per_round = (time.monotonic() - start) / -(
-                -added // chunk
-            )  # a round: one tree per thread
+            rounds = -(-added // chunk)  # a round grows one tree per thread
+            per_round = (time.monotonic() - start) / rounds
             affordable = int(deadline.remaining() / per_round) * chunk
             grow = min(self.n_trees - model.n_estimators, affordable, 4 * chunk)
             if grow < 1 or deadline.expired():
