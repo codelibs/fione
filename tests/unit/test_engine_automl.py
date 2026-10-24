@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from fione.engine import automl as automl_module
 from fione.engine.automl import AutoML
 from fione.engine.config import ConfigError, DeadlineExceeded, NoModelError, TrainConfig
-from fione.engine.families import ExtraTrees, FamilySpec, LightGBM
+from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM
 
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
 HIGHER_IS_BETTER = {"auc", "accuracy", "r2"}
@@ -404,10 +404,31 @@ def test_oversized_member_is_dropped_and_weights_renormalised(monkeypatch):
     assert any("ExtraTrees" in e.data["message"] for e in events if e.type == "notice")
 
 
+def test_members_are_dropped_lightest_first_until_they_fit_together(monkeypatch):
+    weights = {"LightGBM": 0.5, "XGBoost": 0.3, "ExtraTrees": 0.2}
+    monkeypatch.setattr(automl_module, "caruana", lambda oof, *a, **k: weights)
+    for family in FAMILIES.values():
+        monkeypatch.setattr(family, "size_bytes", lambda self, model: 35 * 1024**2)
+    events = []
+    model = _fit(_binary(300), events, families=list(weights), target="y", max_models=3)
+    assert [m.spec.name for m in model.members] == ["LightGBM", "XGBoost"]  # 70 MB together
+    assert [m.weight for m in model.members] == pytest.approx([0.625, 0.375])
+    notices = [e.data["message"] for e in events if e.type == "notice"]
+    assert any(n.startswith("ExtraTrees dropped") and "together" in n for n in notices)
+
+
 def test_when_every_member_is_oversized_the_heaviest_is_kept(monkeypatch):
-    monkeypatch.setattr(FamilySpec, "size_bytes", lambda self, model: 10**9)
-    model = _fit(_binary(300), families=["LightGBM"], target="y", max_models=1)
-    assert len(model.members) == 1
+    monkeypatch.setattr(
+        automl_module, "caruana", lambda oof, *a, **k: {"LightGBM": 0.4, "ExtraTrees": 0.6}
+    )
+    for family in FAMILIES.values():
+        monkeypatch.setattr(family, "size_bytes", lambda self, model: 10**9)
+    events = []
+    model = _fit(
+        _binary(300), events, families=["LightGBM", "ExtraTrees"], target="y", max_models=2
+    )
+    assert [(m.spec.name, m.weight) for m in model.members] == [("ExtraTrees", 1.0)]
+    assert any("kept although" in e.data["message"] for e in events if e.type == "notice")
 
 
 # --- cancellation -------------------------------------------------------------------
@@ -461,6 +482,28 @@ def test_adult_scale_model_is_small_and_predicts_fast(tmp_path):
     rows = df.drop(columns=["income"]).iloc[:1_000]
     start = time.monotonic()
     loaded.predict(rows)  # the first call after loading: the serving path
+    assert time.monotonic() - start <= 0.5
+
+
+@pytest.mark.timing
+def test_adult_scale_model_with_extra_trees_is_small_and_predicts_fast(tmp_path, monkeypatch):
+    # The search rarely picks ExtraTrees, the largest and (single-threaded) slowest member.
+    monkeypatch.setattr(
+        automl_module, "caruana", lambda oof, *a, **k: dict.fromkeys(oof, 1 / len(oof))
+    )
+    df = _adult_like()
+    model = _fit(df, families=["LightGBM", "ExtraTrees"], target="income", max_runtime_secs=30)
+    assert [(m.spec.name, len(m.models)) for m in model.members] == [
+        ("LightGBM", 1),
+        ("ExtraTrees", 1),
+    ]
+    path = tmp_path / "model.joblib"
+    joblib.dump(model, path)
+    assert path.stat().st_size <= 100 * 1024**2
+    loaded = joblib.load(path)  # a file this test wrote itself
+    rows = df.drop(columns=["income"]).iloc[:1_000]
+    start = time.monotonic()
+    loaded.predict(rows)
     assert time.monotonic() - start <= 0.5
 
 

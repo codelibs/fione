@@ -18,7 +18,8 @@ spec 5.1/5.7) and spends it in phases:
    families' probes, first fits on small data, an iteration slower than measured).
 
 Members whose final models are estimated (``FamilySpec.size_bytes``) above ``SIZE_CAP`` are
-dropped, with a ``notice``, and the weights renormalised; if that would drop every member, the
+dropped, with a ``notice``, then the lightest-weighted ones until all together fit in
+``TOTAL_SIZE_CAP``, and the weights are renormalised; if that would drop every member, the
 heaviest-weighted one is kept. ``cv_score``, ``cv_std`` and ``metrics`` come from the fold
 models' OOF predictions, blended with the final weights. The returned model holds neither the
 fold models nor the OOF arrays unless ``keep_cv_*`` asks; ``keep_cv_models`` keeps every
@@ -52,7 +53,8 @@ SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
 REFIT_ROUNDS_FACTOR = 1.1
-SIZE_CAP = 40 * 1024**2
+SIZE_CAP = 40 * 1024**2  # per member
+TOTAL_SIZE_CAP = 90 * 1024**2  # all members: the artifact target is 100 MB (spec 5.2)
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
 TRIAL_COLUMNS = ["family", "trial", "state", "score", "elapsed", "params"]
 
@@ -260,6 +262,10 @@ class AutoML:
             return "time"
         return "no_improvement"  # each family stagnated (or used the trials it was allotted)
 
+    def _drop(self, member: Member, why: str) -> None:
+        name = member.spec.name
+        self._notice(f"{name} dropped from the ensemble: {why}", family=name)
+
     def _members(self, results, weights, X, y, prep, clock, weight, stop_reason):
         """Final members, heaviest first, and the refit time per family."""
         views: dict[str, pd.DataFrame] = {}
@@ -282,26 +288,37 @@ class AutoML:
                     )
             size = sum(result.spec.size_bytes(m) for m in models)
             candidates.append((Member(result.spec, weights[name], models), size))
-        kept = [member for member, size in candidates if size <= SIZE_CAP]
+        kept = [(member, size) for member, size in candidates if size <= SIZE_CAP]
         for member, size in candidates:
             if size > SIZE_CAP:
-                name = member.spec.name
-                self._notice(
-                    f"{name} dropped from the ensemble: its model would take about "
-                    f"{size / 2**20:.0f} MB (limit {SIZE_CAP / 2**20:.0f} MB)",
-                    family=name,
+                self._drop(
+                    member, f"its model would take about {_mb(size)} (limit {_mb(SIZE_CAP)})"
                 )
-        if not kept:
-            kept = [candidates[0][0]]
-            self._notice(
-                f"{kept[0].spec.name} kept although it exceeds the size limit: no smaller member",
-                family=kept[0].spec.name,
+        while len(kept) > 1 and sum(size for _, size in kept) > TOTAL_SIZE_CAP:
+            together = sum(size for _, size in kept)
+            member, _ = kept.pop()  # the lightest weight
+            self._drop(
+                member,
+                f"the members would take about {_mb(together)} together "
+                f"(limit {_mb(TOTAL_SIZE_CAP)})",
             )
+        if not kept:
+            kept = [candidates[0]]
+            self._notice(
+                f"{kept[0][0].spec.name} kept although it exceeds the size limit: "
+                "no smaller member",
+                family=kept[0][0].spec.name,
+            )
+        kept = [member for member, _ in kept]
         total = sum(member.weight for member in kept)
         for member in kept:
             member.weight /= total
             member.models = [member.spec.serving(model) for model in member.models]
         return kept, refit_secs
+
+
+def _mb(size: float) -> str:
+    return f"{size / 2**20:.0f} MB"
 
 
 def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight):
