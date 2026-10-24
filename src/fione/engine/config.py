@@ -18,10 +18,13 @@ class DeadlineExceeded(Exception):
 
 
 _TASKS = ("auto", "classification", "regression")
-# H2O's metric names, compared case-insensitively.
+# H2O's metric names plus accuracy and r2, compared case-insensitively. The AutoML accepts the
+# subset that fits the task (see ``fione.engine.metrics``).
 _METRICS = frozenset(
     {
         "auto",
+        "accuracy",
+        "r2",
         "deviance",
         "logloss",
         "mse",

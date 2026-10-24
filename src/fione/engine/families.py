@@ -15,6 +15,13 @@ scaled by n·log(n) (measured at 400k rows: right for ExtraTrees, 2-8x too high 
 Still unprotected: that probe (about 0.1-0.3 s), the first fit on at most ``PROBE_ROWS`` rows,
 and an iteration that runs slower than the measured ones. Callers should reserve headroom.
 
+``fit_full`` trains the final model on all rows with a fixed number of rounds and no early
+stopping. It refuses like ``fit``, with the unit scaled to the larger row count, and raises
+``DeadlineExceeded`` instead of returning a model that is shorter than requested.
+
+``size_bytes`` estimates a fitted model's pickled size from its tree and leaf counts (within
+about 10% of the measured pickles; an upper bound for the boosting families).
+
 Size caps (artifact target, spec 5.2): at most 2,000 boosting rounds with 50-round early
 stopping, 256 leaves per tree, XGBoost depth 10, CatBoost depth 8; ExtraTrees 100 trees of at
 most 30 levels and 2,048 leaves.
@@ -68,6 +75,7 @@ class FamilySpec:
         self.seed = seed
         self.n_jobs = n_jobs
         self.unit_secs: float | None = None  # see the module docstring
+        self._unit_rows = 0  # the training rows unit_secs applies to
         self._measured = False  # unit_secs comes from a real fit, not the probe
 
     @property
@@ -85,19 +93,78 @@ class FamilySpec:
         X_va: pd.DataFrame,
         y_va: np.ndarray,
         deadline,
+        sample_weight: np.ndarray | None = None,
     ):
+        """A model early-stopped on the validation rows; ``sample_weight`` weights ``X_tr``."""
         if deadline.expired():
             raise DeadlineExceeded
-        if self.unit_secs is None and len(X_tr) > PROBE_ROWS:
-            self.unit_secs = self._probe(params, X_tr, y_tr)
+        self.estimate_unit(params, X_tr, y_tr)
         if self.unit_secs is not None and deadline.remaining() < UNIT_SAFETY * self.unit_secs:
             raise DeadlineExceeded
         timer = _UnitTimer(deadline)
-        model = self._fit(params, X_tr, y_tr, X_va, y_va, timer)
-        if timer.unit is not None:
-            self.unit_secs = max(self.unit_secs, timer.unit) if self._measured else timer.unit
-            self._measured = True
+        model = self._fit(params, X_tr, y_tr, X_va, y_va, timer, sample_weight)
+        self._note_unit(timer, len(X_tr))
         return model
+
+    def fit_full(
+        self,
+        params: dict,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        deadline,
+        rounds: int,
+        sample_weight: np.ndarray | None = None,
+    ):
+        """One model on all rows: ``rounds`` boosting rounds (ExtraTrees: the full forest)."""
+        if deadline.expired():
+            raise DeadlineExceeded
+        if self.unit_secs is not None and self._unit_rows:
+            n, m = max(len(X), 2), max(self._unit_rows, 2)
+            unit = self.unit_secs * max(1.0, n * np.log(n) / (m * np.log(m)))
+            if deadline.remaining() < UNIT_SAFETY * unit:
+                raise DeadlineExceeded
+        timer = _UnitTimer(deadline)
+        model = self._fit(params, X, y, None, None, timer, sample_weight, rounds)
+        self._note_unit(timer, len(X))
+        if self.rounds(model) < self._full_rounds(rounds):
+            raise DeadlineExceeded
+        return model
+
+    def estimate_unit(self, params: dict, X_tr: pd.DataFrame, y_tr: np.ndarray) -> None:
+        """Probe the unit time before the first fit on more than ``PROBE_ROWS`` rows."""
+        if self.unit_secs is None and len(X_tr) > PROBE_ROWS:
+            self.unit_secs = self._probe(params, X_tr, y_tr)
+            self._unit_rows = len(X_tr)
+
+    def _note_unit(self, timer: "_UnitTimer", rows: int) -> None:
+        if timer.unit is None:
+            return
+        if not self._measured or timer.unit > self.unit_secs:
+            self.unit_secs, self._unit_rows = timer.unit, rows
+        self._measured = True
+
+    def _full_rounds(self, rounds: int) -> int:
+        return rounds
+
+    def rounds(self, model) -> int:
+        """Boosting rounds the model predicts with (ExtraTrees: its trees)."""
+        raise NotImplementedError
+
+    def serving(self, model):
+        """``model`` set up for the final artifact, where predictions must be reproducible."""
+        return model
+
+    def size_bytes(self, model) -> int:
+        raise NotImplementedError
+
+    def importance(self, model) -> np.ndarray:
+        """Non-negative importance per feature, in view column order."""
+        raise NotImplementedError
+
+    @property
+    def _outputs(self) -> int:
+        """Values per leaf: one per class beyond binary, else one."""
+        return self.n_classes if self.n_classes > 2 else 1
 
     def _probe(self, params: dict, X: pd.DataFrame, y: np.ndarray) -> float:
         """Estimated unit time on ``X``, from one unit on a subsample."""
@@ -110,8 +177,12 @@ class FamilySpec:
         n, m = len(X), len(rows)
         return (time.monotonic() - start) * n * np.log(n) / (m * np.log(m))
 
-    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline):
-        """Fit; training folds hold every class (stratified folds), as XGBoost requires."""
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
+        """Fit; training folds hold every class (stratified folds), as XGBoost requires.
+
+        Without validation rows (``X_va is None``) there is no early stopping and boosting runs
+        ``rounds`` rounds.
+        """
         raise NotImplementedError
 
     def predict(self, model, X: pd.DataFrame) -> np.ndarray:
@@ -188,25 +259,33 @@ class LightGBM(FamilySpec):
             "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
         }
 
-    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline):
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         cls = lgb.LGBMClassifier if self.classification else lgb.LGBMRegressor
         model = cls(
-            n_estimators=MAX_ROUNDS,
+            n_estimators=MAX_ROUNDS if X_va is not None else rounds,
             subsample_freq=1,
             n_jobs=self.n_jobs,
             random_state=self.seed,
             verbose=-1,
             **params,
         )
-        stopping = lgb.early_stopping(EARLY_STOPPING_ROUNDS, verbose=False)
-        model.fit(
-            X_tr,
-            y_tr,
-            eval_X=(X_va,),
-            eval_y=(y_va,),
-            callbacks=[stopping, _LightGBMDeadline(deadline)],
-        )
+        callbacks = [_LightGBMDeadline(deadline)]
+        evaluation = {}
+        if X_va is not None:
+            callbacks.insert(0, lgb.early_stopping(EARLY_STOPPING_ROUNDS, verbose=False))
+            evaluation = {"eval_X": (X_va,), "eval_y": (y_va,)}
+        model.fit(X_tr, y_tr, sample_weight=sample_weight, callbacks=callbacks, **evaluation)
         return model
+
+    def rounds(self, model) -> int:
+        # best_iteration_ is 0 without early stopping; a deadline stop sets it to the rounds done.
+        return int(model.best_iteration_ or model.booster_.current_iteration())
+
+    def size_bytes(self, model) -> int:
+        return model.booster_.num_trees() * model.get_params()["num_leaves"] * 120
+
+    def importance(self, model) -> np.ndarray:
+        return np.asarray(model.booster_.feature_importance(importance_type="gain"), dtype=float)
 
 
 class _XGBoostDeadline(xgb.callback.TrainingCallback):
@@ -240,11 +319,12 @@ class XGBoost(FamilySpec):
             "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
         }
 
-    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline):
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         cls = xgb.XGBClassifier if self.classification else xgb.XGBRegressor
+        stopping = X_va is not None
         model = cls(
-            n_estimators=MAX_ROUNDS,
-            early_stopping_rounds=EARLY_STOPPING_ROUNDS,
+            n_estimators=MAX_ROUNDS if stopping else rounds,
+            early_stopping_rounds=EARLY_STOPPING_ROUNDS if stopping else None,
             max_leaves=MAX_LEAVES,
             tree_method="hist",
             enable_categorical=True,
@@ -254,10 +334,27 @@ class XGBoost(FamilySpec):
             callbacks=[_XGBoostDeadline(deadline)],
             **params,
         )
-        model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
+        evaluation = {"eval_set": [(X_va, y_va)]} if stopping else {}
+        model.fit(X_tr, y_tr, sample_weight=sample_weight, verbose=False, **evaluation)
         # XGBoost keeps constructor callbacks; ours holds the deadline, which may not pickle.
         model.set_params(callbacks=None)
         return model
+
+    def rounds(self, model) -> int:
+        try:
+            return int(model.best_iteration) + 1
+        except AttributeError:  # trained without early stopping
+            return int(model.get_booster().num_boosted_rounds())
+
+    def size_bytes(self, model) -> int:
+        trees = model.get_booster().num_boosted_rounds() * self._outputs
+        leaves = min(2 ** model.get_params()["max_depth"], MAX_LEAVES)
+        return trees * leaves * 2 * 30
+
+    def importance(self, model) -> np.ndarray:
+        booster = model.get_booster()
+        gains = booster.get_score(importance_type="total_gain")
+        return np.array([gains.get(name, 0.0) for name in booster.feature_names], dtype=float)
 
 
 class _CatBoostDeadline:
@@ -280,11 +377,12 @@ class CatBoost(FamilySpec):
             "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1.0, 20.0, log=True),
         }
 
-    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline):
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         cls = CatBoostClassifier if self.classification else CatBoostRegressor
+        stopping = X_va is not None
         model = cls(
-            iterations=MAX_ROUNDS,
-            early_stopping_rounds=EARLY_STOPPING_ROUNDS,
+            iterations=MAX_ROUNDS if stopping else rounds,
+            early_stopping_rounds=EARLY_STOPPING_ROUNDS if stopping else None,
             thread_count=self.n_jobs,
             random_seed=self.seed,
             verbose=0,
@@ -296,10 +394,21 @@ class CatBoost(FamilySpec):
             X_tr,
             y_tr,
             cat_features=categorical,
-            eval_set=(X_va, y_va),
+            sample_weight=sample_weight,
+            eval_set=(X_va, y_va) if stopping else None,
             callbacks=[_CatBoostDeadline(deadline)],
         )
         return model
+
+    def rounds(self, model) -> int:
+        return int(model.tree_count_)  # shrunk to the best iteration after early stopping
+
+    def size_bytes(self, model) -> int:
+        leaves = 2 ** model.get_params()["depth"]
+        return model.tree_count_ * leaves * (16 + 8 * self._outputs)
+
+    def importance(self, model) -> np.ndarray:
+        return np.asarray(model.get_feature_importance(), dtype=float)
 
 
 class ExtraTrees(FamilySpec):
@@ -316,7 +425,7 @@ class ExtraTrees(FamilySpec):
             "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
         }
 
-    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline):
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         cls = ExtraTreesClassifier if self.classification else ExtraTreesRegressor
         chunk = self.n_jobs  # one tree per thread: measures throughput at the smallest granularity
         model = cls(
@@ -331,14 +440,32 @@ class ExtraTrees(FamilySpec):
         while True:
             start = time.monotonic()
             added = model.n_estimators - len(getattr(model, "estimators_", []))
-            model.fit(X_tr, y_tr)
-            rounds = -(-added // chunk)  # a round grows one tree per thread
-            per_round = max((time.monotonic() - start) / rounds, 1e-3)
+            model.fit(X_tr, y_tr, sample_weight=sample_weight)
+            steps = -(-added // chunk)  # a round grows one tree per thread
+            per_round = max((time.monotonic() - start) / steps, 1e-3)
             affordable = int(deadline.remaining() / per_round) * chunk
             grow = min(self.n_trees - model.n_estimators, affordable, 4 * chunk)
             if grow < 1 or deadline.expired():
                 return model
             model.set_params(n_estimators=model.n_estimators + grow)
+
+    def _full_rounds(self, rounds: int) -> int:
+        return self.n_trees
+
+    def serving(self, model):
+        # Threads add up the trees' outputs in varying order, which changes the last bits.
+        return model.set_params(n_jobs=1)
+
+    def rounds(self, model) -> int:
+        return len(model.estimators_)
+
+    def size_bytes(self, model) -> int:
+        # sklearn stores 64 bytes per node plus a float64 value per output and class.
+        trees = [estimator.tree_ for estimator in model.estimators_]
+        return sum(tree.node_count * (64 + 8 * tree.value[0].size) for tree in trees)
+
+    def importance(self, model) -> np.ndarray:
+        return np.asarray(model.feature_importances_, dtype=float)
 
 
 FAMILIES: dict[str, type[FamilySpec]] = {

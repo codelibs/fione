@@ -8,7 +8,14 @@ import pytest
 from sklearn.datasets import make_classification, make_regression
 
 from fione.engine.config import Deadline, DeadlineExceeded, NoModelError
-from fione.engine.families import FAMILIES, UNIT_SAFETY, FamilySpec, n_threads
+from fione.engine.families import (
+    FAMILIES,
+    MAX_ROUNDS,
+    UNIT_SAFETY,
+    ExtraTrees,
+    FamilySpec,
+    n_threads,
+)
 from fione.engine.prep import Prep, validate_target
 from fione.engine.search import make_folds, run_family
 
@@ -70,7 +77,7 @@ class _SlowFamily(FamilySpec):
     def space(self, trial):
         return {}
 
-    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline):
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         self.starts.append(time.monotonic())
         time.sleep(self.unit)
         deadline.expired()
@@ -127,6 +134,55 @@ def test_fit_refuses_to_start_a_unit_that_cannot_finish(slow):
     with pytest.raises(DeadlineExceeded):
         spec.fit({}, X, y, X, y, Deadline(UNIT_SAFETY * slow.unit * 0.9))
     assert len(slow.starts) == 1
+
+
+@pytest.mark.parametrize("name", list(FAMILIES))
+def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
+    X, y = _classification(1_000, 6)
+    prep, y, _ = _setup(X, y)
+    spec = FAMILIES[name]("classification", 2)
+    view = getattr(prep, spec.view)(X)
+    model = spec.fit_full(spec.defaults, view, y, Deadline(30), rounds=7)
+    assert spec.rounds(model) == (ExtraTrees.n_trees if name == "ExtraTrees" else 7)
+    assert spec.predict(model, view).shape == (1_000, 2)
+    assert spec.size_bytes(model) > 0
+    importance = spec.importance(model)
+    assert importance.shape == (6,) and (importance >= 0).all() and importance.sum() > 0
+
+
+@pytest.mark.parametrize("name", list(FAMILIES))
+def test_fit_full_raises_when_it_cannot_finish(name):
+    X, y = _classification(50_000, 30)
+    prep, y, _ = _setup(X, y)
+    spec = FAMILIES[name]("classification", 2, n_jobs=n_threads(len(X)))
+    view = getattr(prep, spec.view)(X)
+    start = time.monotonic()
+    with pytest.raises(DeadlineExceeded):
+        spec.fit_full(spec.defaults, view, y, Deadline(0.3), rounds=MAX_ROUNDS)
+    assert time.monotonic() - start < 0.8
+
+
+def test_fit_full_refuses_when_the_scaled_unit_does_not_fit(slow):
+    spec = slow("classification", 2)
+    X = pd.DataFrame({"a": range(20)})
+    y = np.array([0, 1] * 10)
+    spec.fit({}, X.iloc[:10], y[:10], X, y, Deadline(5))  # unit measured on 10 rows
+    with pytest.raises(DeadlineExceeded):  # 20 rows: a bigger unit than 1.2 x 0.2 s
+        spec.fit_full({}, X, y, Deadline(UNIT_SAFETY * slow.unit * 1.05), rounds=1)
+    assert len(slow.starts) == 1
+
+
+def test_rounds_counts_the_iterations_used_for_prediction():
+    X, y = _classification(2_000, 6)
+    prep, y, folds = _setup(X, y)
+    train, valid = folds[0]
+    view = prep.tree(X)
+    for name in ("LightGBM", "XGBoost"):
+        spec = FAMILIES[name]("classification", 2)
+        model = spec.fit(
+            spec.defaults, view.iloc[train], y[train], view.iloc[valid], y[valid], Deadline(30)
+        )
+        assert 1 <= spec.rounds(model) < MAX_ROUNDS
 
 
 # --- run_family -----------------------------------------------------------------
@@ -327,6 +383,103 @@ def test_max_trial_secs_truncates_trials_instead_of_discarding_them():
     trials = [e for e in events if e.type == "trial"]
     assert len(trials) == 2
     assert all(e.data["elapsed"] < 1.0 for e in trials)
+
+
+def test_max_trials_stops_the_search():
+    X, y = _classification(300, 5)
+    prep, y, folds = _setup(X, y)
+    events = []
+    result = run_family(
+        "LightGBM",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(30),
+        events.append,
+        lambda: False,
+        max_trials=2,
+    )
+    assert result.trials == 2 and result.reason == "max_models"
+    assert [e.data["reason"] for e in events if e.type == "stopped"] == ["max_models"]
+    assert [t["trial"] for t in result.log] == [0, 1]
+
+
+def test_stagnation_stops_the_search_with_no_improvement():
+    X, y = _classification(300, 5)
+    prep, y, folds = _setup(X, y)
+    seen = []
+    result = run_family(
+        "LightGBM",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(30),
+        lambda e: None,
+        lambda: False,
+        stopping_rounds=2,
+        stopping_tolerance=0.9,
+        stopping_score=lambda oof: seen.append(oof.shape) or 1.0,
+    )
+    assert result.trials == 3 and result.reason == "no_improvement"
+    assert seen == [(300, 2)] * 3  # the stopping metric sees each complete trial's OOF
+
+
+def test_sample_weight_reaches_every_fold_fit(slow, monkeypatch):
+    received = []
+    original = slow._fit
+
+    def spy(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
+        received.append((len(X_tr), sample_weight))
+        return original(self, params, X_tr, y_tr, X_va, y_va, deadline)
+
+    monkeypatch.setattr(slow, "_fit", spy)
+    monkeypatch.setattr(slow, "unit", 0.0)
+    X, y = _classification(40, 4)
+    prep, y, folds = _setup(X, y, nfolds=2)
+    weights = np.arange(40, dtype=float)
+    run_family(
+        "Slow",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(30),
+        lambda e: None,
+        lambda: False,
+        max_trials=1,
+        sample_weight=weights,
+    )
+    assert [(n, list(w)) for n, w in received] == [
+        (len(train), list(weights[train])) for train, _ in folds
+    ]
+
+
+def test_max_trial_secs_is_raised_to_fit_a_unit_per_fold(slow):
+    X, y = _classification(40, 4)
+    prep, y, folds = _setup(X, y, nfolds=2)
+    events = []
+    result = run_family(
+        "Slow",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(30),
+        events.append,
+        lambda: False,
+        max_trial_secs=0.1,
+        max_trials=3,
+    )
+    assert result.trials == 3  # no trial was refused or discarded
+    notices = [e.data for e in events if e.type == "notice"]
+    assert len(notices) == 1 and notices[0]["family"] == "Slow"
+    assert notices[0]["max_trial_secs"] >= len(folds) * UNIT_SAFETY * slow.unit
 
 
 def test_same_seed_gives_same_best_score():

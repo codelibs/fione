@@ -232,7 +232,7 @@ def test_validate_target_reduces_folds_for_small_class_and_emits_event():
     y = pd.Series(["a"] * 27 + ["b"] * 3)
     _, _, nfolds = validate_target(y, "classification", 5, emit=events.append)
     assert nfolds == 3
-    assert [e.type for e in events] == ["started"]
+    assert [e.type for e in events] == ["notice"]
     assert events[0].data["nfolds_reduced_to"] == 3
     assert "smallest class has 3 rows" in events[0].data["reason"]
 
@@ -241,7 +241,11 @@ def test_validate_target_reduces_folds_for_few_rows():
     events = []
     _, _, nfolds = validate_target(pd.Series(range(30)), "regression", 10, emit=events.append)
     assert nfolds == 6
-    assert events[0].data == {"nfolds_reduced_to": 6, "reason": "only 30 rows"}
+    assert events[0].data == {
+        "message": "nfolds reduced to 6: only 30 rows",
+        "nfolds_reduced_to": 6,
+        "reason": "only 30 rows",
+    }
 
 
 def test_validate_target_keeps_folds_for_balanced_small_data():

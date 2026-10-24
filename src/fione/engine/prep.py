@@ -72,17 +72,25 @@ class Prep:
         if not self._plan:
             raise ConfigError("no usable feature columns: every column is empty or constant")
         self.feature_names: list[str] = []
+        self.sources: list[str] = []  # the input column behind each feature
         self._category_at: dict[str, str] = {}  # view column -> categorical source column
         for column, kind in self._plan:
             if kind == "category":
                 self._category_at[f"f{len(self.feature_names)}"] = column
             if kind == "datetime":
                 self.feature_names += [f"{column}__{part}" for part in _DATE_PARTS]
+                self.sources += [column] * len(_DATE_PARTS)
             else:
                 self.feature_names.append(column)
+                self.sources.append(column)
         base = self._base(X)
         self._medians = base.drop(columns=list(self._category_at)).median().fillna(0.0).to_dict()
         return self
+
+    @property
+    def columns(self) -> list[str]:
+        """The input columns the views need, in order."""
+        return [column for column, _ in self._plan]
 
     def _base(self, df: pd.DataFrame) -> pd.DataFrame:
         """Numeric features as float, categorical ones as strings (NaN when missing)."""
@@ -176,7 +184,7 @@ def validate_target(
 
     Returns ``(encoded, classes, nfolds)``: float values for regression, or class codes 0..k-1
     whose labels are ``classes`` (sorted; ``[]`` for regression); and the fold count reduced to
-    min(nfolds, smallest class size, rows // 5), at least 2, emitting a ``started`` event with
+    min(nfolds, smallest class size, rows // 5), at least 2, emitting a ``notice`` event with
     ``nfolds_reduced_to`` and ``reason`` when it was reduced. ``task`` must already be resolved.
     """
     n = len(y)
@@ -219,5 +227,8 @@ def validate_target(
             limit, reason = int(counts.min()), f"smallest class has {counts.min()} rows"
     folds = max(2, min(nfolds, limit))
     if folds < nfolds and emit is not None:
-        emit(Event("started", data={"nfolds_reduced_to": folds, "reason": reason}))
+        message = f"nfolds reduced to {folds}: {reason}"
+        emit(
+            Event("notice", data={"message": message, "nfolds_reduced_to": folds, "reason": reason})
+        )
     return encoded, classes, folds

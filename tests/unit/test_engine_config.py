@@ -50,7 +50,7 @@ def test_from_dict_rejects_unknown_and_missing_keys():
         ({"seed": 1.5}, "seed"),
         ({"stopping_rounds": -1}, "stopping_rounds"),
         ({"stopping_tolerance": -0.1}, "stopping_tolerance"),
-        ({"stopping_metric": "accuracy"}, "stopping_metric"),
+        ({"stopping_metric": "f1"}, "stopping_metric"),
         ({"sort_metric": "speed"}, "sort_metric"),
         ({"balance_classes": "yes"}, "balance_classes"),
         ({"ignored_columns": "id"}, "ignored_columns"),
