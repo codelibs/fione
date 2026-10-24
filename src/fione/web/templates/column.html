@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, breadcrumb, kind_badge, chart %}
+{% block title %}{{ col.name }} · {{ dataset.name }}{% endblock %}
+{% block scripts %}
+<script src="{{ static('vendor/echarts/echarts.min.js') }}" defer></script>
+<script src="{{ static('js/charts.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+{% set back = "/projects/" ~ pid ~ "/datasets/" ~ dataset.id %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, dataset.name, section="datasets") }}
+  <header class="page-header page-header-row">
+    <div class="page-header__main">
+      <p class="eyebrow">{{ t('column.eyebrow') }}</p>
+      <h1 class="page-header__title page-header__title-wrap">{{ col.name }}</h1>
+      <p class="page-header__lead text-muted">{{ t('column.lead', name=dataset.name, rows="{:,}".format(sample_rows)) }}</p>
+    </div>
+    {{ kind_badge(t, col.kind) }}
+  </header>
+  <p><a class="btn btn-ghost" href="{{ back }}?tab=columns">{{ icon("back") }}{{ t('column.back') }}</a></p>
+
+  {% if col.name == target %}
+  <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('column.is_target') }}</span></div>
+  {% elif leak %}
+  <div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('column.leak', target=target) }} {{ t('analysis.reason.leak_' ~ leak) }}</span></div>
+  {% endif %}
+  {% if col.kind in ("id", "constant") %}
+  <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('analysis.reason.' ~ col.kind) }}</span></div>
+  {% endif %}
+
+  <div class="column-grid">
+    <section class="card card-padded stack" aria-labelledby="dist-title">
+      <h2 class="section-header__title" id="dist-title">{{ t('column.distribution') }}</h2>
+      {% if chart_spec %}
+      {{ chart(t, "column-chart", chart_spec) }}
+      {% if other %}<p class="text-muted text-sm">{{ t('column.other_note', n="{:,}".format(other)) }}</p>{% endif %}
+      {% else %}
+      <p class="text-muted">{{ t('column.no_chart') }}</p>
+      {% endif %}
+    </section>
+    <section class="card card-padded stack" aria-labelledby="stats-title">
+      <h2 class="section-header__title" id="stats-title">{{ t('column.stats') }}</h2>
+      <dl class="facts facts-stacked">
+        <div><dt>{{ t('analysis.col.kind') }}</dt><dd>{{ t('kind.' ~ col.kind) }}</dd></div>
+        <div><dt>{{ t('column.values') }}</dt><dd>{{ "{:,}".format(non_null) }}</dd></div>
+        <div><dt>{{ t('analysis.col.missing') }}</dt><dd>{{ pct(col.missing_rate) }}%</dd></div>
+        <div><dt>{{ t('dataset.col.unique') }}</dt><dd>{{ "{:,}".format(col.n_unique) }}</dd></div>
+        {% if col.stats %}
+        {% for key in ["mean", "std", "min", "q25", "median", "q75", "max"] %}
+        <div><dt>{{ t('column.stat.' ~ key) }}</dt><dd>{{ col.stats[key]|cellnum }}</dd></div>
+        {% endfor %}
+        {% endif %}
+        {% if col.kind == "numeric" and col.outlier_rate is not none %}
+        <div><dt>{{ t('column.outliers') }}</dt><dd>{{ pct(col.outlier_rate) }}%</dd></div>
+        {% endif %}
+      </dl>
+      {% if col.kind == "numeric" and col.outlier_rate is not none %}<p class="text-muted text-sm">{{ t('column.outliers_hint') }}</p>{% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

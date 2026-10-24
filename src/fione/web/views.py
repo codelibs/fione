@@ -41,6 +41,8 @@ MAX_NEXT_LENGTH = 2048
 NEXT_DECODE_ROUNDS = 3
 PROFILE_CACHE_SIZE = 16  # column profiles of datasets (the analysis page)
 BASELINE_CACHE_SIZE = 1024  # rating baselines of training targets (a few numbers each)
+LEAK_CACHE_SIZE = 256  # leak suspects per (dataset, target): a few column names each
+SIZE_CACHE_SIZE = 4096  # stored size of each dataset (a HEAD request on S3)
 
 log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
@@ -347,11 +349,12 @@ def wants_html(request: Request) -> bool:
 def install(app: FastAPI) -> None:
     """Serve the UI's pages at ``/`` and its assets under ``/static``, and show errors of
     browser requests outside the API (unknown paths, oversized uploads) as HTML pages."""
-    from fione.web import easyml  # imports this module
+    from fione.web import automl, easyml  # import this module
 
     app.mount(STATIC_PREFIX, StaticFiles(directory=WEB_DIR / "static"), name="static")
     app.include_router(router)
     app.include_router(easyml.router)
+    app.include_router(automl.router)
     app.add_exception_handler(UiError, _ui_error)
     api_http_error = app.exception_handlers[StarletteHTTPException]
 
@@ -378,3 +381,5 @@ def install(app: FastAPI) -> None:
     # Derived from immutable datasets (their ids are never reused), so kept across requests.
     app.state.ui_profiles = LruCache(PROFILE_CACHE_SIZE)
     app.state.ui_baselines = LruCache(BASELINE_CACHE_SIZE)
+    app.state.ui_leaks = LruCache(LEAK_CACHE_SIZE)
+    app.state.ui_sizes = LruCache(SIZE_CACHE_SIZE)

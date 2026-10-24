@@ -151,6 +151,7 @@
         <p>{{ t('analysis.what_background') }}</p>
       </section>
 
+      <p class="text-sm"><a href="{{ base }}/train?target={{ target.name|urlencode }}">{{ t('analysis.advanced') }}</a></p>
       <div class="form-actions">
         <a class="btn btn-ghost" href="/projects/{{ ctx.project.id }}">{{ icon("back") }}{{ t('action.back_project') }}</a>
         <button type="submit" class="btn btn-primary btn-lg" id="run-button"><span class="spinner" aria-hidden="true"></span>{{ icon("play") }}{{ t('analysis.run') }}</button>

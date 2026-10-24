@@ -1,0 +1,66 @@
+{% from "_macros.html" import icon, status_pill, pager %}
+{# The polled job list: polling (every 5 s) only while a job of the project is active. A
+   confirm panel open inside it pauses the polling (automl.js). #}
+{% set pid = ctx.project.id %}
+<section id="job-list" class="stack-tight" aria-labelledby="job-list-title"{% if polling %} hx-get="/projects/{{ pid }}/jobs{% if query %}?{{ query }}{% endif %}" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}>
+  <div class="section-header">
+    <h2 class="section-header__title" id="job-list-title">{{ t('jobs.list') }}</h2>
+    <span class="text-muted text-sm" data-announce>{{ t('jobs.summary', running=n_running, queued=n_queued, total=total) }}</span>
+  </div>
+  {% if rows %}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="job-list-title">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">{{ t('jobs.col.job') }}</th>
+          <th scope="col">{{ t('jobs.col.status') }}</th>
+          <th scope="col">{{ t('jobs.col.created') }}</th>
+          <th scope="col" class="num">{{ t('jobs.col.duration') }}</th>
+          <th scope="col"><span class="visually-hidden">{{ t('datasets.col.actions') }}</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set job = row.job %}
+        <tr>
+          <td class="cell-name">
+            {% if row.link %}<a href="{{ row.link }}">{{ t('job.kind.' ~ job.kind) }} #{{ job.id }}</a>{% else %}{{ t('job.kind.' ~ job.kind) if job.kind in kinds else job.kind }} #{{ job.id }}{% endif %}
+            {% if row.message %}<p class="job-message">{{ row.message }}</p>{% endif %}
+          </td>
+          <td>{{ status_pill(t, job.status.value) }}</td>
+          <td><time datetime="{{ job.created_at|iso }}">{{ t('time.utc', time=job.created_at|utc) }}</time></td>
+          <td class="num">{{ row.duration or "—" }}</td>
+          <td>
+            {% if ctx.can_write %}
+            <details class="confirm confirm-inline" data-confirm-panel>
+              <summary class="btn btn-ghost btn-sm" id="act-{{ job.id }}">{{ t('jobs.cancel') if row.active else t('jobs.delete') }}<span class="visually-hidden"> #{{ job.id }}</span></summary>
+              <div class="confirm__panel" role="group" aria-labelledby="act-q-{{ job.id }}">
+                <p id="act-q-{{ job.id }}"><strong>{{ t('jobs.cancel_question', id=job.id) if row.active else t('jobs.delete_question', id=job.id) }}</strong></p>
+                {% if row.active %}
+                <form class="cluster" method="post" action="/projects/{{ pid }}/jobs/{{ job.id }}/cancel" data-busy-form>
+                  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                  <input type="hidden" name="back" value="list">
+                  <button type="submit" class="btn btn-danger btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('job.cancel_yes') }}</button>
+                  <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('job.cancel_no') }}</button>
+                </form>
+                {% else %}
+                <form class="cluster" method="post" action="/projects/{{ pid }}/jobs/{{ job.id }}/delete" data-busy-form>
+                  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                  <button type="submit" class="btn btn-danger btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('jobs.delete_yes') }}</button>
+                  <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('job.cancel_no') }}</button>
+                </form>
+                {% endif %}
+              </div>
+            </details>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ pager(t, ("?page=" ~ (page_number - 1) ~ ("&" ~ query if query else "")) if page_number > 1 else none, ("?page=" ~ (page_number + 1) ~ ("&" ~ query if query else "")) if page_number < pages else none, t('jobs.pages')) }}
+  {% else %}
+  <p class="empty-line text-muted">{{ t('jobs.empty') }}</p>
+  {% endif %}
+</section>

@@ -5,7 +5,7 @@
 {% set pid = ctx.project.id %}
 {% set best = models[0] if models else None %}
 <div class="container page">
-  {{ breadcrumb(t, ctx.project) }}
+  {{ breadcrumb(t, ctx.project, section="overview") }}
   <header class="page-header page-header-row">
     <div class="page-header__main">
       <h1 class="page-header__title page-header__title-wrap">{{ ctx.project.name }}</h1>

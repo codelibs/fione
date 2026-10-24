@@ -105,12 +105,18 @@
 
   // ---- The cancel panel: opening it moves focus into it (its summary hides); "keep going"
   // closes it ------------------------------------------------------------------------------
-  document.querySelectorAll("details[data-confirm-panel]").forEach(function (panel) {
-    panel.addEventListener("toggle", function () {
+  // "toggle" does not bubble: listened for in the capture phase, so panels swapped in by
+  // HTMX are covered too.
+  document.addEventListener(
+    "toggle",
+    function (event) {
+      var panel = event.target;
+      if (!panel.matches || !panel.matches("details[data-confirm-panel]") || !panel.open) return;
       var keep = panel.querySelector("[data-confirm-close]");
-      if (panel.open && keep) keep.focus();
-    });
-  });
+      if (keep) keep.focus();
+    },
+    true
+  );
   document.addEventListener("click", function (event) {
     var close = event.target.closest("[data-confirm-close]");
     if (!close) return;

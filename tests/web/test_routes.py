@@ -7,7 +7,7 @@ import pytest
 from api_helpers import add_user, iris_csv, login, make_settings
 from fione.api.app import create_app
 from fione.auth.roles import Role
-from fione.web import easyml, views
+from fione.web import automl, easyml, views
 from web_helpers import iris_test_csv, make_world
 
 # (method, path) -> (anonymous status, logged-in status); 303s for anonymous page views go
@@ -87,12 +87,101 @@ def easyml_request(world, method, template, csrf, project=None, objects=None):
     return client.post(path, data=token | form, follow_redirects=False)
 
 
+# The AutoML routes x personas: anonymous, owner, editor member, viewer member, non-member,
+# admin (who acts as an owner of every project).
+AUTOML_PERSONAS = {
+    "anonymous": None,
+    "owner": "ed",
+    "editor": "co",
+    "viewer": "vi",
+    "stranger": "st",
+    "admin": "admin",
+}
+READ = (303, 200, 200, 200, 404, 200)
+WRITE_PAGE = (303, 200, 200, 403, 404, 200)
+WRITE_POST = (401, 303, 303, 403, 404, 303)
+AUTOML_ROUTES = {
+    ("GET", P + "/datasets"): READ,
+    ("POST", P + "/datasets"): WRITE_POST,
+    ("GET", P + "/datasets/{train}"): READ,
+    ("POST", P + "/datasets/{test}/delete"): WRITE_POST,
+    ("GET", P + "/datasets/{train}/columns/species"): READ,
+    ("GET", P + "/datasets/{train}/train"): WRITE_PAGE,
+    ("POST", P + "/datasets/{train}/train"): WRITE_POST,
+    ("GET", P + "/jobs"): READ,
+    ("POST", P + "/jobs/{predict_job}/delete"): WRITE_POST,
+    ("POST", P + "/jobs/delete-finished"): WRITE_POST,
+}
+AUTOML_PATHS = {
+    "/projects/{pid}/datasets": P + "/datasets",
+    "/projects/{pid}/datasets/{did}": P + "/datasets/{train}",
+    "/projects/{pid}/datasets/{did}/delete": P + "/datasets/{test}/delete",
+    "/projects/{pid}/datasets/{did}/columns/{name:path}": P + "/datasets/{train}/columns/species",
+    "/projects/{pid}/datasets/{did}/train": P + "/datasets/{train}/train",
+    "/projects/{pid}/jobs": P + "/jobs",
+    "/projects/{pid}/jobs/{jid}/delete": P + "/jobs/{predict_job}/delete",
+    "/projects/{pid}/jobs/delete-finished": P + "/jobs/delete-finished",
+}
+TRAIN_FORM = {
+    "target": "species",
+    "task": "auto",
+    "inputs": ["petal width (cm)"],
+    "max_runtime_minutes": "1",
+    "nfolds": "5",
+    "seed": "0",
+    "stopping_rounds": "3",
+    "stopping_metric": "auto",
+    "stopping_tolerance": "0.001",
+    "sort_metric": "auto",
+}
+
+
+def automl_request(world, method, template, csrf, objects=None):
+    client, path = world.client, world.path(template, None, objects)
+    if method == "GET":
+        return client.get(path, follow_redirects=False)
+    token = {"csrf_token": csrf or ""}
+    if path.endswith("/datasets"):
+        files = {"file": ("new.csv", iris_csv(), "text/csv")}
+        data = token | {"kind": "train"}
+        return client.post(path, data=data, files=files, follow_redirects=False)
+    form = TRAIN_FORM if path.endswith("/train") else {}
+    return client.post(path, data=token | form, follow_redirects=False)
+
+
 def test_table_covers_every_ui_route():
     """Adding a UI route without a row fails here."""
     routes = {(m, r.path) for r in views.router.routes for m in r.methods - {"HEAD"}}
     assert routes == set(UI_ROUTES)
     routes = {(m, ROUTE_PATHS[r.path]) for r in easyml.router.routes for m in r.methods - {"HEAD"}}
     assert routes == set(EASYML_ROUTES)
+    routes = {(m, AUTOML_PATHS[r.path]) for r in automl.router.routes for m in r.methods - {"HEAD"}}
+    assert routes == set(AUTOML_ROUTES)
+
+
+@pytest.mark.parametrize("persona", list(AUTOML_PERSONAS))
+@pytest.mark.parametrize("route", sorted(AUTOML_ROUTES))
+def test_automl_route(make_client, route, persona):
+    world = make_world(make_client())
+    csrf = world.login(AUTOML_PERSONAS[persona])
+    expected = AUTOML_ROUTES[route][list(AUTOML_PERSONAS).index(persona)]
+    r = automl_request(world, *route, csrf)
+    assert r.status_code == expected, r.text
+    if expected == 303 and persona == "anonymous":
+        assert r.headers["location"].startswith("/login?next=")
+    if expected in (403, 404):
+        assert "text/html" in r.headers["content-type"]
+
+
+@pytest.mark.parametrize("route", sorted(AUTOML_ROUTES))
+def test_automl_ids_of_another_project_are_404(make_client, route):
+    world = make_world(make_client())
+    csrf = world.login("ed")
+    method, template = route
+    if "{" not in template.removeprefix(P):
+        pytest.skip("no object id in the path")
+    r = automl_request(world, method, template, csrf, objects=world.q)
+    assert r.status_code == 404, r.text
 
 
 @pytest.mark.parametrize("persona", list(PERSONAS))

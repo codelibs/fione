@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, breadcrumb, dataset_type, upload_field, upload_problem, pager %}
+{% block title %}{{ t('datasets.title') }} · {{ ctx.project.name }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, t('datasets.title'), section="datasets") }}
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('datasets.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('datasets.lead') }}</p>
+  </header>
+
+  {% if ctx.can_write %}
+  <details class="card card-padded details upload-panel"{% if problem %} open{% endif %}>
+    <summary>{{ icon("upload") }} {{ t('datasets.upload') }}</summary>
+    <div class="stack">
+      {{ upload_problem(t, problem) }}
+      <form class="stack" method="post" action="/projects/{{ pid }}/datasets" enctype="multipart/form-data" data-upload-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <fieldset class="fieldset">
+          <legend class="field__label">{{ t('datasets.kind') }}</legend>
+          <div class="segmented-choice">
+            {% for kind in kinds %}
+            <label class="pill-choice" for="kind-{{ kind }}">
+              <input class="radio" type="radio" id="kind-{{ kind }}" name="kind" value="{{ kind }}"{% if loop.first %} checked{% endif %}>
+              <span>{{ t('dataset.type.' ~ kind) }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <p class="field__hint">{{ t('datasets.kind_hint') }}</p>
+        </fieldset>
+        {{ upload_field(t, limit, "upload-error" if problem else "") }}
+        <div class="form-actions form-actions-end">
+          <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span>{{ icon("upload") }}{{ t('datasets.upload_submit') }}</button>
+        </div>
+      </form>
+    </div>
+  </details>
+  {% endif %}
+
+  <section aria-labelledby="list-title" class="stack-tight">
+    <div class="section-header">
+      <h2 class="section-header__title" id="list-title">{{ t('datasets.list') }}</h2>
+      <span class="text-muted text-sm">{{ t('datasets.count', n=total) }}</span>
+    </div>
+    {% if datasets %}
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="list-title">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">{{ t('datasets.col.name') }}</th>
+            <th scope="col">{{ t('datasets.col.kind') }}</th>
+            <th scope="col" class="num">{{ t('datasets.col.shape') }}</th>
+            <th scope="col" class="num">{{ t('datasets.col.size') }}</th>
+            <th scope="col">{{ t('datasets.col.uploaded') }}</th>
+            <th scope="col"><span class="visually-hidden">{{ t('datasets.col.actions') }}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in datasets %}
+          <tr>
+            <td class="cell-name"><a href="/projects/{{ pid }}/datasets/{{ d.id }}">{{ d.name }}</a></td>
+            <td>{{ dataset_type(t, d.type.value) }}</td>
+            <td class="num">{{ t('project.dataset_size', rows="{:,}".format(d.n_rows), cols="{:,}".format(d.n_cols)) }}</td>
+            <td class="num">{{ sizes[d.id] or "—" }}</td>
+            <td><time datetime="{{ d.created_at|iso }}">{{ t('time.utc', time=d.created_at|utc) }}</time></td>
+            <td>
+              <div class="row-actions">
+                <a class="btn btn-ghost btn-sm" href="/api/v1/projects/{{ pid }}/datasets/{{ d.id }}/download" download>{{ icon("download", "icon icon-sm") }}{{ t('project.action.download') }}<span class="visually-hidden">: {{ d.name }}</span></a>
+                {% if ctx.can_write and d.type.value == "train" %}
+                <a class="btn btn-ghost btn-sm" href="/projects/{{ pid }}/datasets/{{ d.id }}/train">{{ t('datasets.train') }}<span class="visually-hidden">: {{ d.name }}</span></a>
+                {% endif %}
+                {% if ctx.can_write %}
+                <details class="confirm confirm-inline" data-confirm-panel>
+                  <summary class="btn btn-ghost btn-sm">{{ t('datasets.delete') }}<span class="visually-hidden">: {{ d.name }}</span></summary>
+                  <div class="confirm__panel" role="group" aria-labelledby="del-q-{{ d.id }}">
+                    <p id="del-q-{{ d.id }}"><strong>{{ t('datasets.delete_question', name=d.name) }}</strong></p>
+                    <p class="text-muted text-sm">{{ t('datasets.delete_effect') }}</p>
+                    <form class="cluster" method="post" action="/projects/{{ pid }}/datasets/{{ d.id }}/delete" data-busy-form>
+                      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                      <button type="submit" class="btn btn-danger btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('datasets.delete_yes') }}</button>
+                      <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('job.cancel_no') }}</button>
+                    </form>
+                  </div>
+                </details>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {{ pager(t, ("?page=" ~ (page_number - 1)) if page_number > 1 else none, ("?page=" ~ (page_number + 1)) if page_number < pages else none, t('datasets.pages')) }}
+    {% else %}
+    <p class="empty-line text-muted">{{ t('project.datasets_empty') }}</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

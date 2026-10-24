@@ -105,3 +105,11 @@ def test_language_cookie_overrides_the_header(client):
     client.cookies.set("fione_lang", "en")
     r = client.get("/login", headers={"Accept-Language": "ja"})
     assert '<html lang="en"' in r.text and "Sign in to Fione" in r.text
+
+
+def test_japanese_uses_full_width_exclamation_and_question_marks():
+    """After Japanese text, ! and ? are the full-width ！ and ？."""
+    import re
+
+    for key, text in i18n.catalog("ja").items():
+        assert not re.search(r"[぀-ヿ一-鿿][!?]", text), key
