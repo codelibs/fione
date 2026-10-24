@@ -415,6 +415,32 @@ def read_dataset_sample(
     return pa.Table.from_batches(batches).slice(0, max_rows).to_pandas()
 
 
+def read_dataset_rows(
+    storage: Storage,
+    dataset: Dataset,
+    offset: int,
+    limit: int,
+    columns: list[str] | None = None,
+) -> pd.DataFrame:
+    """Rows ``offset`` to ``offset + limit`` (fewer at the end), reading only the row groups
+    that hold them, so a page deep in a large file costs no more than the first one."""
+    with storage.open_read(dataset.key) as f:
+        parquet = pq.ParquetFile(f)
+        meta = parquet.metadata
+        groups, start, first_row = [], 0, None
+        for index in range(meta.num_row_groups):
+            rows = meta.row_group(index).num_rows
+            if start + rows > offset and start < offset + limit:
+                groups.append(index)
+                first_row = start if first_row is None else first_row
+            start += rows
+        if not groups:  # past the end: no rows, the columns all the same
+            table = parquet.schema_arrow.empty_table()
+            return (table.select(columns) if columns is not None else table).to_pandas()
+        table = parquet.read_row_groups(groups, columns=columns)
+    return table.slice(offset - first_row, limit).to_pandas()
+
+
 def export_csv(storage: Storage, dataset: Dataset) -> Iterator[bytes]:
     """The dataset as UTF-8 CSV with a header, yielded in batches of rows."""
     with storage.open_read(dataset.key) as f:

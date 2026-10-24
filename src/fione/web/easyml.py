@@ -12,24 +12,20 @@ import logging
 import math
 import time
 from dataclasses import dataclass
-from pathlib import PurePosixPath, PureWindowsPath
 from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
-from starlette.datastructures import FormData, UploadFile
+from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fione import i18n
-from fione.api.deps import Auth, Conn, authorize, cookie_auth, request_host
-from fione.api.downloads import tmp_dir
-from fione.api.errors import ApiError
-from fione.api.routes_datasets import cell, ingest_upload
+from fione.api.deps import Conn
+from fione.api.routes_datasets import cell
 from fione.api.routes_jobs import cancel
 from fione.api.routes_models import serving_bundle_of
-from fione.api.schemas import MAX_ID, event_out, job_out
-from fione.api.security import origin_matches, tokens_equal
+from fione.api.schemas import event_out, job_out
 from fione.auth.roles import ProjectAccess, Role
 from fione.engine.artifact import UntrustedArtifactError, read_manifest
 from fione.engine.config import TargetError, TrainConfig
@@ -43,11 +39,20 @@ from fione.models.service import ModelNotFound, ModelRecord
 from fione.modules.registry import redact
 from fione.predict.batch import PREDICT
 from fione.projects import service as projects
-from fione.projects.ingest import IngestError, read_dataset_sample
-from fione.projects.service import Dataset, DatasetNotFound, DatasetType, Project, ProjectNotFound
+from fione.projects.ingest import read_dataset_sample
+from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.tools.builtin import propose, sample_profile
-from fione.web.uploads import UploadFormError, read_form
-from fione.web.views import UiError, action_auth, language, render
+from fione.web.access import Ctx
+from fione.web.access import action as _action
+from fione.web.access import dataset_in as _dataset
+from fione.web.access import job_in as _job
+from fione.web.access import model_in as _model
+from fione.web.access import page as _page
+from fione.web.uploads import UploadProblem as _UploadProblem
+from fione.web.uploads import receive_csv as _receive_csv
+from fione.web.uploads import size_text as _size
+from fione.web.uploads import upload_context as _upload_context
+from fione.web.views import UiError, language, render
 
 log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
@@ -63,7 +68,6 @@ RESULT_PREVIEW_ROWS = 20
 RECENT_JOBS = 10
 TOP_INPUTS = 5
 EVENT_DETAILS = 20
-MAX_NAME_LEN = 100
 # The analysis profiles the first rows of every column: about PROFILE_CELLS cells, between
 # PROFILE_MIN_ROWS and PROFILE_MAX_ROWS rows (fewer rows for wider data).
 PROFILE_CELLS = 2_000_000
@@ -73,98 +77,12 @@ PROFILE_MIN_ROWS = 500
 # stays under the 1 MiB limit of non-upload requests.
 MAX_FORM_FIELDS = 20_000
 STOP_POLLING = 286  # the HTMX status that ends hx-trigger polling
-WRITE = (ProjectAccess.OWNER, ProjectAccess.EDITOR)
 # A leak suspect's reason (data.profile) -> the key of its explanation.
 LEAK_REASONS = {
     "identical to target": "identical",
     "near-perfect correlation with target": "correlated",
     "value determines target": "determines",
 }
-# The start of an ingest error -> the key of its plain-language message.
-INGEST_ERRORS = (
-    ("could not detect the text encoding", "upload.error.encoding"),
-    ("empty file", "upload.error.empty"),
-    ("no data rows", "upload.error.no_rows"),
-    ("could not parse the CSV", "upload.error.parse"),
-)
-
-
-@dataclass(frozen=True)
-class Ctx:
-    auth: Auth
-    project: Project
-    access: ProjectAccess
-
-    @property
-    def can_write(self) -> bool:
-        return self.access in WRITE
-
-
-# --- resolving and authorizing ------------------------------------------------------------
-
-
-def _context(conn, auth: Auth, pid: str, need) -> Ctx:
-    """The path project with the API's rules: 404 without read access, 403 without ``need``."""
-    try:
-        project = projects.require_project(conn, pid)
-        access = authorize(conn, auth.user, pid, need, "project not found")
-    except ProjectNotFound:
-        raise UiError(404, "error.not_found") from None
-    except ApiError as e:
-        raise UiError(e.status, "error.not_found" if e.status == 404 else "error.forbidden") from e
-    return Ctx(auth, project, access)
-
-
-def _page(request: Request, conn, pid: str, need="read") -> Ctx:
-    """A page view: anonymous visitors are sent to the login page (HTMX: told to go there)."""
-    auth = cookie_auth(request, conn)
-    if auth is None:
-        raise UiError(401, "error.session")
-    return _context(conn, auth, pid, need)
-
-
-def _action(request: Request, conn, pid: str, token: str, need="write") -> Ctx:
-    """A form post: the session and its CSRF token first, then access to the project."""
-    return _context(conn, action_auth(request, conn, token), pid, need)
-
-
-def _id(text) -> int:
-    if not isinstance(text, str) or not text.isascii() or not text.isdigit():
-        raise UiError(404, "error.not_found")
-    value = int(text)
-    if not 1 <= value <= MAX_ID:
-        raise UiError(404, "error.not_found")
-    return value
-
-
-def _dataset(conn, ctx: Ctx, did) -> Dataset:
-    try:
-        dataset = projects.get_dataset(conn, _id(did))
-    except DatasetNotFound:
-        raise UiError(404, "error.not_found") from None
-    if dataset.project_id != ctx.project.id:
-        raise UiError(404, "error.not_found")
-    return dataset
-
-
-def _model(conn, ctx: Ctx, mid) -> ModelRecord:
-    try:
-        record = models.get_model(conn, _id(mid))
-    except ModelNotFound:
-        raise UiError(404, "error.not_found") from None
-    if record.project_id != ctx.project.id:
-        raise UiError(404, "error.not_found")
-    return record
-
-
-def _job(conn, ctx: Ctx, jid) -> Job:
-    try:
-        job = store.get_job(conn, _id(jid))
-    except KeyError:
-        raise UiError(404, "error.not_found") from None
-    if job.project_id != ctx.project.id:
-        raise UiError(404, "error.not_found")
-    return job
 
 
 def _admin(ctx: Ctx) -> bool:
@@ -235,76 +153,6 @@ def dashboard(request: Request, conn: Conn, pid: str) -> Response:
 
 
 # --- uploads ------------------------------------------------------------------------------
-
-
-class _UploadProblem(Exception):
-    """An upload that cannot be used: shown on the upload form as ``key`` (and ``detail``)."""
-
-    def __init__(self, status: int, key: str, detail: str | None = None, **vars):
-        super().__init__(key)
-        self.status, self.key, self.detail, self.vars = status, key, detail, vars
-
-
-async def _upload_context(request: Request, conn, pid: str) -> Ctx:
-    """Everything an upload is checked for before its body is read."""
-    auth = cookie_auth(request, conn)
-    if auth is None:
-        raise UiError(401, "error.session")
-    ctx = _context(conn, auth, pid, "write")
-    if not origin_matches(request.headers.get("origin"), request_host(request)):
-        raise UiError(403, "error.forbidden")
-    return ctx
-
-
-def _dataset_name(filename: str) -> str:
-    """The dataset name for an uploaded file: its base name without ``.csv``."""
-    base = PureWindowsPath(PurePosixPath(filename).name).name.strip()
-    if base.lower().endswith(".csv"):
-        base = base[:-4].strip()
-    return base[:MAX_NAME_LEN] or "data"
-
-
-def _ingest_problem(error: IngestError) -> _UploadProblem:
-    text = redact(str(error))
-    for start, key in INGEST_ERRORS:
-        if text.startswith(start):
-            return _UploadProblem(422, key, text if key == "upload.error.parse" else None)
-    if "not valid UTF-8" in text:
-        return _UploadProblem(422, "upload.error.encoding")
-    return _UploadProblem(422, "upload.error.invalid", text)
-
-
-async def _receive_csv(request: Request, conn, ctx: Ctx, type_: DatasetType) -> Dataset:
-    """Read the posted form (``csrf_token`` and one ``file``) and ingest the CSV."""
-    settings = request.app.state.settings
-    try:
-        form = await read_form(request, tmp_dir(settings), max_fields=1)
-    except UploadFormError:
-        raise _UploadProblem(400, "upload.error.form") from None
-    try:
-        token = form.get("csrf_token")
-        if not tokens_equal(ctx.auth.session.csrf, token if isinstance(token, str) else None):
-            raise UiError(403, "error.csrf")
-        upload = form.get("file")
-        if not isinstance(upload, UploadFile) or not upload.filename:
-            raise _UploadProblem(422, "upload.error.missing")
-        try:
-            return await ingest_upload(
-                request, conn, ctx.project.id, _dataset_name(upload.filename), type_, upload
-            )
-        except ApiError as e:  # 413: over max_upload_bytes
-            raise _UploadProblem(e.status, "upload.error.too_large") from e
-        except IngestError as e:
-            raise _ingest_problem(e) from e
-    finally:
-        await form.close()
-
-
-def _size(n: int) -> str:
-    for unit, scale in (("GB", 2**30), ("MB", 2**20), ("KB", 2**10)):
-        if n >= scale:
-            return f"{n / scale:.1f}".removesuffix(".0") + f" {unit}"
-    return f"{n} B"
 
 
 def _upload_view(request: Request, ctx: Ctx, *, status: int = 200, problem=None) -> Response:
@@ -732,12 +580,20 @@ def _polling_stopped(request: Request, key: str, hint: str) -> Response:
 
 @router.post("/projects/{pid}/jobs/{jid}/cancel")
 def cancel_job(
-    request: Request, conn: Conn, pid: str, jid: str, csrf_token: Annotated[str, Form()] = ""
+    request: Request,
+    conn: Conn,
+    pid: str,
+    jid: str,
+    csrf_token: Annotated[str, Form()] = "",
+    back: Annotated[str, Form()] = "",
 ) -> Response:
+    """Cancel, then back to the job's page, or to the job list when ``back`` is ``list``."""
     ctx = _action(request, conn, pid, csrf_token)
     job = _job(conn, ctx, jid)
     if job.status not in TERMINAL:
         cancel(request, conn, job)
+    if back == "list":
+        return RedirectResponse(f"/projects/{pid}/jobs", 303)
     return RedirectResponse(f"/projects/{pid}/jobs/{job.id}", 303)
 
 

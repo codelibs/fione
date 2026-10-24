@@ -444,3 +444,21 @@ def test_read_dataset_keeps_integers_and_booleans_exact_only_on_request(conn, st
     exact = ingest.read_dataset(storage, ds, nullable_dtypes=True)
     assert exact["id"].dtype == "Int64" and exact["id"].tolist()[0] == 2**60 + 1
     assert exact["ok"].dtype == "boolean"
+
+
+def test_read_dataset_rows_reads_a_page_from_the_row_groups_that_hold_it(
+    conn, storage, project, monkeypatch
+):
+    monkeypatch.setattr(ingest, "_ROW_GROUP_ROWS", 100)  # several row groups
+    data = "n,s\n" + "".join(f"{i},v{i}\n" for i in range(350))
+    dataset, _ = load(conn, storage, project, data.encode(), block_size=256)
+    with storage.open_read(dataset.key) as f:
+        assert pq.ParquetFile(f).metadata.num_row_groups == 4
+    page = ingest.read_dataset_rows(storage, dataset, 95, 10)
+    assert page["n"].tolist() == list(range(95, 105))  # across a row-group boundary
+    assert ingest.read_dataset_rows(storage, dataset, 345, 10)["n"].tolist() == list(
+        range(345, 350)
+    )
+    assert ingest.read_dataset_rows(storage, dataset, 0, 3, ["s"]).columns.tolist() == ["s"]
+    past = ingest.read_dataset_rows(storage, dataset, 400, 10)
+    assert past.empty and past.columns.tolist() == ["n", "s"]

@@ -197,11 +197,33 @@ def cancel(request: Request, conn, job: Job) -> Job:
     return store.get_job(conn, job.id)
 
 
-def _remove_files(request: Request, job: Job) -> None:
+def remove_job_files(request: Request, job: Job) -> None:
     """A deleted job's log file and, for an export, its zip."""
     (request.app.state.settings.data_dir / "jobs" / f"{job.id}.log").unlink(missing_ok=True)
     if job.kind == EXPORT_KIND and job.project_id:
         request.app.state.storage.delete(export_key(job.project_id, job.id))
+
+
+def delete_finished_job(request: Request, conn, job: Job) -> None:
+    """Delete a finished job with its events, log and export zip (the caller has checked
+    write access); ``KeyError`` if it is gone, ``ValueError`` if it has not finished."""
+    store.delete_job(conn, job.id)
+    remove_job_files(request, job)
+
+
+def delete_finished_jobs_of(request: Request, conn, project_id: str) -> int:
+    """Delete every finished job of the project (as ``delete_finished_job``); queued and
+    running ones stay. Returns how many were deleted."""
+    deleted = 0
+    for job in store.list_jobs(conn, project_id):
+        if job.status not in TERMINAL:
+            continue
+        try:
+            delete_finished_job(request, conn, job)
+        except (KeyError, ValueError):
+            continue  # deleted or restarted meanwhile
+        deleted += 1
+    return deleted
 
 
 @router.delete("/jobs/{job_id}", status_code=204)
@@ -209,26 +231,15 @@ def delete_job(job_id: IdPath, user: CurrentUser, conn: Conn, request: Request) 
     """Delete a finished job with its events, log and export zip; otherwise a 409."""
     job = _job(conn, user, job_id, "write")
     try:
-        store.delete_job(conn, job.id)
+        delete_finished_job(request, conn, job)
     except KeyError:
         raise not_found("job not found") from None
     except ValueError:
         raise ApiError(409, "conflict", "only a finished job can be deleted") from None
-    _remove_files(request, job)
 
 
 @router.delete("/jobs")
 def delete_finished_jobs(ctx: Writer, conn: Conn, request: Request) -> dict:
     """Delete every finished job of ``project_id`` (a required query parameter) with their
     logs and export zips; queued and running jobs stay."""
-    deleted = 0
-    for job in store.list_jobs(conn, ctx.project.id):
-        if job.status not in TERMINAL:
-            continue
-        try:
-            store.delete_job(conn, job.id)
-        except (KeyError, ValueError):
-            continue  # deleted meanwhile
-        _remove_files(request, job)
-        deleted += 1
-    return {"deleted": deleted}
+    return {"deleted": delete_finished_jobs_of(request, conn, ctx.project.id)}
