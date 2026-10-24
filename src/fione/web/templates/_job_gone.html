@@ -1,0 +1,8 @@
+{% from "_macros.html" import icon %}
+{# The poller's last fragment when the job can no longer be shown (no hx-trigger: polling ends). #}
+<section class="card card-padded stack job-status" id="job-status" data-job-status="gone">
+  <div class="alert alert-danger" role="alert">{{ icon("alert") }}<span data-announce>{{ message }}</span></div>
+  <p class="text-muted text-sm">{{ t('job.gone_hint') }}</p>
+  <p><a class="btn btn-secondary" href="/">{{ t('nav.projects') }}</a></p>
+</section>
+<div id="job-cancel" hx-swap-oob="true"></div>

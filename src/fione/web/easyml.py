@@ -8,6 +8,7 @@ the session's CSRF token in ``csrf_token``. Uploads check the session, write acc
 ``Origin`` before the body is read, and the token right after the form is parsed.
 """
 
+import logging
 import math
 import time
 from dataclasses import dataclass
@@ -15,10 +16,12 @@ from pathlib import PurePosixPath, PureWindowsPath
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
-from starlette.datastructures import UploadFile
+from starlette.datastructures import FormData, UploadFile
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from fione import i18n
 from fione.api.deps import Auth, Conn, authorize, cookie_auth, request_host
 from fione.api.downloads import tmp_dir
 from fione.api.errors import ApiError
@@ -29,22 +32,24 @@ from fione.api.schemas import MAX_ID, event_out, job_out
 from fione.api.security import origin_matches, tokens_equal
 from fione.auth.roles import ProjectAccess, Role
 from fione.engine.artifact import UntrustedArtifactError, read_manifest
-from fione.engine.prep import MIN_ROWS, too_many_classes
+from fione.engine.config import TargetError, TrainConfig
+from fione.engine.prep import validate_target
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
 from fione.models import service as models
 from fione.models.bundle import BundleError
-from fione.models.rating import Rating, star_rating, target_baseline
+from fione.models.rating import Baseline, Rating, star_rating, target_baseline
 from fione.models.service import ModelNotFound, ModelRecord
 from fione.modules.registry import redact
 from fione.predict.batch import PREDICT
 from fione.projects import service as projects
 from fione.projects.ingest import IngestError, read_dataset_sample
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType, Project, ProjectNotFound
-from fione.tools.builtin import propose
+from fione.tools.builtin import propose, sample_profile
 from fione.web.uploads import UploadFormError, read_form
-from fione.web.views import UiError, action_auth, render
+from fione.web.views import UiError, action_auth, language, render
 
+log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
 
 # Merged into every training config the wizard submits (tests make runs fast with it).
@@ -59,6 +64,15 @@ RECENT_JOBS = 10
 TOP_INPUTS = 5
 EVENT_DETAILS = 20
 MAX_NAME_LEN = 100
+# The analysis profiles the first rows of every column: about PROFILE_CELLS cells, between
+# PROFILE_MIN_ROWS and PROFILE_MAX_ROWS rows (fewer rows for wider data).
+PROFILE_CELLS = 2_000_000
+PROFILE_MAX_ROWS = 50_000
+PROFILE_MIN_ROWS = 500
+# Form fields a run or prediction post may have (one per checked column); the body itself
+# stays under the 1 MiB limit of non-upload requests.
+MAX_FORM_FIELDS = 20_000
+STOP_POLLING = 286  # the HTMX status that ends hx-trigger polling
 WRITE = (ProjectAccess.OWNER, ProjectAccess.EDITOR)
 # A leak suspect's reason (data.profile) -> the key of its explanation.
 LEAK_REASONS = {
@@ -165,15 +179,19 @@ def _names(dataset: Dataset) -> list[str]:
     return [name for name, _ in dataset.schema]
 
 
+def _baseline(request: Request, conn, record: ModelRecord) -> Baseline:
+    """The rating baseline of a model's training target: read from the whole column once,
+    then cached (datasets never change)."""
+    key = (record.project_id, record.dataset_id, record.target, record.task)
+    return request.app.state.ui_baselines.get(
+        key, lambda: target_baseline(_storage(request), conn, *key)
+    )
+
+
 def _ratings(request: Request, conn, records: list[ModelRecord]) -> dict[int, Rating]:
-    """Each model's rating; a training target's baseline is read once per request."""
-    baselines: dict = {}
     out = {}
     for record in records:
-        key = (record.dataset_id, record.target, record.task)
-        if key not in baselines:
-            baselines[key] = target_baseline(_storage(request), conn, record.project_id, *key)
-        baseline = baselines[key]
+        baseline = _baseline(request, conn, record)
         out[record.id] = star_rating(
             record.task,
             record.metrics,
@@ -336,17 +354,32 @@ def _default_target(names: list[str], kinds: dict[str, str]) -> str:
     return usable[-1] if usable else names[-1]
 
 
+def _profile_rows(dataset: Dataset) -> int:
+    """How many leading rows the analysis profiles: fewer for wide data, so a profile costs
+    about ``PROFILE_CELLS`` cells whatever the shape."""
+    rows = PROFILE_CELLS // max(1, dataset.n_cols)
+    return max(PROFILE_MIN_ROWS, min(PROFILE_MAX_ROWS, rows))
+
+
+def _profile(request: Request, dataset: Dataset):
+    """The dataset's target-independent column profile, computed once and cached."""
+    rows = _profile_rows(dataset)
+    return request.app.state.ui_profiles.get(
+        dataset.id, lambda: sample_profile(_storage(request), dataset, _names(dataset), rows)
+    )
+
+
 def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | None):
     """The analysis of ``dataset`` for ``target`` (or the default one) and the defaults."""
     names = _names(dataset)
-    storage = _storage(request)
-    chosen = target if target in names else names[-1]
-    found = propose(storage, dataset, chosen, names)
-    if target not in names:
-        kinds = {col.name: col.kind for col in found.profile.columns}
-        default = _default_target(names, kinds)
-        if default != chosen:
-            chosen, found = default, propose(storage, dataset, default, names)
+    profile = _profile(request, dataset)
+    if target in names:
+        chosen = target
+    else:
+        chosen = _default_target(names, {col.name: col.kind for col in profile.columns})
+    found = propose(
+        _storage(request), dataset, chosen, names, _profile_rows(dataset), profile=profile
+    )
     reasons = {col.name: col.kind for col in found.ignore}  # id, constant
     for suspect in found.profile.leak_suspects:
         reasons.setdefault(suspect.column, "leak_" + LEAK_REASONS.get(suspect.reason, "other"))
@@ -364,24 +397,19 @@ def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | 
 
 
 def _warnings(dataset: Dataset, found, task: str) -> list[tuple[str, str, dict]]:
-    """``(level, key, vars)`` for what training will refuse or should be checked, by the
-    engine's own limits."""
-    target = found.target
+    """``(level, key, vars)`` for what training will refuse or should be checked. The whole
+    target column goes through the engine's own check, as ``submit_training`` does."""
     out = []
     if dataset.type != DatasetType.TRAIN:
         out.append(("danger", "analysis.warn.not_train", {}))
-    if dataset.n_rows < MIN_ROWS:
-        out.append(("danger", "analysis.warn.few_rows", {"n": dataset.n_rows, "min": MIN_ROWS}))
     if dataset.n_cols < 2:
         out.append(("danger", "analysis.warn.one_column", {}))
-    if target.missing_rate > 0:
-        out.append(("danger", "analysis.warn.target_missing", {"pct": _pct(target.missing_rate)}))
-    if target.kind == "constant":
-        out.append(("danger", "analysis.warn.target_constant", {}))
-    elif target.kind == "id":
+    try:
+        validate_target(found.y, task, TrainConfig.nfolds)
+    except TargetError as e:
+        out.append(("danger", f"analysis.target_error.{e.code}", e.details))
+    if found.target.kind == "id":
         out.append(("warning", "analysis.warn.target_id", {}))
-    if task == "classification" and too_many_classes(target.n_unique, dataset.n_rows):
-        out.append(("warning", "analysis.warn.many_classes", {"n": f"{target.n_unique:,}"}))
     if found.profile.leak_suspects:
         out.append(("info", "analysis.warn.leaks", {"n": len(found.profile.leak_suspects)}))
     return out
@@ -443,6 +471,8 @@ def _analysis_view(
         form=form,
         detected=defaults.task,
         warnings=_warnings(dataset, found, form.task),
+        target_missing=float(found.y.isna().mean()) if len(found.y) else 0.0,
+        target_values=int(found.y.nunique()),
         missing_pct=_pct(sum(missing) / len(missing)) if missing else "0",
         pct=_pct,
         sample_rows=found.profile.n_rows,  # the rows profiled: the first ones
@@ -468,25 +498,43 @@ def _minutes(runtime: str, custom: str) -> int | None:
     return int(runtime) if runtime in {str(m) for m in RUNTIME_PRESETS} else None
 
 
+async def _posted(request: Request) -> FormData | None:
+    """The posted form, with room for one field per column; None if it has more."""
+    try:
+        return await request.form(max_fields=MAX_FORM_FIELDS)
+    except StarletteHTTPException as e:
+        if e.status_code == 400:  # Starlette: too many fields (or a malformed form)
+            return None
+        raise
+
+
+Posted = Annotated[FormData | None, Depends(_posted)]
+
+
+def _text(form: FormData, name: str) -> str:
+    value = form.get(name)
+    return value if isinstance(value, str) else ""
+
+
+def _texts(form: FormData, name: str) -> list[str]:
+    return [v for v in form.getlist(name) if isinstance(v, str)]
+
+
 @router.post("/projects/{pid}/datasets/{did}/run")
-def run(
-    request: Request,
-    conn: Conn,
-    pid: str,
-    did: str,
-    csrf_token: Annotated[str, Form()] = "",
-    target: Annotated[str, Form()] = "",
-    inputs: Annotated[list[str], Form()] = [],  # noqa: B006 (FastAPI copies defaults)
-    task: Annotated[str, Form()] = "",
-    runtime: Annotated[str, Form()] = "",
-    runtime_custom: Annotated[str, Form()] = "",
-) -> Response:
+def run(request: Request, conn: Conn, pid: str, did: str, form: Posted) -> Response:
     """Queue training from the analysis form; anything wrong goes back to the form, inline,
     with nothing queued."""
-    ctx = _action(request, conn, pid, csrf_token)
+    if form is None:  # nothing is changed: shown to whoever may write here
+        ctx = _page(request, conn, pid, "write")
+        errors = {"form": "analysis.error.too_many_fields"}
+        dataset = _dataset(conn, ctx, did)
+        return _analysis_view(request, conn, ctx, dataset, None, errors=errors, status=422)
+    ctx = _action(request, conn, pid, _text(form, "csrf_token"))
     dataset = _dataset(conn, ctx, did)
     names = _names(dataset)
-    chosen = {c for c in inputs if c != target}
+    target, task = _text(form, "target"), _text(form, "task")
+    runtime, runtime_custom = _text(form, "runtime"), _text(form, "runtime_custom")
+    chosen = {c for c in _texts(form, "inputs") if c != target}
     posted = RunForm(target, chosen, task, runtime, runtime_custom)
     errors = {}
     if target not in names:
@@ -511,9 +559,16 @@ def run(
         "ignored_columns": [n for n in names if n != target and n not in chosen],
         **EASYML_CONFIG,
     }
+    errors, detail = {}, None
     try:
-        job = models.submit_training(conn, ctx.auth.user, pid, dataset.id, config)
+        job = models.submit_training(
+            conn, _storage(request), ctx.auth.user, pid, dataset.id, config
+        )
+    except TargetError:  # the warning above the columns says why, in the user's language
+        errors = {"target": "analysis.error.target_data"}
     except (ValueError, PermissionError) as e:  # ConfigError is a ValueError
+        errors, detail = {"form": "analysis.error.config"}, redact(str(e))
+    if errors:
         return _analysis_view(
             request,
             conn,
@@ -521,8 +576,8 @@ def run(
             dataset,
             target,
             posted=posted,
-            errors={"form": "analysis.error.config"},
-            detail=redact(str(e)),
+            errors=errors,
+            detail=detail,
             status=422,
         )
     return RedirectResponse(f"/projects/{pid}/jobs/{job.id}", 303)
@@ -647,13 +702,30 @@ def job_page(request: Request, conn: Conn, pid: str, jid: str) -> Response:
 def job_status(request: Request, conn: Conn, pid: str, jid: str) -> Response:
     """The polled fragment. A finished job's has no trigger, so polling stops; a successful
     one sends HTMX on to its result."""
-    ctx = _page(request, conn, pid)
-    view = _job_view(request, conn, ctx, _job(conn, ctx, jid))
+    polling = bool(request.headers.get("hx-request"))
+    try:
+        ctx = _page(request, conn, pid)
+        view = _job_view(request, conn, ctx, _job(conn, ctx, jid))
+    except UiError as e:
+        if not polling or e.status == 401:  # 401: HTMX is sent to the login page
+            raise
+        return _polling_stopped(request, e.key)
+    except Exception:
+        if not polling:
+            raise
+        log.exception("the status of job %s could not be shown", jid)
+        return _polling_stopped(request, "error.generic")
     response = _view(request, "_job_status.html", ctx, fragment=True, **view)
-    if request.headers.get("hx-request") and view["job"].status == JobStatus.DONE:
-        if view["next_url"]:
-            response.headers["HX-Redirect"] = view["next_url"]
+    if polling and view["job"].status == JobStatus.DONE and view["next_url"]:
+        response.headers["HX-Redirect"] = view["next_url"]
     return response
+
+
+def _polling_stopped(request: Request, key: str) -> Response:
+    """For the poller, a refusal or failure as a final fragment: HTMX swaps a 286 and stops
+    polling (an error status would be left unswapped and polled again forever)."""
+    message = i18n.t(key, language(request))
+    return render(request, "_job_gone.html", status=STOP_POLLING, message=message)
 
 
 @router.post("/projects/{pid}/jobs/{jid}/cancel")
@@ -694,9 +766,7 @@ def summary(request: Request, conn: Conn, pid: str, mid: str) -> Response:
     ctx = _page(request, conn, pid)
     record = _model(conn, ctx, mid)
     rating = _ratings(request, conn, [record])[record.id]
-    baseline = target_baseline(
-        _storage(request), conn, pid, record.dataset_id, record.target, record.task
-    )
+    baseline = _baseline(request, conn, record)  # cached by _ratings
     elapsed = None
     if record.job_id is not None:
         try:
@@ -804,21 +874,18 @@ async def predict_upload(request: Request, conn: Conn, pid: str, mid: str) -> Re
 
 
 @router.post("/projects/{pid}/models/{mid}/predict/run")
-def predict_run(
-    request: Request,
-    conn: Conn,
-    pid: str,
-    mid: str,
-    csrf_token: Annotated[str, Form()] = "",
-    dataset_id: Annotated[str, Form()] = "",
-    include: Annotated[list[str], Form()] = [],  # noqa: B006 (FastAPI copies defaults)
-) -> Response:
-    ctx = _action(request, conn, pid, csrf_token)
+def predict_run(request: Request, conn: Conn, pid: str, mid: str, form: Posted) -> Response:
+    if form is None:
+        ctx = _page(request, conn, pid, "write")
+        record = _model(conn, ctx, mid)
+        problem = _UploadProblem(422, "analysis.error.too_many_fields")
+        return _predict_view(request, ctx, record, status=422, problem=problem)
+    ctx = _action(request, conn, pid, _text(form, "csrf_token"))
     record = _model(conn, ctx, mid)
-    dataset = _dataset(conn, ctx, dataset_id)
+    dataset = _dataset(conn, ctx, _text(form, "dataset_id"))
     try:
         job = models.submit_batch_predict(
-            conn, ctx.auth.user, pid, record.id, dataset.id, include_columns=include
+            conn, ctx.auth.user, pid, record.id, dataset.id, include_columns=_texts(form, "include")
         )
     except (ValueError, PermissionError) as e:
         return _predict_view(

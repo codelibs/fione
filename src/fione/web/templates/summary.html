@@ -54,8 +54,8 @@
       <ol class="importance" role="list">
         {% for name, value in top %}
         <li class="importance__item">
-          <span class="importance__name" id="imp-{{ loop.index }}">{{ name }}</span>
-          <progress class="progress importance__bar" max="1000" value="{{ (value / top_max * 1000)|round|int }}" aria-labelledby="imp-{{ loop.index }}">{{ (value * 100)|round|int }}%</progress>
+          <span class="importance__name">{{ name }}</span>
+          <progress class="progress importance__bar" max="1000" value="{{ (value / top_max * 1000)|round|int }}" aria-hidden="true"></progress>
           <span class="importance__value">{{ "%.0f"|format(value * 100) }}%</span>
         </li>
         {% endfor %}

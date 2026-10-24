@@ -19,8 +19,10 @@ numeric columns, no top values for numbers) are omitted rather than null.
 
 import dataclasses
 
+import pandas as pd
+
 from fione.auth.roles import Role, can_access_project
-from fione.data.profile import ColumnProfile, DatasetProfile, profile_dataset
+from fione.data.profile import ColumnProfile, DatasetProfile, leak_suspects, profile_dataset
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.prep import infer_task
 from fione.jobs import store
@@ -365,25 +367,50 @@ class Proposal:
     profile: DatasetProfile  # of the columns read, profiled with the target
     target: ColumnProfile
     ignore: list[ColumnProfile]  # id and constant columns other than the target
+    y: pd.Series  # the whole target column
 
 
 def propose(
-    storage, dataset: Dataset, target: str, columns: list[str], sample_rows: int = _SAMPLE_ROWS
+    storage,
+    dataset: Dataset,
+    target: str,
+    columns: list[str],
+    sample_rows: int = _SAMPLE_ROWS,
+    *,
+    profile: DatasetProfile | None = None,
 ) -> Proposal:
     """Profile ``columns`` (and ``target``) of ``dataset`` and infer the task: the rules the
-    assistant's ``propose_training_config`` and the EasyML analysis screen share."""
+    assistant's ``propose_training_config`` and the EasyML analysis screen share.
+
+    ``profile``: a profile without target of the same sample (``sample_profile``), so only
+    the target's leak suspects are computed here.
+    """
     read = columns if target in columns else [*columns, target]
     frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
-    profile = profile_dataset(frame, target, sample_rows=sample_rows)
+    if profile is None:
+        profile = profile_dataset(frame, target, sample_rows=sample_rows)
+    else:
+        suspects = leak_suspects(frame, profile.columns, target)
+        profile = dataclasses.replace(profile, leak_suspects=suspects)
     # the whole target column (one column) decides the task, not just the head of the file
-    task = infer_task(ingest.read_dataset(storage, dataset, [target])[target])
+    y = ingest.read_dataset(storage, dataset, [target])[target]
+    task = infer_task(y)
     listed = set(columns)
     ignore = [
         col
         for col in profile.columns
         if col.name != target and col.name in listed and col.kind in ("id", "constant")
     ]
-    return Proposal(task, profile, next(c for c in profile.columns if c.name == target), ignore)
+    return Proposal(task, profile, next(c for c in profile.columns if c.name == target), ignore, y)
+
+
+def sample_profile(
+    storage, dataset: Dataset, columns: list[str], sample_rows: int = _SAMPLE_ROWS
+) -> DatasetProfile:
+    """The target-independent profile of the sample ``propose`` reads (pass it as its
+    ``profile``)."""
+    frame = ingest.read_dataset_sample(storage, dataset, sample_rows, columns)
+    return profile_dataset(frame, sample_rows=sample_rows)
 
 
 def _propose_training_config(ctx: ToolContext, args: dict) -> dict:

@@ -36,22 +36,27 @@
     showName();
   });
 
-  // ---- Busy buttons: a slow upload or run is not submitted twice ------------------------
-  var busyForms = document.querySelectorAll("[data-upload-form], [data-run-form]");
-  busyForms.forEach(function (form) {
-    form.addEventListener("submit", function () {
-      form.setAttribute("data-busy", "");
-      var button = form.querySelector('button[type="submit"]');
-      // Disabled after this event, so the button's own value is still sent.
-      window.setTimeout(function () {
-        button.disabled = true;
-        button.setAttribute("aria-busy", "true");
-      }, 0);
-    });
+  // ---- Busy buttons: a slow upload, run or cancel is not submitted twice. Delegated, so
+  // forms swapped in by HTMX (the run form after a target change) are covered too. -------
+  var BUSY = "[data-upload-form], [data-run-form], [data-busy-form]";
+  document.addEventListener("submit", function (event) {
+    var form = event.target.closest(BUSY);
+    if (!form) return;
+    if (form.hasAttribute("data-busy")) {
+      event.preventDefault(); // already on its way
+      return;
+    }
+    form.setAttribute("data-busy", "");
+    var button = form.querySelector('button[type="submit"]');
+    // Disabled after this event, so the button's own value is still sent.
+    window.setTimeout(function () {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+    }, 0);
   });
   window.addEventListener("pageshow", function (event) {
     if (!event.persisted) return;
-    busyForms.forEach(function (form) {
+    document.querySelectorAll(BUSY).forEach(function (form) {
       form.removeAttribute("data-busy");
       var button = form.querySelector('button[type="submit"]');
       button.disabled = false;

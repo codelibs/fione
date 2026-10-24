@@ -17,9 +17,9 @@ FAST = {"max_models": 1, "nfolds": 2}  # merged into the wizard's training confi
 
 @dataclass
 class World:
-    """Project ``p`` (owner ``ed``; ``vi`` may view it; ``st`` is no member) with a train
-    dataset, a test dataset, a model, a queued training job and a finished prediction job;
-    project ``q`` of ``ed`` has its own copies of each."""
+    """Project ``p`` (owner ``ed``; ``co`` may edit it, ``vi`` may view it; ``st`` is no
+    member) with a train dataset, a test dataset, a model, a queued training job and a
+    finished prediction job; project ``q`` of ``ed`` has its own copies of each."""
 
     client: object
     p: str
@@ -85,10 +85,12 @@ def make_world(client) -> World:
     owner = add_user(client, "ed", Role.EDITOR)
     add_user(client, "vi", Role.EDITOR)
     add_user(client, "st", Role.EDITOR)
+    add_user(client, "co", Role.EDITOR)
     add_user(client, "admin", Role.ADMIN)
     with closing(connect(client)) as conn:
         p = projects.create_project(conn, owner, "P")
         q = projects.create_project(conn, owner, "Q")
         projects.share_project(conn, owner, p.id, "vi", ProjectAccess.VIEWER)
+        projects.share_project(conn, owner, p.id, "co", ProjectAccess.EDITOR)
         ids = {p.id: _objects(client, conn, owner, p.id), q.id: _objects(client, conn, owner, q.id)}
     return World(client, p.id, q.id, ids)

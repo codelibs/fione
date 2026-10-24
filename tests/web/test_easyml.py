@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 
 from api_helpers import add_user, connect, iris_csv, iris_frame, login
+from fione.auth import service as auth
 from fione.auth.roles import Role
 from fione.engine.artifact import save_model
 from fione.engine.automl import AutoML
@@ -469,7 +470,7 @@ def test_owners_see_who_the_project_is_shared_with(make_client):
     world = make_world(make_client())
     world.login("ed")
     dashboard = world.client.get(world.path("/projects/{p}")).text
-    assert "Shared with 1 people" in dashboard and ">vi<" in dashboard
+    assert "Shared with 2 people" in dashboard and ">vi<" in dashboard and ">co<" in dashboard
 
 
 # --- escaping -----------------------------------------------------------------------------
@@ -648,3 +649,219 @@ def test_the_language_switch_never_returns_to_a_post_only_path(make_client):
     assert lang_next(r.text) == world.path("/projects/{p}/models/{model}/predict?dataset={test}")
     for path in (lang_next(r.text).replace("&amp;", "&"),):
         assert world.client.get(path).status_code == 200
+
+
+# --- fix round 1 ---------------------------------------------------------------------------
+
+
+def gappy_frame(rows=1200) -> pd.DataFrame:
+    """A gap in the column to predict far below the rows the analysis profiles."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"x": rng.normal(size=rows), "z": rng.normal(size=rows)})
+    frame["y"] = np.where(frame["x"] > 0, "yes", "no")
+    frame.loc[rows - 5, "y"] = None
+    return frame
+
+
+@pytest.mark.parametrize(
+    ("frame", "form", "message"),
+    [
+        (gappy_frame(), {"target": "y", "inputs": ["x", "z"]}, "empty in 1 rows"),
+        (
+            pd.DataFrame({"x": range(20), "y": ["same"] * 20}),
+            {"target": "y", "inputs": ["x"]},
+            "same value in every row",
+        ),
+        (
+            pd.DataFrame({"x": range(5), "y": ["a", "b", "a", "b", "a"]}),
+            {"target": "y", "inputs": ["x"]},
+            "at least 10 rows, and this data has 5",
+        ),
+        (
+            pd.DataFrame({"x": range(20), "y": ["a", "b"] * 10}),
+            {"target": "y", "inputs": ["x"], "task": "regression"},
+            "Regression predicts numbers",
+        ),
+    ],
+)
+def test_a_run_the_engine_would_refuse_goes_back_to_the_analysis(
+    owner, monkeypatch, frame, form, message
+):
+    monkeypatch.setattr(easyml, "PROFILE_MAX_ROWS", 500)  # the gap is beyond the sample
+    client, pid, csrf = owner
+    url = location(
+        upload(client, f"/projects/{pid}/upload", csrf, frame.to_csv(index=False).encode())
+    )
+    page = client.get(url + "?target=y").text
+    if "task" not in form:  # the warning is there before running (for the suggested type)
+        assert message in page
+    r = client.post(url.replace("/analyze", "/run"), data=run_form(csrf, **form))
+    assert r.status_code == 422
+    assert message in r.text and "Training would refuse the column to predict" in r.text
+    assert job_count(client) == 0
+
+
+def test_the_column_profile_is_computed_once_per_dataset(owner, monkeypatch):
+    client, pid, csrf = owner
+    calls = []
+    original = easyml.sample_profile
+
+    def counting(*args, **kwargs):
+        calls.append(args[1].id)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(easyml, "sample_profile", counting)
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, iris_csv()))
+    for target in ("species", "petal width (cm)", "species"):
+        assert client.get(url, params={"target": target}).status_code == 200
+    client.post(url.replace("/analyze", "/run"), data=run_form(csrf, inputs=[]))  # 422
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("columns", "rows"), [(5, 50_000), (41, 48_780), (1000, 2000), (50_000, 500)]
+)
+def test_wide_data_is_profiled_on_fewer_rows(columns, rows):
+    dataset = projects.Dataset(1, "p", "d", projects.DatasetType.TRAIN, 10**6, columns, [], "k", "")
+    assert easyml._profile_rows(dataset) == rows
+
+
+def test_the_summary_reads_the_training_target_once(make_client, monkeypatch):
+    world = make_world(make_client())
+    world.login("ed")
+    calls = []
+    original = easyml.target_baseline
+
+    def counting(*args):
+        calls.append(args[2:])
+        return original(*args)
+
+    monkeypatch.setattr(easyml, "target_baseline", counting)
+    world.client.get(world.path("/projects/{p}/models/{model}/summary"))
+    world.client.get(world.path("/projects/{p}/models/{model}/summary"))
+    world.client.get(world.path("/projects/{p}"))
+    assert len(calls) == 1
+
+
+def test_importance_bars_are_hidden_from_screen_readers(make_client):
+    world = make_world(make_client())
+    world.login("ed")
+    page = world.client.get(world.path("/projects/{p}/models/{model}/summary")).text
+    bars = re.findall(r'<progress class="progress importance__bar"[^>]*>', page)
+    assert bars and all('aria-hidden="true"' in bar for bar in bars)
+    assert re.search(r'class="importance__value">\d+%<', page)  # the number is read instead
+
+
+def test_polling_stops_when_the_job_cannot_be_shown(make_client, monkeypatch):
+    world = make_world(make_client(raise_server_exceptions=False))
+    world.login("vi")
+    status = world.path("/projects/{p}/jobs/{job}/status")
+    hx = {"HX-Request": "true"}
+    with closing(connect(world.client)) as conn:  # access revoked
+        projects.unshare_project(conn, models_owner(conn), world.p, "vi")
+    r = world.client.get(status, headers=hx)
+    assert r.status_code == 286 and "hx-trigger" not in r.text
+    assert "We could not find that page" in r.text and 'hx-swap-oob="true"' in r.text
+    assert world.client.get(status, headers=HTML).status_code == 404  # a page view: 404 page
+
+    world.login("ed")
+
+    def boom(*args):
+        raise RuntimeError("database gone")
+
+    monkeypatch.setattr(easyml, "_job_view", boom)
+    r = world.client.get(status, headers=hx)
+    assert r.status_code == 286 and "Something went wrong" in r.text
+    assert "database gone" not in r.text
+
+
+def models_owner(conn):
+    return next(u for u in auth.list_users(conn) if u.username == "ed")
+
+
+def test_cancel_and_run_forms_are_protected_against_double_submits(make_client):
+    world = make_world(make_client())
+    world.login("ed")
+    job = world.client.get(world.path("/projects/{p}/jobs/{job}")).text
+    assert re.search(r'<form [^>]*/cancel" data-busy-form>', job)
+    analysis = world.client.get(world.path("/projects/{p}/datasets/{train}/analyze")).text
+    assert "data-run-form" in analysis
+    script = world.client.get("/static/js/easyml.js").text
+    assert 'document.addEventListener("submit"' in script  # delegated: swapped forms too
+
+
+def test_a_dataset_with_more_than_1000_columns_can_be_run(owner, monkeypatch):
+    client, pid, csrf = owner
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(rng.normal(size=(30, 1100)), columns=[f"c{i}" for i in range(1100)])
+    frame["y"] = ["a", "b", "c"] * 10
+    url = location(
+        upload(client, f"/projects/{pid}/upload", csrf, frame.to_csv(index=False).encode())
+    )
+    inputs = [f"c{i}" for i in range(1100)]
+    r = client.post(
+        url.replace("/analyze", "/run"), data=run_form(csrf, "y", inputs), follow_redirects=False
+    )
+    assert r.status_code == 303, r.text
+    monkeypatch.setattr(easyml, "MAX_FORM_FIELDS", 50)
+    r = client.post(url.replace("/analyze", "/run"), data=run_form(csrf, "y", inputs))
+    assert r.status_code == 422 and "too many columns to choose from" in r.text
+    assert job_count(client) == 1
+
+
+def test_an_unexpected_error_is_an_html_page_for_browsers(make_client):
+    world = make_world(make_client(raise_server_exceptions=False))
+    world.login("ed")
+    with closing(connect(world.client)) as conn:
+        key = conn.execute(
+            "SELECT storage_key FROM datasets WHERE id = ?", (world.ids[world.p]["train"],)
+        ).fetchone()[0]
+    world.client.app.state.storage.delete(key)
+    path = world.path("/projects/{p}/datasets/{train}/analyze")
+    r = world.client.get(path, headers=HTML)
+    assert r.status_code == 500 and "text/html" in r.headers["content-type"]
+    assert "Something went wrong" in r.text and "Sign out" in r.text  # the header is kept
+    assert "Traceback" not in r.text
+    api = world.client.get(
+        f"/api/v1/projects/{world.p}/datasets/{world.ids[world.p]['train']}/preview", headers=HTML
+    )
+    assert api.status_code == 500 and api.json() == {"error": "internal error", "code": "internal"}
+
+
+def test_error_pages_keep_the_signed_in_header(make_client):
+    world = make_world(make_client())
+    world.login("vi")
+    r = world.client.get(world.path("/projects/{p}/upload"))
+    assert r.status_code == 403
+    assert "Sign out" in r.text and "Signed in as vi" in r.text
+    r = world.client.get("/nope", headers=HTML)
+    assert r.status_code == 404 and "Sign out" in r.text
+
+
+def test_an_editor_member_gets_the_write_controls(make_client):
+    world = make_world(make_client())
+    world.login("co")
+    analysis = world.client.get(world.path("/projects/{p}/datasets/{train}/analyze")).text
+    assert 'id="run-form"' in analysis
+    summary = world.client.get(world.path("/projects/{p}/models/{model}/summary")).text
+    assert world.path('href="/projects/{p}/models/{model}/predict"') in summary
+    dashboard = world.client.get(world.path("/projects/{p}")).text
+    assert "Sharing" not in dashboard  # only owners see members
+
+
+def test_the_result_of_a_training_job_is_404(make_client):
+    world = make_world(make_client())
+    world.login("ed")
+    r = world.client.get(world.path("/projects/{p}/jobs/{job}/result"))
+    assert r.status_code == 404
+
+
+def test_objects_of_two_projects_cannot_be_mixed(make_client):
+    world = make_world(make_client())
+    csrf = world.login("ed")
+    q_test = world.ids[world.q]["test"]
+    r = world.client.get(world.path("/projects/{p}/models/{model}/predict") + f"?dataset={q_test}")
+    assert r.status_code == 404
+    form = {"csrf_token": csrf, "dataset_id": str(q_test), "include": ["petal width (cm)"]}
+    r = world.client.post(world.path("/projects/{p}/models/{model}/predict/run"), data=form)
+    assert r.status_code == 404 and job_count(world.client) == 4

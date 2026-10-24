@@ -240,9 +240,8 @@ def _leak_reason(
     return None
 
 
-def _leak_suspects(
-    df: pd.DataFrame, columns: list[ColumnProfile], target: str
-) -> list[LeakSuspect]:
+def leak_suspects(df: pd.DataFrame, columns: list[ColumnProfile], target: str) -> list[LeakSuspect]:
+    """Columns of ``df`` (profiled as ``columns``) that may reveal ``target``."""
     t = df[target]
     t_float = _as_float(t) if _is_plain_numeric(t.dtype) else None
     suspects = []
@@ -269,5 +268,5 @@ def profile_dataset(
         n_cols=df.shape[1],
         columns=columns,
         correlations=_correlations(work, columns),
-        leak_suspects=_leak_suspects(work, columns, target) if target is not None else [],
+        leak_suspects=leak_suspects(work, columns, target) if target is not None else [],
     )

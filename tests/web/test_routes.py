@@ -28,27 +28,27 @@ FORMS = {
 }
 
 
-# The EasyML routes x personas: anonymous, the owner, a member who may only view, and a
-# signed-in user who is no member. Anonymous page views go to the login page (303); anonymous
-# form posts get the session-ended page (401). Posts carry the persona's CSRF token and a
-# valid form, so the owner's succeed (303).
+# The EasyML routes x personas: anonymous, the owner, a member who may edit, a member who may
+# only view, and a signed-in user who is no member. Anonymous page views go to the login page
+# (303); anonymous form posts get the session-ended page (401). Posts carry the persona's CSRF
+# token and a valid form, so the owner's and the editor's succeed (303).
 P = "/projects/{p}"
 EASYML_ROUTES = {
-    ("GET", P): (303, 200, 200, 404),
-    ("GET", P + "/upload"): (303, 200, 403, 404),
-    ("POST", P + "/upload"): (401, 303, 403, 404),
-    ("GET", P + "/datasets/{train}/analyze"): (303, 200, 200, 404),
-    ("POST", P + "/datasets/{train}/run"): (401, 303, 403, 404),
-    ("GET", P + "/jobs/{job}"): (303, 200, 200, 404),
-    ("GET", P + "/jobs/{job}/status"): (303, 200, 200, 404),
-    ("POST", P + "/jobs/{job}/cancel"): (401, 303, 403, 404),
-    ("GET", P + "/jobs/{predict_job}/result"): (303, 200, 200, 404),
-    ("GET", P + "/models/{model}/summary"): (303, 200, 200, 404),
-    ("GET", P + "/models/{model}/predict"): (303, 200, 403, 404),
-    ("POST", P + "/models/{model}/predict"): (401, 303, 403, 404),
-    ("POST", P + "/models/{model}/predict/run"): (401, 303, 403, 404),
+    ("GET", P): (303, 200, 200, 200, 404),
+    ("GET", P + "/upload"): (303, 200, 200, 403, 404),
+    ("POST", P + "/upload"): (401, 303, 303, 403, 404),
+    ("GET", P + "/datasets/{train}/analyze"): (303, 200, 200, 200, 404),
+    ("POST", P + "/datasets/{train}/run"): (401, 303, 303, 403, 404),
+    ("GET", P + "/jobs/{job}"): (303, 200, 200, 200, 404),
+    ("GET", P + "/jobs/{job}/status"): (303, 200, 200, 200, 404),
+    ("POST", P + "/jobs/{job}/cancel"): (401, 303, 303, 403, 404),
+    ("GET", P + "/jobs/{predict_job}/result"): (303, 200, 200, 200, 404),
+    ("GET", P + "/models/{model}/summary"): (303, 200, 200, 200, 404),
+    ("GET", P + "/models/{model}/predict"): (303, 200, 200, 403, 404),
+    ("POST", P + "/models/{model}/predict"): (401, 303, 303, 403, 404),
+    ("POST", P + "/models/{model}/predict/run"): (401, 303, 303, 403, 404),
 }
-PERSONAS = {"anonymous": None, "owner": "ed", "viewer": "vi", "stranger": "st"}
+PERSONAS = {"anonymous": None, "owner": "ed", "editor": "co", "viewer": "vi", "stranger": "st"}
 ROUTE_PATHS = {  # the router's path -> the table's template
     "/projects/{pid}": P,
     "/projects/{pid}/upload": P + "/upload",

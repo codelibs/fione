@@ -6,7 +6,9 @@ the JSON API; the UI's own unsafe endpoints check the session's CSRF token (``X-
 which HTMX sends from ``hx-headers`` on ``<body>``, or a ``csrf_token`` form field).
 """
 
+import logging
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -19,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from fione import i18n
+from fione import db, i18n
 from fione.api.deps import Auth, Conn, cookie_auth, effective_access, request_host
 from fione.api.security import SESSION_COOKIE, origin_matches, tokens_equal
 from fione.auth import service as auth_service
@@ -27,6 +29,7 @@ from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import Role
 from fione.projects import service as projects
 from fione.version import __version__
+from fione.web.cache import LruCache
 
 WEB_DIR = Path(__file__).parent
 STATIC_PREFIX = "/static"
@@ -35,7 +38,10 @@ MAX_NEXT_LENGTH = 2048
 # Percent-decoding rounds a ``next`` value is checked through (a proxy or app that decodes
 # once more must not turn it into ``//host``).
 NEXT_DECODE_ROUNDS = 3
+PROFILE_CACHE_SIZE = 16  # column profiles of datasets (the analysis page)
+BASELINE_CACHE_SIZE = 1024  # rating baselines of training targets (a few numbers each)
 
+log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(
     env=Environment(
@@ -287,12 +293,23 @@ def design(request: Request, conn: Conn) -> Response:
     return render(request, "_design.html", auth)
 
 
+def _signed_in(request: Request) -> Auth | None:
+    """The session of an error page's visitor, so the page keeps their header; None if there
+    is none or it cannot be read (the error may be the database itself)."""
+    try:
+        with closing(db.connect(request.app.state.db_path)) as conn:
+            return cookie_auth(request, conn)
+    except Exception:
+        return None
+
+
 def error_page(request: Request, status: int, key: str) -> HTMLResponse:
     """The friendly error page: the translated message ``key`` and a way back home."""
     # here="/": the language switch must not return to a POST-only path.
     return render(
         request,
         "error.html",
+        _signed_in(request),
         status=status,
         message=i18n.t(key, language(request)),
         hint=ERROR_HINTS.get(status),
@@ -345,3 +362,15 @@ def install(app: FastAPI) -> None:
         return await api_http_error(request, exc)
 
     app.add_exception_handler(StarletteHTTPException, http_error)
+    api_internal_error = app.exception_handlers[Exception]
+
+    async def internal_error(request: Request, exc: Exception) -> Response:
+        if wants_html(request):
+            log.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+            return error_page(request, 500, "error.generic")
+        return await api_internal_error(request, exc)
+
+    app.add_exception_handler(Exception, internal_error)
+    # Derived from immutable datasets (their ids are never reused), so kept across requests.
+    app.state.ui_profiles = LruCache(PROFILE_CACHE_SIZE)
+    app.state.ui_baselines = LruCache(BASELINE_CACHE_SIZE)

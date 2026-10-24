@@ -52,8 +52,8 @@
     {% set target = found.target %}
     <div class="callout">
       <p class="callout__title">{{ icon("info") }}{{ t('analysis.about_target', name=target.name) }}</p>
-      <p>{{ t('analysis.about_target_kind', kind=t('kind.' ~ target.kind), values="{:,}".format(target.n_unique), missing=pct(target.missing_rate)) }}</p>
-      <p>{{ t('analysis.detected.' ~ detected, name=target.name, values="{:,}".format(target.n_unique)) }}</p>
+      <p>{{ t('analysis.about_target_kind', kind=t('kind.' ~ target.kind), values="{:,}".format(target_values), missing=pct(target_missing)) }}</p>
+      <p>{{ t('analysis.detected.' ~ detected, name=target.name, values="{:,}".format(target_values)) }}</p>
     </div>
 
     {% for level, key, vars in warnings %}

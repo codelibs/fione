@@ -20,6 +20,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+import pandas as pd
 from playwright.sync_api import Page, expect, sync_playwright
 from sklearn.datasets import load_iris
 
@@ -237,6 +238,7 @@ def write_data(directory: Path) -> dict[str, Path]:
         "partial": directory / "iris_partial.csv",
         "empty": directory / "empty.csv",
         "gaps": directory / "gaps.csv",
+        "constant": directory / "constant.csv",
     }
     frame.to_csv(files["iris"], index=False)
     frame.drop(columns=["species"]).to_csv(files["iris_test"], index=False)
@@ -245,6 +247,8 @@ def write_data(directory: Path) -> dict[str, Path]:
     gaps = frame.head(60).copy()
     gaps.loc[::7, "species"] = None  # the column to predict has gaps: training refuses it
     gaps.to_csv(files["gaps"], index=False)
+    constant = pd.DataFrame({"flat": [1] * 40, "label": ["yes", "no"] * 20})
+    constant.to_csv(files["constant"], index=False)
     return files
 
 
@@ -370,13 +374,23 @@ def easyml(s: "Shooter", base: str) -> None:
         shoot_all(s, base, columns, "predict-columns")
         shoot_all(s, base, result, "result")
 
-        # A run that fails (gaps in the column to predict) and one that is cancelled.
+        # A run the engine would refuse (gaps in the column to predict) is refused inline;
+        # one that fails in the worker (only a constant input), and one that is cancelled.
         page = s.page("light", "desktop")
         sign_in(page, base)
         page.goto(base + project + "/upload")
         upload_file(page, files["gaps"])
         page.wait_for_url("**/analyze")
         s.shot(page, "analysis-warning-en-light-desktop")
+        page.check("#runtime-1")
+        page.click("#run-button")
+        page.wait_for_selector("#run-errors")
+        expect(page.locator("#run-errors")).to_contain_text("Training would refuse")
+        s.shot(page, "analysis-refused-en-light-desktop", full_page=False)
+        page.goto(base + project + "/upload")
+        upload_file(page, files["constant"])
+        page.wait_for_url("**/analyze")
+        page.check("[name=inputs][value=flat]")  # unchecked by Fione: no use for training
         page.check("#runtime-1")
         page.click("#run-button")
         page.wait_for_url("**/jobs/*")

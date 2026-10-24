@@ -272,6 +272,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-multipart" },
     { name = "scikit-learn" },
+    { name = "starlette" },
     { name = "uvicorn" },
     { name = "xgboost" },
 ]
@@ -299,6 +300,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.16.1" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "scikit-learn", specifier = ">=1.9.1" },
+    { name = "starlette", specifier = ">=1.9.0,<1.10" },
     { name = "uvicorn", specifier = ">=0.54.0" },
     { name = "xgboost", specifier = ">=3.4.1" },
 ]
