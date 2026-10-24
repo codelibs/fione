@@ -6,6 +6,7 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "boto3>=1.43.118",
     "pydantic-settings>=2.16.1",
 ]
 
@@ -30,3 +31,4 @@ packages = ["src/fione"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "scripts"]
+markers = ["s3: needs an S3-compatible server (set FIONE_TEST_S3_ENDPOINT, _BUCKET, _ACCESS_KEY, _SECRET_KEY)"]
