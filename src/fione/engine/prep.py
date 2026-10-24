@@ -92,6 +92,11 @@ class Prep:
         """The input columns the views need, in order."""
         return [column for column, _ in self._plan]
 
+    @property
+    def numeric_columns(self) -> list[str]:
+        """The input columns the model reads as numbers."""
+        return [column for column, kind in self._plan if kind == "numeric"]
+
     def _base(self, df: pd.DataFrame) -> pd.DataFrame:
         """Numeric features as float, categorical ones as strings (NaN when missing)."""
         missing = [c for c, _ in self._plan if c not in df.columns]

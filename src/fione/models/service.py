@@ -12,6 +12,7 @@ from fione.engine.events import jsonable
 from fione.engine.model import TrainedModel
 from fione.jobs import store
 from fione.jobs.store import Job
+from fione.predict.batch import check_include_columns
 from fione.projects import service as projects
 from fione.projects.service import DatasetNotFound, DatasetType
 from fione.storage import Storage
@@ -179,3 +180,31 @@ def submit_training(
         raise ConfigError(f"unknown columns in ignored_columns: {unknown}")
     payload = {"dataset_id": dataset_id, "config": config.to_dict(), "name": name}
     return store.enqueue(conn, "automl", project_id, user.id, payload)
+
+
+def submit_batch_predict(
+    conn: sqlite3.Connection,
+    user: User,
+    project_id: str,
+    model_id: int,
+    dataset_id: int,
+    include_columns: list[str] | None = None,
+    name: str | None = None,
+) -> Job:
+    """Queue a ``batch_predict`` job: ``dataset_id`` (of any type) through ``model_id``."""
+    projects.require_project(conn, project_id)
+    if not can_access_project(conn, user, project_id, "write"):
+        raise PermissionError("write access to the project is required")
+    if get_model(conn, model_id).project_id != project_id:
+        raise ModelNotFound(model_id)
+    dataset = projects.get_dataset(conn, dataset_id)
+    if dataset.project_id != project_id:
+        raise DatasetNotFound(dataset_id)
+    check_include_columns([column for column, _ in dataset.schema], include_columns)
+    payload = {
+        "model_id": model_id,
+        "dataset_id": dataset_id,
+        "include_columns": include_columns,
+        "name": name,
+    }
+    return store.enqueue(conn, "batch_predict", project_id, user.id, payload)
