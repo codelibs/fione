@@ -17,6 +17,8 @@ Fields that do not apply to a column (no statistics for text, no outlier rate fo
 numeric columns, no top values for numbers) are omitted rather than null.
 """
 
+import dataclasses
+
 from fione.auth.roles import Role, can_access_project
 from fione.data.profile import ColumnProfile, profile_dataset
 from fione.engine.config import ConfigError, TrainConfig
@@ -26,7 +28,7 @@ from fione.models import service as models
 from fione.projects import ingest
 from fione.projects import service as projects
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
-from fione.tools.registry import Tool, ToolContext, ToolError, clean_text, register
+from fione.tools.registry import Tool, ToolContext, ToolError, clean_text, fits, register
 
 _MAX_COLUMNS = 200
 _SAMPLE_ROWS = 200_000
@@ -57,6 +59,29 @@ _EVENT_ENUMS = frozenset(
 )
 _EVENT_TEXT = frozenset({"message", "error"})  # free text: only with allow_samples
 _EVENT_SETTINGS = frozenset({"params", "best_params", "config"})  # hyperparameters and settings
+# The names those settings may have: TrainConfig's fields and the families' hyperparameters.
+# Any other key (say a class_weight keyed by label) could carry a cell value and is dropped.
+_SETTING_KEYS = frozenset(
+    {f.name for f in dataclasses.fields(TrainConfig)}
+    | {
+        "learning_rate",
+        "num_leaves",
+        "min_child_samples",
+        "colsample_bytree",
+        "subsample",
+        "reg_lambda",
+        "max_depth",
+        "min_child_weight",
+        "depth",
+        "l2_leaf_reg",
+        "max_features",
+        "min_samples_leaf",
+        "n_estimators",
+        "iterations",
+        "criterion",
+        "boosting_type",
+    }
+)
 _DROP = object()
 
 
@@ -132,6 +157,25 @@ def _column_entry(col: ColumnProfile, allow_samples: bool) -> dict:
 # --- describe_dataset / get_column_stats ---------------------------------
 
 
+def _fit_columns(result: dict, total: int) -> None:
+    """Cut ``columns`` until the result fits the size cap, and say how many are left out."""
+    columns = result["columns"]
+    while True:
+        result["n_columns_listed"] = len(columns)
+        if total > len(columns):
+            result["n_more_columns"] = total - len(columns)
+            result["truncated"] = True
+            result["truncated_lists"] = ["columns"]
+        if fits(result) or not columns:
+            return
+        del columns[len(columns) - max(1, len(columns) // 10) :]
+
+
+def _is_plain(name: str) -> bool:
+    """Whether ``name`` has no control characters or odd whitespace (its length is not judged)."""
+    return clean_text(name, max_len=len(name) + 1) == name
+
+
 def _describe_dataset(ctx: ToolContext, args: dict) -> dict:
     dataset = _dataset(ctx, args["dataset_id"])
     names = [name for name, _ in dataset.schema]
@@ -155,9 +199,7 @@ def _describe_dataset(ctx: ToolContext, args: dict) -> dict:
             for s in profile.leak_suspects
         ],
     }
-    if len(names) > _MAX_COLUMNS:
-        result["n_more_columns"] = len(names) - _MAX_COLUMNS
-        result["truncated"] = True
+    _fit_columns(result, len(names))
     return result
 
 
@@ -257,6 +299,7 @@ def _event_value(key: str, value, etype: str, allow_samples: bool, depth: int, s
         items = (
             (clean_text(k), _event_value(k, v, etype, allow_samples, depth + 1, settings))
             for k, v in value.items()
+            if not settings or allow_samples or k in _SETTING_KEYS
         )
         return {k: v for k, v in items if v is not _DROP}
     if isinstance(value, list):
@@ -318,7 +361,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     dataset = _dataset(ctx, args["dataset_id"])
     names = [name for name, _ in dataset.schema]
     target = _resolve_column(names, args["target"])
-    if clean_text(target) != target:
+    if not _is_plain(target):
         raise ToolError("the target column name is not plain text and cannot be proposed")
     shown = names[:_MAX_COLUMNS]
     read = shown if target in shown else [*shown, target]
@@ -342,7 +385,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 warnings.append("the target has missing values, which training refuses")
         elif col.name in shown and col.kind in ("id", "constant"):
             suggestions.append({"column": clean_text(col.name), "reason": f"{col.kind} column"})
-            if clean_text(col.name) == col.name:
+            if _is_plain(col.name):
                 ignored.append(col.name)
             else:
                 warnings.append(
@@ -373,7 +416,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
 
 # --- registration -----------------------------------------------------------
 
-_ID = {"type": "integer", "minimum": 1}
+_ID = {"type": "integer", "minimum": 1, "maximum": 2**63 - 1}  # SQLite integers
 _COLUMN = {"type": "string", "maxLength": 500}
 
 

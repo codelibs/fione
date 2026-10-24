@@ -89,7 +89,32 @@ def env(tmp_path_factory):
     )
     events = [
         Event(
-            "started", data={"config": config.to_dict(), "n_rows": 150, "task": "classification"}
+            "started",
+            data={
+                "config": {**config.to_dict(), SECRET: SECRET, "class_weight": {SECRET: 2.0}},
+                "n_rows": 150,
+                "task": "classification",
+            },
+        ),
+        Event(
+            "trial",
+            data={
+                "family": "ExtraTrees",
+                "trial": 0,
+                "state": "complete",
+                "score": 0.5,
+                "params": {
+                    "max_depth": 4,
+                    "class_weight": {SECRET: 2.0},
+                    SECRET: SECRET,
+                    "label_hint": SECRET,
+                },
+                "elapsed": 0.2,
+            },
+        ),
+        Event(
+            "family_done",
+            data={"family": "ExtraTrees", "trials": 1, "best_params": {"max_depth": 4, SECRET: 1}},
         ),
         Event(
             "notice",
@@ -237,6 +262,25 @@ def test_default_hides_top_values_labels_and_event_text(env):
     assert by_type["trial"][0]["params"] == {"max_depth": 6, "criterion": "gini"}
     assert by_type["stopped"] == [{"reason": "max_models"}]
     assert by_type["started"][0]["config"]["target"] == "label"
+
+
+def test_unknown_setting_keys_are_dropped_unless_samples_are_allowed(env):
+    def settings(allow):
+        events = call(env, "get_training_events", {"job_id": env.job.id}, allow_samples=allow)
+        return [
+            e["data"] for e in events["events"] if e["type"] in ("trial", "family_done", "started")
+        ]
+
+    hidden = settings(False)
+    assert SECRET not in dump(hidden)
+    assert {"max_depth": 4} in [d.get("params") for d in hidden]
+    assert {"max_depth": 4} in [d.get("best_params") for d in hidden]
+    config = next(d["config"] for d in hidden if "config" in d)
+    assert config["target"] == "label" and "class_weight" not in config
+    shown = settings(True)
+    params = next(d["params"] for d in shown if d.get("params", {}).get("label_hint"))
+    assert params["label_hint"] == SECRET and params[SECRET] == SECRET
+    assert params["class_weight"] == {SECRET: 2.0}
 
 
 def test_numeric_statistics_are_allowed_by_default(env):
@@ -409,7 +453,7 @@ def test_get_feature_importance_is_ranked_and_capped(env):
 
 def test_get_training_events_window_and_order(env):
     all_events = call(env, "get_training_events", {"job_id": env.job.id})
-    assert all_events["n_events"] == 6 and len(all_events["events"]) == 6
+    assert all_events["n_events"] == 8 and len(all_events["events"]) == 8
     ids = [e["id"] for e in all_events["events"]]
     assert ids == sorted(ids, reverse=True) and all_events["order"] == "newest_first"
     last = call(env, "get_training_events", {"job_id": env.job.id, "last_n": 2})
@@ -830,7 +874,7 @@ def test_small_results_are_not_marked_truncated(env):
 
 def test_results_that_cannot_be_cut_fail_safely(env, monkeypatch):
     with_tool(monkeypatch, lambda c, a: {f"k{i}": "x" * 100 for i in range(500)})
-    with pytest.raises(ToolError, match="tool failed"):
+    with pytest.raises(ToolError, match="result too large"):
         call(env, "probe", {})
 
 
@@ -873,3 +917,114 @@ def test_calls_are_logged_without_results(env, caplog):
     assert "tool=describe_dataset" in first and f"user={env.users.owner.id}" in first
     assert "outcome=ok" in first and "duration_ms=" in first and "'dataset_id'" in first
     assert "outcome=not_found" in lines[-1]
+
+
+# --- fix round 1 ---------------------------------------------------------------
+
+
+def constant_columns(n: int, prefix_len: int = 76) -> pd.DataFrame:
+    names = [f"{i:03d}_" + "k" * prefix_len for i in range(n)]
+    frame = pd.DataFrame({name: np.ones(30, dtype=int) for name in names})
+    frame["y"] = np.arange(30) % 2
+    return frame
+
+
+def test_the_proposed_config_is_never_cut(env):
+    frame = constant_columns(195)
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "consts", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    assert result["config"]["ignored_columns"] == [c for c in frame.columns if c != "y"]
+    assert result["truncated"] is True
+    assert "ignored_suggestions" in result["truncated_lists"]
+    assert "config" not in result["truncated_lists"] and "ignored_columns" not in dump(
+        result["truncated_lists"]
+    )
+    assert len(json.dumps(result)) <= MAX_RESULT_BYTES
+    assert 0 < len(result["ignored_suggestions"]) < 195
+
+
+def test_a_proposal_that_cannot_fit_with_its_config_is_refused(env):
+    frame = constant_columns(150, prefix_len=296)
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "huge-names", DatasetType.TRAIN, [frame]
+    )
+    with pytest.raises(ToolError, match="proposal too large"):
+        call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+
+
+def test_cut_lists_are_named(env):
+    job = store.enqueue(env.conn, "automl", env.project.id, env.users.owner.id, {})
+    for i in range(300):
+        params = {"learning_rate": i * 0.123456789, "max_depth": 3, "subsample": 0.5}
+        store.append_event(
+            env.conn, job.id, Event("trial", data={"trial": i, "params": params, "score": 0.1})
+        )
+    result = call(env, "get_training_events", {"job_id": job.id, "last_n": 200})
+    assert result["truncated"] is True and result["truncated_lists"] == ["events"]
+    assert "truncated" not in call(env, "get_training_events", {"job_id": env.job.id})
+
+
+def test_a_cut_describe_counts_the_dropped_columns(env):
+    rng = np.random.default_rng(3)
+    frame = pd.DataFrame({f"n{i:03d}": rng.normal(size=100) for i in range(200)})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "wide-num-2", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "describe_dataset", {"dataset_id": ds.id})
+    assert result["truncated"] is True and result["truncated_lists"] == ["columns"]
+    assert result["n_columns_listed"] == len(result["columns"]) < 200
+    assert result["n_columns_listed"] + result["n_more_columns"] == 200
+    plain = call(env, "describe_dataset", {"dataset_id": env.dataset.id})
+    assert plain["n_columns_listed"] == 10 and "n_more_columns" not in plain
+
+
+def test_returned_schemas_are_copies(env):
+    tools = list_tools()
+    tools[0]["function"]["parameters"]["properties"]["dataset_id"]["type"] = "string"
+    tools[0]["function"]["parameters"]["properties"].pop("target")
+    tools[0]["function"]["parameters"]["additionalProperties"] = True
+    assert (
+        list_tools()[0]["function"]["parameters"]["properties"]["dataset_id"]["type"] == "integer"
+    )
+    with pytest.raises(ToolError, match="dataset_id"):
+        call(env, "describe_dataset", {"dataset_id": "1"})
+    with pytest.raises(ToolError, match="unknown argument"):
+        call(env, "describe_dataset", {"dataset_id": 1, "other": 1})
+
+
+@pytest.mark.parametrize("big", [2**63, 2**70])
+def test_huge_ids_are_invalid_arguments(env, big):
+    for name, key in [
+        ("describe_dataset", "dataset_id"),
+        ("get_leaderboard", "model_id"),
+        ("get_training_events", "job_id"),
+    ]:
+        with pytest.raises(ToolError, match=key):
+            call(env, name, {key: big})
+    with pytest.raises(ToolError) as e:
+        call(env, "describe_dataset", {"dataset_id": 2**63 - 1})
+    assert str(e.value) == NOT_ALLOWED
+
+
+def test_clean_text_removes_private_use_and_unassigned_characters():
+    assert clean_text("ab͸c") == "a b c"
+
+
+def test_long_plain_names_are_valid_targets_and_ignored_columns(env):
+    long_target, long_const = "t" * 120, "c" * 120
+    frame = pd.DataFrame(
+        {long_target: np.arange(40) % 2, long_const: 1, "bad\nname": 1, "x": np.arange(40.0) % 7}
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "long", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": long_target})
+    assert result["config"]["target"] == long_target
+    assert result["config"]["ignored_columns"] == [long_const]
+    assert TrainConfig.from_dict(result["config"]).validate()
+    assert not any(long_const[:70] in w for w in result["warnings"])
+    assert any("not plain text" in w for w in result["warnings"])
+    with pytest.raises(ToolError, match="not plain text"):
+        call(env, "propose_training_config", {"dataset_id": ds.id, "target": "bad\nname"})
