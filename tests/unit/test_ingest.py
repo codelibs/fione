@@ -3,6 +3,7 @@ import itertools
 import sqlite3
 
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -328,3 +329,103 @@ def test_ints_at_float_limit_then_float_are_double(conn, storage, project):
     ds, df = _int_then_float(conn, storage, project, [2**53, -(2**53)] + [5] * 3000)
     assert ds.schema == [("a", "double")]
     assert df["a"].iloc[0] == 2.0**53 and df["a"].iloc[1] == -(2.0**53) and df["a"].iloc[-1] == 1.5
+
+
+# --- ingest_batches: a dataset made from frames ---------------------------------
+
+
+def _frames():
+    yield pd.DataFrame({"a": [1, 2], "b": ["x", "ä"], "c": [0.5, None]})
+    yield pd.DataFrame({"a": [3], "b": ["日本"], "c": [1.5]})
+
+
+def store_batches(conn, storage, project, batches, **kw):
+    return ingest.ingest_batches(
+        storage, conn, project.id, "pred", DatasetType.PREDICT, batches, **kw
+    )
+
+
+def test_ingest_batches_records_the_dataset_and_reads_back(conn, storage, project):
+    ds = store_batches(conn, storage, project, _frames())
+    assert (ds.type, ds.name, ds.n_rows, ds.n_cols) == (DatasetType.PREDICT, "pred", 3, 3)
+    assert ds.schema == [("a", "int64"), ("b", "string"), ("c", "double")]
+    assert ds.key == f"projects/{project.id}/datasets/{ds.id}/data.parquet"
+    assert service.get_dataset(conn, ds.id) == ds
+    expected = pd.concat(_frames(), ignore_index=True)
+    pd.testing.assert_frame_equal(ingest.read_dataset(storage, ds), expected)
+
+
+def test_ingest_batches_types_a_column_missing_in_the_first_frame_from_the_fallback(
+    conn, storage, project
+):
+    first = pd.DataFrame({"a": [None, None], "b": [1, 2]}, dtype=object).astype({"b": "int64"})
+    batches = [first, pd.DataFrame({"a": ["x", "y"], "b": [3, 4]})]
+    types = {"a": pa.string(), "b": pa.int32()}
+    ds = store_batches(conn, storage, project, batches, fallback_types=types)
+    assert ds.schema == [("a", "string"), ("b", "int64")]
+    values = ingest.read_dataset(storage, ds)["a"]
+    assert values.isna().tolist() == [True, True, False, False]
+    assert values.iloc[2:].tolist() == ["x", "y"]
+
+
+def test_ingest_batches_refuses_no_rows(conn, storage, project):
+    with pytest.raises(IngestError, match="no data rows"):
+        store_batches(conn, storage, project, [pd.DataFrame({"a": []})])
+    with pytest.raises(IngestError, match="no data rows"):
+        store_batches(conn, storage, project, [])
+    assert storage.list("") == [] and service.list_datasets(conn, project.id) == []
+
+
+def test_ingest_batches_leaves_nothing_when_the_batches_fail(conn, storage, project, tmp_path):
+    tmp = tmp_path / "scratch"
+    tmp.mkdir()
+
+    def broken():
+        yield pd.DataFrame({"a": [1]})
+        raise RuntimeError("source failed")
+
+    with pytest.raises(RuntimeError, match="source failed"):
+        store_batches(conn, storage, project, broken(), tmp_dir=tmp)
+    assert storage.list("") == [] and list(tmp.iterdir()) == []
+    assert service.list_datasets(conn, project.id) == []
+
+
+def test_ingest_batches_removes_the_object_when_the_insert_fails(
+    conn, storage, project, monkeypatch, tmp_path
+):
+    tmp = tmp_path / "scratch"
+    tmp.mkdir()
+
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(service, "add_dataset", boom)
+    with pytest.raises(RuntimeError, match="db down"):
+        store_batches(conn, storage, project, _frames(), tmp_dir=tmp)
+    assert storage.list("") == [] and list(tmp.iterdir()) == []
+
+
+def test_a_failing_cleanup_never_masks_the_insert_error(conn, storage, project, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    def cannot_delete(key):
+        raise OSError("storage down")
+
+    monkeypatch.setattr(service, "add_dataset", boom)
+    monkeypatch.setattr(storage, "delete", cannot_delete)
+    with pytest.raises(RuntimeError, match="db down"):
+        store_batches(conn, storage, project, _frames())
+
+
+def test_ingest_batches_missing_project(conn, storage):
+    with pytest.raises(ProjectNotFound):
+        ingest.ingest_batches(storage, conn, "nope", "x", DatasetType.PREDICT, _frames())
+    assert storage.list("") == []
+
+
+def test_tmp_dir_is_cleaned_after_ingest_batches(conn, storage, project, tmp_path):
+    tmp = tmp_path / "scratch"
+    tmp.mkdir()
+    store_batches(conn, storage, project, _frames(), tmp_dir=tmp)
+    assert list(tmp.iterdir()) == []

@@ -2,9 +2,10 @@ import codecs
 import csv
 import io
 import itertools
+import logging
 import sqlite3
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import BinaryIO
 
@@ -17,6 +18,8 @@ import pyarrow.parquet as pq
 from fione.projects import service
 from fione.projects.service import Dataset, DatasetType
 from fione.storage import Storage
+
+log = logging.getLogger(__name__)
 
 _SAMPLE_SIZE = 1 << 20
 _COPY_CHUNK = 1 << 20
@@ -262,25 +265,99 @@ def ingest_csv(
             raise IngestError(f"could not parse the CSV: {e}") from e
         if n_rows == 0:
             raise IngestError("no data rows")
-        dataset_id = service.reserve_dataset_id(conn)
-        key = f"projects/{project_id}/datasets/{dataset_id}/data.parquet"
-        with parquet.open("rb") as f:
-            storage.put(key, f)
+        return _register(storage, conn, project_id, name, type, parquet, n_rows, schema)
+
+
+def _register(
+    storage: Storage,
+    conn: sqlite3.Connection,
+    project_id: str,
+    name: str,
+    type: DatasetType,
+    parquet: Path,
+    n_rows: int,
+    schema: pa.Schema,
+) -> Dataset:
+    """Store the Parquet file, then record the dataset; the object is removed if that fails."""
+    dataset_id = service.reserve_dataset_id(conn)
+    key = f"projects/{project_id}/datasets/{dataset_id}/data.parquet"
+    with parquet.open("rb") as f:
+        storage.put(key, f)
+    try:
+        return service.add_dataset(
+            conn,
+            project_id,
+            name,
+            type,
+            n_rows,
+            len(schema),
+            [(field.name, str(field.type)) for field in schema],
+            key,
+            dataset_id,
+        )
+    except BaseException:
         try:
-            return service.add_dataset(
-                conn,
-                project_id,
-                name,
-                type,
-                n_rows,
-                len(schema),
-                [(field.name, str(field.type)) for field in schema],
-                key,
-                dataset_id,
-            )
-        except BaseException:
             storage.delete(key)
-            raise
+        except Exception:
+            # Never mask the original error (a JobAbort must stay a JobAbort).
+            log.exception("could not remove the object %s", key)
+        raise
+
+
+def _frame_schema(frame: pd.DataFrame, fallback_types: dict[str, pa.DataType]) -> pa.Schema:
+    """The frame's Arrow schema; a column holding only missing values takes its fallback type."""
+    fields = []
+    for field in pa.Schema.from_pandas(frame, preserve_index=False):
+        dtype = (
+            fallback_types.get(field.name, field.type)
+            if pa.types.is_null(field.type)
+            else field.type
+        )
+        fields.append(pa.field(field.name, pa.string() if dtype == pa.large_string() else dtype))
+    return pa.schema(fields)
+
+
+def ingest_batches(
+    storage: Storage,
+    conn: sqlite3.Connection,
+    project_id: str,
+    name: str,
+    type: DatasetType,
+    batches: Iterable[pd.DataFrame],
+    *,
+    fallback_types: dict[str, pa.DataType] | None = None,
+    tmp_dir: Path | None = None,
+) -> Dataset:
+    """Record frames, written one at a time to a Parquet file, as a dataset.
+
+    The column types are inferred from the first frame; a column with only missing values there
+    takes its type from ``fallback_types`` (a later frame may hold values for it). Raises
+    ``IngestError`` when there are no rows. Whatever ``batches`` raises propagates; nothing is
+    left in storage or the database unless the dataset is fully recorded.
+    """
+    service.require_project(conn, project_id)
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as work:
+        parquet = Path(work) / "data.parquet"
+        n_rows = 0
+        schema = writer = None
+        try:
+            for frame in batches:
+                if writer is None:
+                    schema = _frame_schema(frame, fallback_types or {})
+                    writer = pq.ParquetWriter(parquet, schema)
+                writer.write_table(pa.Table.from_pandas(frame, schema=schema, preserve_index=False))
+                n_rows += len(frame)
+        finally:
+            if writer is not None:
+                writer.close()
+        if n_rows == 0:
+            raise IngestError("no data rows")
+        return _register(storage, conn, project_id, name, type, parquet, n_rows, schema)
+
+
+def read_schema(storage: Storage, dataset: Dataset) -> pa.Schema:
+    with storage.open_read(dataset.key) as f:
+        return pq.ParquetFile(f).schema_arrow
 
 
 def read_dataset(
