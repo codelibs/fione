@@ -1,8 +1,9 @@
 {% from "_macros.html" import icon, status_pill, pager %}
-{# The polled job list: polling (every 5 s) only while a job of the project is active. A
-   confirm panel open inside it pauses the polling (automl.js). #}
+{# The polled job list (every 5 s while a job of the project is active, every 30 s
+   otherwise), on the page and filters shown. A confirm panel open inside it pauses the
+   polling (automl.js). #}
 {% set pid = ctx.project.id %}
-<section id="job-list" class="stack-tight" aria-labelledby="job-list-title"{% if polling %} hx-get="/projects/{{ pid }}/jobs{% if query %}?{{ query }}{% endif %}" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}>
+<section id="job-list" class="stack-tight" aria-labelledby="job-list-title" hx-get="{{ poll_url }}" hx-trigger="every {{ poll_every }}" hx-swap="outerHTML">
   <div class="section-header">
     <h2 class="section-header__title" id="job-list-title">{{ t('jobs.list') }}</h2>
     <span class="text-muted text-sm" data-announce>{{ t('jobs.summary', running=n_running, queued=n_queued, total=total) }}</span>

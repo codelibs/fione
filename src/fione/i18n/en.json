@@ -539,7 +539,7 @@
   "train.error.metric": "This metric does not fit the prediction type. Choose one listed for it, or Automatic.",
   "train.error.config": "Training cannot start with these settings.",
   "jobs.title": "Jobs",
-  "jobs.lead": "Training, prediction and other runs of this project. The list updates by itself while something runs.",
+  "jobs.lead": "Training, prediction and other runs of this project. The list updates by itself: every few seconds while something runs, every half minute otherwise.",
   "jobs.filter.kind": "Kind",
   "jobs.filter.status": "Status",
   "jobs.filter.all": "All",
@@ -564,5 +564,8 @@
   "jobs.error.not_finished": "Only a finished job can be deleted. Stop it first.",
   "analysis.advanced": "Advanced settings: every training parameter",
   "action.keep": "No, keep it",
-  "jobs.col.started": "Started"
+  "jobs.col.started": "Started",
+  "error.form": "The form could not be read. Reload the page and try again.",
+  "jobs.gone_hint": "This list can no longer be shown here. The project may have been deleted, or your access to it changed.",
+  "jobs.reload_hint": "The latest list could not be loaded. Reload the page to see it."
 }

@@ -242,6 +242,23 @@ def list_datasets(conn: sqlite3.Connection, project_id: str) -> list[Dataset]:
     return [_dataset(r) for r in rows]
 
 
+def page_datasets(
+    conn: sqlite3.Connection, project_id: str, *, limit: int, offset: int = 0
+) -> list[Dataset]:
+    """One page of the project's datasets, newest first."""
+    rows = conn.execute(
+        "SELECT * FROM datasets WHERE project_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+        (project_id, limit, offset),
+    ).fetchall()
+    return [_dataset(r) for r in rows]
+
+
+def count_datasets(conn: sqlite3.Connection, project_id: str) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM datasets WHERE project_id = ?", (project_id,)
+    ).fetchone()[0]
+
+
 def get_dataset(conn: sqlite3.Connection, dataset_id: int) -> Dataset:
     row = conn.execute("SELECT * FROM datasets WHERE id = ?", (dataset_id,)).fetchone()
     if row is None:

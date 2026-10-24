@@ -430,7 +430,7 @@
   "dataset.guided": "かんたん設定で学習",
   "dataset.download": "CSV をダウンロード",
   "dataset.tabs": "データセットの表示",
-  "dataset.tab.summary": "概要",
+  "dataset.tab.summary": "データ概要",
   "dataset.tab.columns": "列",
   "dataset.tab.data": "データ",
   "dataset.tab.correlation": "相関",
@@ -539,7 +539,7 @@
   "train.error.metric": "この指標は予測の種類に合いません。種類に合う指標か「自動」を選んでください。",
   "train.error.config": "この設定では学習を開始できません。",
   "jobs.title": "ジョブ",
-  "jobs.lead": "このプロジェクトの学習・予測などの実行です。実行中は一覧が自動で更新されます。",
+  "jobs.lead": "このプロジェクトの学習・予測などの実行です。一覧は自動で更新されます(実行中は数秒ごと、それ以外は 30 秒ごと)。",
   "jobs.filter.kind": "種類",
   "jobs.filter.status": "状態",
   "jobs.filter.all": "すべて",
@@ -564,5 +564,8 @@
   "jobs.error.not_finished": "削除できるのは終了したジョブだけです。先に中止してください。",
   "analysis.advanced": "詳細設定(すべての学習パラメーター)",
   "action.keep": "いいえ、残します",
-  "jobs.col.started": "開始日時"
+  "jobs.col.started": "開始日時",
+  "error.form": "フォームを読み取れませんでした。ページを再読み込みして、もう一度お試しください。",
+  "jobs.gone_hint": "この一覧はここに表示できなくなりました。プロジェクトが削除されたか、権限が変わった可能性があります。",
+  "jobs.reload_hint": "最新の一覧を読み込めませんでした。ページを再読み込みして確認してください。"
 }

@@ -347,13 +347,16 @@ def _minutes(runtime: str, custom: str) -> int | None:
 
 
 async def _posted(request: Request) -> FormData | None:
-    """The posted form, with room for one field per column; None if it has more."""
+    """The posted form, with room for one field per column; None if it has more. A form
+    that cannot be read at all is a 400 page."""
     try:
         return await request.form(max_fields=MAX_FORM_FIELDS)
     except StarletteHTTPException as e:
-        if e.status_code == 400:  # Starlette: too many fields (or a malformed form)
+        if e.status_code != 400:
+            raise
+        if str(e.detail).startswith("Too many fields"):  # Starlette's MultiPartException
             return None
-        raise
+        raise UiError(400, "error.form") from None
 
 
 Posted = Annotated[FormData | None, Depends(_posted)]

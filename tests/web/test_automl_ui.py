@@ -14,9 +14,11 @@ import pandas as pd
 import pytest
 
 from api_helpers import connect, iris_csv
+from fione.auth import service as auth
 from fione.engine.config import TrainConfig
 from fione.jobs import store
 from fione.jobs.store import JobStatus
+from fione.projects import service as projects
 from fione.projects.ingest import ingest_csv
 from fione.projects.service import DatasetType
 from fione.web import automl
@@ -206,6 +208,13 @@ def test_the_data_tab_pages_through_rows_and_columns(world):
     assert page.count('<th scope="row" class="num text-muted">') == 10
     page = world.client.get(base + "&offset=999999&limit=999999").text  # clamped
     assert "Rows 150–150 of 150" in page
+    long = pd.DataFrame({"n": range(450), "s": [f"v{i}" for i in range(450)]})
+    lid = add_dataset(world, long, "long")
+    page = world.client.get(
+        world.path("/projects/{p}/datasets/") + f"{lid}?tab=data&limit=999999"
+    ).text
+    assert "Rows 1–200 of 450" in page  # at most 200 rows per page
+    assert page.count('<th scope="row" class="num text-muted">') == 200
     page = world.client.get(base + "&limit=5").text
     assert page.count('<th scope="row" class="num text-muted">') == 5
     wide = pd.DataFrame(np.arange(3 * 120).reshape(3, 120), columns=[f"c{i}" for i in range(120)])
@@ -538,7 +547,7 @@ def test_the_job_list_with_filters(world):
     assert world.path("/projects/{p}/jobs/{predict_job}/result") in kind
 
 
-def test_polling_stops_when_no_job_is_active(world):
+def test_the_list_polls_fast_while_a_job_is_active_and_slowly_otherwise(world):
     csrf = world.login("ed")
     hx = {"HX-Request": "true"}
     r = world.client.get(world.path("/projects/{p}/jobs"), headers=hx)
@@ -547,7 +556,59 @@ def test_polling_stops_when_no_job_is_active(world):
         world.path("/projects/{p}/jobs/{job}/cancel"), data={"csrf_token": csrf, "back": "list"}
     )
     r = world.client.get(world.path("/projects/{p}/jobs"), headers=hx)
-    assert r.status_code == 286 and "hx-trigger" not in r.text
+    assert r.status_code == 200 and 'hx-trigger="every 30s"' in r.text  # notices new jobs
+    with closing(connect(world.client)) as conn:  # a job queued elsewhere (the API, a tab)
+        user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        store.enqueue(conn, "automl", world.p, user, {})
+    r = world.client.get(world.path("/projects/{p}/jobs"), headers=hx)
+    assert 'hx-trigger="every 5s"' in r.text
+
+
+def test_polling_keeps_the_page_and_filters(world):
+    world.login("ed")
+    for _ in range(automl.JOBS_PER_PAGE + 5):
+        finished(world, world.p)
+    page = world.client.get(world.path("/projects/{p}/jobs") + "?page=2&status=done").text
+    poll = re.search(r'id="job-list"[^>]*hx-get="([^"]+)"', page).group(1)
+    assert unescape(poll) == world.path("/projects/{p}/jobs") + "?status=done&page=2"
+    again = world.client.get(unescape(poll), headers={"HX-Request": "true"}).text
+    shown = re.findall(r">(?:Training|Prediction) #(\d+)<", again)
+    first_page = re.findall(
+        r">(?:Training|Prediction) #(\d+)<",
+        world.client.get(world.path("/projects/{p}/jobs") + "?status=done").text,
+    )
+    assert shown and not set(shown) & set(first_page)  # still page 2
+
+
+def test_polling_stops_when_the_list_can_no_longer_be_shown(make_client, monkeypatch):
+    world = make_world(make_client(raise_server_exceptions=False))
+    world.login("vi")
+    hx = {"HX-Request": "true"}
+    with closing(connect(world.client)) as conn:
+        owner = next(u for u in auth.list_users(conn) if u.username == "ed")
+        projects.unshare_project(conn, owner, world.p, "vi")
+    r = world.client.get(world.path("/projects/{p}/jobs"), headers=hx)
+    assert r.status_code == 286 and "hx-trigger" not in r.text and 'id="job-list"' in r.text
+    assert "This list can no longer be shown" in r.text
+    world.login("ed")
+
+    def boom(*args):
+        raise RuntimeError("database locked")
+
+    monkeypatch.setattr(automl, "_jobs_context", boom)
+    r = world.client.get(world.path("/projects/{p}/jobs"), headers=hx)
+    assert r.status_code == 286 and "Reload the page" in r.text and "database locked" not in r.text
+
+
+def test_a_malformed_form_is_not_called_too_many_columns(world):
+    csrf = world.login("ed")
+    r = world.client.post(
+        world.path("/projects/{p}/datasets/{train}/train"),
+        content=b"csrf_token=" + csrf.encode(),
+        headers={"Content-Type": "multipart/form-data"},  # no boundary: unreadable
+    )
+    assert r.status_code == 400 and "The form could not be read" in r.text
+    assert "too many columns" not in r.text
 
 
 def test_cancelling_from_the_list_comes_back_to_the_list(world):

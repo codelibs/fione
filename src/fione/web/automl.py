@@ -7,6 +7,7 @@ per-app caches (datasets never change), and every list or preview is capped.
 """
 
 import dataclasses
+import logging
 import math
 import re
 import time
@@ -47,6 +48,7 @@ from fione.web.easyml import (
 from fione.web.uploads import UploadProblem, receive_csv, size_text, upload_context
 from fione.web.views import UiError, language, render
 
+log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
 
 DATASETS_PER_PAGE = 50
@@ -56,6 +58,7 @@ DATA_MAX_ROWS = 200  # the Data tab: rows per page
 DATA_MAX_COLUMNS = 50  # and columns per page
 TOP_PAIRS = 20  # correlations: what the profile keeps
 JOBS_PER_PAGE = 50
+POLL_ACTIVE, POLL_IDLE = "5s", "30s"  # job-list refresh
 JOB_KINDS = ("automl", "batch_predict", "module", "export_models")
 TASKS = ("auto", "classification", "regression")
 MAX_RUNTIME_DIGITS = 6  # minutes, as in the wizard
@@ -141,10 +144,11 @@ def _leaks(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str) -> d
 
 
 def _datasets_view(request: Request, conn, ctx: Ctx, *, status=200, problem=None) -> Response:
-    datasets = projects.list_datasets(conn, ctx.project.id)[::-1]  # newest first
-    pages = max(1, math.ceil(len(datasets) / DATASETS_PER_PAGE))
+    total = projects.count_datasets(conn, ctx.project.id)
+    pages = max(1, math.ceil(total / DATASETS_PER_PAGE))
     number = _int_param(request.query_params.get("page"), 1, 1, pages)
-    shown = datasets[(number - 1) * DATASETS_PER_PAGE : number * DATASETS_PER_PAGE]
+    offset = (number - 1) * DATASETS_PER_PAGE
+    shown = projects.page_datasets(conn, ctx.project.id, limit=DATASETS_PER_PAGE, offset=offset)
     sizes = {d.id: _size(request, d) for d in shown}
     return _view(
         request,
@@ -153,7 +157,7 @@ def _datasets_view(request: Request, conn, ctx: Ctx, *, status=200, problem=None
         "datasets",
         status=status,
         datasets=shown,
-        total=len(datasets),
+        total=total,
         page_number=number,
         pages=pages,
         sizes={k: (size_text(v) if v is not None else None) for k, v in sizes.items()},
@@ -179,13 +183,16 @@ async def upload_dataset(request: Request, conn: Conn, pid: str) -> Response:
 
 
 async def _posted(request: Request) -> FormData | None:
-    """The posted form, with room for one field per column; None if it has more."""
+    """The posted form, with room for one field per column; None if it has more. A form
+    that cannot be read at all is a 400 page."""
     try:
         return await request.form(max_fields=MAX_FORM_FIELDS)
     except StarletteHTTPException as e:
-        if e.status_code == 400:  # Starlette: too many fields (or a malformed form)
+        if e.status_code != 400:
+            raise
+        if str(e.detail).startswith("Too many fields"):  # Starlette's MultiPartException
             return None
-        raise
+        raise UiError(400, "error.form") from None
 
 
 Posted = Annotated[FormData | None, Depends(_posted)]
@@ -633,6 +640,10 @@ def _jobs_context(request: Request, conn, ctx: Ctx) -> dict:
     n_running = store.count_jobs(conn, pid, statuses=(JobStatus.RUNNING,))
     n_queued = store.count_jobs(conn, pid, statuses=(JobStatus.QUEUED,))
     query = urlencode({k: v for k, v in (("kind", kind), ("status", status)) if v})
+    poll = urlencode(
+        {k: v for k, v in (("kind", kind), ("status", status), ("page", number)) if v and v != 1}
+    )
+    active = bool(n_running + n_queued)
     return {
         "rows": [_job_row(ctx, j, now) for j in window],
         "total": total,
@@ -642,7 +653,10 @@ def _jobs_context(request: Request, conn, ctx: Ctx) -> dict:
         "statuses": [s.value for s in JobStatus],
         "page_number": number,
         "pages": pages,
-        "polling": bool(n_running + n_queued),  # any active job of the project
+        # Every 5 s while a job of the project is active (whatever the filter), else a slow
+        # poll that notices a job queued elsewhere (another tab, the API).
+        "poll_every": POLL_ACTIVE if active else POLL_IDLE,
+        "poll_url": f"/projects/{pid}/jobs" + (f"?{poll}" if poll else ""),
         "n_running": n_running,
         "n_queued": n_queued,
         "n_finished": store.count_jobs(conn, pid, statuses=TERMINAL),
@@ -652,14 +666,38 @@ def _jobs_context(request: Request, conn, ctx: Ctx) -> dict:
 
 @router.get("/projects/{pid}/jobs")
 def jobs(request: Request, conn: Conn, pid: str) -> Response:
-    """The project's jobs. HTMX polls the list every 5 s while a job is active; with none,
-    the answer is 286 and polling stops."""
-    ctx = page(request, conn, pid)
-    context = _jobs_context(request, conn, ctx)
-    if request.headers.get("hx-request"):
-        code = 200 if context["polling"] else STOP_POLLING
-        return _view(request, "_jobs_list.html", ctx, "jobs", status=code, **context)
+    """The project's jobs. HTMX polls the list (every 5 s while a job is active, every
+    30 s otherwise); if the list can no longer be shown (access revoked, project deleted,
+    an error), the answer is 286 with a final fragment, and polling stops."""
+    polling = bool(request.headers.get("hx-request"))
+    try:
+        ctx = page(request, conn, pid)
+        context = _jobs_context(request, conn, ctx)
+    except UiError as e:
+        if not polling or e.status == 401:  # 401: HTMX is sent to the login page
+            raise
+        return _list_gone(request, e.key, "jobs.gone_hint")
+    except Exception:
+        if not polling:
+            raise
+        log.exception("the job list of project %s could not be shown", pid)
+        return _list_gone(request, "error.generic", "jobs.reload_hint")
+    if polling:
+        return _view(request, "_jobs_list.html", ctx, "jobs", **context)
     return _view(request, "jobs.html", ctx, "jobs", **context)
+
+
+def _list_gone(request: Request, key: str, hint: str) -> Response:
+    """The poller's last fragment: HTMX swaps a 286 and stops polling."""
+    message = i18n.t(key, language(request))
+    return render(
+        request,
+        "_job_gone.html",
+        status=STOP_POLLING,
+        message=message,
+        hint=hint,
+        target_id="job-list",
+    )
 
 
 @router.post("/projects/{pid}/jobs/{jid}/delete")
