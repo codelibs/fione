@@ -22,9 +22,13 @@ class User:
     username: str
     role: Role
 
+    def __post_init__(self) -> None:
+        # Coerce so a User rebuilt from plain data (e.g. JSON) cannot bypass role checks.
+        object.__setattr__(self, "role", Role(self.role))
+
 
 def require_admin(user: User) -> None:
-    if user.role is not Role.ADMIN:
+    if user.role != Role.ADMIN:
         raise PermissionError("admin role required")
 
 
@@ -52,11 +56,11 @@ def can_access_project(
     """
     if need not in ("read", "write"):
         raise ValueError(f"need must be 'read' or 'write', not {need!r}")
-    if user.role is Role.ADMIN:
+    if user.role == Role.ADMIN:
         return True
     access = project_access(conn, user, project_id)
     if access is None:
         return False
     if need == "read":
         return True
-    return user.role is not Role.VIEWER and access is not ProjectAccess.VIEWER
+    return user.role != Role.VIEWER and access != ProjectAccess.VIEWER

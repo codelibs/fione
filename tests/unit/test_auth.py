@@ -291,3 +291,33 @@ def test_member_access_check_constraint(conn, matrix):
     other = service.create_user(conn, "other", PW, Role.EDITOR)
     with pytest.raises(sqlite3.IntegrityError):
         add_member(conn, "p1", other.id, "owner")
+
+
+# --- User role coercion -------------------------------------------------------
+
+
+def test_user_coerces_string_role():
+    assert User(1, "x", "viewer").role is Role.VIEWER  # type: ignore[arg-type]
+
+
+def test_user_invalid_role_value_error():
+    with pytest.raises(ValueError):
+        User(1, "x", "bogus")  # type: ignore[arg-type]
+
+
+def test_string_role_viewer_member_editor_write_denied(conn):
+    owner = service.create_user(conn, "owner", PW, Role.EDITOR)
+    viewer = service.create_user(conn, "vic", PW, Role.VIEWER)
+    add_project(conn, "p", owner.id)
+    add_member(conn, "p", viewer.id, "editor")
+    from_json = User(viewer.id, "vic", "viewer")  # type: ignore[arg-type]
+    assert roles.can_access_project(conn, from_json, "p", "read")
+    assert not roles.can_access_project(conn, from_json, "p", "write")
+
+
+def test_string_role_admin_allowed_and_require_admin(conn):
+    admin = User(1, "root", "admin")  # type: ignore[arg-type]
+    roles.require_admin(admin)
+    assert roles.can_access_project(conn, admin, "anything", "write")
+    with pytest.raises(PermissionError):
+        roles.require_admin(User(2, "e", "editor"))  # type: ignore[arg-type]
