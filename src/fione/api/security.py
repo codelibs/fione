@@ -133,8 +133,10 @@ class LoginThrottle:
 
     In memory, per process. Live entries are never evicted, so a lockout cannot be undone
     by flooding with junk keys; expired ones are pruned once more than ``max_keys`` keys are
-    held. Memory stays bounded because entries are only added by allowed attempts, each of
-    which then costs a password hash (``password_work``), over a window of fixed length.
+    held. For the login throttle, memory stays bounded because every allowed attempt then
+    costs a password hash (``password_work``), over a window of fixed length. The
+    first-admin throttle has no such cost per attempt: before setup, many source addresses
+    can grow it at request rate (small entries, and only until the first admin exists).
     """
 
     def __init__(

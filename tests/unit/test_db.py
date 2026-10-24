@@ -215,3 +215,12 @@ def test_setup_token_must_be_long_enough(tmp_path):
         Settings(data_dir=tmp_path, setup_token="short-token")
     assert Settings(data_dir=tmp_path, setup_token="").setup_token is None
     assert Settings(data_dir=tmp_path, setup_token="x" * 16).setup_token == "x" * 16
+
+
+@pytest.mark.parametrize("field", ["login_max_failures", "login_max_failures_per_ip"])
+def test_login_limits_must_be_positive(tmp_path, field):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match=f"{field}[\\s\\S]*greater than or equal to 1"):
+        Settings(data_dir=tmp_path, **{field: 0})
+    assert getattr(Settings(data_dir=tmp_path, **{field: 1}), field) == 1

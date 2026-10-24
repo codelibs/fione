@@ -138,8 +138,11 @@ def project_access(need: Literal["read", "write", "owner"]):
 
 
 def _forwarded(request: Request, name: str) -> str | None:
-    """The value the nearest proxy added: the last of a comma-separated header."""
-    values = [v.strip() for v in request.headers.get(name, "").split(",") if v.strip()]
+    """The value the nearest proxy added: the last one, whether the proxy appended it to the
+    client's line or sent a line of its own (every line counts; ``get`` sees only the first)."""
+    values = [
+        v.strip() for line in request.headers.getlist(name) for v in line.split(",") if v.strip()
+    ]
     return values[-1] if values else None
 
 

@@ -299,3 +299,25 @@ def test_a_viewer_role_owner_cannot_delete_or_share(client, people):
     body = {"username": "editor", "access": "viewer"}
     r = client.post(f"/api/v1/projects/{project}/share", json=body, headers=owner)
     assert r.status_code == 403
+
+
+def test_project_deletion_uses_at_most_eight_cancel_threads(client, people, monkeypatch):
+    project = new_project(client, people)
+    conn = connect(client)
+    for _ in range(12):
+        store.enqueue(conn, "automl", project, people["owner"][0].id, {})
+    conn.close()
+    sizes = []
+    real = routes_projects.ThreadPoolExecutor
+
+    def recording(max_workers, **kwargs):
+        sizes.append(max_workers)
+        return real(max_workers=max_workers, **kwargs)
+
+    monkeypatch.setattr(routes_projects, "ThreadPoolExecutor", recording)
+    runner = FakeRunner(client.app.state.db_path)
+    client.app.state.runner = runner
+    r = client.delete(f"/api/v1/projects/{project}", headers=h(people, "owner"))
+    assert r.status_code == 204
+    assert sizes == [routes_projects.MAX_CANCEL_THREADS] == [8]
+    assert len(runner.cancelled) == 12

@@ -3,7 +3,7 @@ import secrets
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_SETUP_TOKEN_LENGTH = 16
@@ -28,10 +28,14 @@ class Settings(BaseSettings):
     runner_enabled: bool = True
     cookie_secure: bool = False
     session_max_age_secs: int = 7 * 24 * 3600
-    login_max_failures: int = 5
+    login_max_failures: int = Field(5, ge=1)  # per (client address, username) and window
     login_window_secs: int = 15 * 60
-    login_max_failures_per_ip: int = 50
-    # Trust X-Forwarded-For/-Host: only behind a reverse proxy that sets them.
+    # Per client address and window, whatever the usernames. Users sharing an address (NAT, or
+    # a proxy while trust_proxy is off) share this budget: one client's wrong attempts can
+    # block login for all of them. Behind a reverse proxy, set trust_proxy.
+    login_max_failures_per_ip: int = Field(50, ge=1)
+    # Trust X-Forwarded-For/-Host (the last value, the one the nearest proxy added): only behind
+    # a reverse proxy that sets them; otherwise clients could choose their own address.
     trust_proxy: bool = False
     max_upload_bytes: int = 2**30
     # First-admin setup token; when unset, one is generated into <data_dir>/setup-token.

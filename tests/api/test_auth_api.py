@@ -520,3 +520,27 @@ def test_non_bearer_authorization_falls_back_to_the_cookie(client):
     client.cookies.clear()
     r = client.get(ME, headers=basic)
     assert r.status_code == 401 and r.json()["error"] == "authentication required"
+
+
+# --- fix round 2: the proxy's X-Forwarded-For value ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        [("X-Forwarded-For", "10.0.0.2"), ("X-Forwarded-For", "203.0.113.9")],  # proxy's own line
+        [("X-Forwarded-For", "10.0.0.2, 203.0.113.9")],  # proxy appended to the client's line
+    ],
+    ids=["two-lines", "one-line"],
+)
+def test_the_address_the_proxy_added_is_used(make_client, headers):
+    client = make_client(trust_proxy=True)
+    add_user(client, "alice")
+    bad = {"username": "alice", "password": "wrong-password"}
+    for _ in range(5):
+        assert client.post(LOGIN, json=bad, headers=headers).status_code == 401
+    # The client spoofed 10.0.0.2; the lockout must land on 203.0.113.9 only.
+    spoofed = {"X-Forwarded-For": "10.0.0.2"}
+    assert client.post(LOGIN, json={**bad, "password": PW}, headers=spoofed).status_code == 200
+    real = {"X-Forwarded-For": "203.0.113.9"}
+    assert client.post(LOGIN, json={**bad, "password": PW}, headers=real).status_code == 429
