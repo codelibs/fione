@@ -11,7 +11,6 @@ with warnings.catch_warnings():
     from fastapi.testclient import TestClient
 
 from api_helpers import make_settings  # noqa: E402
-
 from fione.api.app import create_app  # noqa: E402
 
 
