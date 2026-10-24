@@ -625,3 +625,26 @@ def test_the_wizard_in_japanese_uses_the_product_terms(make_client):
     summary = world.client.get(world.path("/projects/{p}/models/{model}/summary"), headers=ja).text
     assert "予測結果サマリー" in summary and "Fione 君" in summary
     assert re.search(r'aria-label="5 段階中 星 \d つ"', summary)
+
+
+def test_the_language_switch_never_returns_to_a_post_only_path(make_client):
+    """Inline errors are rendered by the run posts; switching language must go to a page."""
+    world = make_world(make_client())
+    csrf = world.login("ed")
+
+    def lang_next(html: str) -> str:
+        return re.search(r'<input type="hidden" name="next" value="([^"]+)">', html).group(1)
+
+    r = world.client.post(
+        world.path("/projects/{p}/datasets/{train}/run"), data=run_form(csrf, inputs=[])
+    )
+    assert r.status_code == 422
+    assert lang_next(r.text) == world.path("/projects/{p}/datasets/{train}/analyze?target=species")
+    r = world.client.post(
+        world.path("/projects/{p}/models/{model}/predict/run"),
+        data={"csrf_token": csrf, "dataset_id": world.path("{test}"), "include": ["nope"]},
+    )
+    assert r.status_code == 422 and "unknown columns" in r.text
+    assert lang_next(r.text) == world.path("/projects/{p}/models/{model}/predict?dataset={test}")
+    for path in (lang_next(r.text).replace("&amp;", "&"),):
+        assert world.client.get(path).status_code == 200

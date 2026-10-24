@@ -99,9 +99,9 @@ class Shooter:
                     yield lang, scheme, viewport
 
 
-def sign_in(page: Page, base: str) -> None:
+def sign_in(page: Page, base: str, username: str = ADMIN) -> None:
     page.goto(f"{base}/login")
-    page.fill("#login-username", ADMIN)
+    page.fill("#login-username", username)
     page.fill("#login-password", PASSWORD)
     page.click("form[data-json-form] button[type=submit]")
     page.wait_for_url(f"{base}/")
@@ -254,10 +254,12 @@ def upload_file(page: Page, path: Path) -> None:
     page.wait_for_load_state()
 
 
-def shoot_all(s: "Shooter", base: str, url: str, name: str, langs=("en",)) -> None:
+def shoot_all(
+    s: "Shooter", base: str, url: str, name: str, langs=("en",), username: str = ADMIN
+) -> None:
     for lang, scheme, viewport in s.variants(langs):
         page = s.page(scheme, viewport, lang)
-        sign_in(page, base)
+        sign_in(page, base, username)
         page.goto(base + url)
         wait_settled(page)
         s.shot(page, f"{name}-{lang}-{scheme}-{viewport}")
@@ -324,13 +326,17 @@ def easyml(s: "Shooter", base: str) -> None:
         page.wait_for_selector("[data-job-status=running]", timeout=60_000)
         page.wait_for_timeout(3000)  # a few polls: models are being tried
         wait_settled(page)
+        running = 0
         for lang, scheme, viewport in s.variants():
             other = s.page(scheme, viewport, lang)
             sign_in(other, base)
             other.goto(base + job)
             if other.locator("[data-job-status=running]").count():
                 s.shot(other, f"progress-{lang}-{scheme}-{viewport}")
+                running += 1
             other.context.close()
+        if running < len(list(s.variants())):
+            s.errors.append(f"only {running} shots of the running job: training ended too soon")
         page.click("details.confirm > summary")
         s.shot(page, "progress-cancel-panel-en-light-desktop", full_page=False)
         page.click("[data-confirm-close]")
@@ -389,11 +395,20 @@ def easyml(s: "Shooter", base: str) -> None:
         shoot_all(s, base, cancelled, "progress-cancelled")
         shoot_all(s, base, project, "project")
 
-        page = s.page("dark", "phone")
+        # The error pages: an unknown path, and a write page for a member who may only view.
+        shoot_all(s, base, "/no-such-page", "not-found")
+        page = s.page("light", "desktop")
         sign_in(page, base)
-        page.goto(base + "/no-such-page")
-        s.shot(page, "not-found-en-dark-phone")
+        page.goto(base + project)
+        csrf = {"X-CSRF-Token": page.get_attribute("meta[name=csrf-token]", "content")}
+        user = {"username": "viewer", "password": PASSWORD, "role": "editor"}
+        assert page.request.post(f"{base}/api/v1/users", data=user, headers=csrf).ok
+        share = {"username": "viewer", "access": "viewer"}
+        api_project = project.replace("/projects/", "/api/v1/projects/")
+        assert page.request.post(f"{base}{api_project}/share", data=share, headers=csrf).ok
         page.context.close()
+        shoot_all(s, base, project, "project-viewer", username="viewer")
+        shoot_all(s, base, project + "/upload", "forbidden", username="viewer")
 
 
 def main() -> None:

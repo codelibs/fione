@@ -428,11 +428,15 @@ def _analysis_view(
     found, columns, defaults = _analysis(request, conn, ctx, dataset, target)
     form = posted if posted is not None and posted.target == defaults.target else defaults
     missing = [col.missing_rate for col in found.profile.columns]
+    # The language switch comes back here (never to the run form's POST-only path).
+    here = f"/projects/{ctx.project.id}/datasets/{dataset.id}/analyze?"
+    here += urlencode({"target": defaults.target})
     return _view(
         request,
         "analysis.html",
         ctx,
         status=status,
+        here=here,
         dataset=dataset,
         found=found,
         columns=columns,
@@ -750,11 +754,14 @@ def _predict_view(
     extra = []
     if dataset is not None and columns is not None:
         extra = [n for n in _names(dataset) if n not in set(columns[0])]
+    here = f"/projects/{ctx.project.id}/models/{record.id}/predict"  # for the language switch
+    here += f"?dataset={dataset.id}" if dataset is not None else ""
     return _view(
         request,
         "predict.html",
         ctx,
         status=status,
+        here=here,
         record=record,
         columns=columns,
         dataset=dataset,
