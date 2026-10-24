@@ -14,7 +14,16 @@ from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from fione import db
-from fione.api import routes_auth, routes_datasets, routes_projects, routes_system, routes_users
+from fione.api import (
+    routes_auth,
+    routes_datasets,
+    routes_jobs,
+    routes_models,
+    routes_modules,
+    routes_projects,
+    routes_system,
+    routes_users,
+)
 from fione.api.errors import error_response, install_error_handlers
 from fione.api.security import LoginThrottle, SessionSigner, ensure_setup_token
 from fione.auth import service as auth_service
@@ -35,8 +44,15 @@ ROUTERS = [
     routes_users.router,
     routes_projects.router,
     routes_datasets.router,
+    routes_jobs.router,
+    routes_models.router,
+    routes_modules.router,
 ]
-UPLOAD_PATHS = [re.compile(rf"^{API_PREFIX}/projects/[^/]+/datasets$")]
+UPLOAD_PATHS = [
+    re.compile(rf"^{API_PREFIX}/projects/[^/]+/datasets$"),
+    re.compile(rf"^{API_PREFIX}/projects/[^/]+/models/import$"),
+    re.compile(rf"^{API_PREFIX}/modules$"),
+]
 
 setup_log = logging.getLogger("fione.setup")
 

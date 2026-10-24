@@ -5,21 +5,18 @@ is a 404, whatever the caller may see elsewhere.
 """
 
 import datetime
-import itertools
 import math
-import re
 from dataclasses import asdict
 from typing import Annotated
-from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from fione.api.deps import Conn, ProjectContext, project_access
+from fione.api.downloads import attachment, content_disposition
 from fione.api.errors import ApiError, not_found, service_errors
 from fione.api.schemas import IdPath, dataset_out
 from fione.data.profile import profile_dataset
@@ -133,30 +130,14 @@ def get_dataset(dataset_id: IdPath, ctx: Reader, conn: Conn) -> dict:
     return dataset_out(_dataset(conn, ctx, dataset_id), schema=True)
 
 
-def _ascii_filename(name: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
-    return safe or "dataset"
-
-
-def content_disposition(name: str) -> str:
-    """``attachment`` with an ASCII-only ``filename`` and the exact name as RFC 5987
-    ``filename*``; neither can carry quotes, CR/LF or other header syntax."""
-    filename = name if name.lower().endswith(".csv") else f"{name}.csv"
-    fallback = _ascii_filename(filename[:-4]) + ".csv"
-    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
-
-
 @router.get("/{dataset_id}/download")
 def download_dataset(dataset_id: IdPath, ctx: Reader, conn: Conn, request: Request):
     """The dataset as UTF-8 CSV, streamed."""
     dataset = _dataset(conn, ctx, dataset_id)
-    chunks = export_csv(request.app.state.storage, dataset)
-    # Pull the first chunk now: a storage error becomes an error response, not a cut 200.
-    first = next(chunks, b"")
-    return StreamingResponse(
-        itertools.chain([first], chunks),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": content_disposition(dataset.name)},
+    return attachment(
+        export_csv(request.app.state.storage, dataset),
+        "text/csv; charset=utf-8",
+        content_disposition(dataset.name),
     )
 
 

@@ -4,20 +4,27 @@ Responses are built field by field here, so internal fields (password hashes, to
 storage keys) can never leak by being added to a record.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Path
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import ProjectAccess, Role, User
 from fione.auth.service import ApiToken
+from fione.engine.events import Event
+from fione.jobs.store import Job
+from fione.models.service import ModelRecord
+from fione.modules.registry import redact
+from fione.modules.service import ModuleInfo
 from fione.projects.service import Dataset, Project
 
 MAX_PASSWORD_LENGTH = 1024
 
 # SQLite integers are signed 64-bit; a larger id would be an OverflowError, not a 404.
-IdPath = Annotated[int, Path(ge=1, le=2**63 - 1)]
+MAX_ID = 2**63 - 1
+IdPath = Annotated[int, Path(ge=1, le=MAX_ID)]
+DbId = Annotated[int, Field(ge=1, le=MAX_ID)]
 
 Username = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 Password = Annotated[str, StringConstraints(min_length=1, max_length=MAX_PASSWORD_LENGTH)]
@@ -71,6 +78,26 @@ class ShareIn(Body):
     access: Literal["editor", "viewer"]
 
 
+class AutomlIn(Body):
+    dataset_id: DbId
+    config: dict[str, Any]  # a TrainConfig; checked by models.service.submit_training
+    name: Name | None = None
+
+
+class BatchPredictIn(Body):
+    model_id: DbId
+    dataset_id: DbId
+    include_columns: list[str] | None = None
+    name: Name | None = None
+
+
+class ModuleJobIn(Body):
+    module_id: Annotated[str, StringConstraints(min_length=1, max_length=40)]
+    dataset_id: DbId
+    params: dict[str, Any] = Field(default_factory=dict)
+    name: Name | None = None
+
+
 def user_out(user: User) -> dict:
     return {"id": user.id, "username": user.username, "role": user.role.value}
 
@@ -111,3 +138,79 @@ def dataset_out(dataset: Dataset, *, schema: bool = False) -> dict:
     if schema:
         out["schema"] = [{"name": name, "type": dtype} for name, dtype in dataset.schema]
     return out
+
+
+def _first_line(text: str | None) -> str | None:
+    """What a non-admin sees of an error: its first line, without file paths."""
+    if not text:
+        return text
+    lines = text.strip().splitlines()
+    return redact(lines[0]) if lines else ""
+
+
+def job_out(job: Job, *, admin: bool) -> dict:
+    """The job. ``stop_reason`` and ``degraded`` come from a training result; non-admins get
+    only the first line of the error ``message`` (no tracebacks or paths)."""
+    result = None if job.result is None else {k: v for k, v in job.result.items() if k != "key"}
+    return {
+        "id": job.id,
+        "kind": job.kind,
+        "project_id": job.project_id,
+        "owner_id": job.owner_id,
+        "status": job.status.value,
+        "payload": job.payload,
+        "result": result,
+        "message": job.message if admin else _first_line(job.message),
+        "stop_reason": (result or {}).get("stop_reason"),
+        "degraded": bool((result or {}).get("degraded")),
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+    }
+
+
+def event_out(event_id: int, event: Event, *, admin: bool) -> dict:
+    """The event; for non-admins an ``error`` event keeps only the first line of its
+    message (no traceback, no worker log tail)."""
+    data = event.data
+    if event.type == "error" and not admin:
+        error = data.get("error") if isinstance(data, dict) else None
+        data = {"error": _first_line(error) if isinstance(error, str) else None}
+    return {"id": event_id, "type": event.type, "ts": event.ts, "data": data}
+
+
+def model_out(record: ModelRecord, *, detail: bool = False) -> dict:
+    out = {
+        "id": record.id,
+        "project_id": record.project_id,
+        "dataset_id": record.dataset_id,
+        "job_id": record.job_id,
+        "name": record.name,
+        "task": record.task,
+        "target": record.target,
+        "best_model": record.best_model,
+        "stop_reason": record.stop_reason,
+        # Training hit an error and kept what it had: the model works but may be weaker.
+        "degraded": record.stop_reason == "error",
+        "trusted": bool(record.trusted),
+        "metrics": record.metrics,
+        "created_at": record.created_at,
+    }
+    if detail:
+        out |= {
+            "config": record.config,
+            "leaderboard": record.leaderboard,
+            "trials": record.trials,
+            "importance": record.importance,
+        }
+    return out
+
+
+def module_out(info: ModuleInfo) -> dict:
+    return {
+        "id": info.id,
+        "name": info.name,
+        "kind": info.kind,
+        "params": info.params,
+        "builtin": info.builtin,
+    }

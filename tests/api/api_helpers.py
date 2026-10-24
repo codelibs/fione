@@ -1,9 +1,19 @@
 """Helpers shared by the API tests (fixtures are in conftest.py)."""
 
+import time
+import uuid
+from functools import cache
+
+from sklearn.datasets import load_iris
+
 from fione import db
 from fione.auth import service as auth
 from fione.auth.roles import Role
 from fione.config import Settings
+from fione.engine.artifact import save_model
+from fione.engine.automl import AutoML
+from fione.engine.config import TrainConfig
+from fione.models import service as models
 
 PW = "password-123"
 CSV = b"a,b,label\n1,x,yes\n2,y,no\n3,x,yes\n4,z,no\n"
@@ -57,3 +67,51 @@ def upload(client, project_id, data=CSV, *, name="train", type="train", filename
         files={"file": (filename, data, "text/csv")},
         **kw,
     )
+
+
+def iris_frame():
+    df = load_iris(as_frame=True).frame
+    df["species"] = df.pop("target").map({0: "setosa", 1: "versicolor", 2: "virginica"})
+    return df
+
+
+def iris_csv() -> bytes:
+    return iris_frame().to_csv(index=False).encode()
+
+
+# Small enough to train in about a second.
+FAST_CONFIG = {"target": "species", "max_runtime_secs": 10, "max_models": 1, "nfolds": 2}
+
+
+@cache
+def tiny_model():
+    """An iris classifier, trained once per session."""
+    return AutoML(TrainConfig(**FAST_CONFIG), lambda event: None).fit(iris_frame())
+
+
+def store_model(conn, storage, secret, project_id, name="iris model", model=None):
+    """Save ``model`` (the tiny one by default) signed with ``secret`` and record it."""
+    model = model or tiny_model()
+    prefix = f"projects/{project_id}/models/{uuid.uuid4().hex}/"
+    save_model(model, storage, prefix, secret, image_tag="test")
+    return models.add_model(
+        conn,
+        project_id=project_id,
+        dataset_id=None,
+        job_id=None,
+        name=name,
+        model=model,
+        storage_prefix=prefix,
+    )
+
+
+def wait_job(client, job_id, headers, timeout=60.0) -> dict:
+    """Poll ``GET /jobs/{id}`` until the job has finished; returns it."""
+    deadline = time.monotonic() + timeout
+    while True:
+        job = client.get(f"/api/v1/jobs/{job_id}", headers=headers).json()
+        if job["status"] in ("done", "failed", "cancelled"):
+            return job
+        if time.monotonic() > deadline:
+            raise AssertionError(f"job {job_id} still {job['status']}")
+        time.sleep(0.1)

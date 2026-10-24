@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException
 
 from fione.auth.service import UserConflict, UserNotFound
 from fione.engine.config import ConfigError
+from fione.models.service import ModelNotFound
 from fione.projects.ingest import IngestError
 from fione.projects.service import DatasetNotFound, ProjectNotFound
 
@@ -105,6 +106,10 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(DatasetNotFound)
     async def _no_dataset(request: Request, exc: DatasetNotFound) -> JSONResponse:
         return error_response(404, "not_found", "dataset not found")
+
+    @app.exception_handler(ModelNotFound)
+    async def _no_model(request: Request, exc: ModelNotFound) -> JSONResponse:
+        return error_response(404, "not_found", "model not found")
 
     @app.exception_handler(UserNotFound)
     async def _no_user(request: Request, exc: UserNotFound) -> JSONResponse:

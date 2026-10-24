@@ -1,0 +1,178 @@
+"""Trained models: listing, details, export and import, the serving bundle, and the zips of
+whole-project exports.
+
+A model id is resolved first and then authorized on the model's own project (404 without
+read access). Downloads are built before their headers are sent, so a failure is a JSON
+error, never a cut 200; their temp files live under ``<data_dir>/tmp``.
+"""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Request
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
+
+from fione.api.deps import AdminUser, Conn, CurrentUser, ProjectContext, authorize, project_access
+from fione.api.downloads import attachment, content_disposition, tmp_dir
+from fione.api.errors import ApiError, not_found, service_errors
+from fione.api.routes_jobs import EXPORT_KIND, export_key
+from fione.api.schemas import IdPath, model_out
+from fione.auth.roles import User
+from fione.config import load_secret
+from fione.engine.artifact import UntrustedArtifactError
+from fione.jobs import store
+from fione.jobs.store import JobStatus
+from fione.models import service
+from fione.models.bundle import BundleError, make_serving_bundle
+from fione.models.service import ModelRecord
+from fione.models.transfer import export_model, import_model
+from fione.projects.service import require_project
+
+router = APIRouter(tags=["models"])
+
+Reader = Annotated[ProjectContext, Depends(project_access("read"))]
+
+ZIP = "application/zip"
+CHUNK = 1 << 20
+
+_IMPORT_SCHEMA = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "required": ["file"],
+                    "properties": {
+                        "file": {"type": "string", "format": "binary"},
+                        "trust_foreign": {"type": "boolean", "default": False},
+                    },
+                }
+            }
+        },
+    }
+}
+
+
+def _model(conn, user: User, model_id: int, need) -> ModelRecord:
+    record = service.get_model(conn, model_id)  # ModelNotFound -> 404
+    authorize(conn, user, record.project_id, need, "model not found")
+    return record
+
+
+@router.get("/projects/{project_id}/models")
+def list_models(ctx: Reader, conn: Conn) -> list[dict]:
+    return [model_out(m) for m in service.list_models(conn, ctx.project.id)]
+
+
+@router.get("/models/{model_id}")
+def get_model(model_id: IdPath, user: CurrentUser, conn: Conn) -> dict:
+    """The model with its metrics, ``stop_reason`` (``degraded`` when training hit an error),
+    config, leaderboard, trials and variable importance."""
+    return model_out(_model(conn, user, model_id, "read"), detail=True)
+
+
+@router.get("/models/{model_id}/export")
+def export(model_id: IdPath, user: CurrentUser, conn: Conn, request: Request):
+    """The model as a zip that ``POST /projects/{project_id}/models/import`` takes."""
+    record = _model(conn, user, model_id, "read")
+    chunks = export_model(
+        request.app.state.storage, record, tmp_dir=tmp_dir(request.app.state.settings)
+    )
+    return attachment(chunks, ZIP, content_disposition(record.name, ".zip", "model"))
+
+
+@router.get("/models/{model_id}/serving")
+def serving_bundle(model_id: IdPath, user: CurrentUser, conn: Conn, request: Request):
+    """The serving bundle: a zip with ``model/manifest.json`` and ``model/model.joblib``. A
+    model whose manifest or the configured serving image cannot be used safely is a 409."""
+    record = _model(conn, user, model_id, "read")
+    settings = request.app.state.settings
+    try:
+        bundle = make_serving_bundle(
+            request.app.state.storage, record, settings, tmp_dir=tmp_dir(settings)
+        )
+    except BundleError as e:
+        raise ApiError(409, "conflict", str(e)) from e
+    disposition = content_disposition(bundle.filename, ".zip", "model")
+    return attachment(bundle.open(), ZIP, disposition)
+
+
+@router.delete("/models/{model_id}", status_code=204)
+def delete_model(model_id: IdPath, user: CurrentUser, conn: Conn, request: Request) -> None:
+    record = _model(conn, user, model_id, "write")
+    service.delete_model(conn, request.app.state.storage, record.id)
+
+
+def _trust_foreign(form) -> bool:
+    value = form.get("trust_foreign")
+    if value is None:
+        return False
+    if not isinstance(value, str) or value.strip().lower() not in ("true", "false"):
+        raise ApiError(422, "invalid", "trust_foreign must be true or false")
+    return value.strip().lower() == "true"
+
+
+@router.post("/projects/{project_id}/models/import", status_code=201, openapi_extra=_IMPORT_SCHEMA)
+async def import_(project_id: str, admin: AdminUser, request: Request, conn: Conn) -> dict:
+    """Import a model export zip (multipart ``file``). Admin only: the file holds a pickle.
+
+    A model signed by another install is refused unless ``trust_foreign`` is true; it is
+    then stored with ``trusted`` false. The form is parsed only after authorization.
+    """
+    require_project(conn, project_id)  # ProjectNotFound -> 404
+    if not request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
+        raise ApiError(415, "unsupported_media_type", "Content-Type must be multipart/form-data")
+    form = await request.form(max_files=1, max_fields=1)
+    try:
+        trust_foreign = _trust_foreign(form)
+        upload = form.get("file")
+        if not isinstance(upload, UploadFile):
+            raise ApiError(422, "invalid", "file: a file field is required")
+        settings = request.app.state.settings
+
+        def run() -> ModelRecord:
+            try:
+                with service_errors():  # ModelImportError is a ValueError with a plain reason
+                    return import_model(
+                        request.app.state.storage,
+                        conn,
+                        admin,
+                        project_id,
+                        upload.file,
+                        load_secret(settings),
+                        trust_foreign=trust_foreign,
+                        tmp_dir=tmp_dir(settings),
+                    )
+            except UntrustedArtifactError as e:
+                raise ApiError(422, "untrusted", f"the model file failed verification: {e}") from e
+
+        record = await run_in_threadpool(run)
+    finally:
+        await form.close()
+    return model_out(record, detail=True)
+
+
+@router.get("/projects/{project_id}/exports/{job_id}")
+def download_export(job_id: IdPath, ctx: Reader, conn: Conn, request: Request):
+    """The zip of a finished export job of this project (``POST .../jobs/export``)."""
+    try:
+        job = store.get_job(conn, job_id)
+    except KeyError:
+        raise not_found("export not found") from None
+    if job.project_id != ctx.project.id or job.kind != EXPORT_KIND:
+        raise not_found("export not found")
+    if job.status is not JobStatus.DONE:
+        raise ApiError(409, "conflict", "the export has not finished")
+    try:
+        source = request.app.state.storage.open_read(export_key(ctx.project.id, job.id))
+    except KeyError:
+        raise not_found("export not found") from None
+
+    def chunks():
+        with source:
+            while chunk := source.read(CHUNK):
+                yield chunk
+
+    name = f"fione-export-{ctx.project.name}-{job.id}"
+    return attachment(chunks(), ZIP, content_disposition(name, ".zip", "fione-export"))

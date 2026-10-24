@@ -91,7 +91,9 @@ def require_admin(user: CurrentUser) -> User:
 AdminUser = Annotated[User, Depends(require_admin)]
 
 
-def effective_access(conn: sqlite3.Connection, user: User, project_id: str) -> ProjectAccess | None:
+def effective_access(
+    conn: sqlite3.Connection, user: User, project_id: str | None
+) -> ProjectAccess | None:
     """What the user may do in the project: ``owner`` (share, delete), ``editor`` (write),
     ``viewer`` (read), or None. Admins act as owners of every project; a global viewer is
     capped at ``viewer`` even as owner or editor member."""
@@ -117,21 +119,33 @@ _SUFFICIENT = {
 }
 
 
+def authorize(
+    conn: sqlite3.Connection,
+    user: User,
+    project_id: str | None,
+    need: Literal["read", "write", "owner"],
+    missing: str,
+) -> ProjectAccess:
+    """The user's access to the project an object belongs to: 404 (``missing``) without read
+    access, 403 with read access but not ``need``. A job without a project is admins' only."""
+    access = effective_access(conn, user, project_id)
+    if access is None:
+        raise not_found(missing)
+    if access not in _SUFFICIENT[need]:
+        raise ApiError(403, "forbidden", f"{need} access to the project required")
+    return access
+
+
 def project_access(need: Literal["read", "write", "owner"]):
     """Dependency for routes under ``/projects/{project_id}``: 404 without read access (also
     for a missing project, even for admins), 403 with read access but not ``need``."""
-    allowed = _SUFFICIENT[need]
 
     def dependency(project_id: str, conn: Conn, user: CurrentUser) -> ProjectContext:
         try:
             project = require_project(conn, project_id)
         except ProjectNotFound:
             raise not_found("project not found") from None
-        access = effective_access(conn, user, project_id)
-        if access is None:
-            raise not_found("project not found")
-        if access not in allowed:
-            raise ApiError(403, "forbidden", f"{need} access to the project required")
+        access = authorize(conn, user, project_id, need, "project not found")
         return ProjectContext(project, user, access)
 
     return dependency
