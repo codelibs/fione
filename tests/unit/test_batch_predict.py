@@ -217,6 +217,15 @@ def test_padded_numbers_pass_and_other_text_still_fails(cls):
     assert "'x'" in str(e.value) and "'abc'" in str(e.value) and "''" not in str(e.value)
 
 
+def test_a_lone_surrogate_is_an_input_error_naming_the_column(cls):
+    for column, value in (("color", "\ud800"), ("x", "\ud800")):
+        df = features(10).astype({column: object})
+        df.loc[3, column] = value
+        with pytest.raises(PredictInputError) as e:
+            batch_predict(cls, df)
+        assert repr(column) in str(e.value)
+
+
 # --- nullable integer input ---------------------------------------------------
 
 

@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 
 from fione.engine.config import ConfigError
 from fione.engine.events import jsonable
-from fione.predict.batch import unreadable_numbers
+from fione.predict.batch import encodable, unreadable_numbers
 from fione_serving.loader import LoadedModel, load
 
 log = logging.getLogger(__name__)
@@ -122,6 +122,10 @@ class Predictor:
             if missing:
                 results[i] = _exception(f"missing columns: {missing}")
                 continue
+            broken = [c for c in self.columns if isinstance(row[c], str) and not encodable(row[c])]
+            if broken:  # pandas cannot hold such text, so the row leaves the batch here
+                results[i] = _exception(f"invalid text in column {_shown(broken[0])}")
+                continue
             positions.append(i)
             rows.append(row)
         if rows:
@@ -134,7 +138,9 @@ class Predictor:
         for column in self.model.prep.numeric_columns:
             values = frame[column]
             for at in np.flatnonzero(unreadable_numbers(values).to_numpy()):
-                text = f"column {column!r} must hold a number, but got {_shown(values.iloc[at])}"
+                text = (
+                    f"column {_shown(column)} must hold a number, but got {_shown(values.iloc[at])}"
+                )
                 problems.setdefault(int(at), []).append(text)
         for at, messages in problems.items():
             results[positions[at]] = _exception("; ".join(messages))
@@ -143,22 +149,33 @@ class Predictor:
             return
         frame = frame.iloc[keep].reset_index(drop=True)
         slots = [positions[at] for at in keep]
-        try:
-            outputs = self._predict_frame(frame)
-        except Exception:
-            log.warning("batch prediction failed, predicting row by row", exc_info=True)
-            outputs = [self._predict_one(frame.iloc[[at]]) for at in range(len(frame))]
-        for slot, output in zip(slots, outputs, strict=True):
+        for slot, output in zip(slots, self._predict_split(frame, top=True), strict=True):
             results[slot] = output
 
-    def _predict_one(self, row: pd.DataFrame) -> dict:
+    def _predict_split(self, frame: pd.DataFrame, *, top: bool = False) -> list[dict]:
+        """Predict ``frame`` in one call; if that raises, bisect to find the rows that fail.
+
+        k failing rows among n cost O(k log n) calls (a linear row-by-row fallback would let
+        one bad row make the server predict every row of the request one at a time).
+        """
         try:
-            return self._predict_frame(row)[0]
-        except ConfigError as e:
-            return _exception(str(e))
+            return self._predict_frame(frame)
         except Exception as e:
-            log.warning("a row could not be predicted: %s", type(e).__name__)
-            return _exception(f"prediction failed ({type(e).__name__})")
+            if top:
+                log.warning("batch prediction failed, isolating the failing rows", exc_info=True)
+            if len(frame) == 1:
+                return [self._failure(e)]
+            middle = len(frame) // 2
+            return self._predict_split(frame.iloc[:middle]) + self._predict_split(
+                frame.iloc[middle:]
+            )
+
+    @staticmethod
+    def _failure(e: Exception) -> dict:
+        if isinstance(e, ConfigError):
+            return _exception(str(e))
+        log.debug("a row could not be predicted: %s", type(e).__name__)
+        return _exception(f"prediction failed ({type(e).__name__})")
 
     def _predict_frame(self, frame: pd.DataFrame) -> list[dict]:
         with self._lock:
@@ -184,7 +201,7 @@ async def _read_body(request: Request, limit: int) -> bytes:
     arrive, because the header may be absent (chunked) or wrong.
     """
     declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > limit:
+    if declared.isascii() and declared.isdigit() and int(declared) > limit:
         raise Rejected(413, f"the request body is larger than {limit} bytes")
     chunks: list[bytes] = []
     size = 0

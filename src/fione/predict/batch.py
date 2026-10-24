@@ -56,22 +56,54 @@ def included_columns(
     return out
 
 
+def encodable(text: str) -> bool:
+    """False for text that cannot be written as UTF-8, such as a lone surrogate."""
+    if text.isascii():
+        return True
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def unencodable_text(values: pd.Series) -> pd.Series:
+    """True where ``values`` holds text that is not valid Unicode (see ``encodable``).
+
+    Pandas' string handling raises ``UnicodeEncodeError`` on such text, so it is found before
+    anything else looks at the column.
+    """
+    if pd.api.types.is_numeric_dtype(values.dtype) or pd.api.types.is_datetime64_any_dtype(
+        values.dtype
+    ):
+        return pd.Series(False, index=values.index)
+    return pd.Series([isinstance(v, str) and not encodable(v) for v in values], index=values.index)
+
+
 def unreadable_numbers(values: pd.Series) -> pd.Series:
     """True where ``values`` holds something a numeric column cannot read as a number.
 
     Missing values and blank text count as missing, as in the engine, so they are readable.
+    Text that is not valid Unicode is unreadable. A value like ``1e999`` reads as infinity,
+    which the engine treats as missing.
     """
     if pd.api.types.is_numeric_dtype(values.dtype):
         return pd.Series(False, index=values.index)
+    broken = unencodable_text(values)
+    values = values.mask(broken)
     blank = values.astype(str).str.strip() == ""
-    return pd.to_numeric(values, errors="coerce").isna() & values.notna() & ~blank
+    return (pd.to_numeric(values, errors="coerce").isna() & values.notna() & ~blank) | broken
 
 
 def _check_inputs(model: TrainedModel, df: pd.DataFrame) -> None:
     missing = [c for c in model.prep.columns if c not in df.columns]
     if missing:
         raise PredictInputError(f"missing columns: {missing}")
-    for column in model.prep.numeric_columns:
+    numeric = model.prep.numeric_columns
+    for column in model.prep.columns:
+        if column not in numeric and unencodable_text(df[column]).any():
+            raise PredictInputError(f"column {column!r} has text that is not valid Unicode")
+    for column in numeric:
         values = df[column]
         unreadable = values[unreadable_numbers(values)]
         if len(unreadable):

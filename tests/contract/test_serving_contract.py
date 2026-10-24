@@ -20,7 +20,7 @@ from fione.config import Settings
 from fione.engine.artifact import MODEL_FILE, read_manifest, save_model
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
-from fione.models.bundle import make_serving_bundle
+from fione.models.bundle import BundleError, make_serving_bundle
 from fione.models.service import ModelNotFound, ModelRecord
 from fione.storage import LocalStorage
 from fione_serving.app import create_app
@@ -217,6 +217,34 @@ def test_japanese_names_and_labels_round_trip(jp):
     assert row["label"] in r.text  # not \u-escaped
 
 
+def invoke_text(client, instances):
+    """POST with ASCII-only JSON, so a lone surrogate travels as a ``\\ud800`` escape."""
+    return client.post("/invocations", content=json.dumps({"instances": instances}))
+
+
+@pytest.mark.parametrize("field", ["color", "x"])
+def test_a_lone_surrogate_costs_only_its_own_row(jp, field):
+    rows = [JP_ROW, dict(JP_ROW, **{field: "\ud800"}), dict(JP_ROW, x=-1.0), JP_ROW]
+    r = invoke_text(jp, rows)
+    assert r.status_code == 200
+    out = strict(r.text)["predictions"]
+    assert [list(x) for x in out] == [
+        ["label", "index", "class_probabilities"],
+        ["exception"],
+        ["label", "index", "class_probabilities"],
+        ["label", "index", "class_probabilities"],
+    ]
+    assert repr(field) in out[1]["exception"] and "ud800" not in r.text
+    assert out[0] == out[3]
+
+
+def test_a_surrogate_beside_a_mixed_type_column_is_one_exception(jp):
+    rows = [dict(JP_ROW, color="\ud800"), dict(JP_ROW, color=1)] + [JP_ROW] * 20
+    out = strict(invoke_text(jp, rows).text)["predictions"]
+    assert list(out[0]) == ["exception"]
+    assert all("label" in row for row in out[1:])
+
+
 def test_an_empty_list_is_an_empty_prediction_list(iris):
     r = invoke(iris, [])
     assert r.status_code == 200 and r.text == '{"predictions":[]}'
@@ -246,6 +274,47 @@ def test_a_failing_batch_falls_back_to_one_prediction_per_row(jp_model, stored, 
         ["label", "index", "class_probabilities"],
     ]
     assert "secret internal detail" not in rows[1]["exception"]
+
+
+@pytest.fixture
+def counted(jp_model, stored, monkeypatch):
+    """(client, calls): the model's ``predict_proba`` fails on any frame holding x > 100."""
+    app = create_app(stored(jp_model)[1], image_tag=TAG)
+    model = app.state.loaded.model
+    real = type(model).predict_proba
+    calls: list[int] = []
+
+    def flaky(self, df):
+        calls.append(len(df))
+        if (df["x"] > 100).any():
+            raise RuntimeError("secret internal detail")
+        return real(self, df)
+
+    monkeypatch.setattr(type(model), "predict_proba", flaky)
+    return TestClient(app), calls
+
+
+def thousand(bad: set[int]) -> list[dict]:
+    return [dict(JP_ROW, x=1000.0 if i in bad else i / 1000) for i in range(1000)]
+
+
+def test_one_bad_row_among_a_thousand_costs_few_model_calls(counted):
+    client, calls = counted
+    rows = strict(invoke(client, thousand({617})).text)["predictions"]
+    assert [i for i, row in enumerate(rows) if "exception" in row] == [617]
+    assert len(calls) <= 2 * 10 + 3
+
+
+def test_scattered_bad_rows_cost_a_bounded_number_of_model_calls(counted):
+    client, calls = counted
+    bad = {3, 250, 251, 600, 999}
+    rows = strict(invoke(client, thousand(bad)).text)["predictions"]
+    assert {i for i, row in enumerate(rows) if "exception" in row} == bad
+    assert all("secret" not in row.get("exception", "") for row in rows)
+    assert len(calls) <= 5 * (2 * 10 + 2)
+    alone = strict(invoke(client, [thousand(set())[i] for i in sorted(bad)]).text)["predictions"]
+    assert all("label" in row for row in alone)
+    assert [r["label"] for i, r in enumerate(rows) if i not in bad][:5]  # neighbours are intact
 
 
 def test_responses_are_strict_json(iris, reg):
@@ -321,7 +390,7 @@ def test_a_body_over_the_cap_without_a_length_is_413(small_body_app):
     assert r.status_code == 413
 
 
-def asgi_post(app, chunks: list[bytes], declared: int) -> tuple[int, bytes]:
+def asgi_post(app, chunks: list[bytes], declared: int | str) -> tuple[int, bytes]:
     """POST ``chunks`` with a Content-Length that says ``declared`` (no server to police it)."""
     sent: list[dict] = []
     pending = [{"type": "http.request", "body": c, "more_body": True} for c in chunks]
@@ -343,7 +412,7 @@ def asgi_post(app, chunks: list[bytes], declared: int) -> tuple[int, bytes]:
         "query_string": b"",
         "root_path": "",
         "scheme": "http",
-        "headers": [(b"content-length", str(declared).encode())],
+        "headers": [(b"content-length", str(declared).encode("latin-1"))],
         "server": ("test", 80),
         "client": ("test", 1),
     }
@@ -356,6 +425,12 @@ def test_a_lying_content_length_does_not_get_around_the_cap(small_body_app):
     body = big_body()
     status, _ = asgi_post(small_body_app, [body[i : i + 500] for i in range(0, len(body), 500)], 10)
     assert status == 413
+
+
+def test_a_non_ascii_digit_content_length_is_ignored_not_a_500(iris):
+    body = json.dumps({"instances": [SETOSA]}).encode()
+    status, _ = asgi_post(iris.app, [body], "\u00b2")
+    assert status == 200
 
 
 def test_a_body_at_the_cap_still_works(iris_model, stored, monkeypatch):
@@ -634,6 +709,77 @@ def test_the_example_curl_survives_a_quote_in_a_column_name(tmp_path):
 def test_the_filename_is_ascii_safe(jp_model, stored, tmp_path, name, expected):
     storage, _ = stored(jp_model)
     assert bundle_of(storage, tmp_path, name).filename == expected
+
+
+def test_a_very_long_name_gives_a_short_filename(jp_model, stored, tmp_path):
+    storage, _ = stored(jp_model)
+    for name in ("あ" * 300, "a" * 300, "ab " * 100):
+        filename = bundle_of(storage, tmp_path, name).filename
+        assert filename.isascii() and len(filename) <= 120
+        assert filename.startswith("fione-serving-") and filename.endswith("-7.zip")
+
+
+def stored_with_tag(storage, tag: str) -> None:
+    """Rewrite the stored manifest's image tag (the hash and HMAC checks are not run here)."""
+    manifest = json.loads(storage.get(PREFIX + "manifest.json"))
+    manifest["image_tag"] = tag
+    storage.put(PREFIX + "manifest.json", json.dumps(manifest).encode())
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "x;touch pwned",
+        "a b",
+        "$(id)",
+        "dev\nrm -rf /",
+        "a" * 129,
+        "",
+        ".dev",
+        "-dev",
+        "a`b`",
+        "dev'",
+    ],
+)
+def test_an_unsafe_image_tag_is_refused(jp_model, stored, tmp_path, tag):
+    storage, _ = stored(jp_model)
+    stored_with_tag(storage, tag)
+    with pytest.raises(BundleError, match="image tag") as e:
+        bundle_of(storage, tmp_path)
+    assert isinstance(e.value, ValueError) and len(str(e.value)) < 150
+
+
+@pytest.mark.parametrize("tag", ["dev", "2.0.0.dev0", "v1_2-rc.3", "_x", "a" * 128])
+def test_a_valid_image_tag_gives_exactly_the_expected_argv(jp_model, stored, tmp_path, tag):
+    storage, _ = stored(jp_model)
+    stored_with_tag(storage, tag)
+    bundle = bundle_of(storage, tmp_path)
+    assert shlex.split(bundle.run_command) == [
+        "docker", "run", "--rm", "-p", "8081:8080", "-v", "$PWD/model:/model:ro",
+        f"ghcr.io/codelibs/fione-serving:{tag}",
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "image", ["ghcr.io/x;id", "a b", "$(id)", "UPPER/case", "x:tag", "/abs", "a//b", "", "a/b\n"]
+)
+def test_an_unsafe_serving_image_is_refused(jp_model, stored, tmp_path, image):
+    storage, _ = stored(jp_model)
+    settings = Settings(data_dir=tmp_path, serving_image=image)
+    with pytest.raises(BundleError, match="image name"):
+        make_serving_bundle(storage, record_for(), settings)
+
+
+@pytest.mark.parametrize(
+    "image",
+    ["ghcr.io/codelibs/fione-serving", "localhost:5000/team/fione_serving", "fione-serving"],
+)
+def test_a_registry_image_name_is_accepted(jp_model, stored, tmp_path, image):
+    storage, _ = stored(jp_model)
+    bundle = make_serving_bundle(
+        storage, record_for(), Settings(data_dir=tmp_path, serving_image=image)
+    )
+    assert shlex.split(bundle.run_command)[-1] == f"{image}:{TAG}"
 
 
 def test_closing_the_stream_early_removes_the_temp_file(jp_model, stored, tmp_path, work):
