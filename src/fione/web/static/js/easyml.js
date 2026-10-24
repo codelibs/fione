@@ -98,7 +98,14 @@
     });
   });
 
-  // ---- The cancel panel: "keep going" closes it ---------------------------------------
+  // ---- The cancel panel: opening it moves focus into it (its summary hides); "keep going"
+  // closes it ------------------------------------------------------------------------------
+  document.querySelectorAll("details[data-confirm-panel]").forEach(function (panel) {
+    panel.addEventListener("toggle", function () {
+      var keep = panel.querySelector("[data-confirm-close]");
+      if (panel.open && keep) keep.focus();
+    });
+  });
   document.addEventListener("click", function (event) {
     var close = event.target.closest("[data-confirm-close]");
     if (!close) return;

@@ -148,13 +148,13 @@
 {% endmacro %}
 
 {% macro preview_table(t, preview, caption) %}
-<div class="table-wrap table-wrap-limited" tabindex="0" role="region" aria-label="{{ caption }}">
-  <table class="table table-compact">
+<div class="table-wrap" tabindex="0" role="region" aria-label="{{ caption }}">
+  <table class="table table-compact table-data">
     <caption class="visually-hidden">{{ caption }}</caption>
-    <thead><tr>{% for name in preview.columns %}<th scope="col">{{ name }}</th>{% endfor %}</tr></thead>
+    <thead><tr>{% for name in preview.columns %}<th scope="col"{% if preview.numeric[loop.index0] %} class="num"{% endif %}>{{ name }}</th>{% endfor %}</tr></thead>
     <tbody>
       {% for row in preview.rows %}
-      <tr>{% for value in row %}{% if value is none %}<td class="cell-missing"><span aria-hidden="true">—</span><span class="visually-hidden">{{ t('preview.missing') }}</span></td>{% elif value is number %}<td class="num">{{ value }}</td>{% else %}<td>{{ value }}</td>{% endif %}{% endfor %}</tr>
+      <tr>{% for value in row %}{% if value is none %}<td class="cell-missing"><span aria-hidden="true">—</span><span class="visually-hidden">{{ t('preview.missing') }}</span></td>{% elif value is number %}<td class="num">{{ value|cellnum }}</td>{% else %}<td>{{ value }}</td>{% endif %}{% endfor %}</tr>
       {% endfor %}
     </tbody>
   </table>

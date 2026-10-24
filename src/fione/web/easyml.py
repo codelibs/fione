@@ -399,13 +399,18 @@ def _pct(rate: float) -> str:
 
 def _preview(request: Request, dataset: Dataset, rows: int) -> dict:
     frame = read_dataset_sample(_storage(request), dataset, max_rows=rows)
-    return {
-        "columns": list(frame.columns),
-        "rows": [
-            [cell(v) for v in row]
-            for row in frame.astype(object).itertuples(index=False, name=None)
-        ],
-    }
+    cells = [
+        [cell(v) for v in row] for row in frame.astype(object).itertuples(index=False, name=None)
+    ]
+    numeric = [  # right-aligned columns: numbers only (gaps aside)
+        all(
+            isinstance(r[i], int | float) and not isinstance(r[i], bool)
+            for r in cells
+            if r[i] is not None
+        )
+        for i in range(frame.shape[1])
+    ]
+    return {"columns": list(frame.columns), "rows": cells, "numeric": numeric}
 
 
 def _analysis_view(

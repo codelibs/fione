@@ -10,6 +10,7 @@
     <h1 class="page-header__title">{{ t('upload.title') }}</h1>
     <p class="page-header__lead text-muted">{{ t('upload.lead') }}</p>
   </header>
+  {{ guide(t, t('upload.guide'), "calm") }}
   {{ upload_problem(t, problem) }}
   <form class="card card-padded stack" method="post" action="/projects/{{ ctx.project.id }}/upload" enctype="multipart/form-data" data-upload-form>
     <input type="hidden" name="csrf_token" value="{{ csrf }}">
@@ -19,6 +20,5 @@
       <button type="submit" class="btn btn-primary btn-lg"><span class="spinner" aria-hidden="true"></span>{{ icon("upload") }}{{ t('upload.submit') }}</button>
     </div>
   </form>
-  {{ guide(t, t('upload.guide'), "calm") }}
 </div>
 {% endblock %}

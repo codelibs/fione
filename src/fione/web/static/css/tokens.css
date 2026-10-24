@@ -36,6 +36,7 @@
   --color-success-text: light-dark(#1a673c, #8fdcab);
   --color-warning-subtle: light-dark(#fcf1dc, #33260e);
   --color-warning-text: light-dark(#87500a, #f2c46e);
+  --color-star: light-dark(#b8740a, #f2c46e); /* filled rating stars (a graphic: 3:1) */
   --color-danger-subtle: light-dark(#fcebeb, #3a1616);
   --color-danger-text: light-dark(#a52524, #ffb4b1);
   --color-neutral-subtle: var(--color-surface-2);
@@ -131,6 +132,7 @@
     --color-success-text: #1a673c;
     --color-warning-subtle: #fcf1dc;
     --color-warning-text: #87500a;
+    --color-star: #b8740a;
     --color-danger-subtle: #fcebeb;
     --color-danger-text: #a52524;
     --color-neutral-text: #454e5c;

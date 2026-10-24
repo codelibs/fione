@@ -5,8 +5,10 @@ desktop and a phone viewport, plus a few Japanese ones.
     uv run python scripts/ui-screenshots.py OUTPUT_DIR
 
 Starts Fione on a free port with a temporary data directory, creates the first admin, signs in
-and creates two projects through the UI, then writes PNGs to OUTPUT_DIR. Fails if a page logs
-a console error (a Content-Security-Policy violation, say), raises one, or scrolls sideways.
+and creates two projects through the UI, then walks the EasyML wizard with the iris data (a real
+training run of at most a minute, a prediction, a failed and a cancelled run) and writes PNGs to
+OUTPUT_DIR. Fails if a page logs a console error (a Content-Security-Policy violation, say),
+raises one, or scrolls sideways.
 """
 
 import os
@@ -19,6 +21,7 @@ import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import Page, expect, sync_playwright
+from sklearn.datasets import load_iris
 
 SETUP_TOKEN = "screenshot-setup-token-0123456789"
 ADMIN, PASSWORD = "admin", "screenshot-password"
@@ -161,7 +164,7 @@ def run(base: str, out: Path, errors: list[str]) -> None:
         for name in ("Iris species", "売上予測 2026"):
             page.fill("#project-name", name)
             page.click("#new-project button[type=submit]")
-            page.wait_for_selector(f".project-card__name:text-is('{name}')")
+            page.wait_for_selector(f".project-card__link:text-is('{name}')")
             wait_settled(page)
         s.shot(page, "home-projects-toast-en-light-desktop", full_page=False)
         page.fill("#project-name", "   ")  # blank: the server's inline error
@@ -220,7 +223,177 @@ def run(base: str, out: Path, errors: list[str]) -> None:
         expect(page.locator("#toasts .toast-danger")).to_have_count(3)
         page.context.close()
 
+        easyml(s, base)
         browser.close()
+
+
+def write_data(directory: Path) -> dict[str, Path]:
+    """The CSV files the wizard is shown with."""
+    frame = load_iris(as_frame=True).frame
+    frame["species"] = frame.pop("target").map({0: "setosa", 1: "versicolor", 2: "virginica"})
+    files = {
+        "iris": directory / "iris.csv",
+        "iris_test": directory / "iris_test.csv",
+        "partial": directory / "iris_partial.csv",
+        "empty": directory / "empty.csv",
+        "gaps": directory / "gaps.csv",
+    }
+    frame.to_csv(files["iris"], index=False)
+    frame.drop(columns=["species"]).to_csv(files["iris_test"], index=False)
+    frame[["sepal length (cm)", "petal width (cm)"]].to_csv(files["partial"], index=False)
+    files["empty"].write_bytes(b"")
+    gaps = frame.head(60).copy()
+    gaps.loc[::7, "species"] = None  # the column to predict has gaps: training refuses it
+    gaps.to_csv(files["gaps"], index=False)
+    return files
+
+
+def upload_file(page: Page, path: Path) -> None:
+    page.set_input_files("#upload-file", str(path))
+    page.click("form[data-upload-form] button[type=submit]")
+    page.wait_for_load_state()
+
+
+def shoot_all(s: "Shooter", base: str, url: str, name: str, langs=("en",)) -> None:
+    for lang, scheme, viewport in s.variants(langs):
+        page = s.page(scheme, viewport, lang)
+        sign_in(page, base)
+        page.goto(base + url)
+        wait_settled(page)
+        s.shot(page, f"{name}-{lang}-{scheme}-{viewport}")
+        page.context.close()
+
+
+def wait_for_url(page: Page, pattern: str, seconds: int) -> None:
+    """Wait while the page polls (wait_for_url evaluates nothing, so the CSP allows it)."""
+    page.wait_for_url(pattern, timeout=seconds * 1000)
+
+
+def easyml(s: "Shooter", base: str) -> None:
+    with tempfile.TemporaryDirectory() as work:
+        files = write_data(Path(work))
+        page = s.page("light", "desktop")
+        sign_in(page, base)
+        page.click(".project-card__link:text-is('Iris species')")
+        page.wait_for_url("**/projects/*")
+        project = page.url.removeprefix(base)
+        page.context.close()
+        shoot_all(s, base, project, "project-empty")
+        shoot_all(s, base, project + "/upload", "upload")
+
+        # Upload errors in plain words, then the real upload.
+        page = s.page("light", "desktop")
+        sign_in(page, base)
+        page.goto(base + project + "/upload")
+        upload_file(page, files["empty"])
+        expect(page.locator("#upload-error")).to_contain_text("The file is empty")
+        s.shot(page, "upload-error-en-light-desktop")
+        upload_file(page, files["iris"])
+        page.wait_for_url("**/analyze")
+        analysis = page.url.removeprefix(base)
+
+        # Changing the column to predict refreshes the section below it (HTMX) and keeps focus.
+        page.focus("#target-select")
+        page.select_option("#target-select", "petal width (cm)")
+        wait_settled(page)
+        expect(page.locator("#task-regression")).to_be_checked()
+        expect(page.locator("#target-select")).to_be_focused()
+        s.shot(page, "analysis-other-target-en-light-desktop")
+        page.select_option("#target-select", "species")
+        wait_settled(page)
+        expect(page.locator("#task-classification")).to_be_checked()
+        # Typing custom minutes picks "other"; no input column is refused inline by the server.
+        page.fill("#runtime-custom-minutes", "5")
+        expect(page.locator("#runtime-custom")).to_be_checked()
+        page.click("[data-check-none]")
+        page.click("#run-button")
+        page.wait_for_selector("#run-errors")
+        expect(page.locator("#run-errors")).to_be_focused()
+        s.shot(page, "analysis-error-en-light-desktop")
+        page.context.close()
+        shoot_all(s, base, analysis, "analysis", ("en", "ja"))
+
+        # Train for at most a minute; the progress page polls and moves on by itself.
+        page = s.page("light", "desktop")
+        sign_in(page, base)
+        page.goto(base + analysis)
+        page.check("#runtime-1")
+        page.click("#run-button")
+        page.wait_for_url("**/jobs/*")
+        job = page.url.removeprefix(base)
+        page.wait_for_selector("[data-job-status=running]", timeout=60_000)
+        page.wait_for_timeout(3000)  # a few polls: models are being tried
+        wait_settled(page)
+        for lang, scheme, viewport in s.variants():
+            other = s.page(scheme, viewport, lang)
+            sign_in(other, base)
+            other.goto(base + job)
+            if other.locator("[data-job-status=running]").count():
+                s.shot(other, f"progress-{lang}-{scheme}-{viewport}")
+            other.context.close()
+        page.click("details.confirm > summary")
+        s.shot(page, "progress-cancel-panel-en-light-desktop", full_page=False)
+        page.click("[data-confirm-close]")
+        expect(page.locator("details.confirm > summary")).to_be_focused()
+        wait_for_url(page, "**/summary", 180)
+        summary = page.url.removeprefix(base)
+        page.context.close()
+        shoot_all(s, base, summary, "summary", ("en", "ja"))
+        shoot_all(s, base, job, "progress-done")
+        model = summary.removesuffix("/summary")
+
+        # A new prediction: the columns the model needs, a file missing some, then the real one.
+        shoot_all(s, base, model + "/predict", "predict")
+        page = s.page("light", "desktop")
+        sign_in(page, base)
+        page.goto(base + model + "/predict")
+        upload_file(page, files["partial"])
+        expect(page.locator("#upload-error")).to_contain_text("missing 2 columns")
+        s.shot(page, "predict-missing-en-light-desktop")
+        upload_file(page, files["iris_test"])
+        page.wait_for_url("**/predict?dataset=*")
+        columns = page.url.removeprefix(base)
+        page.uncheck("#out-1")
+        page.click("form[data-run-form] button[type=submit]")
+        wait_for_url(page, "**/result", 120)
+        result = page.url.removeprefix(base)
+        link = page.locator("a[download][href*='/download']").first.get_attribute("href")
+        response = page.request.get(base + link)
+        assert response.ok and "predict_iris_test.csv" in response.headers["content-disposition"]
+        page.context.close()
+        shoot_all(s, base, columns, "predict-columns")
+        shoot_all(s, base, result, "result")
+
+        # A run that fails (gaps in the column to predict) and one that is cancelled.
+        page = s.page("light", "desktop")
+        sign_in(page, base)
+        page.goto(base + project + "/upload")
+        upload_file(page, files["gaps"])
+        page.wait_for_url("**/analyze")
+        s.shot(page, "analysis-warning-en-light-desktop")
+        page.check("#runtime-1")
+        page.click("#run-button")
+        page.wait_for_url("**/jobs/*")
+        failed = page.url.removeprefix(base)
+        page.wait_for_selector("[data-job-status=failed]", timeout=120_000)
+        page.goto(base + analysis)
+        page.check("#runtime-1")
+        page.click("#run-button")
+        page.wait_for_url("**/jobs/*")
+        page.click("details.confirm > summary")
+        page.click("details.confirm button[type=submit]")
+        page.wait_for_selector("[data-job-status=cancelled]", timeout=60_000)
+        cancelled = page.url.removeprefix(base)
+        page.context.close()
+        shoot_all(s, base, failed, "progress-failed")
+        shoot_all(s, base, cancelled, "progress-cancelled")
+        shoot_all(s, base, project, "project")
+
+        page = s.page("dark", "phone")
+        sign_in(page, base)
+        page.goto(base + "/no-such-page")
+        s.shot(page, "not-found-en-dark-phone")
+        page.context.close()
 
 
 def main() -> None:
@@ -235,7 +408,7 @@ def main() -> None:
             **os.environ,
             "FIONE_DATA_DIR": data_dir,
             "FIONE_SETUP_TOKEN": SETUP_TOKEN,
-            "FIONE_RUNNER_ENABLED": "false",
+            "FIONE_RUNNER_ENABLED": "true",
             # The script signs in with a wrong password once per variant on purpose.
             "FIONE_LOGIN_MAX_FAILURES": "1000",
         }

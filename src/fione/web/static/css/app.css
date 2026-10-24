@@ -1595,6 +1595,13 @@ select.input {
   height: 5.5rem;
 }
 
+@media (max-width: 35.99rem) {
+  .mascot-lg {
+    width: 3.5rem;
+    height: 3.5rem;
+  }
+}
+
 .mascot__head {
   fill: var(--color-primary);
 }
@@ -1672,8 +1679,8 @@ select.input {
 }
 
 .star-on {
-  fill: var(--color-warning-text);
-  stroke: var(--color-warning-text);
+  fill: var(--color-star);
+  stroke: var(--color-star);
 }
 
 .star-off {
@@ -1893,9 +1900,15 @@ select.input {
   font-variant-numeric: tabular-nums;
 }
 
-.table-wrap-limited {
-  max-height: 24rem;
-  overflow: auto;
+/* Column names are the user's: shown as written, not upper-cased */
+.table-data thead th {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--text-sm);
+}
+
+.table-data thead th.num {
+  text-align: right;
 }
 
 .table-compact th,
@@ -2005,12 +2018,19 @@ select.input {
     display: none;
   }
 
+  /* Name over kind, the empty share at the right, the reason below */
   .column-list__item {
     grid-template-columns: 1.5rem minmax(0, 1fr) auto;
   }
 
-  .column-list-readonly .column-list__item {
-    grid-template-columns: minmax(0, 1fr) auto;
+  .column-list__item > :first-child {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .column-list__item > .column-list__name {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .column-list__kind {
@@ -2018,16 +2038,27 @@ select.input {
     grid-row: 2;
   }
 
-  .column-list-readonly .column-list__kind {
-    grid-column: 1;
-  }
-
   .column-list__missing {
+    grid-column: 3;
     grid-row: 1 / span 2;
   }
 
   .column-list__why {
     grid-column: 2 / -1;
+    grid-row: 3;
+  }
+
+  .column-list-readonly .column-list__item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .column-list-readonly .column-list__item > .column-list__name,
+  .column-list-readonly .column-list__kind {
+    grid-column: 1;
+  }
+
+  .column-list-readonly .column-list__missing {
+    grid-column: 2;
   }
 }
 
@@ -2224,7 +2255,7 @@ select.input {
   display: grid;
   gap: var(--space-5);
   padding: var(--space-6) var(--space-5);
-  border-top: 4px solid var(--color-warning-text);
+  border-top: 4px solid var(--color-star);
 }
 
 @media (min-width: 48rem) {
@@ -2326,6 +2357,11 @@ select.input {
 .copy-box {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: var(--space-2);
   width: 100%;
+}
+
+.copy-box .code-block {
+  align-self: stretch;
 }

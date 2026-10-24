@@ -173,6 +173,7 @@ def test_the_iris_flow_ends_with_a_star_rating_and_a_prediction_download(runner_
 
     result = client.get(result_url).text
     assert result.count("<tr>") == 1 + 20  # header and the first 20 rows
+    assert not re.search(r"\d\.\d{10,}<", result)  # probabilities shown to 6 digits
     download = re.search(r'href="(/api/v1/projects/[^"]+/download)"', result).group(1)
     r = client.get(download)
     assert r.status_code == 200

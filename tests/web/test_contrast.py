@@ -29,6 +29,8 @@ PAIRS = [
     *[("focus", bg, 3.0) for bg in ("bg", "surface", "surface-2")],
     ("primary", "surface", 3.0),
     ("danger", "surface", 3.0),
+    ("star", "surface", 3.0),
+    ("star", "surface-2", 3.0),
 ]
 
 

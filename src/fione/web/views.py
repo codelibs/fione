@@ -69,7 +69,15 @@ def _iso(value) -> str:
     return when.strftime("%Y-%m-%dT%H:%M:%SZ") if when else ""
 
 
-templates.env.filters.update(utc=_utc, iso=_iso)
+def _cellnum(value) -> str:
+    """A number in a data preview: floats to 6 significant digits (downloads keep them all)."""
+    if not isinstance(value, float):
+        return str(value)
+    text = f"{value:.6g}"
+    return text if any(c in text for c in ".eni") else text + ".0"  # 3.0 stays a float
+
+
+templates.env.filters.update(utc=_utc, iso=_iso, cellnum=_cellnum)
 
 
 class UiError(Exception):
