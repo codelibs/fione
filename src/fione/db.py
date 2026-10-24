@@ -103,6 +103,27 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX models_project_id_created_at ON models(project_id, created_at);
     """,
+    """
+    CREATE TABLE modules (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        params_json TEXT NOT NULL,
+        source_sha256 TEXT NOT NULL,
+        uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at REAL NOT NULL
+    );
+    CREATE TABLE module_models (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        module_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        state_key TEXT NOT NULL,
+        source_dataset_id INTEGER REFERENCES datasets(id) ON DELETE SET NULL,
+        created_at REAL NOT NULL
+    );
+    CREATE INDEX module_models_project_id ON module_models(project_id);
+    """,
 ]
 
 
