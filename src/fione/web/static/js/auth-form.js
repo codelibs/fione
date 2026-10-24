@@ -25,6 +25,11 @@
       button.setAttribute("aria-busy", busy ? "true" : "false");
     }
 
+    // Back/forward cache: a page left mid-submit comes back with a usable button.
+    window.addEventListener("pageshow", function (event) {
+      if (event.persisted) setBusy(false);
+    });
+
     form.addEventListener("submit", function (event) {
       event.preventDefault();
       alertBox.hidden = true;

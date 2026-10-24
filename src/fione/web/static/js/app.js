@@ -104,6 +104,7 @@
   // ---- Toasts ---------------------------------------------------------------------------
   var toasts = document.getElementById("toasts");
   var TOAST_MS = 6000;
+  var MAX_DANGER_TOASTS = 3; // errors stay until closed, so only the latest few are kept
 
   function dismiss(toast) {
     if (toast.parentNode) toast.parentNode.removeChild(toast);
@@ -127,9 +128,18 @@
   }
 
   // Built from the server-rendered <template data-toast-template="success|danger">.
+  // The same message twice in a row shows once; at most MAX_DANGER_TOASTS errors are kept.
   function showToast(message, kind) {
+    kind = kind === "danger" ? "danger" : "success";
     var template = document.querySelector('template[data-toast-template="' + kind + '"]');
     if (!template || !toasts) return;
+    var last = toasts.lastElementChild;
+    if (last && last.classList.contains("toast-" + kind)) {
+      var lastText = last.querySelector(".toast__text");
+      if (lastText && lastText.textContent === message) return;
+    }
+    var errors = toasts.querySelectorAll(".toast-danger");
+    if (kind === "danger" && errors.length >= MAX_DANGER_TOASTS) dismiss(errors[0]);
     var toast = template.content.firstElementChild.cloneNode(true);
     toast.querySelector(".toast__text").textContent = message;
     toasts.appendChild(toast);

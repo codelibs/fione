@@ -203,6 +203,21 @@ def run(base: str, out: Path, errors: list[str]) -> None:
         expect(page.locator("#light-panel-overview")).to_be_hidden()
         page.locator("#light-tab-columns").scroll_into_view_if_needed()
         s.shot(page, "design-tabs-keyboard-en-dark-desktop", full_page=False)
+
+        # Toasts: no kind means success; errors are capped at 3 (oldest dropped), a repeated
+        # message shows once, and only confirmations go away by themselves.
+        page.evaluate("window.fione.showToast('Saved.')")
+        for message in ("Error 1", "Error 2", "Error 2", "Error 3", "Error 4"):
+            page.evaluate("m => window.fione.showToast(m, 'danger')", message)
+        expect(page.locator("#toasts .toast-success")).to_have_count(1)
+        expect(page.locator("#toasts .toast-danger .toast__text")).to_have_text(
+            ["Error 2", "Error 3", "Error 4"]
+        )
+        page.wait_for_timeout(400)  # let the slide-in animation finish
+        s.shot(page, "toasts-en-dark-desktop", full_page=False)
+        page.wait_for_timeout(6500)
+        expect(page.locator("#toasts .toast-success")).to_have_count(0)
+        expect(page.locator("#toasts .toast-danger")).to_have_count(3)
         page.context.close()
 
         browser.close()

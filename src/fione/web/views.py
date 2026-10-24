@@ -65,8 +65,9 @@ def _same_site_path(value: str) -> bool:
 
 def safe_next(value: str | None) -> str:
     """``value`` if it is a path on this site, else ``/``: one leading slash, no backslash
-    or control character (browsers read ``/\\host`` and ``/<tab>/host`` as ``//host``),
-    also after percent-decoding it (``/%2F%2Fhost``, double-encoded too)."""
+        or control character (browsers read ``/\\host`` and ``/<tab>/host`` as ``//host``),
+        also after each of ``NEXT_DECODE_ROUNDS`` percent-decodings (``/%2F%2Fhost``, and double
+    or triple encoded); the original string is returned."""
     if not value or len(value) > MAX_NEXT_LENGTH:
         return "/"
     decoded = value
@@ -74,7 +75,7 @@ def safe_next(value: str | None) -> str:
         if not _same_site_path(decoded):
             return "/"
         decoded = unquote(decoded)
-    return value
+    return value if _same_site_path(decoded) else "/"
 
 
 def language(request: Request) -> str:

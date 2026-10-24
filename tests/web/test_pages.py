@@ -146,6 +146,8 @@ def test_garbage_session_cookie_redirects_to_login(admin_client):
         ("/%2f/evil.example", "/"),
         ("/%5Cevil.example", "/"),
         ("/%252F%252Fevil.example", "/"),
+        ("/%25252F%25252Fevil.example", "/"),
+        ("/%25255Cevil.example", "/"),
         ("/%09/evil.example", "/"),
         ("/?q=a%2Fb", "/?q=a%2Fb"),
     ],
@@ -332,6 +334,8 @@ def test_language_switch_sets_the_cookie(admin_client):
         "/%2F%2Fevil.example",
         "/%5Cevil.example",
         "/%252F%252Fevil.example",
+        "/%25252F%25252Fevil.example",
+        "/%25255Cevil.example",
     ],
 )
 def test_language_switch_next_stays_on_site(admin_client, target):
