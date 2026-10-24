@@ -5,9 +5,9 @@ import threading
 
 import pyarrow as pa
 import pytest
-from api_helpers import add_user, bearer, make_settings
 from fastapi.testclient import TestClient
 
+from api_helpers import add_user, bearer, make_settings
 from fione.api import app as app_module
 from fione.api import routes_projects
 from fione.api.app import create_app
@@ -27,6 +27,8 @@ def test_docs_and_schema_need_no_auth(client):
     upload = schema["paths"]["/api/v1/projects/{project_id}/datasets"]["post"]
     assert "multipart/form-data" in upload["requestBody"]["content"]
     assert client.get("/docs").status_code == 404 and client.get("/redoc").status_code == 404
+    assert client.get("/api/docs/oauth2-redirect").status_code == 200
+    assert client.get("/docs/oauth2-redirect").status_code == 404
 
 
 def test_unknown_routes_and_methods_use_the_error_shape(client):

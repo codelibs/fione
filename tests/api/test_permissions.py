@@ -15,9 +15,9 @@ from contextlib import closing
 from dataclasses import dataclass, field
 
 import pytest
-from api_helpers import CSV, PW, make_settings, store_model
 from fastapi.testclient import TestClient
 
+from api_helpers import CSV, PW, make_settings, store_model
 from fione import db
 from fione.api.app import DB_FILE, create_app
 from fione.auth import service as auth

@@ -5,8 +5,8 @@ import threading
 import time
 
 import pytest
-from api_helpers import PW, add_user, bearer, connect, login, upload
 
+from api_helpers import PW, add_user, bearer, connect, login, upload
 from fione import db
 from fione.api import routes_projects
 from fione.auth import service as auth

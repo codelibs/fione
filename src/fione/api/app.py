@@ -143,6 +143,8 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
         version=__version__,
         lifespan=lifespan,
         docs_url="/api/docs",
+        # Under /api with the docs page: outside it, the UI's strict CSP would apply.
+        swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )

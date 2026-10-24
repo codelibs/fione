@@ -9,7 +9,6 @@ and creates two projects through the UI, then writes PNGs to OUTPUT_DIR. Fails i
 a console error (a Content-Security-Policy violation, say), raises one, or scrolls sideways.
 """
 
-import json
 import os
 import socket
 import subprocess
@@ -19,7 +18,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, expect, sync_playwright
 
 SETUP_TOKEN = "screenshot-setup-token-0123456789"
 ADMIN, PASSWORD = "admin", "screenshot-password"
@@ -55,16 +54,6 @@ def wait_until_up(base: str, server: subprocess.Popen) -> None:
         except OSError:
             time.sleep(0.3)
     raise SystemExit("the server did not start")
-
-
-def create_admin(base: str) -> None:
-    body = {"setup_token": SETUP_TOKEN, "username": ADMIN, "password": PASSWORD}
-    request = urllib.request.Request(
-        f"{base}/api/v1/auth/first-admin",
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    urllib.request.urlopen(request, timeout=30)
 
 
 class Shooter:
@@ -128,7 +117,26 @@ def run(base: str, out: Path, errors: list[str]) -> None:
             s.shot(page, f"first-admin-{lang}-{scheme}-{viewport}")
             page.context.close()
 
-        create_admin(base)
+        # The first admin, created through the form: a wrong token, then mismatched passwords
+        # (both shown as translated errors), then the real thing.
+        page = s.page("light", "desktop")
+        page.goto(f"{base}/first-admin")
+        page.fill("#setup-token", "not-the-token")
+        page.fill("#setup-username", ADMIN)
+        page.fill("#setup-password", PASSWORD)
+        page.fill("#setup-password2", PASSWORD)
+        submit = "form[data-json-form] button[type=submit]"
+        page.click(submit)
+        expect(page.locator("[data-form-error]")).to_contain_text("setup token is not correct")
+        s.shot(page, "first-admin-error-en-light-desktop", full_page=False)
+        page.fill("#setup-token", SETUP_TOKEN)
+        page.fill("#setup-password2", "something-else")
+        page.click(submit)
+        expect(page.locator("[data-form-error]")).to_contain_text("do not match")
+        page.fill("#setup-password2", PASSWORD)
+        page.click(submit)
+        page.wait_for_url(f"{base}/")
+        page.context.close()
 
         for lang, scheme, viewport in variants:
             page = s.page(scheme, viewport, lang)
@@ -174,6 +182,28 @@ def run(base: str, out: Path, errors: list[str]) -> None:
             page.goto(f"{base}/_design")
             s.shot(page, f"design-{lang}-{scheme}-{viewport}")
             page.context.close()
+
+        # The theme toggle switches and is remembered across a reload.
+        page = s.page("light", "desktop")
+        sign_in(page, base)
+        page.click("[data-theme-toggle]")
+        page.reload()
+        expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+        expect(page.locator("[data-theme-toggle]").first).to_have_attribute("aria-pressed", "true")
+        s.shot(page, "theme-toggled-dark-en-light-desktop", full_page=False)
+
+        # Tabs by keyboard: ArrowRight selects and shows the next tab; the focus ring shows.
+        page.goto(f"{base}/_design")
+        first = page.locator("#light-tab-overview")
+        first.focus()
+        page.keyboard.press("ArrowRight")
+        expect(page.locator("#light-tab-columns")).to_have_attribute("aria-selected", "true")
+        expect(page.locator("#light-tab-columns")).to_be_focused()
+        expect(page.locator("#light-panel-columns")).to_be_visible()
+        expect(page.locator("#light-panel-overview")).to_be_hidden()
+        page.locator("#light-tab-columns").scroll_into_view_if_needed()
+        s.shot(page, "design-tabs-keyboard-en-dark-desktop", full_page=False)
+        page.context.close()
 
         browser.close()
 

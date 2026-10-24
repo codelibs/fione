@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from starlette.requests import Request
+
 from api_helpers import (
     FAST_CONFIG,
     add_user,
@@ -17,8 +19,6 @@ from api_helpers import (
     upload,
     wait_job,
 )
-from starlette.requests import Request
-
 from fione.auth.roles import Role
 from fione.engine.events import Event
 from fione.jobs import store
