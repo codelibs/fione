@@ -388,5 +388,7 @@
   "analysis.target_error.single_row_class": "The value “{label}” of the column to predict appears in only one row ({n} such values). Each value needs at least 2 rows: add rows or remove those.",
   "analysis.error.target_data": "Training would refuse the column to predict as it is. See the red notice above the columns for what to change.",
   "analysis.error.too_many_fields": "This data has too many columns to choose from in the form. Remove columns you do not need from the file and upload it again.",
-  "job.gone_hint": "This run can no longer be shown here. It may have been deleted, or your access to the project changed."
+  "job.gone_hint": "This run can no longer be shown here. It may have been deleted, or your access to the project changed.",
+  "job.reload_hint": "The latest status could not be loaded. The run itself may still be going: reload the page to see it.",
+  "job.reload": "Reload the page"
 }

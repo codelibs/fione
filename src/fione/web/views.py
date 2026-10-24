@@ -30,6 +30,7 @@ from fione.auth.roles import Role
 from fione.projects import service as projects
 from fione.version import __version__
 from fione.web.cache import LruCache
+from fione.web.headers import ui_headers
 
 WEB_DIR = Path(__file__).parent
 STATIC_PREFIX = "/static"
@@ -367,7 +368,10 @@ def install(app: FastAPI) -> None:
     async def internal_error(request: Request, exc: Exception) -> Response:
         if wants_html(request):
             log.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
-            return error_page(request, 500, "error.generic")
+            # Served by Starlette's ServerErrorMiddleware, outside UIHeaders: set them here.
+            response = error_page(request, 500, "error.generic")
+            ui_headers(response.headers)
+            return response
         return await api_internal_error(request, exc)
 
     app.add_exception_handler(Exception, internal_error)

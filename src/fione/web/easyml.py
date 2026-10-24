@@ -566,6 +566,8 @@ def run(request: Request, conn: Conn, pid: str, did: str, form: Posted) -> Respo
         )
     except TargetError:  # the warning above the columns says why, in the user's language
         errors = {"target": "analysis.error.target_data"}
+    except DatasetNotFound:  # its data is gone from storage
+        raise UiError(404, "error.not_found") from None
     except (ValueError, PermissionError) as e:  # ConfigError is a ValueError
         errors, detail = {"form": "analysis.error.config"}, redact(str(e))
     if errors:
@@ -709,23 +711,23 @@ def job_status(request: Request, conn: Conn, pid: str, jid: str) -> Response:
     except UiError as e:
         if not polling or e.status == 401:  # 401: HTMX is sent to the login page
             raise
-        return _polling_stopped(request, e.key)
-    except Exception:
+        return _polling_stopped(request, e.key, "job.gone_hint")
+    except Exception:  # maybe transient (a busy database): reloading may recover
         if not polling:
             raise
         log.exception("the status of job %s could not be shown", jid)
-        return _polling_stopped(request, "error.generic")
+        return _polling_stopped(request, "error.generic", "job.reload_hint")
     response = _view(request, "_job_status.html", ctx, fragment=True, **view)
     if polling and view["job"].status == JobStatus.DONE and view["next_url"]:
         response.headers["HX-Redirect"] = view["next_url"]
     return response
 
 
-def _polling_stopped(request: Request, key: str) -> Response:
+def _polling_stopped(request: Request, key: str, hint: str) -> Response:
     """For the poller, a refusal or failure as a final fragment: HTMX swaps a 286 and stops
     polling (an error status would be left unswapped and polled again forever)."""
     message = i18n.t(key, language(request))
-    return render(request, "_job_gone.html", status=STOP_POLLING, message=message)
+    return render(request, "_job_gone.html", status=STOP_POLLING, message=message, hint=hint)
 
 
 @router.post("/projects/{pid}/jobs/{jid}/cancel")

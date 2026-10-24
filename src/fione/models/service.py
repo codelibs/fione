@@ -230,8 +230,12 @@ def submit_training(
 
 def check_target(storage: Storage, dataset, target: str, task: str, nfolds: int = 5) -> str:
     """The task training ``dataset`` on ``target`` would have (``auto`` resolved as the engine
-    does); ``TargetError`` if the engine would refuse the whole target column."""
-    y = read_dataset(storage, dataset, [target])[target]
+    does); ``TargetError`` if the engine would refuse the whole target column, and
+    ``DatasetNotFound`` if the dataset's data is gone from storage."""
+    try:
+        y = read_dataset(storage, dataset, [target])[target]
+    except KeyError:  # storage: no such object
+        raise DatasetNotFound(dataset.id) from None
     resolved = infer_task(y) if task == "auto" else task
     validate_target(y, resolved, nfolds)
     return resolved

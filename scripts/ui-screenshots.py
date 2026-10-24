@@ -12,6 +12,7 @@ raises one, or scrolls sideways.
 """
 
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -258,6 +259,29 @@ def upload_file(page: Page, path: Path) -> None:
     page.wait_for_load_state()
 
 
+def submit_twice(page: Page, selector: str, suffix: str) -> int:
+    """Click a submit button, then click it again while its request is held back; returns how
+    many requests the form sent. easyml.js must make it one (the busy button is disabled, and
+    a busy form's second submit is cancelled); without it the browser would send a second."""
+    held = []
+    pattern = re.compile(re.escape(suffix) + "$")
+    page.route(pattern, lambda route: held.append(route))  # each request waits here
+    button = page.locator(selector)
+    button.scroll_into_view_if_needed()
+    box = button.bounding_box()
+    try:
+        button.click(no_wait_after=True)
+        page.wait_for_timeout(300)
+        # The page is navigating, so locators would wait: click where the button is.
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.wait_for_timeout(300)
+        return len(held)
+    finally:
+        if held:
+            held[-1].continue_()  # the last one is the one the page waits for
+        page.unroute(pattern)
+
+
 def shoot_all(
     s: "Shooter", base: str, url: str, name: str, langs=("en",), username: str = ADMIN
 ) -> None:
@@ -324,7 +348,9 @@ def easyml(s: "Shooter", base: str) -> None:
         sign_in(page, base)
         page.goto(base + analysis)
         page.check("#runtime-1")
-        page.click("#run-button")
+        runs = submit_twice(page, "#run-button", "/run")
+        if runs != 1:
+            s.errors.append(f"submitting the run form twice sent {runs} requests")
         page.wait_for_url("**/jobs/*")
         job = page.url.removeprefix(base)
         page.wait_for_selector("[data-job-status=running]", timeout=60_000)
@@ -401,7 +427,9 @@ def easyml(s: "Shooter", base: str) -> None:
         page.click("#run-button")
         page.wait_for_url("**/jobs/*")
         page.click("details.confirm > summary")
-        page.click("details.confirm button[type=submit]")
+        cancels = submit_twice(page, "details.confirm button[type=submit]", "/cancel")
+        if cancels != 1:
+            s.errors.append(f"submitting the cancel form twice sent {cancels} requests")
         page.wait_for_selector("[data-job-status=cancelled]", timeout=60_000)
         cancelled = page.url.removeprefix(base)
         page.context.close()

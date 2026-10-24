@@ -14,6 +14,16 @@ CONTENT_SECURITY_POLICY = (
 )
 
 
+def ui_headers(headers: MutableHeaders, *, page: bool = True) -> None:
+    """Set the UI's security headers; ``page``: also the CSP and ``no-store``. Also used for
+    responses sent from outside this middleware (the HTML 500 page)."""
+    headers["X-Content-Type-Options"] = "nosniff"
+    headers["Referrer-Policy"] = "same-origin"
+    if page:
+        headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+        headers["Cache-Control"] = "no-store"
+
+
 class UIHeaders:
     def __init__(self, app: ASGIApp, *, static_prefix: str = "/static/"):
         self.app = app
@@ -28,12 +38,7 @@ class UIHeaders:
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
-                headers = MutableHeaders(scope=message)
-                headers["X-Content-Type-Options"] = "nosniff"
-                headers["Referrer-Policy"] = "same-origin"
-                if page:
-                    headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
-                    headers["Cache-Control"] = "no-store"
+                ui_headers(MutableHeaders(scope=message), page=page)
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

@@ -25,11 +25,13 @@ from fione.jobs.store import JobStatus
 from fione.models import service as models
 from fione.projects import service as projects
 from fione.web import easyml, uploads
+from fione.web.headers import CONTENT_SECURITY_POLICY
 from web_helpers import FAST, iris_test_csv, make_world
 
 INPUTS = ["sepal length (cm)", "sepal width (cm)", "petal length (cm)", "petal width (cm)"]
 XSS = ["<script>alert(1)</script>", '"><img src=x onerror=alert(1)>']
 HTML = {"Accept": "text/html,application/xhtml+xml"}
+CSP = CONTENT_SECURITY_POLICY
 
 
 def location(r) -> str:
@@ -762,6 +764,7 @@ def test_polling_stops_when_the_job_cannot_be_shown(make_client, monkeypatch):
     r = world.client.get(status, headers=hx)
     assert r.status_code == 286 and "hx-trigger" not in r.text
     assert "We could not find that page" in r.text and 'hx-swap-oob="true"' in r.text
+    assert "may have been deleted" in r.text and "Reload the page" not in r.text
     assert world.client.get(status, headers=HTML).status_code == 404  # a page view: 404 page
 
     world.login("ed")
@@ -773,6 +776,7 @@ def test_polling_stops_when_the_job_cannot_be_shown(make_client, monkeypatch):
     r = world.client.get(status, headers=hx)
     assert r.status_code == 286 and "Something went wrong" in r.text
     assert "database gone" not in r.text
+    assert "may still be going" in r.text and "may have been deleted" not in r.text
 
 
 def models_owner(conn):
@@ -822,6 +826,11 @@ def test_an_unexpected_error_is_an_html_page_for_browsers(make_client):
     assert r.status_code == 500 and "text/html" in r.headers["content-type"]
     assert "Something went wrong" in r.text and "Sign out" in r.text  # the header is kept
     assert "Traceback" not in r.text
+    # Served outside the UI headers middleware, but with the same headers as every page.
+    assert r.headers["content-security-policy"] == CSP
+    assert r.headers["cache-control"] == "no-store"
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["referrer-policy"] == "same-origin"
     api = world.client.get(
         f"/api/v1/projects/{world.p}/datasets/{world.ids[world.p]['train']}/preview", headers=HTML
     )
@@ -865,3 +874,22 @@ def test_objects_of_two_projects_cannot_be_mixed(make_client):
     form = {"csrf_token": csrf, "dataset_id": str(q_test), "include": ["petal width (cm)"]}
     r = world.client.post(world.path("/projects/{p}/models/{model}/predict/run"), data=form)
     assert r.status_code == 404 and job_count(world.client) == 4
+
+
+def test_training_on_a_dataset_whose_data_is_gone_is_404(make_client):
+    """Not a 500: the target check reads the column, and the file is missing."""
+    world = make_world(make_client())
+    csrf = world.login("ed")
+    train = world.ids[world.p]["train"]
+    with closing(connect(world.client)) as conn:
+        key = conn.execute("SELECT storage_key FROM datasets WHERE id = ?", (train,)).fetchone()[0]
+    world.client.app.state.storage.delete(key)
+    r = world.client.post(
+        f"/api/v1/projects/{world.p}/jobs/automl",
+        json={"dataset_id": train, "config": {"target": "species"}},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert r.status_code == 404 and r.json()["error"] == "dataset not found"
+    r = world.client.post(world.path("/projects/{p}/datasets/{train}/run"), data=run_form(csrf))
+    assert r.status_code == 404 and "text/html" in r.headers["content-type"]
+    assert job_count(world.client) == 4
