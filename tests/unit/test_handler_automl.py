@@ -21,7 +21,7 @@ from fione.models import service as models
 from fione.projects import service as projects
 from fione.projects.ingest import ingest_csv
 from fione.projects.service import DatasetType
-from fione.storage import open_storage
+from fione.storage import LocalStorage, open_storage
 
 TERMINAL = {JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELLED}
 CONFIG = {"target": "species", "max_runtime_secs": 20, "max_models": 4, "nfolds": 3}
@@ -308,8 +308,29 @@ def test_a_cancel_that_arrives_while_saving_takes_the_model_back_out(
         return manifest
 
     monkeypatch.setattr(automl_handler, "save_model", save_then_cancel)
-    monkeypatch.setattr(worker, "STOP_CHECK_SECS", 0)  # no cached "not stopped" from before
     done = run_job(quick_job)
     assert done.status is JobStatus.CANCELLED
     assert model_count(conn) == 0
     assert storage.list(f"projects/{project.id}/models/") == []
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (sqlite3.IntegrityError("no such project"), "IntegrityError: no such project"),
+        (worker.JobAbort("progress lost"), "could not record progress: progress lost"),
+    ],
+)
+def test_a_failing_rollback_does_not_mask_the_original_error(
+    conn, run_job, quick_job, monkeypatch, error, message
+):
+    def fail_insert(conn, **kwargs):
+        raise error
+
+    def fail_cleanup(self, prefix):
+        raise OSError("storage down")
+
+    monkeypatch.setattr(models, "add_model", fail_insert)
+    monkeypatch.setattr(LocalStorage, "delete_prefix", fail_cleanup)
+    done = run_job(quick_job)
+    assert done.status is JobStatus.FAILED and done.message == message

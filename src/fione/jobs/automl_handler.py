@@ -1,5 +1,6 @@
 """The ``automl`` job: train on a dataset, save the model artifact, record it in ``models``."""
 
+import logging
 import time
 import uuid
 from datetime import datetime
@@ -13,12 +14,22 @@ from fione.models import service as models_service
 from fione.projects import service as projects
 from fione.projects.ingest import IngestError, read_dataset
 
+log = logging.getLogger(__name__)
+
 # Raised for what the user can fix; JobAbort and everything else keep their own handling.
 USER_ERRORS = (ConfigError, NoModelError, IngestError)
 
 
 @register_handler("automl")
 def automl(ctx: JobContext) -> None:
+    """Train, save and record a model; a cancelled run leaves no row and no objects.
+
+    Cancellation is read forced (not from the 0.5 s cache) before saving and again after the
+    row is inserted, the second time undoing the row and objects, so the worker's own forced
+    read at the end can only differ if a cancel lands in the microseconds between the two. A
+    SIGKILL during ``save_model`` can leave unreferenced objects under the project prefix;
+    ``delete_project`` removes them.
+    """
     payload = ctx.job.payload
     project_id = ctx.job.project_id
     try:
@@ -36,7 +47,7 @@ def automl(ctx: JobContext) -> None:
         raise JobUserError(str(e)) from e
     elapsed = time.monotonic() - start
     # A cancelled run is discarded whole: the worker records the job as CANCELLED.
-    if model.stop_reason == "cancelled" or ctx.should_stop():
+    if model.stop_reason == "cancelled" or ctx.should_stop(force=True):
         return
 
     prefix = f"projects/{project_id}/models/{uuid.uuid4().hex}/"
@@ -54,9 +65,13 @@ def automl(ctx: JobContext) -> None:
             storage_prefix=prefix,
         )
     except BaseException:
-        ctx.storage.delete_prefix(prefix)
+        try:
+            ctx.storage.delete_prefix(prefix)
+        except Exception:
+            # Never mask the original error (a JobAbort must stay a JobAbort).
+            log.exception("could not remove the objects under %s", prefix)
         raise
-    if ctx.should_stop():  # cancelled while saving: take the model back out
+    if ctx.should_stop(force=True):  # cancelled while saving: take the model back out
         models_service.delete_model(ctx.conn, ctx.storage, record.id)
         return
     result = {
