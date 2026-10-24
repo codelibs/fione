@@ -38,6 +38,20 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (project_id, user_id)
     );
     """,
+    """
+    CREATE TABLE datasets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('train', 'test', 'predict')),
+        n_rows INTEGER NOT NULL,
+        n_cols INTEGER NOT NULL,
+        schema_json TEXT NOT NULL,
+        storage_key TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX datasets_project_id ON datasets(project_id);
+    """,
 ]
 
 
