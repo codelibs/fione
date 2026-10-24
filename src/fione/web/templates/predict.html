@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, steps, breadcrumb, upload_field, upload_problem, guide %}
+{% block title %}{{ t('predict.title') }} · {{ record.name }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+{% set base = "/projects/" ~ pid ~ "/models/" ~ record.id %}
+<div class="container page page-narrow">
+  {{ breadcrumb(t, ctx.project, t('predict.title')) }}
+  {{ steps(t, 5) }}
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('predict.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('predict.lead', name=record.name, target=record.target) }}</p>
+  </header>
+
+  {% if columns is none %}
+  <div class="alert alert-danger" role="alert">{{ icon("alert") }}<span>{{ t('predict.error.model') }}</span></div>
+  {% elif dataset is none %}
+  {{ upload_problem(t, problem) }}
+  {% if missing %}
+  <div class="alert alert-danger" role="alert" id="upload-error" tabindex="-1" autofocus>
+    {{ icon("alert") }}
+    <div class="stack-tight">
+      <p><strong>{{ t('predict.error.missing', n=missing|length) }}</strong></p>
+      <ul class="error-list">{% for name in missing %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+      <p>{{ t('predict.error.missing_hint') }}</p>
+    </div>
+  </div>
+  {% endif %}
+  <section class="callout" aria-labelledby="needs-title">
+    <h2 class="callout__title" id="needs-title">{{ icon("info") }}{{ t('predict.needs', n=columns[0]|length) }}</h2>
+    <ul class="tag-list" role="list">{% for name in columns[0] %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+    <p class="text-sm">{{ t('predict.needs_hint', target=record.target) }}</p>
+  </section>
+  <form class="card card-padded stack" method="post" action="{{ base }}/predict" enctype="multipart/form-data" data-upload-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    {{ upload_field(t, limit, "upload-error" if (problem or missing) else "") }}
+    <div class="form-actions">
+      <a class="btn btn-ghost" href="{{ base }}/summary">{{ icon("back") }}{{ t('predict.back_summary') }}</a>
+      <button type="submit" class="btn btn-primary btn-lg"><span class="spinner" aria-hidden="true"></span>{{ icon("upload") }}{{ t('predict.upload') }}</button>
+    </div>
+  </form>
+  {% else %}
+  {% if detail %}
+  <div class="alert alert-danger" role="alert" tabindex="-1" autofocus>{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('predict.error.run') }}</strong></p><p class="alert__detail">{{ t('upload.error.detail', detail=detail) }}</p></div></div>
+  {% endif %}
+  {{ guide(t, t('predict.ready', name=dataset.name, rows="{:,}".format(dataset.n_rows))) }}
+  {% if extra %}
+  <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('predict.extra', n=extra|length) }}</span></div>
+  {% endif %}
+  <form class="stack-lg" method="post" action="{{ base }}/predict/run" data-run-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="dataset_id" value="{{ dataset.id }}">
+    <fieldset class="card card-padded fieldset" aria-describedby="output-hint">
+      <legend class="fieldset__legend">{{ t('predict.output') }}</legend>
+      <p class="field__hint" id="output-hint">{{ t('predict.output_hint') }}</p>
+      <div class="cluster cluster-tight">
+        <button type="button" class="btn btn-ghost btn-sm" data-check-all="include" hidden>{{ t('analysis.inputs_all') }}</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-check-none="include" hidden>{{ t('analysis.inputs_none') }}</button>
+      </div>
+      <ul class="column-list column-list-simple" role="list">
+        {% for name in columns[1] %}
+        <li class="column-list__item is-target">
+          <span class="column-list__check" aria-hidden="true">{{ icon("check", "icon icon-sm") }}</span>
+          <span class="column-list__name"><code>{{ name }}</code> <span class="badge badge-success">{{ t('predict.always') }}</span></span>
+        </li>
+        {% endfor %}
+        {% for name, _ in dataset.schema %}
+        <li class="column-list__item">
+          <input class="checkbox" type="checkbox" id="out-{{ loop.index }}" name="include" value="{{ name }}" checked>
+          <label class="column-list__name" for="out-{{ loop.index }}">{{ name }}{% if name in extra %} <span class="badge badge-neutral">{{ t('predict.not_used') }}</span>{% endif %}</label>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="text-muted text-sm">{{ t('predict.columns_explain') }}</p>
+    </fieldset>
+    <div class="form-actions">
+      <a class="btn btn-ghost" href="{{ base }}/predict">{{ icon("back") }}{{ t('predict.other_file') }}</a>
+      <button type="submit" class="btn btn-primary btn-lg"><span class="spinner" aria-hidden="true"></span>{{ icon("play") }}{{ t('predict.run') }}</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

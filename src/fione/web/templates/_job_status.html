@@ -1,0 +1,66 @@
+{% from "_macros.html" import icon, status_pill, guide %}
+{# The polled job status. Finished jobs render without hx-trigger, so polling stops; the
+   cancel panel lives outside (polling would reset it) and is removed out of band. #}
+{% set pid = ctx.project.id %}
+<section class="card card-padded stack job-status" id="job-status" aria-labelledby="job-status-title" data-job-status="{{ job.status.value }}"{% if not terminal %} hx-get="/projects/{{ pid }}/jobs/{{ job.id }}/status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <div class="job-status__head">
+    <h2 class="section-header__title" id="job-status-title">{{ t('job.status') }}</h2>
+    {{ status_pill(t, job.status.value) }}
+  </div>
+  <p class="job-status__stage" data-announce>{{ t(stage, **stage_vars) }}</p>
+  {% if not terminal or job.status.value == "done" %}
+  <div class="field">
+    {% if progress is none %}
+    <progress class="progress" aria-label="{{ t('job.progress') }}"></progress>
+    {% else %}
+    <progress class="progress" max="100" value="{{ (progress * 100)|round|int }}" aria-label="{{ t('job.progress') }}">{{ (progress * 100)|round|int }}%</progress>
+    {% endif %}
+  </div>
+  {% endif %}
+  <dl class="facts">
+    {% if elapsed %}<div><dt>{{ t('job.elapsed') }}</dt><dd>{{ elapsed }}{% if budget and job.kind == "automl" %} <span class="text-muted">/ {{ budget }}</span>{% endif %}</dd></div>{% endif %}
+    {% if remaining and not terminal %}<div><dt>{{ t('job.remaining') }}</dt><dd>{{ t('job.remaining_at_most', time=remaining) }}</dd></div>{% endif %}
+    {% if job.kind == "automl" %}
+    <div><dt>{{ t('job.models_tried') }}</dt><dd>{{ n_trials }}</dd></div>
+    {% if best %}<div><dt>{{ t('job.best') }}</dt><dd>{{ best }}</dd></div>{% endif %}
+    {% endif %}
+  </dl>
+  {% if job.kind == "automl" and best %}<p class="text-muted text-sm">{{ t('job.best_hint') }}</p>{% endif %}
+
+  {% if job.status.value == "done" %}
+    {{ guide(t, t('job.done.' ~ job.kind) if job.kind in ("automl", "batch_predict") else t('job.stage.done')) }}
+    {% if next_url %}
+    <div class="form-actions">
+      <a class="btn btn-primary btn-lg" href="{{ next_url }}">{{ icon("arrow") }}{{ t('job.see_result.' ~ job.kind) }}</a>
+    </div>
+    {% endif %}
+  {% elif job.status.value == "failed" %}
+    <div class="alert alert-danger" role="alert">
+      {{ icon("alert") }}
+      <div class="stack-tight">
+        <p><strong>{{ t('job.failed_title') }}</strong></p>
+        {% if info.message %}<p class="alert__detail">{{ info.message }}</p>{% endif %}
+        <p>{{ t('job.failed_hint') }}</p>
+      </div>
+    </div>
+  {% elif job.status.value == "cancelled" %}
+    {{ guide(t, t('job.cancelled_text'), "calm") }}
+  {% endif %}
+  {% if terminal and job.status.value != "done" %}
+  <div class="form-actions form-actions-start">
+    {% if back_url %}<a class="btn btn-primary" href="{{ back_url }}">{{ icon("back") }}{{ t('job.back.' ~ job.kind) }}</a>{% endif %}
+    <a class="btn btn-ghost" href="/projects/{{ pid }}">{{ t('action.back_project') }}</a>
+  </div>
+  {% endif %}
+  {% if details and terminal %}
+  <details class="details">
+    <summary>{{ t('job.details') }}</summary>
+    <ul class="event-list" role="list">
+      {% for ts, text in details %}
+      <li><time datetime="{{ ts|iso }}">{{ ts|utc }}</time> <span>{{ text }}</span></li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+</section>
+{% if terminal and fragment %}<div id="job-cancel" hx-swap-oob="true"></div>{% endif %}

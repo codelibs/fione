@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, steps, breadcrumb, preview_table, guide %}
+{% block title %}{{ t('result.title') }} · {{ dataset.name }}{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, t('result.title')) }}
+  {{ steps(t, 6) }}
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('result.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('result.lead', rows="{:,}".format(dataset.n_rows), cols="{:,}".format(dataset.n_cols)) }}</p>
+  </header>
+  {{ guide(t, t('result.guide')) }}
+  <div class="cluster">
+    <a class="btn btn-primary btn-lg" href="/api/v1/projects/{{ pid }}/datasets/{{ dataset.id }}/download" download>{{ icon("download") }}{{ t('result.download', name=dataset.name ~ ".csv") }}</a>
+    {% if model_id and ctx.can_write %}
+    <a class="btn btn-secondary" href="/projects/{{ pid }}/models/{{ model_id }}/predict">{{ t('result.again') }}</a>
+    {% endif %}
+    {% if model_id %}<a class="btn btn-ghost" href="/projects/{{ pid }}/models/{{ model_id }}/summary">{{ t('predict.back_summary') }}</a>{% endif %}
+  </div>
+  <section class="stack-tight" aria-labelledby="result-preview-title">
+    <h2 class="section-header__title" id="result-preview-title">{{ t('result.preview', n=preview.rows|length) }}</h2>
+    {{ preview_table(t, preview, t('result.preview', n=preview.rows|length)) }}
+    <p class="text-muted text-sm">{{ t('result.columns_explain') }}</p>
+  </section>
+</div>
+{% endblock %}

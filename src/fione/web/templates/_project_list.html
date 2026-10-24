@@ -10,7 +10,7 @@
     <li class="card project-card">
       <div class="project-card__icon">{{ icon("folder") }}</div>
       <div class="project-card__body">
-        <h3 class="project-card__name">{{ row.project.name }}</h3>
+        <h3 class="project-card__name"><a class="project-card__link" href="/projects/{{ row.project.id }}">{{ row.project.name }}</a></h3>
         <p class="project-card__meta text-muted text-sm">
           <time datetime="{{ row.iso }}">{{ t('home.created_on', date=row.created) }}</time>{% if not row.own and row.owner %} · {{ t('home.owner', name=row.owner) }}{% endif %}
         </p>

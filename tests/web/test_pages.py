@@ -516,7 +516,7 @@ def test_projects_newest_first_even_within_one_second(admin_client):
         make_project(admin_client, "admin", name)
     login(admin_client, "admin")
     html = admin_client.get("/").text
-    names = re.findall(r'<h3 class="project-card__name">([^<]+)</h3>', html)
+    names = re.findall(r'<h3 class="project-card__name"><a [^>]*>([^<]+)</a></h3>', html)
     assert names == ["Bravo", "Alpha", "Charlie"]
 
 

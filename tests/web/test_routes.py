@@ -4,10 +4,11 @@ tests/api/test_permissions.py; this table covers the routes outside /api."""
 
 import pytest
 
-from api_helpers import add_user, login, make_settings
+from api_helpers import add_user, iris_csv, login, make_settings
 from fione.api.app import create_app
 from fione.auth.roles import Role
-from fione.web import views
+from fione.web import easyml, views
+from web_helpers import iris_test_csv, make_world
 
 # (method, path) -> (anonymous status, logged-in status); 303s for anonymous page views go
 # to /login?next=<path>. Actions are sent with the session's CSRF token when logged in.
@@ -27,10 +28,97 @@ FORMS = {
 }
 
 
+# The EasyML routes x personas: anonymous, the owner, a member who may only view, and a
+# signed-in user who is no member. Anonymous page views go to the login page (303); anonymous
+# form posts get the session-ended page (401). Posts carry the persona's CSRF token and a
+# valid form, so the owner's succeed (303).
+P = "/projects/{p}"
+EASYML_ROUTES = {
+    ("GET", P): (303, 200, 200, 404),
+    ("GET", P + "/upload"): (303, 200, 403, 404),
+    ("POST", P + "/upload"): (401, 303, 403, 404),
+    ("GET", P + "/datasets/{train}/analyze"): (303, 200, 200, 404),
+    ("POST", P + "/datasets/{train}/run"): (401, 303, 403, 404),
+    ("GET", P + "/jobs/{job}"): (303, 200, 200, 404),
+    ("GET", P + "/jobs/{job}/status"): (303, 200, 200, 404),
+    ("POST", P + "/jobs/{job}/cancel"): (401, 303, 403, 404),
+    ("GET", P + "/jobs/{predict_job}/result"): (303, 200, 200, 404),
+    ("GET", P + "/models/{model}/summary"): (303, 200, 200, 404),
+    ("GET", P + "/models/{model}/predict"): (303, 200, 403, 404),
+    ("POST", P + "/models/{model}/predict"): (401, 303, 403, 404),
+    ("POST", P + "/models/{model}/predict/run"): (401, 303, 403, 404),
+}
+PERSONAS = {"anonymous": None, "owner": "ed", "viewer": "vi", "stranger": "st"}
+ROUTE_PATHS = {  # the router's path -> the table's template
+    "/projects/{pid}": P,
+    "/projects/{pid}/upload": P + "/upload",
+    "/projects/{pid}/datasets/{did}/analyze": P + "/datasets/{train}/analyze",
+    "/projects/{pid}/datasets/{did}/run": P + "/datasets/{train}/run",
+    "/projects/{pid}/jobs/{jid}": P + "/jobs/{job}",
+    "/projects/{pid}/jobs/{jid}/status": P + "/jobs/{job}/status",
+    "/projects/{pid}/jobs/{jid}/cancel": P + "/jobs/{job}/cancel",
+    "/projects/{pid}/jobs/{jid}/result": P + "/jobs/{predict_job}/result",
+    "/projects/{pid}/models/{mid}/summary": P + "/models/{model}/summary",
+    "/projects/{pid}/models/{mid}/predict": P + "/models/{model}/predict",
+    "/projects/{pid}/models/{mid}/predict/run": P + "/models/{model}/predict/run",
+}
+
+
+def easyml_request(world, method, template, csrf, project=None, objects=None):
+    """Send the route's request with a valid form (multipart for uploads)."""
+    client, path = world.client, world.path(template, project, objects)
+    ids = world.ids[objects or project or world.p]
+    if method == "GET":
+        return client.get(path, follow_redirects=False)
+    token = {"csrf_token": csrf or ""}
+    if path.endswith("/upload"):
+        files = {"file": ("iris.csv", iris_csv(), "text/csv")}
+        return client.post(path, data=token, files=files, follow_redirects=False)
+    if path.endswith("/predict"):
+        files = {"file": ("new.csv", iris_test_csv(), "text/csv")}
+        return client.post(path, data=token, files=files, follow_redirects=False)
+    forms = {  # the first suffix that matches
+        "/predict/run": {"dataset_id": str(ids["test"]), "include": ["petal width (cm)"]},
+        "/run": {"target": "species", "inputs": ["petal width (cm)"], "task": "classification"}
+        | {"runtime": "1"},
+        "/cancel": {},
+    }
+    form = next(f for suffix, f in forms.items() if path.endswith(suffix))
+    return client.post(path, data=token | form, follow_redirects=False)
+
+
 def test_table_covers_every_ui_route():
     """Adding a UI route without a row fails here."""
     routes = {(m, r.path) for r in views.router.routes for m in r.methods - {"HEAD"}}
     assert routes == set(UI_ROUTES)
+    routes = {(m, ROUTE_PATHS[r.path]) for r in easyml.router.routes for m in r.methods - {"HEAD"}}
+    assert routes == set(EASYML_ROUTES)
+
+
+@pytest.mark.parametrize("persona", list(PERSONAS))
+@pytest.mark.parametrize("route", sorted(EASYML_ROUTES))
+def test_easyml_route(make_client, route, persona):
+    world = make_world(make_client())
+    csrf = world.login(PERSONAS[persona])
+    expected = EASYML_ROUTES[route][list(PERSONAS).index(persona)]
+    r = easyml_request(world, *route, csrf)
+    assert r.status_code == expected, r.text
+    if expected == 303 and persona == "anonymous":
+        assert r.headers["location"].startswith("/login?next=")
+    if expected in (403, 404):
+        assert "text/html" in r.headers["content-type"]
+
+
+@pytest.mark.parametrize("route", sorted(EASYML_ROUTES))
+def test_ids_of_another_project_are_404(make_client, route):
+    """The owner of both projects, with project p in the path and q's objects in it."""
+    world = make_world(make_client())
+    csrf = world.login("ed")
+    method, template = route
+    if template == P or template == P + "/upload":
+        pytest.skip("no object id in the path")
+    r = easyml_request(world, method, template, csrf, objects=world.q)
+    assert r.status_code == 404, r.text
 
 
 def test_ui_routes_stay_out_of_the_api_schema(tmp_path):

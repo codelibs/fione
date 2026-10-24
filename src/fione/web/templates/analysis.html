@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, steps, breadcrumb, kind_badge, preview_table, guide %}
+{% block title %}{{ t('analysis.title') }} · {{ dataset.name }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+{% set base = "/projects/" ~ ctx.project.id ~ "/datasets/" ~ dataset.id %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, t('analysis.title')) }}
+  {{ steps(t, 2) }}
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('analysis.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('analysis.lead', name=dataset.name) }}</p>
+  </header>
+
+  <dl class="stats">
+    <div class="stat"><dt>{{ t('analysis.stat.rows') }}</dt><dd>{{ "{:,}".format(dataset.n_rows) }}</dd></div>
+    <div class="stat"><dt>{{ t('analysis.stat.columns') }}</dt><dd>{{ "{:,}".format(dataset.n_cols) }}</dd></div>
+    <div class="stat"><dt>{{ t('analysis.stat.missing') }}</dt><dd>{{ missing_pct }}%</dd></div>
+  </dl>
+  {% if sample_rows < dataset.n_rows %}
+  <p class="text-muted text-sm">{{ t('analysis.sampled', n="{:,}".format(sample_rows)) }}</p>
+  {% endif %}
+
+  <section class="stack-tight" aria-labelledby="preview-title">
+    <h2 class="section-header__title" id="preview-title">{{ t('analysis.preview', n=preview.rows|length) }}</h2>
+    {{ preview_table(t, preview, t('analysis.preview', n=preview.rows|length)) }}
+  </section>
+
+  <section class="card card-padded stack" aria-labelledby="target-title">
+    <div>
+      <p class="eyebrow">{{ t('analysis.step_n', n=1) }}</p>
+      <h2 class="section-header__title" id="target-title">{{ t('analysis.target') }}</h2>
+    </div>
+    <form class="target-form" method="get" action="{{ base }}/analyze" hx-get="{{ base }}/analyze" hx-trigger="change" hx-target="#analysis-body" hx-select="#analysis-body" hx-swap="outerHTML" hx-push-url="true">
+      <div class="field">
+        <label class="field__label" for="target-select">{{ t('analysis.target_label') }}</label>
+        <p class="field__hint" id="target-hint">{{ t('analysis.target_hint') }}</p>
+        <div class="target-form__row">
+          <select class="input" id="target-select" name="target" aria-describedby="target-hint{% if errors.target %} target-error{% endif %}"{% if errors.target %} aria-invalid="true"{% endif %}>
+            {% for col in columns %}
+            <option value="{{ col.profile.name }}"{% if col.target %} selected{% endif %}>{{ col.profile.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn-secondary js-hidden">{{ t('analysis.target_apply') }}</button>
+        </div>
+        {% if errors.target %}<p class="field__error" id="target-error" role="alert">{{ icon("alert", "icon icon-sm") }}{{ t(errors.target) }}</p>{% endif %}
+      </div>
+    </form>
+  </section>
+
+  <div id="analysis-body" class="stack-lg">
+    {% set target = found.target %}
+    <div class="callout">
+      <p class="callout__title">{{ icon("info") }}{{ t('analysis.about_target', name=target.name) }}</p>
+      <p>{{ t('analysis.about_target_kind', kind=t('kind.' ~ target.kind), values="{:,}".format(target.n_unique), missing=pct(target.missing_rate)) }}</p>
+      <p>{{ t('analysis.detected.' ~ detected, name=target.name, values="{:,}".format(target.n_unique)) }}</p>
+    </div>
+
+    {% for level, key, vars in warnings %}
+    <div class="alert alert-{{ level }}" role="note">{{ icon("info" if level == "info" else "alert") }}<span>{{ t(key, **vars) }}</span></div>
+    {% endfor %}
+
+    {% if ctx.can_write %}
+    <form class="stack-lg" id="run-form" method="post" action="{{ base }}/run" data-run-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="target" value="{{ target.name }}">
+      {% if errors %}
+      <div class="alert alert-danger" role="alert" id="run-errors" tabindex="-1" autofocus>
+        {{ icon("alert") }}
+        <div class="stack-tight">
+          <p><strong>{{ t('analysis.error.summary') }}</strong></p>
+          <ul class="error-list">
+            {% for field, key in errors.items() %}<li>{{ t(key) }}</li>{% endfor %}
+          </ul>
+          {% if detail %}<p class="alert__detail">{{ t('upload.error.detail', detail=detail) }}</p>{% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <fieldset class="card card-padded fieldset" aria-describedby="inputs-hint{% if errors.inputs %} inputs-error{% endif %}">
+        <legend class="fieldset__legend"><span class="eyebrow">{{ t('analysis.step_n', n=2) }}</span>{{ t('analysis.inputs') }}</legend>
+        <p class="field__hint" id="inputs-hint">{{ t('analysis.inputs_hint') }}</p>
+        {% if errors.inputs %}<p class="field__error" id="inputs-error">{{ icon("alert", "icon icon-sm") }}{{ t(errors.inputs) }}</p>{% endif %}
+        <div class="cluster cluster-tight">
+          <button type="button" class="btn btn-ghost btn-sm" data-check-all="inputs" hidden>{{ t('analysis.inputs_all') }}</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-check-none="inputs" hidden>{{ t('analysis.inputs_none') }}</button>
+        </div>
+        <ul class="column-list" role="list">
+          <li class="column-list__head" aria-hidden="true"><span>{{ t('analysis.col.name') }}</span><span>{{ t('analysis.col.kind') }}</span><span>{{ t('analysis.col.missing') }}</span></li>
+          {% for col in columns %}
+          {% set p = col.profile %}
+          <li class="column-list__item{% if col.target %} is-target{% endif %}{% if col.reason %} has-reason{% endif %}">
+            {% if col.target %}
+            <span class="column-list__check" aria-hidden="true">{{ icon("check", "icon icon-sm") }}</span>
+            <span class="column-list__name">{{ p.name }} <span class="badge badge-info">{{ t('analysis.is_target') }}</span></span>
+            {% else %}
+            <input class="checkbox" type="checkbox" id="col-{{ col.index }}" name="inputs" value="{{ p.name }}"{% if p.name in form.inputs %} checked{% endif %}{% if col.reason %} aria-describedby="col-{{ col.index }}-why"{% endif %}>
+            <label class="column-list__name" for="col-{{ col.index }}">{{ p.name }}</label>
+            {% endif %}
+            <span class="column-list__kind">{{ kind_badge(t, p.kind) }}</span>
+            <span class="column-list__missing"><span class="visually-hidden">{{ t('analysis.col.missing') }}: </span>{{ pct(p.missing_rate) }}%</span>
+            {% if col.reason %}
+            <p class="column-list__why" id="col-{{ col.index }}-why">{{ icon("info", "icon icon-sm") }}{{ t('analysis.reason.' ~ col.reason) }}</p>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        <p class="text-muted text-sm">{{ t('analysis.kind_note') }}</p>
+      </fieldset>
+
+      <fieldset class="card card-padded fieldset" aria-describedby="task-hint{% if errors.task %} task-error{% endif %}">
+        <legend class="fieldset__legend"><span class="eyebrow">{{ t('analysis.step_n', n=3) }}</span>{{ t('analysis.task') }}</legend>
+        <p class="field__hint" id="task-hint">{{ t('analysis.task_hint') }}</p>
+        {% if errors.task %}<p class="field__error" id="task-error">{{ icon("alert", "icon icon-sm") }}{{ t(errors.task) }}</p>{% endif %}
+        <div class="choice-grid">
+          {% for task in ("classification", "regression") %}
+          <label class="choice" for="task-{{ task }}">
+            <input class="radio" type="radio" id="task-{{ task }}" name="task" value="{{ task }}"{% if form.task == task %} checked{% endif %}>
+            <span class="choice__body">
+              <span class="choice__title">{{ t('task.' ~ task) }}{% if detected == task %} <span class="badge badge-success">{{ t('analysis.suggested') }}</span>{% endif %}</span>
+              <span class="choice__text text-muted">{{ t('task.' ~ task ~ '.explain') }}</span>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="card card-padded fieldset" aria-describedby="runtime-hint{% if errors.runtime %} runtime-error{% endif %}">
+        <legend class="fieldset__legend"><span class="eyebrow">{{ t('analysis.step_n', n=4) }}</span>{{ t('analysis.runtime') }}</legend>
+        <p class="field__hint" id="runtime-hint">{{ t('analysis.runtime_hint') }}</p>
+        {% if errors.runtime %}<p class="field__error" id="runtime-error">{{ icon("alert", "icon icon-sm") }}{{ t(errors.runtime) }}</p>{% endif %}
+        <div class="segmented-choice">
+          {% for minutes in presets %}
+          <label class="pill-choice" for="runtime-{{ minutes }}">
+            <input class="radio" type="radio" id="runtime-{{ minutes }}" name="runtime" value="{{ minutes }}"{% if form.runtime == minutes|string %} checked{% endif %}>
+            <span>{{ t('analysis.minutes', n=minutes) }}</span>
+          </label>
+          {% endfor %}
+          <span class="pill-choice pill-choice-custom">
+            <input class="radio" type="radio" id="runtime-custom" name="runtime" value="custom"{% if form.runtime == "custom" %} checked{% endif %}>
+            <label for="runtime-custom">{{ t('analysis.runtime_custom') }}</label>
+            <input class="input input-sm" type="number" id="runtime-custom-minutes" name="runtime_custom" min="1" step="1" inputmode="numeric" value="{{ form.custom }}" aria-label="{{ t('analysis.runtime_custom_label') }}"{% if errors.runtime %} aria-invalid="true"{% endif %} data-custom-runtime>
+            <span aria-hidden="true">{{ t('analysis.minutes_unit') }}</span>
+          </span>
+        </div>
+      </fieldset>
+
+      <section class="callout what-next" aria-labelledby="what-title">
+        <h2 class="callout__title" id="what-title">{{ icon("info") }}{{ t('analysis.what') }}</h2>
+        <p>{{ t('analysis.what_text', rows="{:,}".format(dataset.n_rows)) }}</p>
+        <p>{{ t('analysis.what_background') }}</p>
+      </section>
+
+      <div class="form-actions">
+        <a class="btn btn-ghost" href="/projects/{{ ctx.project.id }}">{{ icon("back") }}{{ t('action.back_project') }}</a>
+        <button type="submit" class="btn btn-primary btn-lg" id="run-button"><span class="spinner" aria-hidden="true"></span>{{ icon("play") }}{{ t('analysis.run') }}</button>
+      </div>
+    </form>
+    {% else %}
+    <section class="card card-padded stack" aria-labelledby="columns-title">
+      <h2 class="section-header__title" id="columns-title">{{ t('analysis.columns') }}</h2>
+      <ul class="column-list column-list-readonly" role="list">
+        <li class="column-list__head" aria-hidden="true"><span>{{ t('analysis.col.name') }}</span><span>{{ t('analysis.col.kind') }}</span><span>{{ t('analysis.col.missing') }}</span></li>
+        {% for col in columns %}
+        {% set p = col.profile %}
+        <li class="column-list__item">
+          <span class="column-list__name">{{ p.name }}</span>
+          <span class="column-list__kind">{{ kind_badge(t, p.kind) }}</span>
+          <span class="column-list__missing"><span class="visually-hidden">{{ t('analysis.col.missing') }}: </span>{{ pct(p.missing_rate) }}%</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {{ guide(t, t('analysis.viewer_note'), "calm") }}
+    </section>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

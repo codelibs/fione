@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, steps, breadcrumb, stars, mascot %}
+{% block title %}{{ t('summary.title') }} · {{ record.name }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+{% set mood = "happy" if rating.stars >= 4 else ("calm" if rating.stars >= 2 else "worried") %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, t('summary.title')) }}
+  {{ steps(t, 4) }}
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('summary.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('summary.lead', name=record.name, target=record.target) }}</p>
+  </header>
+
+  <section class="card summary-hero" aria-labelledby="rating-title">
+    <div class="summary-hero__rating">
+      <h2 class="eyebrow" id="rating-title">{{ t('summary.rating') }}</h2>
+      {{ stars(t, rating, "stars-lg") }}
+      <p class="summary-hero__score">{{ t('rating.text', n=rating.stars) }}</p>
+      {% if sentence %}<p class="summary-hero__sentence">{{ t(sentence[0], **sentence[1]) }}</p>{% endif %}
+      {% if rating.note and rating.note != "degraded" %}<p class="text-muted text-sm">{{ t('rating.note.' ~ rating.note) }}</p>{% endif %}
+    </div>
+    <div class="summary-hero__guide">
+      {{ mascot(mood, "mascot mascot-lg") }}
+      <div class="guide__bubble">
+        <p class="guide__name">{{ t('fione.name') }}</p>
+        <p class="guide__text">{{ t('fione.message.' ~ rating.stars) }}</p>
+      </div>
+    </div>
+  </section>
+
+  {% if record.stop_reason == "error" %}
+  <div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('summary.degraded') }}</span></div>
+  {% endif %}
+
+  <div class="summary-grid">
+    <section class="card card-padded stack" aria-labelledby="facts-title">
+      <h2 class="section-header__title" id="facts-title">{{ t('summary.facts') }}</h2>
+      <dl class="facts facts-stacked">
+        <div><dt>{{ t('summary.best_model') }}</dt><dd>{% if record.best_model == "Ensemble" %}{{ t('summary.ensemble', n=members) }}{% else %}{{ record.best_model }}{% endif %}</dd></div>
+        <div><dt>{{ t('summary.task') }}</dt><dd>{{ t('task.' ~ record.task) }}</dd></div>
+        <div><dt>{{ t('summary.models_tried') }}</dt><dd>{{ n_trials }}</dd></div>
+        {% if elapsed %}<div><dt>{{ t('summary.training_time') }}</dt><dd>{{ elapsed }}</dd></div>{% endif %}
+        <div><dt>{{ t('summary.stop_reason') }}</dt><dd>{{ t('stop_reason.' ~ record.stop_reason) }}</dd></div>
+      </dl>
+      {% if record.best_model == "Ensemble" %}<p class="text-muted text-sm">{{ t('summary.ensemble_hint') }}</p>{% endif %}
+    </section>
+
+    <section class="card card-padded stack" aria-labelledby="inputs-title">
+      <h2 class="section-header__title" id="inputs-title">{{ t('summary.top_inputs') }}</h2>
+      <p class="text-muted text-sm">{{ t('summary.top_inputs_hint') }}</p>
+      {% if top %}
+      <ol class="importance" role="list">
+        {% for name, value in top %}
+        <li class="importance__item">
+          <span class="importance__name" id="imp-{{ loop.index }}">{{ name }}</span>
+          <progress class="progress importance__bar" max="1000" value="{{ (value / top_max * 1000)|round|int }}" aria-labelledby="imp-{{ loop.index }}">{{ (value * 100)|round|int }}%</progress>
+          <span class="importance__value">{{ "%.0f"|format(value * 100) }}%</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="text-muted">{{ t('summary.top_inputs_none') }}</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <section class="card card-padded stack" aria-labelledby="use-title">
+    <h2 class="section-header__title" id="use-title">{{ t('summary.use') }}</h2>
+    <div class="use-grid">
+      <div class="use-option">
+        <h3 class="use-option__title">{{ icon("play") }}{{ t('summary.predict_title') }}</h3>
+        <p class="text-muted text-sm">{{ t('summary.predict_text') }}</p>
+        {% if ctx.can_write %}
+        <a class="btn btn-primary btn-lg" href="/projects/{{ pid }}/models/{{ record.id }}/predict">{{ t('summary.predict') }}</a>
+        {% else %}
+        <p class="text-muted text-sm">{{ t('summary.predict_viewer') }}</p>
+        {% endif %}
+      </div>
+      <div class="use-option">
+        <h3 class="use-option__title">{{ icon("terminal") }}{{ t('summary.serving_title') }}</h3>
+        <p class="text-muted text-sm">{{ t('summary.serving_text') }}</p>
+        {% if bundle %}
+        <a class="btn btn-secondary" href="/api/v1/models/{{ record.id }}/serving" download>{{ icon("download") }}{{ t('summary.serving_download') }}</a>
+        <div class="copy-box">
+          <p class="field__label" id="run-command-label">{{ t('summary.serving_run') }}</p>
+          <pre class="code-block" id="run-command" aria-labelledby="run-command-label">{{ bundle.run_command }}</pre>
+          <button type="button" class="btn btn-ghost btn-sm" data-copy="run-command" data-copied="{{ t('summary.copied') }}" hidden>{{ icon("copy", "icon icon-sm") }}{{ t('summary.copy') }}</button>
+        </div>
+        {% else %}
+        <p class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('summary.serving_unavailable') }}</span></p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <details class="details card card-padded">
+    <summary>{{ t('rating.how') }}</summary>
+    <div class="stack-tight text-sm">
+      <p>{{ t('rating.how_text') }}</p>
+      <p>{{ t('rating.how_' ~ record.task) if record.task in ("classification", "regression") else "" }}</p>
+      <p>{{ t('rating.how_bands') }}</p>
+    </div>
+  </details>
+
+  <p><a class="btn btn-ghost" href="/projects/{{ pid }}">{{ icon("back") }}{{ t('action.back_project') }}</a></p>
+</div>
+{% endblock %}

@@ -13,6 +13,15 @@
 {% elif name == "chevron" %}<path d="M6 9l6 6 6-6"/>
 {% elif name == "globe" %}<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
 {% elif name == "key" %}<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M16 7l3 3M14 9l2 2"/>
+{% elif name == "upload" %}<path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>
+{% elif name == "download" %}<path d="M12 4v12M7 11l5 5 5-5M4 20h16"/>
+{% elif name == "play" %}<path d="M7 5v14l11-7z"/>
+{% elif name == "arrow" %}<path d="M5 12h14M13 6l6 6-6 6"/>
+{% elif name == "back" %}<path d="M19 12H5M11 6l-6 6 6 6"/>
+{% elif name == "copy" %}<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>
+{% elif name == "chart" %}<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>
+{% elif name == "users" %}<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>
+{% elif name == "clock" %}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
 {% elif name == "terminal" %}<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>
 {% endif %}
 </svg>
@@ -54,4 +63,131 @@
 {% macro access_badge(t, access) %}
 {% set kind = {"owner": "info", "editor": "success", "viewer": "neutral"}[access.value] %}
 <span class="badge badge-{{ kind }}">{{ t('access.' ~ access.value) }}</span>
+{% endmacro %}
+
+{% macro steps(t, current) %}
+{# The EasyML step indicator; ``current`` is the 1-based step shown as the current one. #}
+<ol class="steps" aria-label="{{ t('wizard.steps') }}">
+  {% for key in ["upload", "analysis", "run", "summary", "predict"] %}
+  {% set state = "done" if loop.index < current else ("current" if loop.index == current else "todo") %}
+  <li class="steps__item steps__item-{{ state }}"{% if state == "current" %} aria-current="step"{% endif %}>
+    <span class="steps__marker" aria-hidden="true">{% if state == "done" %}{{ icon("check", "icon icon-sm") }}{% else %}{{ loop.index }}{% endif %}</span>
+    <span class="steps__label">{{ t('wizard.step.' ~ key) }}{% if state != "todo" %}<span class="visually-hidden"> ({{ t('wizard.step_state.' ~ state) }})</span>{% endif %}</span>
+  </li>
+  {% endfor %}
+</ol>
+{% endmacro %}
+
+{% macro status_pill(t, status) %}
+{% set kind = {"queued": "neutral", "running": "info", "done": "success", "failed": "danger", "cancelled": "warning"}[status] %}
+<span class="badge badge-{{ kind }}">{% if status == "running" %}<span class="dot dot-pulse" aria-hidden="true"></span>{% endif %}{{ t('status.' ~ status) }}</span>
+{% endmacro %}
+
+{% macro stars(t, rating, cls="") %}
+{# Five stars, ``rating.stars`` of them filled; one accessible text for the whole group. #}
+<span class="stars {{ cls }}" role="img" aria-label="{{ t('rating.alt', n=rating.stars) }}" data-stars="{{ rating.stars }}">
+  {% for i in range(1, 6) %}
+  <svg class="star {{ 'star-on' if i <= rating.stars else 'star-off' }}" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>
+  {% endfor %}
+</span>
+{% endmacro %}
+
+{% macro mascot(mood="happy", cls="mascot") %}
+{# Fione-kun, the guide: a friendly round face (decorative; the speech bubble says it all). #}
+<svg class="{{ cls }} mascot-{{ mood }}" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true" focusable="false">
+  <path class="mascot__antenna" d="M32 10V4" fill="none" stroke-width="2.5" stroke-linecap="round"/>
+  <circle class="mascot__tip" cx="32" cy="4" r="3"/>
+  <rect class="mascot__head" x="8" y="10" width="48" height="44" rx="20"/>
+  <rect class="mascot__face" x="14" y="17" width="36" height="30" rx="14"/>
+  <circle class="mascot__eye" cx="25" cy="30" r="3.2"/>
+  <circle class="mascot__eye" cx="39" cy="30" r="3.2"/>
+  {% if mood == "happy" %}
+  <path class="mascot__mouth" d="M24 37q8 7 16 0" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+  {% elif mood == "calm" %}
+  <path class="mascot__mouth" d="M25 39h14" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+  {% else %}
+  <path class="mascot__mouth" d="M25 41q7-5 14 0" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+  {% endif %}
+  <circle class="mascot__cheek" cx="19" cy="37" r="2.6"/>
+  <circle class="mascot__cheek" cx="45" cy="37" r="2.6"/>
+</svg>
+{% endmacro %}
+
+{% macro guide(t, text, mood="happy") %}
+{# Fione-kun saying ``text``. #}
+<div class="guide">
+  {{ mascot(mood) }}
+  <div class="guide__bubble">
+    <p class="guide__name">{{ t('fione.name') }}</p>
+    <p class="guide__text">{{ text }}</p>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro kind_badge(t, kind) %}
+<span class="badge badge-neutral kind kind-{{ kind }}">{{ t('kind.' ~ kind) }}</span>
+{% endmacro %}
+
+{% macro dataset_type(t, type) %}
+{% set kind = {"train": "info", "test": "neutral", "predict": "success"}[type] %}
+<span class="badge badge-{{ kind }}">{{ t('dataset.type.' ~ type) }}</span>
+{% endmacro %}
+
+{% macro breadcrumb(t, project, here=None) %}
+<nav class="breadcrumb" aria-label="{{ t('nav.breadcrumb') }}">
+  <ol>
+    <li><a href="/">{{ t('nav.projects') }}</a></li>
+    {% if here %}
+    <li><a href="/projects/{{ project.id }}">{{ project.name }}</a></li>
+    <li><span aria-current="page">{{ here }}</span></li>
+    {% else %}
+    <li><span aria-current="page">{{ project.name }}</span></li>
+    {% endif %}
+  </ol>
+</nav>
+{% endmacro %}
+
+{% macro preview_table(t, preview, caption) %}
+<div class="table-wrap table-wrap-limited" tabindex="0" role="region" aria-label="{{ caption }}">
+  <table class="table table-compact">
+    <caption class="visually-hidden">{{ caption }}</caption>
+    <thead><tr>{% for name in preview.columns %}<th scope="col">{{ name }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for row in preview.rows %}
+      <tr>{% for value in row %}{% if value is none %}<td class="cell-missing"><span aria-hidden="true">—</span><span class="visually-hidden">{{ t('preview.missing') }}</span></td>{% elif value is number %}<td class="num">{{ value }}</td>{% else %}<td>{{ value }}</td>{% endif %}{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro upload_field(t, limit, describedby="") %}
+<div class="dropzone" data-dropzone>
+  <input class="dropzone__input" type="file" id="upload-file" name="file" accept=".csv,text/csv" required aria-describedby="upload-help{% if describedby %} {{ describedby }}{% endif %}">
+  <label class="dropzone__label" for="upload-file">
+    <span class="dropzone__icon" aria-hidden="true">{{ icon("upload") }}</span>
+    <span class="dropzone__title">{{ t('upload.drop') }}</span>
+    <span class="dropzone__or text-muted">{{ t('upload.or') }}</span>
+    <span class="btn btn-secondary dropzone__button" aria-hidden="true">{{ t('upload.choose') }}</span>
+    <span class="dropzone__file" data-dropzone-file hidden></span>
+  </label>
+</div>
+<ul class="upload-rules text-muted text-sm" id="upload-help">
+  <li>{{ t('upload.rule_format') }}</li>
+  <li>{{ t('upload.rule_size', size=limit) }}</li>
+  <li>{{ t('upload.rule_encoding') }}</li>
+  <li>{{ t('upload.rule_header') }}</li>
+</ul>
+{% endmacro %}
+
+{% macro upload_problem(t, problem) %}
+{% if problem %}
+<div class="alert alert-danger" role="alert" id="upload-error" tabindex="-1" autofocus>
+  {{ icon("alert") }}
+  <div class="stack-tight">
+    <p><strong>{{ t(problem.key, **problem.vars) }}</strong></p>
+    {% if problem.detail %}<p class="alert__detail">{{ t('upload.error.detail', detail=problem.detail) }}</p>{% endif %}
+  </div>
+</div>
+{% endif %}
 {% endmacro %}

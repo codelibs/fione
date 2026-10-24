@@ -9,7 +9,7 @@ import logging
 import re
 from contextlib import asynccontextmanager, closing
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -54,6 +54,9 @@ UPLOAD_PATHS = [
     re.compile(rf"^{API_PREFIX}/projects/[^/]+/datasets$"),
     re.compile(rf"^{API_PREFIX}/projects/[^/]+/models/import$"),
     re.compile(rf"^{API_PREFIX}/modules$"),
+    # The web UI's training-data and prediction-data uploads (fione.web.easyml).
+    re.compile(r"^/projects/[^/]+/upload$"),
+    re.compile(r"^/projects/[^/]+/models/[^/]+/predict$"),
 ]
 
 setup_log = logging.getLogger("fione.setup")
@@ -80,7 +83,13 @@ class BodyLimit:
         declared = Headers(scope=scope).get("content-length")
         if declared is not None and (not declared.isdigit() or int(declared) > limit):
             status, code = (413, "too_large") if declared.isdigit() else (400, "bad_request")
-            response = error_response(status, code, "request body too large or malformed")
+            request = Request(scope)
+            if web.wants_html(request):  # a browser's upload form: the UI's error page
+                response = web.error_page(
+                    request, status, web.HTTP_ERROR_KEYS.get(status, "error.generic")
+                )
+            else:
+                response = error_response(status, code, "request body too large or malformed")
             await response(scope, receive, send)
             return
         received = 0

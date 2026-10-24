@@ -7,6 +7,7 @@ which HTMX sends from ``hx-headers`` on ``<body>``, or a ``csrf_token`` form fie
 """
 
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import unquote, urlencode, urlsplit
@@ -16,6 +17,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fione import i18n
 from fione.api.deps import Auth, Conn, cookie_auth, effective_access, request_host
@@ -43,6 +45,31 @@ templates = Jinja2Templates(
         lstrip_blocks=True,
     )
 )
+
+
+def _when(value) -> datetime | None:
+    """A database time as UTC: Unix seconds, or SQLite's ``YYYY-MM-DD HH:MM:SS`` (UTC)."""
+    if isinstance(value, int | float):
+        return datetime.fromtimestamp(value, UTC)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).replace(tzinfo=UTC)
+        except ValueError:
+            return None
+    return None
+
+
+def _utc(value) -> str:
+    when = _when(value)
+    return when.strftime("%Y-%m-%d %H:%M") if when else ""
+
+
+def _iso(value) -> str:
+    when = _when(value)
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ") if when else ""
+
+
+templates.env.filters.update(utc=_utc, iso=_iso)
 
 
 class UiError(Exception):
@@ -118,11 +145,11 @@ def render(
     )
 
 
-def _to_login(request: Request) -> RedirectResponse:
+def to_login(request: Request) -> RedirectResponse:
     return RedirectResponse("/login?" + urlencode({"next": _here(request)}), 303)
 
 
-def _action_auth(request: Request, conn: sqlite3.Connection, token: str | None = None) -> Auth:
+def action_auth(request: Request, conn: sqlite3.Connection, token: str | None = None) -> Auth:
     """The session of an unsafe UI request, whose CSRF token must match."""
     auth = cookie_auth(request, conn)
     if auth is None:
@@ -157,7 +184,7 @@ def first_admin_page(request: Request, conn: Conn) -> Response:
 @router.post("/logout")
 def logout(request: Request, conn: Conn, csrf_token: Annotated[str, Form()] = "") -> Response:
     try:
-        _action_auth(request, conn, csrf_token)
+        action_auth(request, conn, csrf_token)
     except UiError as e:
         if e.status != 401:
             raise
@@ -210,7 +237,7 @@ def _project_rows(conn: sqlite3.Connection, auth: Auth) -> list[dict]:
 def home(request: Request, conn: Conn) -> Response:
     auth = cookie_auth(request, conn)
     if auth is None:
-        return _to_login(request)
+        return to_login(request)
     return render(
         request,
         "home.html",
@@ -225,7 +252,7 @@ def home(request: Request, conn: Conn) -> Response:
 def create_project(request: Request, conn: Conn, name: Annotated[str, Form()] = "") -> Response:
     """HTMX: create a project; returns the form (cleared, or with an error) and, out of
     band, the refreshed project list and a toast."""
-    auth = _action_auth(request, conn)
+    auth = action_auth(request, conn)
     if auth.user.role == Role.VIEWER:
         raise UiError(403, "error.forbidden")
     try:
@@ -248,25 +275,65 @@ def create_project(request: Request, conn: Conn, name: Annotated[str, Form()] = 
 def design(request: Request, conn: Conn) -> Response:
     auth = cookie_auth(request, conn)
     if auth is None:
-        return _to_login(request)
+        return to_login(request)
     return render(request, "_design.html", auth)
 
 
+def error_page(request: Request, status: int, key: str) -> HTMLResponse:
+    """The friendly error page: the translated message ``key`` and a way back home."""
+    # here="/": the language switch must not return to a POST-only path.
+    return render(
+        request,
+        "error.html",
+        status=status,
+        message=i18n.t(key, language(request)),
+        hint=ERROR_HINTS.get(status),
+        here="/",
+    )
+
+
 async def _ui_error(request: Request, exc: UiError) -> Response:
-    message = i18n.t(exc.key, language(request))
     if request.headers.get("hx-request"):
+        message = i18n.t(exc.key, language(request))
         response: Response = PlainTextResponse(message, status_code=exc.status)
         if exc.status == 401:
             current = urlsplit(request.headers.get("hx-current-url", ""))
             back = safe_next(current.path + (f"?{current.query}" if current.query else ""))
             response.headers["HX-Redirect"] = "/login?" + urlencode({"next": back})
         return response
-    # here="/": the language switch must not return to a POST-only path.
-    return render(request, "error.html", status=exc.status, message=message, here="/")
+    if exc.status == 401 and request.method == "GET":
+        return to_login(request)
+    return error_page(request, exc.status, exc.key)
+
+
+# Status -> message of the error page for errors raised outside the UI's own checks.
+HTTP_ERROR_KEYS = {404: "error.not_found", 405: "error.method", 413: "error.too_large"}
+ERROR_HINTS = {404: "error.not_found_hint", 403: "error.forbidden_hint"}
+
+
+def wants_html(request: Request) -> bool:
+    """A browser asking for a page outside the API: errors become the HTML error page."""
+    path = request.url.path
+    api = path == "/api" or path.startswith("/api/")
+    return not api and "text/html" in request.headers.get("accept", "")
 
 
 def install(app: FastAPI) -> None:
-    """Serve the UI's pages at ``/`` and its assets under ``/static``."""
+    """Serve the UI's pages at ``/`` and its assets under ``/static``, and show errors of
+    browser requests outside the API (unknown paths, oversized uploads) as HTML pages."""
+    from fione.web import easyml  # imports this module
+
     app.mount(STATIC_PREFIX, StaticFiles(directory=WEB_DIR / "static"), name="static")
     app.include_router(router)
+    app.include_router(easyml.router)
     app.add_exception_handler(UiError, _ui_error)
+    api_http_error = app.exception_handlers[StarletteHTTPException]
+
+    async def http_error(request: Request, exc: StarletteHTTPException) -> Response:
+        if wants_html(request):
+            return error_page(
+                request, exc.status_code, HTTP_ERROR_KEYS.get(exc.status_code, "error.generic")
+            )
+        return await api_http_error(request, exc)
+
+    app.add_exception_handler(StarletteHTTPException, http_error)
