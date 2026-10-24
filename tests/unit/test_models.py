@@ -1,6 +1,7 @@
 import io
 import json
 
+import pandas as pd
 import pytest
 from sklearn.datasets import load_iris
 
@@ -9,7 +10,7 @@ from fione.auth import service as auth
 from fione.auth.roles import ProjectAccess, Role
 from fione.engine.artifact import UntrustedArtifactError, save_model
 from fione.engine.automl import AutoML
-from fione.engine.config import ConfigError, TrainConfig
+from fione.engine.config import ConfigError, TargetError, TrainConfig
 from fione.jobs import store
 from fione.models import service as models
 from fione.models.service import ModelNotFound
@@ -206,17 +207,21 @@ def job_count(conn):
     return conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
 
-def test_submit_training_enqueues_an_automl_job(conn, owner, project, dataset):
-    job = models.submit_training(conn, owner, project.id, dataset.id, CONFIG, name="mine")
+def test_submit_training_enqueues_an_automl_job(conn, storage, owner, project, dataset):
+    job = models.submit_training(conn, storage, owner, project.id, dataset.id, CONFIG, name="mine")
     assert (job.kind, job.project_id, job.owner_id) == ("automl", project.id, owner.id)
     assert job.payload["dataset_id"] == dataset.id and job.payload["name"] == "mine"
     assert job.payload["config"] == TrainConfig(**CONFIG).to_dict()
 
 
-def test_submit_training_takes_a_config_object_and_an_editor_member(conn, owner, project, dataset):
+def test_submit_training_takes_a_config_object_and_an_editor_member(
+    conn, storage, owner, project, dataset
+):
     member = auth.create_user(conn, "member", "pw-member-1", Role.EDITOR)
     projects.share_project(conn, owner, project.id, "member", ProjectAccess.EDITOR)
-    job = models.submit_training(conn, member, project.id, dataset.id, TrainConfig(**CONFIG))
+    job = models.submit_training(
+        conn, storage, member, project.id, dataset.id, TrainConfig(**CONFIG)
+    )
     assert job.payload["name"] is None and job.owner_id == member.id
 
 
@@ -235,31 +240,31 @@ def test_submit_training_takes_a_config_object_and_an_editor_member(conn, owner,
     ],
 )
 def test_a_bad_config_is_refused_before_a_job_is_queued(
-    conn, owner, project, dataset, config, message
+    conn, storage, owner, project, dataset, config, message
 ):
     with pytest.raises(ConfigError, match=message):
-        models.submit_training(conn, owner, project.id, dataset.id, config)
+        models.submit_training(conn, storage, owner, project.id, dataset.id, config)
     assert job_count(conn) == 0
 
 
-def test_a_viewer_cannot_train(conn, owner, project, dataset):
+def test_a_viewer_cannot_train(conn, storage, owner, project, dataset):
     viewer = auth.create_user(conn, "viewer", "pw-viewer-1", Role.VIEWER)
     projects.share_project(conn, owner, project.id, "viewer", ProjectAccess.VIEWER)
     with pytest.raises(PermissionError):
-        models.submit_training(conn, viewer, project.id, dataset.id, CONFIG)
+        models.submit_training(conn, storage, viewer, project.id, dataset.id, CONFIG)
     assert job_count(conn) == 0
 
 
-def test_a_non_member_cannot_train(conn, project, dataset):
+def test_a_non_member_cannot_train(conn, storage, project, dataset):
     stranger = auth.create_user(conn, "stranger", "pw-stranger-1", Role.EDITOR)
     with pytest.raises(PermissionError):
-        models.submit_training(conn, stranger, project.id, dataset.id, CONFIG)
+        models.submit_training(conn, storage, stranger, project.id, dataset.id, CONFIG)
     assert job_count(conn) == 0
 
 
-def test_the_project_must_exist(conn, owner, dataset):
+def test_the_project_must_exist(conn, storage, owner, dataset):
     with pytest.raises(ProjectNotFound):
-        models.submit_training(conn, owner, "no-such-project", dataset.id, CONFIG)
+        models.submit_training(conn, storage, owner, "no-such-project", dataset.id, CONFIG)
 
 
 def test_only_a_train_dataset_can_be_used(conn, storage, owner, project):
@@ -267,7 +272,7 @@ def test_only_a_train_dataset_can_be_used(conn, storage, owner, project):
         storage, conn, project.id, "p", DatasetType.PREDICT, io.BytesIO(iris_csv())
     )
     with pytest.raises(ValueError, match="training needs a train dataset"):
-        models.submit_training(conn, owner, project.id, predict.id, CONFIG)
+        models.submit_training(conn, storage, owner, project.id, predict.id, CONFIG)
     assert job_count(conn) == 0
 
 
@@ -275,7 +280,32 @@ def test_a_dataset_of_another_project_is_not_found(conn, storage, owner, project
     other = projects.create_project(conn, owner, "other")
     foreign = ingest_csv(storage, conn, other.id, "iris", DatasetType.TRAIN, io.BytesIO(iris_csv()))
     with pytest.raises(DatasetNotFound):
-        models.submit_training(conn, owner, project.id, foreign.id, CONFIG)
+        models.submit_training(conn, storage, owner, project.id, foreign.id, CONFIG)
     with pytest.raises(DatasetNotFound):
-        models.submit_training(conn, owner, project.id, 9999, CONFIG)
+        models.submit_training(conn, storage, owner, project.id, 9999, CONFIG)
+    assert job_count(conn) == 0
+
+
+@pytest.mark.parametrize(
+    ("frame", "config", "code"),
+    [
+        (pd.DataFrame({"x": range(20), "y": [1.0, None] * 10}), {"target": "y"}, "missing"),
+        (pd.DataFrame({"x": range(20), "y": ["a"] * 20}), {"target": "y"}, "single_value"),
+        (pd.DataFrame({"x": range(5), "y": [0, 1, 0, 1, 0]}), {"target": "y"}, "few_rows"),
+        (
+            pd.DataFrame({"x": range(20), "y": ["a", "b"] * 10}),
+            {"target": "y", "task": "regression"},
+            "not_numeric",
+        ),
+    ],
+)
+def test_a_target_the_engine_would_refuse_is_refused_before_a_job_is_queued(
+    conn, storage, owner, project, frame, config, code
+):
+    """The whole target column goes through the engine's own check, not a sample."""
+    data = io.BytesIO(frame.to_csv(index=False).encode())
+    dataset = ingest_csv(storage, conn, project.id, "d", DatasetType.TRAIN, data)
+    with pytest.raises(TargetError) as raised:
+        models.submit_training(conn, storage, owner, project.id, dataset.id, config)
+    assert raised.value.code == code
     assert job_count(conn) == 0

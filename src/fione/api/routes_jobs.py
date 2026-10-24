@@ -56,12 +56,18 @@ def _job(conn, user: User, job_id: int, need) -> Job:
 
 
 @router.post("/projects/{project_id}/jobs/automl", status_code=201)
-def submit_automl(body: AutomlIn, ctx: Writer, conn: Conn) -> dict:
-    """Queue AutoML training on a train dataset; an invalid config is a 422 and nothing is
-    queued."""
+def submit_automl(body: AutomlIn, ctx: Writer, conn: Conn, request: Request) -> dict:
+    """Queue AutoML training on a train dataset; an invalid config, or a target column the
+    engine would refuse (gaps, one value, too few rows...), is a 422 and nothing is queued."""
     with service_errors():
         job = models.submit_training(
-            conn, ctx.user, ctx.project.id, body.dataset_id, body.config, name=body.name
+            conn,
+            request.app.state.storage,
+            ctx.user,
+            ctx.project.id,
+            body.dataset_id,
+            body.config,
+            name=body.name,
         )
     return job_out(job, admin=_admin(ctx.user))
 

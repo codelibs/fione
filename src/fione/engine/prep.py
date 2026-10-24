@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from fione.data.frames import parse_datetimes
-from fione.engine.config import ConfigError
+from fione.engine.config import ConfigError, TargetError
 from fione.engine.events import Event, EventSink
 
 Task = Literal["classification", "regression"]
@@ -200,39 +200,50 @@ def validate_target(
     """
     n = len(y)
     if n < MIN_ROWS:
-        raise ConfigError(f"not enough rows: {n} (at least {MIN_ROWS} are needed)")
+        raise TargetError(
+            f"not enough rows: {n} (at least {MIN_ROWS} are needed)", "few_rows", n=n, min=MIN_ROWS
+        )
     missing = int(y.isna().sum())
     if missing:
-        raise ConfigError(
+        raise TargetError(
             f"target has missing values in {missing} rows; "
-            "remove those rows or choose another column"
+            "remove those rows or choose another column",
+            "missing",
+            n=missing,
         )
     distinct = y.nunique()
     if distinct < 2:
-        raise ConfigError("target has a single distinct value; there is nothing to predict")
+        raise TargetError(
+            "target has a single distinct value; there is nothing to predict", "single_value"
+        )
     limit, reason = n // 5, f"only {n} rows"
     if task == "regression":
         if _is_categorical(y):
-            raise ConfigError("target must be numeric for regression")
+            raise TargetError("target must be numeric for regression", "not_numeric")
         encoded = y.to_numpy(dtype=float)
         if not np.isfinite(encoded).all():
-            raise ConfigError("target has infinite values")
+            raise TargetError("target has infinite values", "infinite")
         classes = []
     else:
         if too_many_classes(distinct, n):
             advice = "use regression or " if not _is_categorical(y) else ""
-            raise ConfigError(
+            raise TargetError(
                 f"target has {distinct} distinct values, too many for classification; "
-                f"{advice}choose another column"
+                f"{advice}choose another column",
+                "too_many_classes",
+                n=distinct,
             )
         classes = _sorted_labels(y)
         encoded = pd.Categorical(y, categories=classes).codes.astype(np.int64)
         counts = np.bincount(encoded)
         singles = [classes[i] for i in np.flatnonzero(counts == 1)]
         if singles:
-            raise ConfigError(
+            raise TargetError(
                 f"class {singles[0]!r} has only 1 row ({len(singles)} such classes); "
-                "each class needs at least 2 rows"
+                "each class needs at least 2 rows",
+                "single_row_class",
+                label=str(singles[0]),
+                n=len(singles),
             )
         if counts.min() < limit:
             limit, reason = int(counts.min()), f"smallest class has {counts.min()} rows"

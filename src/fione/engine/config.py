@@ -9,6 +9,16 @@ class ConfigError(ValueError):
     """Bad user input (configuration or data); the message is shown to the user as is."""
 
 
+class TargetError(ConfigError):
+    """The target column cannot be trained on. ``code`` names the rule it breaks and
+    ``details`` holds its numbers, so a UI can say it in its own words."""
+
+    def __init__(self, message: str, code: str, **details):
+        super().__init__(message)
+        self.code = code
+        self.details = details
+
+
 class NoModelError(RuntimeError):
     """No model could be trained, e.g. because the time budget is too small."""
 

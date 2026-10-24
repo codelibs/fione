@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from fione.engine.config import ConfigError
+from fione.engine.config import ConfigError, TargetError
 from fione.engine.prep import Prep, infer_task, validate_target
 
 RNG = np.random.default_rng(0)
@@ -252,3 +252,33 @@ def test_validate_target_keeps_folds_for_balanced_small_data():
     events = []
     _, _, nfolds = validate_target(pd.Series([0, 1] * 20), "classification", 5, emit=events.append)
     assert nfolds == 5 and events == []
+
+
+@pytest.mark.parametrize(
+    ("y", "task", "code", "details"),
+    [
+        (pd.Series([0, 1] * 4), "classification", "few_rows", {"n": 8, "min": 10}),
+        (pd.Series([1.0, None] * 10), "regression", "missing", {"n": 10}),
+        (pd.Series(["a"] * 20), "classification", "single_value", {}),
+        (pd.Series(["a", "b"] * 10), "regression", "not_numeric", {}),
+        (pd.Series([1.0, np.inf] * 10), "regression", "infinite", {}),
+        (
+            pd.Series([i % 250 for i in range(300)]),
+            "classification",
+            "too_many_classes",
+            {"n": 250},
+        ),
+        (
+            pd.Series(["a", "b"] * 10 + ["rare"]),
+            "classification",
+            "single_row_class",
+            {"label": "rare", "n": 1},
+        ),
+    ],
+)
+def test_a_refused_target_names_the_rule_it_breaks(y, task, code, details):
+    """UIs say it in their own words from ``code`` and ``details``; the message is unchanged."""
+    with pytest.raises(TargetError) as raised:
+        validate_target(y, task, 5)
+    assert (raised.value.code, raised.value.details) == (code, details)
+    assert isinstance(raised.value, ConfigError)

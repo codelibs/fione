@@ -13,6 +13,7 @@ from fione import db
 from fione.auth import service as auth
 from fione.auth.roles import Role
 from fione.config import Settings, load_secret
+from fione.engine.config import TrainConfig
 from fione.engine.families import XGBoost
 from fione.jobs import automl_handler, store, worker
 from fione.jobs.runner import JobRunner
@@ -113,7 +114,7 @@ def model_count(conn):
 
 
 def test_a_training_job_runs_end_to_end(conn, runner, owner, project, dataset, storage, settings):
-    job = models.submit_training(conn, owner, project.id, dataset.id, CONFIG)
+    job = models.submit_training(conn, storage, owner, project.id, dataset.id, CONFIG)
     done = wait_done(conn, job.id)
     assert done.status is JobStatus.DONE, done.message
 
@@ -147,7 +148,9 @@ def test_missing_target_values_fail_the_job_with_a_plain_message(
     df = iris_frame()
     df.loc[:4, "species"] = None
     dataset = add_dataset(conn, storage, project, df, "gaps")
-    job = models.submit_training(conn, owner, project.id, dataset.id, CONFIG)
+    # submit_training refuses this up front; a job queued anyway still fails plainly
+    payload = {"dataset_id": dataset.id, "config": TrainConfig(**CONFIG).to_dict(), "name": None}
+    job = store.enqueue(conn, "automl", project.id, owner.id, payload)
     done = wait_done(conn, job.id)
     assert done.status is JobStatus.FAILED
     assert done.message.startswith("target has missing values")
@@ -159,7 +162,7 @@ def test_cancelling_mid_run_leaves_no_model_and_no_objects(
     conn, runner, owner, project, dataset, storage
 ):
     config = {**CONFIG, "max_runtime_secs": 120, "max_models": None}
-    job = models.submit_training(conn, owner, project.id, dataset.id, config)
+    job = models.submit_training(conn, storage, owner, project.id, dataset.id, config)
 
     def first_trial():
         return "trial" in event_types(conn, job.id)
@@ -201,9 +204,11 @@ def run_job(conn, settings):
 
 
 @pytest.fixture
-def quick_job(conn, owner, project, dataset):
+def quick_job(conn, storage, owner, project, dataset):
     config = {**CONFIG, "max_runtime_secs": 15, "max_models": 3}
-    return models.submit_training(conn, owner, project.id, dataset.id, config, name="quick")
+    return models.submit_training(
+        conn, storage, owner, project.id, dataset.id, config, name="quick"
+    )
 
 
 def test_a_failing_save_leaves_nothing_behind(
@@ -234,14 +239,14 @@ def test_a_failing_insert_removes_the_saved_objects(
 
 
 def test_a_degraded_run_still_records_the_model(
-    conn, run_job, owner, project, dataset, monkeypatch
+    conn, storage, run_job, owner, project, dataset, monkeypatch
 ):
     def boom(self, *args, **kwargs):
         raise ValueError("library failure")
 
     monkeypatch.setattr(XGBoost, "_fit", boom)
     config = {**CONFIG, "max_models": None, "stopping_rounds": 1, "stopping_tolerance": 0.5}
-    job = models.submit_training(conn, owner, project.id, dataset.id, config, name="quick")
+    job = models.submit_training(conn, storage, owner, project.id, dataset.id, config, name="quick")
     done = run_job(job)
     assert done.status is JobStatus.DONE, done.message
     assert done.result["stop_reason"] == "error" and done.result["degraded"] is True

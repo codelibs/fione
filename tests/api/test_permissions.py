@@ -43,6 +43,11 @@ PERSONAS = (
 )
 MAX_UPLOAD = 64 * 1024
 
+# Enough rows for a training job to be accepted (the engine needs 10); ``c`` holds one value.
+TRAIN_CSV = b"a,b,c,label\n" + b"".join(
+    f"{i},{'xyz'[i % 3]},1,{'yes' if i % 2 else 'no'}\n".encode() for i in range(12)
+)
+
 
 def e(*codes: int) -> dict[str, int]:
     assert len(codes) == len(PERSONAS)
@@ -312,6 +317,14 @@ ROWS = [
         "POST",
         R_P + "/jobs/automl",
         P + "/jobs/automl",
+        e(401, 403, 422, 422, 422, 404, 403),
+        json=lambda v: {"dataset_id": v["D"], "config": {"target": "c"}},
+        note="a target the engine refuses (one value)",
+    ),
+    Row(
+        "POST",
+        R_P + "/jobs/automl",
+        P + "/jobs/automl",
         e(401, 403, 404, 404, 404, 404, 403),
         json=lambda v: {"dataset_id": v["D2"], "config": {"target": "label"}},
         note="dataset of another project",
@@ -516,8 +529,8 @@ def seed(tmp_path_factory):
             projects.share_project(conn, users["owner"], p.id, member, ProjectAccess.EDITOR)
         projects.share_project(conn, users["owner"], p.id, "editor_viewer", ProjectAccess.VIEWER)
         q = projects.create_project(conn, users["outsider"], "Q")
-        d = ingest_csv(storage, conn, p.id, "d", DatasetType.TRAIN, io.BytesIO(CSV))
-        d2 = ingest_csv(storage, conn, q.id, "d2", DatasetType.TRAIN, io.BytesIO(CSV))
+        d = ingest_csv(storage, conn, p.id, "d", DatasetType.TRAIN, io.BytesIO(TRAIN_CSV))
+        d2 = ingest_csv(storage, conn, q.id, "d2", DatasetType.TRAIN, io.BytesIO(TRAIN_CSV))
         secret = load_secret(settings)
         m = store_model(conn, storage, secret, p.id)
         m2 = store_model(conn, storage, secret, q.id)

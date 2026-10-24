@@ -10,10 +10,12 @@ from fione.engine.artifact import load_model
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.events import jsonable
 from fione.engine.model import TrainedModel
+from fione.engine.prep import infer_task, validate_target
 from fione.jobs import store
 from fione.jobs.store import Job
 from fione.predict.batch import check_include_columns
 from fione.projects import service as projects
+from fione.projects.ingest import read_dataset
 from fione.projects.service import DatasetNotFound, DatasetType
 from fione.storage import Storage
 
@@ -195,6 +197,7 @@ def delete_model(conn: sqlite3.Connection, storage: Storage, model_id: int) -> N
 
 def submit_training(
     conn: sqlite3.Connection,
+    storage: Storage,
     user: User,
     project_id: str,
     dataset_id: int,
@@ -202,7 +205,9 @@ def submit_training(
     *,
     name: str | None = None,
 ) -> Job:
-    """Queue an ``automl`` job after checking everything the user can get wrong up front."""
+    """Queue an ``automl`` job after checking everything the user can get wrong up front,
+    the target column included: the whole column goes through the engine's own
+    ``validate_target`` (``TargetError`` for gaps, a single value, too few rows...)."""
     projects.require_project(conn, project_id)
     if not can_access_project(conn, user, project_id, "write"):
         raise PermissionError("write access to the project is required")
@@ -218,8 +223,18 @@ def submit_training(
     unknown = [c for c in config.ignored_columns if c not in columns]
     if unknown:
         raise ConfigError(f"unknown columns in ignored_columns: {unknown}")
+    check_target(storage, dataset, config.target, config.task, config.nfolds)
     payload = {"dataset_id": dataset_id, "config": config.to_dict(), "name": name}
     return store.enqueue(conn, "automl", project_id, user.id, payload)
+
+
+def check_target(storage: Storage, dataset, target: str, task: str, nfolds: int = 5) -> str:
+    """The task training ``dataset`` on ``target`` would have (``auto`` resolved as the engine
+    does); ``TargetError`` if the engine would refuse the whole target column."""
+    y = read_dataset(storage, dataset, [target])[target]
+    resolved = infer_task(y) if task == "auto" else task
+    validate_target(y, resolved, nfolds)
+    return resolved
 
 
 def submit_batch_predict(
