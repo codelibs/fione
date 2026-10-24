@@ -123,12 +123,21 @@ def submit_export(ctx: Reader, conn: Conn) -> dict:
     # The one job a reader may submit (every other submission needs write): it yields no
     # more than the per-model exports, which read access can already download. One export
     # at a time per project, so readers cannot flood the queue.
-    with db.immediate(conn), service_errors():
-        if any(j.kind == EXPORT_KIND for j in _active_jobs(conn, ctx.project.id)):
-            message = "an export of this project is already queued or running"
-            raise ApiError(409, "conflict", message)
-        job = submit_export_all(conn, ctx.user, ctx.project.id)
+    with service_errors():
+        job = start_export(conn, ctx.user, ctx.project.id)
+    if job is None:
+        message = "an export of this project is already queued or running"
+        raise ApiError(409, "conflict", message)
     return job_out(job, admin=_admin(ctx.user))
+
+
+def start_export(conn, user: User, project_id: str) -> Job | None:
+    """Queue an ``export_models`` job (read access is enough), or None while one of the
+    project is already queued or running."""
+    with db.immediate(conn):
+        if any(j.kind == EXPORT_KIND for j in _active_jobs(conn, project_id)):
+            return None
+        return submit_export_all(conn, user, project_id)
 
 
 @router.get("/jobs")

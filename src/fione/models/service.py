@@ -181,6 +181,39 @@ def list_models(conn: sqlite3.Connection, project_id: str) -> list[ModelRecord]:
     return [_record(r) for r in rows]
 
 
+def list_models_brief(conn: sqlite3.Connection, project_id: str) -> list[ModelRecord]:
+    """The project's models, newest first, for lists: ``config``, ``leaderboard``, ``trials``
+    and ``importance`` (the large fields) are left empty."""
+    rows = conn.execute(
+        "SELECT id, project_id, dataset_id, job_id, name, task, target, best_model, stop_reason,"
+        " storage_prefix, trusted, metrics_json, created_at FROM models WHERE project_id = ?"
+        " ORDER BY created_at DESC, id DESC",
+        (project_id,),
+    ).fetchall()
+    return [
+        ModelRecord(
+            id=r["id"],
+            project_id=r["project_id"],
+            dataset_id=r["dataset_id"],
+            job_id=r["job_id"],
+            name=r["name"],
+            task=r["task"],
+            target=r["target"],
+            best_model=r["best_model"],
+            stop_reason=r["stop_reason"],
+            storage_prefix=r["storage_prefix"],
+            trusted=r["trusted"],
+            config={},
+            leaderboard=[],
+            trials=[],
+            metrics=json.loads(r["metrics_json"]),
+            importance={},
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
 def load_trained(storage: Storage, record: ModelRecord, secret: bytes) -> TrainedModel:
     """Load the model's artifact. Nothing is unpickled unless its signature and hash verify
     (``UntrustedArtifactError`` otherwise), whatever ``record.trusted`` says."""

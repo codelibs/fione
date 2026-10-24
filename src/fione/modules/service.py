@@ -66,6 +66,11 @@ def list_modules(conn: sqlite3.Connection) -> list[ModuleInfo]:
     return built + [_row_info(r) for r in rows]
 
 
+def uploaded_at(conn: sqlite3.Connection) -> dict[str, float]:
+    """When each uploaded module was uploaded (Unix seconds), by id."""
+    return dict(conn.execute("SELECT id, created_at FROM modules").fetchall())
+
+
 def get_module(conn: sqlite3.Connection, module_id) -> ModuleInfo:
     """The module ``module_id`` (built-in or uploaded); ``ModuleNotFound`` for anything else."""
     if isinstance(module_id, str) and (built := registry.get_builtin(module_id)):

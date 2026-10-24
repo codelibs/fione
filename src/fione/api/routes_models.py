@@ -83,7 +83,12 @@ def get_model(model_id: IdPath, user: CurrentUser, conn: Conn) -> dict:
 @router.get("/models/{model_id}/export")
 def export(model_id: IdPath, user: CurrentUser, conn: Conn, request: Request):
     """The model as a zip that ``POST /projects/{project_id}/models/import`` takes."""
-    record = _model(conn, user, model_id, "read")
+    return export_response(request, _model(conn, user, model_id, "read"))
+
+
+def export_response(request: Request, record: ModelRecord):
+    """The model's export zip as a download (the caller has checked read access). Built
+    before the headers are sent: a missing file raises ``ModelNotFound``."""
     chunks = export_model(
         request.app.state.storage, record, tmp_dir=tmp_dir(request.app.state.settings)
     )
@@ -158,8 +163,7 @@ async def import_(project_id: str, admin: AdminUser, request: Request, conn: Con
     require_project(conn, project_id)  # ProjectNotFound -> 404
     if not request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
         raise ApiError(415, "unsupported_media_type", "Content-Type must be multipart/form-data")
-    declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > MAX_ARCHIVE_BYTES + UPLOAD_SLACK_BYTES:
+    if too_large_for_import(request):
         raise _too_large()
     form = await request.form(max_files=1, max_fields=1)
     try:
@@ -169,22 +173,11 @@ async def import_(project_id: str, admin: AdminUser, request: Request, conn: Con
             raise ApiError(422, "invalid", "file: a file field is required")
         if upload.size is not None and upload.size > MAX_ARCHIVE_BYTES:
             raise _too_large()
-        settings = request.app.state.settings
 
         def run() -> ModelRecord:
             try:
                 with service_errors():  # ModelImportError is a ValueError with a plain reason
-                    return import_model(
-                        request.app.state.storage,
-                        conn,
-                        admin,
-                        project_id,
-                        upload.file,
-                        load_secret(settings),
-                        trust_foreign=trust_foreign,
-                        tmp_dir=tmp_dir(settings),
-                        max_bytes=MAX_ARCHIVE_BYTES,
-                    )
+                    return import_upload(request, conn, admin, project_id, upload, trust_foreign)
             except UntrustedArtifactError as e:
                 raise ApiError(422, "untrusted", f"the model file failed verification: {e}") from e
 
@@ -192,6 +185,31 @@ async def import_(project_id: str, admin: AdminUser, request: Request, conn: Con
     finally:
         await form.close()
     return model_out(record, detail=True)
+
+
+def too_large_for_import(request: Request) -> bool:
+    """Whether the declared body is over the archive cap (checked before the form is read)."""
+    declared = request.headers.get("content-length", "")
+    return declared.isdigit() and int(declared) > MAX_ARCHIVE_BYTES + UPLOAD_SLACK_BYTES
+
+
+def import_upload(
+    request: Request, conn, admin: User, project_id: str, upload: UploadFile, trust_foreign: bool
+) -> ModelRecord:
+    """Import an uploaded export zip (admin checked by the caller and by the service):
+    ``ModelImportError`` (a ``ValueError``) or ``UntrustedArtifactError`` if refused."""
+    settings = request.app.state.settings
+    return import_model(
+        request.app.state.storage,
+        conn,
+        admin,
+        project_id,
+        upload.file,
+        load_secret(settings),
+        trust_foreign=trust_foreign,
+        tmp_dir=tmp_dir(settings),
+        max_bytes=MAX_ARCHIVE_BYTES,
+    )
 
 
 @router.get("/projects/{project_id}/exports/{job_id}")
