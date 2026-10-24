@@ -20,7 +20,7 @@ numeric columns, no top values for numbers) are omitted rather than null.
 import dataclasses
 
 from fione.auth.roles import Role, can_access_project
-from fione.data.profile import ColumnProfile, profile_dataset
+from fione.data.profile import ColumnProfile, DatasetProfile, profile_dataset
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.prep import infer_task
 from fione.jobs import store
@@ -357,18 +357,43 @@ def _runtime_secs(n_rows: int) -> int:
     return 120 if n_rows < 10_000 else 600 if n_rows < 100_000 else 1800
 
 
+@dataclasses.dataclass(frozen=True)
+class Proposal:
+    """What a training proposal rests on, with the dataset's raw column names."""
+
+    task: str  # inferred from the whole target column
+    profile: DatasetProfile  # of the columns read, profiled with the target
+    target: ColumnProfile
+    ignore: list[ColumnProfile]  # id and constant columns other than the target
+
+
+def propose(
+    storage, dataset: Dataset, target: str, columns: list[str], sample_rows: int = _SAMPLE_ROWS
+) -> Proposal:
+    """Profile ``columns`` (and ``target``) of ``dataset`` and infer the task: the rules the
+    assistant's ``propose_training_config`` and the EasyML analysis screen share."""
+    read = columns if target in columns else [*columns, target]
+    frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
+    profile = profile_dataset(frame, target, sample_rows=sample_rows)
+    # the whole target column (one column) decides the task, not just the head of the file
+    task = infer_task(ingest.read_dataset(storage, dataset, [target])[target])
+    listed = set(columns)
+    ignore = [
+        col
+        for col in profile.columns
+        if col.name != target and col.name in listed and col.kind in ("id", "constant")
+    ]
+    return Proposal(task, profile, next(c for c in profile.columns if c.name == target), ignore)
+
+
 def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     dataset = _dataset(ctx, args["dataset_id"])
     names = [name for name, _ in dataset.schema]
     target = _resolve_column(names, args["target"])
     if not _is_plain(target):
         raise ToolError("the target column name is not plain text and cannot be proposed")
-    shown = names[:_MAX_COLUMNS]
-    read = shown if target in shown else [*shown, target]
-    frame = ingest.read_dataset_sample(ctx.storage, dataset, _SAMPLE_ROWS, read)
-    profile = profile_dataset(frame, target, sample_rows=_SAMPLE_ROWS)
-    # the whole target column (one column) decides the task, not just the head of the file
-    task = infer_task(ingest.read_dataset(ctx.storage, dataset, [target])[target])
+    found = propose(ctx.storage, dataset, target, names[:_MAX_COLUMNS])
+    profile, task = found.profile, found.task
 
     warnings: list[str] = []
     suggestions: list[dict] = []
@@ -377,13 +402,14 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         warnings.append(f"this is a {dataset.type.value} dataset; training needs a train dataset")
     if len(names) > _MAX_COLUMNS:
         warnings.append(f"only the first {_MAX_COLUMNS} columns were examined")
+    ignore = {col.name for col in found.ignore}
     for col in profile.columns:
         if col.name == target:
             if col.kind in ("id", "constant"):
                 warnings.append(f"the target looks like a {col.kind} column; check the choice")
             if col.missing_rate > 0:
                 warnings.append("the target has missing values, which training refuses")
-        elif col.name in shown and col.kind in ("id", "constant"):
+        elif col.name in ignore:
             suggestions.append({"column": clean_text(col.name), "reason": f"{col.kind} column"})
             if _is_plain(col.name):
                 ignored.append(col.name)

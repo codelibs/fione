@@ -174,6 +174,12 @@ def infer_task(y: pd.Series) -> Task:
     return "regression"
 
 
+def too_many_classes(distinct: int, n_rows: int) -> bool:
+    """Whether a target with ``distinct`` values in ``n_rows`` rows is refused for
+    classification."""
+    return distinct > max(100, 0.5 * n_rows)
+
+
 def _sorted_labels(y: pd.Series) -> list:
     labels = [v.item() if isinstance(v, np.generic) else v for v in y.unique()]
     try:
@@ -213,7 +219,7 @@ def validate_target(
             raise ConfigError("target has infinite values")
         classes = []
     else:
-        if distinct > max(100, 0.5 * n):
+        if too_many_classes(distinct, n):
             advice = "use regression or " if not _is_categorical(y) else ""
             raise ConfigError(
                 f"target has {distinct} distinct values, too many for classification; "

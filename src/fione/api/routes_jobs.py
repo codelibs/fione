@@ -177,12 +177,18 @@ def cancel_job(job_id: IdPath, user: CurrentUser, conn: Conn, request: Request) 
     job = _job(conn, user, job_id, "write")
     if job.status in TERMINAL:
         raise ApiError(409, "conflict", "the job has already finished")
+    return job_out(cancel(request, conn, job), admin=_admin(user))
+
+
+def cancel(request: Request, conn, job: Job) -> Job:
+    """Cancel an unfinished job (the caller has checked write access); returns it as it is now.
+    Without a runner in this process, a running job is asked to stop."""
     runner = request.app.state.runner
     if runner is not None:
         runner.cancel(job.id)
     elif not store.cancel_queued(conn, job.id):
         store.request_cancel(conn, job.id)
-    return job_out(store.get_job(conn, job.id), admin=_admin(user))
+    return store.get_job(conn, job.id)
 
 
 def _remove_files(request: Request, job: Job) -> None:

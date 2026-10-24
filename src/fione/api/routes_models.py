@@ -93,14 +93,18 @@ def export(model_id: IdPath, user: CurrentUser, conn: Conn, request: Request):
 def _bundle(conn, user: User, model_id: int, request: Request) -> Bundle:
     """The model's serving bundle (its zip is built only when ``open()`` is read); a 409 when
     the model's manifest or the configured serving image cannot be used safely."""
-    record = _model(conn, user, model_id, "read")
-    settings = request.app.state.settings
     try:
-        return make_serving_bundle(
-            request.app.state.storage, record, settings, tmp_dir=tmp_dir(settings)
-        )
+        return serving_bundle_of(request, _model(conn, user, model_id, "read"))
     except BundleError as e:
         raise ApiError(409, "conflict", str(e)) from e
+
+
+def serving_bundle_of(request: Request, record: ModelRecord) -> Bundle:
+    """The serving bundle of a model the caller may read (``BundleError`` if unsafe)."""
+    settings = request.app.state.settings
+    return make_serving_bundle(
+        request.app.state.storage, record, settings, tmp_dir=tmp_dir(settings)
+    )
 
 
 @router.get("/models/{model_id}/serving")

@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from fione.api.deps import Conn, ProjectContext, project_access
-from fione.api.downloads import attachment, content_disposition
+from fione.api.downloads import attachment, content_disposition, tmp_dir
 from fione.api.errors import ApiError, not_found, service_errors
 from fione.api.schemas import IdPath, dataset_out
 from fione.data.profile import profile_dataset
@@ -98,31 +98,41 @@ async def upload_dataset(ctx: Writer, request: Request, conn: Conn) -> dict:
         upload = form.get("file")
         if not isinstance(upload, UploadFile):
             raise ApiError(422, "invalid", "file: a file field is required")
-        settings = request.app.state.settings
-        storage = request.app.state.storage
-
-        def ingest() -> Dataset:
-            try:
-                return ingest_csv(
-                    storage,
-                    conn,
-                    ctx.project.id,
-                    name,
-                    DatasetType(type_),
-                    upload.file,
-                    max_bytes=settings.max_upload_bytes,
-                )
-            except ValueError as e:
-                if str(e) == "too large":  # ingest's size refusal
-                    raise ApiError(
-                        413, "too_large", f"the file exceeds {settings.max_upload_bytes} bytes"
-                    ) from e
-                raise
-
-        dataset = await run_in_threadpool(ingest)
+        dataset = await ingest_upload(
+            request, conn, ctx.project.id, name, DatasetType(type_), upload
+        )
     finally:
         await form.close()
     return dataset_out(dataset, schema=True)
+
+
+async def ingest_upload(
+    request: Request, conn, project_id: str, name: str, type_: DatasetType, upload: UploadFile
+) -> Dataset:
+    """Ingest an uploaded CSV in a worker thread: ``ApiError`` 413 past ``max_upload_bytes``,
+    ``IngestError`` for a file that is not a readable CSV."""
+    settings = request.app.state.settings
+
+    def ingest() -> Dataset:
+        try:
+            return ingest_csv(
+                request.app.state.storage,
+                conn,
+                project_id,
+                name,
+                type_,
+                upload.file,
+                max_bytes=settings.max_upload_bytes,
+                tmp_dir=tmp_dir(settings),
+            )
+        except ValueError as e:
+            if str(e) == "too large":  # ingest's size refusal
+                raise ApiError(
+                    413, "too_large", f"the file exceeds {settings.max_upload_bytes} bytes"
+                ) from e
+            raise
+
+    return await run_in_threadpool(ingest)
 
 
 @router.get("/{dataset_id}")
@@ -141,7 +151,7 @@ def download_dataset(dataset_id: IdPath, ctx: Reader, conn: Conn, request: Reque
     )
 
 
-def _cell(value):
+def cell(value):
     """A JSON value: missing values as null, dates and times as ISO 8601 strings."""
     if value is None or value is pd.NA or value is pd.NaT:
         return None
@@ -168,7 +178,7 @@ def preview_dataset(
     return {
         "columns": list(frame.columns),
         "rows": [
-            [_cell(v) for v in row]
+            [cell(v) for v in row]
             for row in frame.astype(object).itertuples(index=False, name=None)
         ],
     }
