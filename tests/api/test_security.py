@@ -1,0 +1,197 @@
+"""Security primitives behind the API: signed sessions, login throttle, setup token."""
+
+import stat
+import threading
+import time
+
+import pytest
+
+from fione.api import security
+from fione.api.security import LoginThrottle, SessionSigner
+from fione.config import Settings
+
+SECRET = b"s" * 32
+
+
+class Clock:
+    def __init__(self, now=1000.0):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+
+# --- sessions -----------------------------------------------------------------
+
+
+def test_session_key_is_derived_not_the_secret():
+    key = security.session_key(SECRET)
+    assert key != SECRET and len(key) == 32
+    assert security.session_key(b"t" * 32) != key
+
+
+def test_session_round_trip_carries_only_id_time_and_csrf():
+    clock = Clock()
+    signer = SessionSigner(SECRET, max_age_secs=60, clock=clock)
+    value, session = signer.issue(7, binding="hash-a")
+    assert (session.user_id, session.issued_at) == (7, 1000)
+    assert len(session.csrf) >= 32
+    assert signer.unverified_user_id(value) == 7
+    assert signer.verify(value, "hash-a") == session
+    assert "hash-a" not in value and "editor" not in value and "admin" not in value
+
+
+def test_session_rejects_other_binding_tampering_and_other_keys():
+    signer = SessionSigner(SECRET, max_age_secs=60)
+    value, _ = signer.issue(7, binding="hash-a")
+    assert signer.verify(value, "hash-b") is None
+    version, payload, sig = value.split(".")
+    forged = security._b64e(b'{"u":1,"t":%d,"c":"x"}' % int(time.time()))
+    assert signer.verify(f"{version}.{forged}.{sig}", "hash-a") is None
+    flipped = sig[:-2] + ("A" if sig[-2] != "A" else "B") + sig[-1]
+    assert signer.verify(f"{version}.{payload}.{flipped}", "hash-a") is None
+    assert SessionSigner(b"t" * 32, max_age_secs=60).verify(value, "hash-a") is None
+
+
+@pytest.mark.parametrize(
+    "value", ["", "x", "v1..", "v1.e30.", "v2.e30.AAAA", "v1.!!!.AAAA", "v1." + "A" * 5000 + ".A"]
+)
+def test_session_rejects_garbage(value):
+    signer = SessionSigner(SECRET, max_age_secs=60)
+    assert signer.unverified_user_id(value) is None
+    assert signer.verify(value, "hash-a") is None
+
+
+def test_session_expires_on_the_server_side():
+    clock = Clock()
+    signer = SessionSigner(SECRET, max_age_secs=60, clock=clock)
+    value, _ = signer.issue(7, binding="h")
+    clock.now += 60
+    assert signer.verify(value, "h") is not None
+    clock.now += 1
+    assert signer.verify(value, "h") is None
+    clock.now = 900  # issued in the future
+    assert signer.verify(value, "h") is None
+
+
+# --- login throttle -----------------------------------------------------------
+
+
+def test_throttle_blocks_after_max_failures_within_window():
+    clock = Clock()
+    t = LoginThrottle(max_failures=3, window_secs=100, clock=clock)
+    key = ("1.2.3.4", "alice")
+    for _ in range(3):
+        assert t.retry_after(key) is None
+        t.failure(key)
+        clock.now += 10
+    assert t.retry_after(key) == 70  # now 1030; the first failure leaves the window at 1100
+    assert t.retry_after(("1.2.3.4", "bob")) is None
+    assert t.retry_after(("5.6.7.8", "alice")) is None
+    clock.now = 1100
+    assert t.retry_after(key) is None
+
+
+def test_throttle_success_resets():
+    t = LoginThrottle(max_failures=2, window_secs=100, clock=Clock())
+    key = ("ip", "alice")
+    t.failure(key)
+    t.success(key)
+    t.failure(key)
+    assert t.retry_after(key) is None
+
+
+def test_throttle_bounds_its_memory():
+    clock = Clock()
+    t = LoginThrottle(max_failures=2, window_secs=100, max_keys=10, clock=clock)
+    for i in range(50):
+        t.failure(("ip", f"u{i}"))
+    assert len(t._failures) <= 10
+    t.failure(("ip", "u49"))
+    assert t.retry_after(("ip", "u49")) is not None  # the newest keys survive
+
+
+def test_throttle_is_thread_safe():
+    t = LoginThrottle(max_failures=10_000, window_secs=100)
+    key = ("ip", "alice")
+    threads = [
+        threading.Thread(target=lambda: [t.failure(key) for _ in range(500)]) for _ in range(8)
+    ]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert len(t._failures[key]) == 4000
+
+
+def test_password_work_caps_concurrency():
+    active = peak = 0
+    lock = threading.Lock()
+
+    def work():
+        nonlocal active, peak
+        with security.password_work():
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+
+    threads = [threading.Thread(target=work) for _ in range(12)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert peak == security.PASSWORD_SLOTS == 4
+
+
+# --- origin and client address -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("origin", "host", "ok"),
+    [
+        (None, "fione.example", True),
+        ("https://fione.example", "fione.example", True),
+        ("http://FIONE.example:8080", "fione.example:8080", True),
+        ("https://evil.example", "fione.example", False),
+        ("null", "fione.example", False),
+        ("https://fione.example", None, False),
+        ("garbage", "fione.example", False),
+    ],
+)
+def test_origin_matches(origin, host, ok):
+    assert security.origin_matches(origin, host) is ok
+
+
+# --- setup token ----------------------------------------------------------------
+
+
+def test_setup_token_generated_once_private(tmp_path):
+    settings = Settings(data_dir=tmp_path, setup_token=None)
+    token, generated = security.ensure_setup_token(settings)
+    assert generated is True and len(token) >= 43
+    path = tmp_path / security.SETUP_TOKEN_FILE
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert security.ensure_setup_token(settings) == (token, True)
+    assert security.read_setup_token(settings) == token
+    security.discard_setup_token(settings)
+    assert not path.exists()
+    assert security.read_setup_token(settings) is None
+    security.discard_setup_token(settings)  # idempotent
+
+
+def test_setup_token_from_settings_writes_no_file(tmp_path):
+    settings = Settings(data_dir=tmp_path, setup_token="from-env-token")
+    assert security.ensure_setup_token(settings) == ("from-env-token", False)
+    assert security.read_setup_token(settings) == "from-env-token"
+    assert not (tmp_path / security.SETUP_TOKEN_FILE).exists()
+
+
+def test_tokens_equal_is_constant_time_compare():
+    assert security.tokens_equal("abc", "abc")
+    assert not security.tokens_equal("abc", "abd")
+    assert not security.tokens_equal("abc", None)
+    assert not security.tokens_equal("", "")
+    assert not security.tokens_equal("é", "e")
