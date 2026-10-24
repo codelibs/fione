@@ -266,7 +266,7 @@ CASES = [
     ),
     (
         "tokenize",
-        {"target_column": "t", "use_stop_words": True, "regex": "[ ,]+"},
+        {"target_column": "t", "use_stop_words": True},
         None,
         expect(t=["the cat, and a dog"]),
         expect(t=["cat", "dog", None]),
@@ -301,18 +301,19 @@ def test_cor_pearson_and_spearman():
 
 
 def test_cor_missing_value_handling():
-    df = expect(a=[1.0, 2, 3, 4], b=[2.0, 4, np.nan, 8], c=[1.0, 0, 2, 5])
-    # use="" follows na_rm: complete.obs when false (v1 default), everything when true
+    # v1 ran H2O's `use = "complete.obs" if na_rm else "everything"` (h2o/frame.py cor), whose
+    # docstring says the opposite: with the defaults a column with a gap came out as NaN.
+    df = expect(a=[1.0, 2, 3, 4, np.nan], b=[2.0, 4, 6, 8, 10], c=[5.0, 4, 3, 2, 1])
     default, _ = run_op("cor", df)
-    assert not default.isna().to_numpy().any()
-    assert np.allclose(default.loc[0, "b"], np.corrcoef([1, 2, 4], [2, 4, 8])[0, 1])
-    everything, _ = run_op("cor", df, {"use": "everything"})
-    assert everything.loc[0, "b"] != everything.loc[0, "b"]  # NaN
-    assert everything.loc[0, "c"] == pytest.approx(np.corrcoef(df["a"], df["c"])[0, 1])
-    assert (
-        run_op("cor", df, {"na_rm": True})[0].loc[0, "b"]
-        != run_op("cor", df, {"na_rm": True})[0].loc[0, "b"]
-    )
+    assert default.loc[0].isna().tolist() == [True, True, True]  # a is unknown against all
+    assert default.loc[:, "a"].isna().all()
+    assert default.loc[1, "c"] == pytest.approx(-1.0) and default.loc[1, "b"] == pytest.approx(1.0)
+    removed, _ = run_op("cor", df, {"na_rm": True})  # incomplete rows dropped first
+    assert not removed.isna().to_numpy().any()
+    assert removed.loc[0, "b"] == pytest.approx(1.0) and removed.loc[0, "c"] == pytest.approx(-1.0)
+    # an explicit `use` wins over na_rm
+    assert run_op("cor", df, {"use": "everything", "na_rm": True})[0].loc[0].isna().all()
+    assert not run_op("cor", df, {"use": "complete.obs"})[0].isna().to_numpy().any()
     with pytest.raises(ModuleError, match="missing values"):
         run_op("cor", df, {"use": "all.obs"})
 
@@ -360,7 +361,7 @@ def test_a_japanese_column_passes_through_the_ops():
         ("split", {"train_ratio": 0}, None, "train_ratio"),
         ("tokenize", {"target_column": "nope"}, None, "unknown column 'nope'"),
         ("tokenize", {"target_column": "id"}, None, "text column"),
-        ("tokenize", {"target_column": "g", "regex": "("}, None, "regular expression"),
+        ("tokenize", {"target_column": "g", "mode": "delimiter"}, None, "needs a delimiter"),
     ],
 )
 def test_bad_op_inputs_are_module_errors(op, params, other, message):
@@ -543,11 +544,7 @@ def test_validate_output_rejects(value, message):
 
 
 def test_validate_output_caps_the_size(monkeypatch):
-    assert registry.MAX_OUTPUT_CELLS == 1_000_000
-    big = pd.DataFrame(np.zeros((1001, 1000)))
-    big.columns = [f"c{i}" for i in range(1000)]
-    with pytest.raises(ModuleError, match="1000000 cells"):
-        validate_output(big)
+    assert registry.MAX_OUTPUT_CELLS == 50_000_000
     monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 4)
     with pytest.raises(ModuleError, match="4 cells"):
         validate_output(pd.DataFrame({"a": [1, 2, 3], "b": [1, 2, 3]}))
@@ -764,6 +761,7 @@ SLEEPER = "import time\ntime.sleep(60)\n" + GOOD
 RAISER = "raise RuntimeError('boom at /secret/place/x.py')\n" + GOOD
 EXITER = "import sys\nsys.exit(3)\n" + GOOD
 HUGE = "import os\nos.write(1, b'x' * (2 << 20))\n" + GOOD
+DEEP = "import os\nos.write(1, b'[' * 30000 + b']' * 30000)\n" + GOOD
 FLOOD = "import os\nos.write(1, b'x' * (200 << 10))\n" + GOOD
 
 
@@ -776,6 +774,7 @@ FLOOD = "import os\nos.write(1, b'x' * (200 << 10))\n" + GOOD
         (EXITER, "exit code 3"),
         (FLOOD, "metadata"),
         (HUGE, "File too large"),
+        (DEEP, "metadata"),
     ],
 )
 def test_a_module_that_misbehaves_at_inspection_is_refused(conn, storage, admin, source, message):
@@ -916,6 +915,14 @@ def test_submit_rejects_bad_requests(conn, storage, editor, project, module_id, 
         service.submit_module(conn, editor, project.id, module_id, data.id, params)
 
 
+@pytest.mark.parametrize("bad", [True, "1", 1.0, None])
+def test_submit_requires_an_integer_dataset_id(conn, storage, editor, project, bad):
+    add_dataset(conn, storage, project)
+    with pytest.raises(ValueError, match="dataset_id"):
+        service.submit_module(conn, editor, project.id, "sort", bad, {"column": "x"})
+    assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+
+
 def test_submit_checks_that_the_datasets_belong_to_the_project(conn, storage, editor, project):
     other_project = projects.create_project(conn, editor, "other")
     mine = add_dataset(conn, storage, project)
@@ -975,3 +982,119 @@ def test_deleting_the_dataset_keeps_the_model(conn, storage, editor, project):
     projects.delete_dataset(conn, storage, data.id)
     row = conn.execute("SELECT * FROM module_models WHERE id = ?", (model_id,)).fetchone()
     assert row["source_dataset_id"] is None
+
+
+# --- tokenize without user regexes -------------------------------------------------------------
+
+
+def tokens(text, **params):
+    out, _ = run_op("tokenize", expect(t=[text]), {"target_column": "t", **params})
+    return [None if pd.isna(x) else x for x in out["t"]]
+
+
+def test_tokenize_modes():
+    assert tokens("a  b\tc,d", mode="whitespace") == ["a", "b", "c,d", None]
+    assert tokens("a  b\tc,d") == ["a", "b", "c", "d", None]  # word is the default
+    assert tokens("a,b,,c", mode="delimiter", delimiter=",") == ["a", "b", "c", None]
+    # the delimiter is literal text, not a pattern
+    assert tokens("a.b.c", mode="delimiter", delimiter=".") == ["a", "b", "c", None]
+    assert tokens("a(a+)+b", mode="delimiter", delimiter="(a+)+") == ["a", "b", None]
+    # Japanese: a run of letters is one token (no morphological analysis)
+    assert tokens("猫は可愛い。犬も、好き") == ["猫は可愛い", "犬も", "好き", None]
+    assert tokens("", mode="whitespace") == [None]
+
+
+def test_tokenize_takes_no_regex():
+    with pytest.raises(ValueError, match="unknown argument 'regex'"):
+        run_op("tokenize", expect(t=["x"]), {"target_column": "t", "regex": "(a+)+$"})
+    with pytest.raises(ModuleError, match="needs a delimiter"):
+        tokens("x", mode="delimiter", delimiter="")
+    with pytest.raises(ValueError, match="at most 20"):
+        tokens("x", mode="delimiter", delimiter="x" * 21)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{"mode": "whitespace"}, {"mode": "word"}, {"mode": "delimiter", "delimiter": "a"}],
+)
+def test_tokenize_is_linear_on_hostile_text(params):
+    text = "a" * 24 + "!" + " ab" * 33_000
+    started = time.monotonic()
+    out = tokens(text, **params)
+    assert time.monotonic() - started < 1.0 and len(out) > 1
+
+
+# --- the output-size estimate runs before the result is built --------------------------------
+
+
+def test_pivot_is_refused_before_it_is_built():
+    import tracemalloc
+
+    n = 8_000  # 8,000 x 8,001 cells would be over the 50 million cap
+    df = pd.DataFrame(
+        {
+            "i": np.r_[np.arange(n), np.arange(n)],
+            "c": np.r_[np.arange(n), np.arange(n)[::-1]],
+            "v": 1.0,
+        }
+    )
+    tracemalloc.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(ModuleError, match="cells"):
+            run_op("pivot", df, {"index": "i", "column": "c", "value": "v"})
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert time.monotonic() - started < 1.0 and peak < 50_000_000
+
+
+def test_cor_of_too_many_columns_is_refused():
+    wide = pd.DataFrame(np.zeros((3, 10_000)), columns=[f"c{i}" for i in range(10_000)])
+    started = time.monotonic()
+    with pytest.raises(ModuleError, match="cells"):
+        run_op("cor", wide)
+    assert time.monotonic() - started < 1.0
+
+
+def test_tokenize_and_binds_are_refused_by_their_bounds(monkeypatch):
+    monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 10)
+
+    def run_op(op, df, params, other=None):  # no output check: only the estimate can refuse
+        module = get_builtin(op)
+        return module.run(df, validate_args(module.params, params), ModuleContext(other, None))
+
+    with pytest.raises(ModuleError, match="10 cells"):
+        run_op("tokenize", expect(t=["a b c d e f g h i j k"]), {"target_column": "t"})
+    small = expect(a=[1, 2, 3], b=[1, 2, 3])
+    with pytest.raises(ModuleError, match="10 cells"):
+        run_op(
+            "cbind",
+            small,
+            {"other_dataset_id": 1},
+            other=expect(c=[1, 2, 3], d=[1, 2, 3], e=[1, 2, 3]),
+        )
+    with pytest.raises(ModuleError, match="10 cells"):
+        run_op("rbind", small, {"other_dataset_id": 1}, other=small)
+    with pytest.raises(ModuleError, match="10 cells"):
+        run_op("concat", small, {"other_dataset_id": 1, "axis": 0}, other=small)
+
+
+def test_a_large_cslice_passes_the_default_cap():
+    big = pd.DataFrame(np.zeros((100_000, 20)), columns=[f"c{i}" for i in range(20)])
+    out, _ = run_op("cslice", big, {"columns": ["c1", "c2"]})
+    assert out.shape == (100_000, 2)
+    assert validate_output(big).shape == (100_000, 20)
+
+
+# --- low-rank size and submit id types --------------------------------------------------------
+
+
+@pytest.mark.parametrize("method", ["svd", "nmf"])
+def test_lowrank_components_are_limited_by_the_rows_too(method):
+    with pytest.raises(ModuleError, match="at most 1"):
+        run_op(
+            "lowrank_train",
+            expect(a=[1.0], b=[2.0], c=[3.0]),
+            {"method": method, "n_components": 2},
+        )

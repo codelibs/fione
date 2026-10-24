@@ -15,6 +15,7 @@ from fione.modules.registry import (
     ModuleContext,
     ModuleError,
     ModuleOutput,
+    check_cells,
     numeric_matrix,
     pick_columns,
     register,
@@ -65,11 +66,13 @@ def _side_by_side(df: pd.DataFrame, other: pd.DataFrame) -> pd.DataFrame:
         raise ModuleError(
             f"the datasets must have the same number of rows ({len(df)} and {len(other)})"
         )
+    check_cells(len(df), len(df.columns) + len(other.columns))
     both = pd.concat([df.reset_index(drop=True), other.reset_index(drop=True)], axis=1)
     return both.set_axis(unique_names([str(c) for c in both.columns]), axis=1)
 
 
 def _stacked(df: pd.DataFrame, other: pd.DataFrame) -> pd.DataFrame:
+    check_cells(len(df) + len(other), len(df.columns.union(other.columns)))
     return pd.concat([df, other], ignore_index=True)
 
 
@@ -104,10 +107,12 @@ def fillna(df, params, ctx):
 
 
 def cor(df, params, ctx):
+    check_cells(len(pick_columns(df, params["columns"])), len(pick_columns(df, params["columns"])))
     columns, matrix = numeric_matrix(df, params["columns"])
     data = pd.DataFrame(matrix, columns=columns)
-    # H2O: "use" wins; otherwise na_rm decides between 'everything' and 'complete.obs'.
-    use = params["use"] or ("everything" if params["na_rm"] else "complete.obs")
+    # H2O's code (not its docstring, which says the opposite): "use" wins, otherwise na_rm
+    # picks 'complete.obs' and its absence 'everything'.
+    use = params["use"] or ("complete.obs" if params["na_rm"] else "everything")
     missing = data.isna().any()
     if use == "all.obs" and missing.any():
         raise ModuleError("use 'all.obs' needs data without missing values")
@@ -125,6 +130,7 @@ def pivot(df, params, ctx):
     if len(set(names)) != 3:
         raise ModuleError("index, column and value must be three different columns")
     index, column, value = names
+    check_cells(df[index].nunique(), df[column].nunique() + 1)
     table = df.groupby([index, column])[value].first().unstack()
     table.columns = [str(c) for c in table.columns]
     return table.reset_index()
@@ -205,19 +211,32 @@ def split(df, params, ctx):
     return df.iloc[np.sort(order[cuts[first] : cuts[first + 1]])]
 
 
+_WORD = re.compile(r"\w+")  # fixed and linear: no user pattern ever reaches the regex engine
+
+
+def _split(text: str, mode: str, delimiter: str) -> list[str]:
+    if mode == "whitespace":
+        return text.split()
+    if mode == "word":
+        return _WORD.findall(text)
+    return text.split(delimiter)
+
+
 def tokenize(df, params, ctx):
+    """One token per row with a gap after each document. ``word`` takes runs of letters, digits
+    and ``_`` (a run of Japanese letters is one token: no morphological analysis)."""
     column = require_column(df, params["target_column"])
     if not (pd.api.types.is_string_dtype(df[column]) or pd.api.types.is_object_dtype(df[column])):
         raise ModuleError(f"'{column}' is not a text column")
-    try:
-        pattern = re.compile(params["regex"])
-    except re.error as e:
-        raise ModuleError(f"the regular expression is not valid: {e}") from None
+    mode, delimiter = params["mode"], params["delimiter"]
+    if mode == "delimiter" and not delimiter:
+        raise ModuleError("the delimiter mode needs a delimiter")
+    # every token is at least one character, so this bounds the rows of the result
+    check_cells(int(df[column].str.len().fillna(0).sum()) + len(df), 1)
     tokens: list[str | None] = []
     for text in df[column]:
         if isinstance(text, str):
-            for token in pattern.split(text):
-                token = token.lower() if params["lower_case"] and token else token
+            for token in _split(text.lower() if params["lower_case"] else text, mode, delimiter):
                 if (
                     token
                     and len(token) >= params["min_word_len"]
@@ -310,7 +329,12 @@ _op(
     "Tokenize text",
     {
         "target_column": _NAME,
-        "regex": {"type": "string", "maxLength": 200, "default": r"\W+"},
+        "mode": {
+            "type": "string",
+            "enum": ["whitespace", "word", "delimiter"],
+            "default": "word",
+        },
+        "delimiter": {"type": "string", "maxLength": 20, "default": ""},
         "lower_case": {"type": "boolean", "default": False},
         "min_word_len": {"type": "integer", "minimum": 0, "default": 0},
         "use_stop_words": {"type": "boolean", "default": False},

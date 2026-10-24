@@ -165,7 +165,9 @@ def _store_model(
 
 
 def _roll_back(undo: list[Callable[[], None]]) -> None:
-    for step in reversed(undo):
+    steps = undo[:]
+    undo.clear()  # a second call finds nothing left to undo
+    for step in reversed(steps):
         try:
             step()
         except Exception:
@@ -185,47 +187,49 @@ def module(ctx: JobContext) -> None:
     payload = ctx.job.payload
     project_id = ctx.job.project_id
     start = time.monotonic()
-    with contextlib.ExitStack() as stack:
-        mod = _resolve(ctx, stack, payload["module_id"])
-        try:
-            params = validate_args(mod.params, payload["params"])
-        except ValueError as e:
-            raise JobUserError(str(e)) from e
-        dataset = _dataset(ctx, payload["dataset_id"])
-        other_id, model_id = params.get("other_dataset_id"), params.get("module_model_id")
-        other = (
-            ingest.read_dataset(ctx.storage, _dataset(ctx, other_id), nullable_dtypes=True)
-            if other_id
-            else None
-        )
-        state = _load_state(ctx, mod, model_id) if model_id else None
-        frame = ingest.read_dataset(ctx.storage, dataset, nullable_dtypes=True)
-        ctx.emit(
-            Event(
-                "started",
-                data={"module_id": mod.id, "dataset_id": dataset.id, "n_rows": len(frame)},
-            )
-        )
-        if ctx.should_stop():
-            return
-        try:
-            output = _run(mod, frame, params, ModuleContext(other, state))
-            result = validate_output(output.df)
-            state_bytes = _encode_state(mod, output)
-        except ModuleError as e:
-            raise JobUserError(str(e)) from e
-        if ctx.should_stop(force=True):  # nothing stored yet
-            return
-        name = payload.get("name") or f"{mod.id}_{dataset.name}"
-        kind = DatasetType.PREDICT if mod.kind == "predict" else DatasetType.TRAIN
-        try:
-            created = ingest.ingest_batches(ctx.storage, ctx.conn, project_id, name, kind, [result])
-        except ingest.IngestError as e:
-            raise JobUserError(str(e)) from e
-    undo: list[Callable[[], None]] = [
-        lambda: projects.delete_dataset(ctx.conn, ctx.storage, created.id)
-    ]
+    undo: list[Callable[[], None]] = []
     try:
+        with contextlib.ExitStack() as stack:
+            mod = _resolve(ctx, stack, payload["module_id"])
+            try:
+                params = validate_args(mod.params, payload["params"])
+            except ValueError as e:
+                raise JobUserError(str(e)) from e
+            dataset = _dataset(ctx, payload["dataset_id"])
+            other_id, model_id = params.get("other_dataset_id"), params.get("module_model_id")
+            other = (
+                ingest.read_dataset(ctx.storage, _dataset(ctx, other_id), nullable_dtypes=True)
+                if other_id
+                else None
+            )
+            state = _load_state(ctx, mod, model_id) if model_id else None
+            frame = ingest.read_dataset(ctx.storage, dataset, nullable_dtypes=True)
+            ctx.emit(
+                Event(
+                    "started",
+                    data={"module_id": mod.id, "dataset_id": dataset.id, "n_rows": len(frame)},
+                )
+            )
+            if ctx.should_stop():
+                return
+            try:
+                output = _run(mod, frame, params, ModuleContext(other, state))
+                result = validate_output(output.df)
+                state_bytes = _encode_state(mod, output)
+            except ModuleError as e:
+                raise JobUserError(str(e)) from e
+            if ctx.should_stop(force=True):  # nothing stored yet
+                return
+            name = payload.get("name") or f"{mod.id}_{dataset.name}"
+            kind = DatasetType.PREDICT if mod.kind == "predict" else DatasetType.TRAIN
+            try:
+                created = ingest.ingest_batches(
+                    ctx.storage, ctx.conn, project_id, name, kind, [result]
+                )
+            except ingest.IngestError as e:
+                raise JobUserError(str(e)) from e
+            # Before anything else can fail (closing the stack included), so it is always undone.
+            undo.append(lambda: projects.delete_dataset(ctx.conn, ctx.storage, created.id))
         new_model = None
         if state_bytes is not None:
             new_model = _store_model(ctx, mod.id, name, dataset.id, state_bytes, undo)

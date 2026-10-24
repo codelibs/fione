@@ -122,7 +122,7 @@ def _inspect(path: Path, timeout: float) -> dict:
         if len(data) > MAX_METADATA_BYTES:
             raise ValueError
         return json.loads(data.decode("utf-8"))
-    except ValueError:  # includes bad UTF-8 and bad JSON
+    except (ValueError, RecursionError):  # bad UTF-8, bad JSON, JSON nested too deeply
         raise ModuleError("the module did not produce valid metadata") from None
 
 
@@ -250,6 +250,8 @@ def submit_module(
     projects.require_project(conn, project_id)
     if not can_access_project(conn, user, project_id, "write"):
         raise PermissionError("write access to the project is required")
+    if not isinstance(dataset_id, int) or isinstance(dataset_id, bool):
+        raise ValueError("dataset_id must be an integer")
     dataset = projects.get_dataset(conn, dataset_id)
     if dataset.project_id != project_id:
         raise DatasetNotFound(dataset_id)

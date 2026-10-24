@@ -17,8 +17,9 @@ from fione.projects.ingest import unique_names
 
 MODULE_ID = re.compile(r"[a-z][a-z0-9_]{0,39}")
 KINDS = ("frame", "train", "predict")
-# The most cells (rows times columns) a module may return.
-MAX_OUTPUT_CELLS = 1_000_000
+# The most cells (rows times columns) a module may return: a memory ceiling (about 400 MB of
+# float64), checked before a result is built where its size can be estimated.
+MAX_OUTPUT_CELLS = 50_000_000
 # A predict module only accepts a state made by its train module.
 TRAIN_FOR = {"kmeans_predict": "kmeans_train", "lowrank_predict": "lowrank_train"}
 _PATH = re.compile(r"/(?:[^\s/:'\"]+/)+[^\s:'\"]*")
@@ -86,6 +87,15 @@ def redact(text: str) -> str:
     return _PATH.sub("<path>", text)
 
 
+def check_cells(rows: int, columns: int) -> None:
+    """``ModuleError`` if a result of ``rows`` x ``columns`` would be over the cell cap."""
+    cells = rows * columns
+    if cells > MAX_OUTPUT_CELLS:
+        raise ModuleError(
+            f"the result has {cells} cells; at most {MAX_OUTPUT_CELLS} cells are allowed"
+        )
+
+
 def validate_output(df) -> pd.DataFrame:
     """The module's result, checked and with its column names normalized like an import's."""
     if not isinstance(df, pd.DataFrame):
@@ -98,11 +108,7 @@ def validate_output(df) -> pd.DataFrame:
     duplicates = sorted({n for n in names if names.count(n) > 1})
     if duplicates:
         raise ModuleError(f"duplicate column names: {duplicates}")
-    cells = len(df) * len(names)
-    if cells > MAX_OUTPUT_CELLS:
-        raise ModuleError(
-            f"the result has {cells} cells; at most {MAX_OUTPUT_CELLS} cells are allowed"
-        )
+    check_cells(len(df), len(names))
     return df.set_axis(unique_names(names), axis=1)
 
 

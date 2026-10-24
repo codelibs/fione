@@ -673,3 +673,20 @@ def test_a_lost_event_connection_removes_the_dataset(
     assert done.status is JobStatus.FAILED and done.message.startswith("could not record progress")
     assert projects.list_datasets(conn, project.id) == [dataset] and n_models(conn) == 0
     assert len(dataset_objects(storage, project)) == 1
+
+
+def test_a_failing_cleanup_after_the_store_leaves_no_dataset(
+    conn, run_job, owner, project, dataset, storage, monkeypatch
+):
+    import contextlib
+
+    class FailingStack(contextlib.ExitStack):
+        def __exit__(self, *exc):
+            super().__exit__(*exc)
+            raise OSError("cleanup failed")
+
+    monkeypatch.setattr(module_handler.contextlib, "ExitStack", FailingStack)
+    done = run_job(submit(conn, owner, project, dataset, "sort", {"column": "a"}))
+    assert done.status is JobStatus.FAILED and done.message == "OSError: cleanup failed"
+    assert projects.list_datasets(conn, project.id) == [dataset]
+    assert len(dataset_objects(storage, project)) == 1

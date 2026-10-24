@@ -167,8 +167,11 @@ def lowrank_train(df, params, ctx):
     columns, matrix = numeric_matrix(df, params["columns"])
     filled, means = _fill_gaps(columns, matrix)
     n_components, method = params["n_components"], params["method"]
-    if n_components > len(columns):
-        raise ModuleError(f"n_components must be at most {len(columns)} (the number of columns)")
+    limit = min(len(df), len(columns))
+    if n_components > limit:
+        raise ModuleError(
+            f"n_components must be at most {limit} (the smaller of the rows and columns)"
+        )
     if method == "nmf":
         negative = [c for c, bad in zip(columns, (filled < 0).any(axis=0), strict=True) if bad]
         if negative:
