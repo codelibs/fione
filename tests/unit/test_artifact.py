@@ -400,3 +400,88 @@ def test_hash_only_load_cannot_tell_who_signed_the_manifest(saved, storage):
     pd.testing.assert_series_equal(loaded.predict(test), model.predict(test))
     with pytest.raises(UntrustedArtifactError):
         load_model(storage, PREFIX, SECRET)
+
+
+# --- the secret must be a real key ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "secret", [b"", b"short", bytes(16), bytes(31), "x" * 32, None, 12345], ids=repr
+)
+def test_a_weak_or_mistyped_secret_is_rejected_everywhere(iris, saved, storage, load_spy, secret):
+    model, _ = iris
+    manifest = read_manifest(storage, PREFIX)
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        save_model(model, storage, "other/", secret, image_tag="t")
+    assert storage.list("other/") == []
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        verify_manifest_hmac(manifest, secret)
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        load_model(storage, PREFIX, secret)
+
+
+def test_a_32_byte_secret_is_accepted(iris, storage):
+    model, _ = iris
+    manifest = save_model(model, storage, PREFIX, bytes(32), image_tag="t")
+    assert verify_manifest_hmac(manifest, bytes(32))
+
+
+# --- hostile manifests never surface a raw exception ----------------------------------------
+
+HOSTILE_MANIFESTS = {
+    "non-ascii-hmac": lambda s: _edit_manifest(s, hmac="é" * 64),
+    "non-ascii-file-hash": lambda s: _edit_manifest(s, files={"model.joblib": "é" * 64}),
+    "lone-surrogate-image-tag": lambda s: _edit_manifest(s, image_tag="\ud800"),
+    "lone-surrogate-column": lambda s: _edit_manifest(s, columns=["\udfff"]),
+    "lone-surrogate-file-name": lambda s: _edit_manifest(
+        s, files={"\ud800": "0" * 64, "model.joblib": "0" * 64}
+    ),
+    "deep-nesting": lambda s: s.put(MANIFEST_KEY, b"[" * 100_000),
+    "empty-file-name": lambda s: _edit_manifest(s, files={"": "0" * 64}),
+    "short-hmac": lambda s: _edit_manifest(s, hmac="ab"),
+    "upper-case-hmac": lambda s: _edit_manifest(s, hmac="A" * 64),
+    "trailing-newline-hash": lambda s: _edit_manifest(s, files={"model.joblib": "0" * 64 + "\n"}),
+}
+
+
+@pytest.mark.parametrize("hostile", HOSTILE_MANIFESTS.values(), ids=HOSTILE_MANIFESTS.keys())
+def test_a_hostile_manifest_is_an_untrusted_artifact_error(saved, storage, load_spy, hostile):
+    hostile(storage)
+    with pytest.raises(UntrustedArtifactError):
+        load_model(storage, PREFIX, SECRET)
+    with pytest.raises(UntrustedArtifactError):
+        load_model_unverified_hash_only(storage, PREFIX)
+    with pytest.raises(UntrustedArtifactError):
+        read_manifest(storage, PREFIX)
+
+
+# --- verification order ---------------------------------------------------------------------
+
+
+class _RecordingStorage:
+    def __init__(self, inner):
+        self.inner = inner
+        self.reads = []
+
+    def get(self, key):
+        self.reads.append(key)
+        return self.inner.get(key)
+
+    def open_read(self, key):
+        self.reads.append(key)
+        return self.inner.open_read(key)
+
+
+def test_the_model_file_is_not_read_before_the_signature_checks_out(saved, storage, load_spy):
+    spy = _RecordingStorage(storage)
+    with pytest.raises(UntrustedArtifactError):
+        load_model(spy, PREFIX, OTHER_SECRET)
+    assert spy.reads == [MANIFEST_KEY]
+
+
+def test_a_good_signature_with_a_wrong_model_hash_is_not_unpickled(saved, storage, load_spy):
+    _flip_byte(storage, MODEL_KEY)
+    spy = _RecordingStorage(storage)
+    with pytest.raises(UntrustedArtifactError):
+        load_model(spy, PREFIX, SECRET)
+    assert spy.reads == [MANIFEST_KEY, MODEL_KEY]  # the hash check was reached, then it stopped

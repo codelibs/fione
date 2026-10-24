@@ -16,6 +16,7 @@ import hmac
 import io
 import json
 import os
+import re
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -34,6 +35,8 @@ MANIFEST_FILE = "manifest.json"
 _CHUNK = 1 << 20
 _DTYPES = {"int": int, "float": float, "bool": bool, "str": str}
 _UNSUPPORTED = "unsupported artifact format"
+_MIN_SECRET_BYTES = 32
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
 class UntrustedArtifactError(Exception):
@@ -62,7 +65,7 @@ class Manifest:
         """Parse and schema-check a manifest; raise ``UntrustedArtifactError`` if it is not one."""
         try:
             raw = json.loads(text)
-        except ValueError as e:  # includes JSONDecodeError and UnicodeDecodeError
+        except (ValueError, RecursionError) as e:  # bad JSON or UTF-8, absurd nesting
             raise UntrustedArtifactError("manifest is not valid JSON") from e
         if not isinstance(raw, dict):
             raise UntrustedArtifactError("manifest is not a JSON object")
@@ -85,18 +88,30 @@ def _check_schema(raw: dict) -> None:
         set(raw) == {f.name for f in Manifest.__dataclass_fields__.values()}
         and isinstance(version, int)
         and not isinstance(version, bool)
-        and all(isinstance(raw[k], str) for k in ("fione_version", "image_tag", "hmac"))
-        and all(isinstance(raw[k], str) for k in ("task", "target", "created_at"))
+        and all(isinstance(raw[k], str) for k in ("fione_version", "image_tag", "task", "target"))
+        and isinstance(raw["created_at"], str)
+        and isinstance(raw["hmac"], str)
+        and _SHA256_HEX.fullmatch(raw["hmac"])
         and isinstance(files, dict)
-        and all(isinstance(k, str) and isinstance(v, str) for k, v in files.items())
+        and all(isinstance(k, str) and k for k in files)
+        and all(isinstance(v, str) and _SHA256_HEX.fullmatch(v) for v in files.values())
         and _is_str_list(raw["columns"])
         and (
             (classes is None and dtype is None)
             or (isinstance(classes, list) and dtype in _DTYPES and _classes_match(classes, dtype))
         )
     )
-    if not valid:
+    if not valid or not _encodable(raw):
         raise UntrustedArtifactError("manifest does not match the expected schema")
+
+
+def _encodable(raw: dict) -> bool:
+    """False if the manifest holds text (a lone surrogate) that cannot be signed as UTF-8."""
+    try:
+        json.dumps(raw, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _classes_match(classes: list, dtype: str) -> bool:
@@ -119,6 +134,8 @@ def _classes_to_json(classes: list | None) -> tuple[list | None, str | None]:
 
 
 def _sign(raw: dict, secret: bytes) -> str:
+    if not isinstance(secret, bytes | bytearray) or len(secret) < _MIN_SECRET_BYTES:
+        raise ValueError(f"secret must be at least {_MIN_SECRET_BYTES} bytes")
     body = {k: v for k, v in raw.items() if k != "hmac"}
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
