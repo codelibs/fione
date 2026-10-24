@@ -48,6 +48,8 @@ def test_from_dict_rejects_unknown_and_missing_keys():
         ({"max_models": 0}, "max_models"),
         ({"nfolds": 1}, "nfolds"),
         ({"seed": 1.5}, "seed"),
+        ({"seed": -1}, "seed must be a whole number from 0 to 4294967295"),
+        ({"seed": 2**32}, "seed must be a whole number from 0 to 4294967295"),
         ({"stopping_rounds": -1}, "stopping_rounds"),
         ({"stopping_tolerance": -0.1}, "stopping_tolerance"),
         ({"stopping_metric": "f1"}, "stopping_metric"),

@@ -309,3 +309,27 @@ def test_a_target_the_engine_would_refuse_is_refused_before_a_job_is_queued(
         models.submit_training(conn, storage, owner, project.id, dataset.id, config)
     assert raised.value.code == code
     assert job_count(conn) == 0
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({**CONFIG, "sort_metric": "rmse"}, "sort_metric 'rmse' does not apply to classification"),
+        ({**CONFIG, "stopping_metric": "r2"}, "stopping_metric 'r2' does not apply"),
+        ({**CONFIG, "sort_metric": "deviance"}, "does not apply to classification"),
+        ({**CONFIG, "seed": -1}, "seed must be a whole number from 0 to 4294967295"),
+        ({**CONFIG, "seed": 2**32}, "seed must be a whole number from 0 to 4294967295"),
+    ],
+)
+def test_metrics_and_seed_the_engine_cannot_use_are_refused_up_front(
+    conn, storage, owner, project, dataset, config, message
+):
+    with pytest.raises(ConfigError, match=message):
+        models.submit_training(conn, storage, owner, project.id, dataset.id, config)
+    assert job_count(conn) == 0
+
+
+def test_the_largest_seed_and_task_metrics_are_accepted(conn, storage, owner, project, dataset):
+    config = {**CONFIG, "seed": 2**32 - 1, "sort_metric": "AUC", "stopping_metric": "accuracy"}
+    job = models.submit_training(conn, storage, owner, project.id, dataset.id, config)
+    assert job.payload["config"]["seed"] == 2**32 - 1

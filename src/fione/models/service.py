@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 
 from fione.auth.roles import User, can_access_project
+from fione.engine import metrics
 from fione.engine.artifact import load_model
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.events import jsonable
@@ -207,7 +208,8 @@ def submit_training(
 ) -> Job:
     """Queue an ``automl`` job after checking everything the user can get wrong up front,
     the target column included: the whole column goes through the engine's own
-    ``validate_target`` (``TargetError`` for gaps, a single value, too few rows...)."""
+    ``validate_target`` (``TargetError`` for gaps, a single value, too few rows...), and the
+    metrics must apply to the resolved task (``ConfigError``)."""
     projects.require_project(conn, project_id)
     if not can_access_project(conn, user, project_id, "write"):
         raise PermissionError("write access to the project is required")
@@ -223,7 +225,9 @@ def submit_training(
     unknown = [c for c in config.ignored_columns if c not in columns]
     if unknown:
         raise ConfigError(f"unknown columns in ignored_columns: {unknown}")
-    check_target(storage, dataset, config.target, config.task, config.nfolds)
+    task = check_target(storage, dataset, config.target, config.task, config.nfolds)
+    for field in ("stopping_metric", "sort_metric"):  # as AutoML.fit resolves them
+        metrics.resolve(getattr(config, field), task, field)
     payload = {"dataset_id": dataset_id, "config": config.to_dict(), "name": name}
     return store.enqueue(conn, "automl", project_id, user.id, payload)
 

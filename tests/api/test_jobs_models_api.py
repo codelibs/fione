@@ -264,6 +264,10 @@ def test_a_running_job_is_cancelled(make_env, monkeypatch):
         ({"target": "nope"}, "target column 'nope' is not in the data"),
         ({"max_models": 1}, "target is required"),
         ({"target": "species", "ignored_columns": ["species"]}, "cannot also be ignored"),
+        ({"target": "species", "seed": -1}, "seed must be a whole number from 0 to 4294967295"),
+        ({"target": "species", "seed": 2**32}, "seed must be a whole number from 0"),
+        ({"target": "species", "sort_metric": "rmse"}, "sort_metric 'rmse' does not apply"),
+        ({"target": "species", "stopping_metric": "mae"}, "stopping_metric 'mae' does not apply"),
     ],
 )
 def test_an_invalid_training_config_is_422_and_nothing_is_queued(env, config, reason):
