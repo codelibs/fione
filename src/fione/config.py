@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     max_concurrent_train_jobs: int = 1
     max_concurrent_short_jobs: int = 4
     image_tag: str = "dev"
+    serving_image: str = "ghcr.io/codelibs/fione-serving"
 
     @model_validator(mode="after")
     def _derive_defaults(self) -> "Settings":

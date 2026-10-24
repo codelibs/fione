@@ -56,16 +56,24 @@ def included_columns(
     return out
 
 
+def unreadable_numbers(values: pd.Series) -> pd.Series:
+    """True where ``values`` holds something a numeric column cannot read as a number.
+
+    Missing values and blank text count as missing, as in the engine, so they are readable.
+    """
+    if pd.api.types.is_numeric_dtype(values.dtype):
+        return pd.Series(False, index=values.index)
+    blank = values.astype(str).str.strip() == ""
+    return pd.to_numeric(values, errors="coerce").isna() & values.notna() & ~blank
+
+
 def _check_inputs(model: TrainedModel, df: pd.DataFrame) -> None:
     missing = [c for c in model.prep.columns if c not in df.columns]
     if missing:
         raise PredictInputError(f"missing columns: {missing}")
     for column in model.prep.numeric_columns:
         values = df[column]
-        if pd.api.types.is_numeric_dtype(values.dtype):
-            continue
-        blank = values.astype(str).str.strip() == ""  # counts as missing, as in the engine
-        unreadable = values[pd.to_numeric(values, errors="coerce").isna() & values.notna() & ~blank]
+        unreadable = values[unreadable_numbers(values)]
         if len(unreadable):
             shown = unreadable.drop_duplicates().head(_SHOWN_VALUES).tolist()
             raise PredictInputError(
