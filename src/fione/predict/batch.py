@@ -64,7 +64,8 @@ def _check_inputs(model: TrainedModel, df: pd.DataFrame) -> None:
         values = df[column]
         if pd.api.types.is_numeric_dtype(values.dtype):
             continue
-        unreadable = values[pd.to_numeric(values, errors="coerce").isna() & values.notna()]
+        blank = values.astype(str).str.strip() == ""  # counts as missing, as in the engine
+        unreadable = values[pd.to_numeric(values, errors="coerce").isna() & values.notna() & ~blank]
         if len(unreadable):
             shown = unreadable.drop_duplicates().head(_SHOWN_VALUES).tolist()
             raise PredictInputError(

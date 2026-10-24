@@ -429,3 +429,18 @@ def test_tmp_dir_is_cleaned_after_ingest_batches(conn, storage, project, tmp_pat
     tmp.mkdir()
     store_batches(conn, storage, project, _frames(), tmp_dir=tmp)
     assert list(tmp.iterdir()) == []
+
+
+def test_read_dataset_keeps_integers_and_booleans_exact_only_on_request(conn, storage, project):
+    frame = pd.DataFrame(
+        {
+            "id": pd.array([2**60 + 1, None], dtype="Int64"),
+            "ok": pd.array([True, None], dtype="boolean"),
+        }
+    )
+    ds = store_batches(conn, storage, project, [frame])
+    plain = ingest.read_dataset(storage, ds)
+    assert plain["id"].dtype == "float64" and plain["ok"].dtype == object
+    exact = ingest.read_dataset(storage, ds, nullable_dtypes=True)
+    assert exact["id"].dtype == "Int64" and exact["id"].tolist()[0] == 2**60 + 1
+    assert exact["ok"].dtype == "boolean"

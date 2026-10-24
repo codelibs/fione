@@ -77,7 +77,7 @@ def batch_predict(ctx: JobContext) -> None:
     except UntrustedArtifactError as e:
         raise JobUserError("the model file failed verification") from e
     try:
-        frame = ingest.read_dataset(ctx.storage, dataset)
+        frame = ingest.read_dataset(ctx.storage, dataset, nullable_dtypes=True)
         chunks = predict_chunks(model, frame, payload.get("include_columns"), chunk_rows=CHUNK_ROWS)
         # A column that is empty in the first chunk still needs the type its source has.
         source = ingest.read_schema(ctx.storage, dataset)

@@ -1,3 +1,4 @@
+import datetime
 import io
 import os
 import signal
@@ -7,6 +8,7 @@ import sys
 import time
 
 import pandas as pd
+import pyarrow.parquet as pq
 import pytest
 from predict_models import classifier, features, regressor
 
@@ -294,6 +296,70 @@ def test_an_input_column_empty_in_the_first_chunk_keeps_its_type(
     out = projects.get_dataset(conn, done.result["dataset_id"])
     assert dict(out.schema)["flag"] == "bool"
     assert read_dataset(storage, out)["flag"].tolist()[8:] == [True, False] * 16
+
+
+def exact_columns():
+    """Columns that must come out of a prediction exactly as they went in."""
+    n = 40
+    ids = pd.array([2**60 + 1, 2**60 + 2, None] * 13 + [7], dtype="Int64")
+    return {
+        "id": ids,
+        "count": pd.array(range(n), dtype="int64"),
+        "flag": pd.array([True, None, False, True] * 10, dtype="boolean"),
+        "when": [datetime.date(2024, 1, 1 + i % 28) if i % 5 else None for i in range(n)],
+        "memo": ["メモ", None, "x", ""] * 10,
+    }
+
+
+def exact_source(conn, storage, project, frame):
+    return ingest.ingest_batches(
+        storage,
+        conn,
+        project.id,
+        "exact",
+        DatasetType.TEST,
+        [frame.assign(**exact_columns())],
+    )
+
+
+def stored_table(storage, dataset):
+    with storage.open_read(dataset.key) as f:
+        return pq.read_table(f)
+
+
+def assert_inputs_unchanged(storage, source, out):
+    names = [n for n in stored_table(storage, source).column_names]
+    assert [(n, t) for n, t in out.schema if n in names] == [
+        (n, t) for n, t in source.schema if n in names
+    ]
+    assert stored_table(storage, out).select(names).equals(stored_table(storage, source))
+
+
+def test_integer_ids_with_gaps_come_out_exactly_as_they_went_in(
+    conn, run_job, owner, project, record, storage, frame, monkeypatch
+):
+    monkeypatch.setattr(batch_predict_handler, "CHUNK_ROWS", 16)
+    source = exact_source(conn, storage, project, frame)
+    assert dict(source.schema)["id"] == "int64"
+    done = run_job(submit(conn, owner, project, record, source))
+    assert done.status is JobStatus.DONE, done.message
+    out = projects.get_dataset(conn, done.result["dataset_id"])
+    assert dict(out.schema)["id"] == "int64" and dict(out.schema)["count"] == "int64"
+    ids = stored_table(storage, out).column("id").to_pylist()
+    assert ids[:3] == [2**60 + 1, 2**60 + 2, None]
+    assert_inputs_unchanged(storage, source, out)
+
+
+def test_other_input_types_come_out_unchanged_through_the_runner(
+    conn, runner, owner, project, record, storage, frame
+):
+    source = exact_source(conn, storage, project, frame)
+    done = wait_done(conn, submit(conn, owner, project, record, source).id)
+    assert done.status is JobStatus.DONE, done.message
+    out = projects.get_dataset(conn, done.result["dataset_id"])
+    assert {n: t for n, t in out.schema}["flag"] == "bool"
+    assert {n: t for n, t in out.schema}["when"] == "date32[day]"
+    assert_inputs_unchanged(storage, source, out)
 
 
 def test_a_deleted_dataset_is_a_plain_failure(conn, run_job, job, dataset, storage):

@@ -360,11 +360,37 @@ def read_schema(storage: Storage, dataset: Dataset) -> pa.Schema:
         return pq.ParquetFile(f).schema_arrow
 
 
+_NULLABLE = {
+    **{
+        getattr(pa, name)(): dtype
+        for name, dtype in [
+            ("int8", pd.Int8Dtype()),
+            ("int16", pd.Int16Dtype()),
+            ("int32", pd.Int32Dtype()),
+            ("int64", pd.Int64Dtype()),
+            ("uint8", pd.UInt8Dtype()),
+            ("uint16", pd.UInt16Dtype()),
+            ("uint32", pd.UInt32Dtype()),
+            ("uint64", pd.UInt64Dtype()),
+        ]
+    },
+    pa.bool_(): pd.BooleanDtype(),
+}
+
+
 def read_dataset(
-    storage: Storage, dataset: Dataset, columns: list[str] | None = None
+    storage: Storage,
+    dataset: Dataset,
+    columns: list[str] | None = None,
+    *,
+    nullable_dtypes: bool = False,
 ) -> pd.DataFrame:
+    """The dataset as a frame. Integer and boolean columns become pandas nullable dtypes when
+    ``nullable_dtypes`` is set, so that gaps neither turn integers into floats (losing digits
+    above 2**53) nor booleans into objects."""
     with storage.open_read(dataset.key) as f:
-        return pq.ParquetFile(f).read(columns=columns).to_pandas()
+        table = pq.ParquetFile(f).read(columns=columns)
+    return table.to_pandas(types_mapper=_NULLABLE.get if nullable_dtypes else None)
 
 
 def export_csv(storage: Storage, dataset: Dataset) -> Iterator[bytes]:

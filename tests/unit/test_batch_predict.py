@@ -189,3 +189,50 @@ def test_a_regression_model_gives_only_predict(reg):
 def test_chunk_rows_must_be_positive(cls):
     with pytest.raises(ValueError, match="chunk_rows"):
         batch_predict(cls, features(), chunk_rows=0)
+
+
+# --- blank strings count as missing numbers ----------------------------------
+
+
+def test_blank_strings_in_a_numeric_column_count_as_missing(cls):
+    df = features(10).astype({"x": object})
+    blanks = df.copy()
+    blanks.loc[[1, 4], "x"] = ""
+    blanks.loc[[2, 5], "x"] = "   "
+    missing = df.copy()
+    missing.loc[[1, 2, 4, 5], "x"] = None
+    out = batch_predict(cls, blanks, ["幅"])
+    pd.testing.assert_frame_equal(out, batch_predict(cls, missing, ["幅"]))
+
+
+def test_padded_numbers_pass_and_other_text_still_fails(cls):
+    df = features(10).astype({"x": object})
+    df.loc[0, "x"] = " 5 "
+    df.loc[1, "x"] = "5"
+    assert len(batch_predict(cls, df)) == 10
+    df.loc[2, "x"] = "abc"
+    df.loc[3, "x"] = ""
+    with pytest.raises(PredictInputError) as e:
+        batch_predict(cls, df)
+    assert "'x'" in str(e.value) and "'abc'" in str(e.value) and "''" not in str(e.value)
+
+
+# --- nullable integer input ---------------------------------------------------
+
+
+def test_an_integer_input_column_passes_through_unchanged(cls):
+    df = features(10).assign(id=pd.array([2**60 + 1, None, 2**60 + 3] * 3 + [5], dtype="Int64"))
+    out = batch_predict(cls, df)
+    assert out["id"].dtype == "Int64"
+    assert out["id"].tolist() == df["id"].tolist()
+
+
+def test_predictions_are_the_same_for_nullable_integer_and_float_input(cls):
+    base = features(30)
+    base["x"] = (base["x"] * 10).round()
+    as_float = base.copy()
+    as_float.loc[[3, 7], "x"] = None
+    as_int = as_float.astype({"x": "Int64"})
+    pd.testing.assert_frame_equal(
+        batch_predict(cls, as_int, ["幅"]), batch_predict(cls, as_float, ["幅"])
+    )
