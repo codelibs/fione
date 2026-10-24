@@ -89,7 +89,7 @@
         <legend class="fieldset__legend">{{ t('train.g.task') }}</legend>
         <div class="field">
           <label class="field__label" for="f-task">{{ t('train.f.task') }}</label>
-          <select class="input input-md" id="f-task" name="task" data-task-select{{ described("task") }}>
+          <select class="input input-md input-limited" id="f-task" name="task" data-task-select{{ described("task") }}>
             {% for task in tasks %}<option value="{{ task }}"{% if values.task == task %} selected{% endif %}>{{ t('train.task.' ~ task) }}</option>{% endfor %}
           </select>
           <p class="field__hint" id="task-hint">{{ t('train.h.task', detected=t('task.' ~ detected)) }}</p>

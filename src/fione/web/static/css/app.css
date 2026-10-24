@@ -798,6 +798,7 @@ select.input {
 
 /* ---------- Table ---------- */
 .table-wrap {
+  position: relative; /* keeps visually hidden text in rows inside the scroll area */
   overflow-x: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -2544,3 +2545,7 @@ select.input {
 .chart-probe-grid { color: var(--color-border); }
 .chart-probe-axis { color: var(--color-border-strong); }
 .chart-probe-surface { color: var(--color-surface); }
+
+.input-limited {
+  max-width: 24rem;
+}

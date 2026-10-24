@@ -225,7 +225,8 @@ def run(base: str, out: Path, errors: list[str]) -> None:
         expect(page.locator("#toasts .toast-danger")).to_have_count(3)
         page.context.close()
 
-        easyml(s, base)
+        project = easyml(s, base)
+        automl(s, base, project)
         browser.close()
 
 
@@ -283,15 +284,37 @@ def submit_twice(page: Page, selector: str, suffix: str) -> int:
 
 
 def shoot_all(
-    s: "Shooter", base: str, url: str, name: str, langs=("en",), username: str = ADMIN
+    s: "Shooter",
+    base: str,
+    url: str,
+    name: str,
+    langs=("en",),
+    username: str = ADMIN,
+    charts: bool = False,
 ) -> None:
     for lang, scheme, viewport in s.variants(langs):
         page = s.page(scheme, viewport, lang)
         sign_in(page, base, username)
         page.goto(base + url)
         wait_settled(page)
+        if charts:
+            charts_drawn(s, page, name)
         s.shot(page, f"{name}-{lang}-{scheme}-{viewport}")
         page.context.close()
+
+
+def charts_drawn(s: "Shooter", page: Page, name: str) -> None:
+    """Every visible chart has been drawn: a canvas of non-zero size."""
+    visible = page.locator("[data-chart]:visible")
+    if not visible.count():
+        s.errors.append(f"{name}: no chart shown")
+    for index in range(visible.count()):
+        canvas = visible.nth(index).locator("canvas").first
+        canvas.wait_for(timeout=10_000)
+        box = canvas.bounding_box()
+        if not box or box["width"] < 10 or box["height"] < 10:
+            s.errors.append(f"{name}: a chart was not drawn ({box})")
+    page.wait_for_timeout(1200)  # ECharts' entry animation (1 s) has finished
 
 
 def wait_for_url(page: Page, pattern: str, seconds: int) -> None:
@@ -451,6 +474,64 @@ def easyml(s: "Shooter", base: str) -> None:
         page.context.close()
         shoot_all(s, base, project, "project-viewer", username="viewer")
         shoot_all(s, base, project + "/upload", "forbidden", username="viewer")
+        return project
+
+
+def automl(s: "Shooter", base: str, project: str) -> None:
+    """The AutoML screens, on the data the wizard left behind (iris, its test file...)."""
+    page = s.page("light", "desktop")
+    sign_in(page, base)
+    page.goto(base + project + "/datasets")
+    link = page.locator("table a", has_text=re.compile("^iris$")).first
+    dataset = link.get_attribute("href")
+    page.click("details.upload-panel > summary")
+    s.shot(page, "datasets-upload-en-light-desktop", full_page=False)
+    page.context.close()
+    shoot_all(s, base, project + "/datasets", "datasets")
+    shoot_all(s, base, dataset, "dataset-summary", ("en", "ja"))
+    for tab in ("columns", "data"):
+        shoot_all(s, base, f"{dataset}?tab={tab}", f"dataset-{tab}")
+    shoot_all(
+        s, base, f"{dataset}?tab=correlation", "dataset-correlation", ("en", "ja"), charts=True
+    )
+    numeric = dataset + "/columns/" + "petal%20length%20(cm)"
+    shoot_all(s, base, numeric, "column-numeric", charts=True)
+    shoot_all(s, base, dataset + "/columns/species", "column-categorical", charts=True)
+    shoot_all(s, base, dataset + "/train", "train", ("en", "ja"))
+    shoot_all(s, base, project + "/jobs", "jobs")
+
+    page = s.page("dark", "desktop")
+    sign_in(page, base)
+    # A chart in a hidden tab is drawn when the tab is opened; its tooltip is canvas text.
+    page.goto(base + dataset)
+    page.click("#tab-correlation")
+    charts_drawn(s, page, "dataset-correlation-tab")
+    box = page.locator("#corr-chart canvas").first.bounding_box()
+    page.mouse.move(box["x"] + box["width"] * 0.6, box["y"] + 60)
+    page.wait_for_timeout(400)
+    s.shot(page, "dataset-correlation-tooltip-en-dark-desktop", full_page=False)
+    # Keyboard tabs: ArrowRight moves to the next tab.
+    page.focus("#tab-correlation")
+    page.keyboard.press("Home")
+    expect(page.locator("#tab-summary")).to_be_focused()
+    # The theme toggle redraws the chart in the other theme's colours.
+    page.goto(base + numeric)
+    charts_drawn(s, page, "column-theme")
+    page.click("[data-theme-toggle]")
+    page.wait_for_timeout(300)
+    s.shot(page, "column-numeric-toggled-en-dark-desktop", full_page=False)
+    # The training form: an inline error, nothing queued.
+    page.goto(base + dataset + "/train")
+    page.fill("#f-nfolds", "1")
+    page.evaluate("() => document.getElementById('f-nfolds').removeAttribute('min')")
+    page.click("#run-button")
+    page.wait_for_selector("#run-errors")
+    s.shot(page, "train-error-en-dark-desktop", full_page=False)
+    # The job list's confirm panel.
+    page.goto(base + project + "/jobs")
+    page.locator("#job-list details.confirm-inline > summary").first.click()
+    s.shot(page, "jobs-confirm-en-dark-desktop", full_page=False)
+    page.context.close()
 
 
 def main() -> None:

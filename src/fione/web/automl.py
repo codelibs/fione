@@ -248,8 +248,11 @@ def _data_page(request: Request, dataset: Dataset) -> dict:
     }
 
 
-def _chart(kind: str, labels: list, values: list, label: str, x_name: str, y_name: str) -> dict:
-    """What ``charts.js`` draws: plain data, never markup."""
+def _chart(
+    kind: str, labels: list, values: list, label: str, x_name: str, y_name: str, **axis
+) -> dict:
+    """What ``charts.js`` draws: plain data, never markup (``axis``: the value axis's
+    ``min`` and ``max``)."""
     return {
         "type": kind,
         "labels": [str(v) for v in labels],
@@ -257,6 +260,7 @@ def _chart(kind: str, labels: list, values: list, label: str, x_name: str, y_nam
         "label": label,
         "x_name": x_name,
         "y_name": y_name,
+        **axis,
     }
 
 
@@ -287,6 +291,8 @@ def dataset_detail(request: Request, conn: Conn, pid: str, did: str) -> Response
         i18n.t("dataset.corr_chart", lang, n=len(pairs)),
         i18n.t("dataset.corr_r", lang),
         "",
+        min=-1,
+        max=1,
     )
     size = _size(request, dataset)
     return _view(

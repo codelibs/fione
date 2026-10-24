@@ -47,7 +47,7 @@
                 <form class="cluster" method="post" action="/projects/{{ pid }}/jobs/{{ job.id }}/delete" data-busy-form>
                   <input type="hidden" name="csrf_token" value="{{ csrf }}">
                   <button type="submit" class="btn btn-danger btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('jobs.delete_yes') }}</button>
-                  <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('job.cancel_no') }}</button>
+                  <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('action.keep') }}</button>
                 </form>
                 {% endif %}
               </div>

@@ -29,31 +29,41 @@
     };
   }
 
-  function option(spec, c) {
+  function option(spec, c, width) {
     var horizontal = spec.type === "hbar";
+    var labelWidth = Math.max(80, Math.min(260, Math.round(width * 0.4)));
     var categoryAxis = {
       type: "category",
       data: spec.labels,
       inverse: horizontal, // the first (largest) on top
       axisLine: { lineStyle: { color: c.axis } },
       axisTick: { lineStyle: { color: c.axis } },
-      axisLabel: { color: c.muted, width: 160, overflow: "truncate", hideOverlap: true },
+      axisLabel: { color: c.muted, width: labelWidth, overflow: "truncate", hideOverlap: true },
       name: horizontal ? "" : spec.x_name,
+      nameLocation: "middle",
+      nameGap: 28,
       nameTextStyle: { color: c.muted },
     };
     var valueAxis = {
       type: "value",
+      min: spec.min,
+      max: spec.max,
       axisLine: { lineStyle: { color: c.axis } },
       axisLabel: { color: c.muted },
       splitLine: { lineStyle: { color: c.grid } },
       name: horizontal ? spec.x_name : spec.y_name,
+      nameLocation: "middle",
+      nameGap: horizontal ? 28 : 44,
       nameTextStyle: { color: c.muted },
     };
     return {
       animation: !reduceMotion.matches,
       aria: { enabled: true },
       textStyle: { color: c.text, fontFamily: window.getComputedStyle(document.body).fontFamily },
-      grid: { left: 8, right: 24, top: 32, bottom: 8, containLabel: true },
+      // Horizontal bars: room for the labels set aside explicitly (they are truncated to it).
+      grid: horizontal
+        ? { left: labelWidth + 16, right: 24, top: 16, bottom: 44 }
+        : { left: 8, right: 24, top: 16, bottom: 32, containLabel: true },
       tooltip: {
         trigger: "axis",
         renderMode: "richText",
@@ -76,7 +86,7 @@
   }
 
   function draw(entry) {
-    entry.chart.setOption(option(entry.spec, colours(entry.figure)), true);
+    entry.chart.setOption(option(entry.spec, colours(entry.figure), entry.el.clientWidth), true);
   }
 
   document.querySelectorAll("[data-chart]").forEach(function (el) {
@@ -93,6 +103,7 @@
         draw(entry);
       } else {
         entry.chart.resize();
+        draw(entry); // the label width follows the chart's width
       }
     }).observe(el);
   });
