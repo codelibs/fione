@@ -142,11 +142,36 @@ def share_project(
     row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
     if row is None:
         raise ValueError(f"unknown user: {username}")
+    if row["id"] == require_project(conn, project_id).owner_id:
+        raise ValueError("the owner already has full access")
     conn.execute(
         "INSERT INTO project_members (project_id, user_id, access) VALUES (?, ?, ?)"
         " ON CONFLICT (project_id, user_id) DO UPDATE SET access = excluded.access",
         (project_id, row["id"], access.value),
     )
+
+
+def unshare_project(conn: sqlite3.Connection, owner: User, project_id: str, username: str) -> bool:
+    """Remove a member; False if ``username`` was not one."""
+    require_project(conn, project_id)
+    _require_owner_or_admin(conn, owner, project_id)
+    cur = conn.execute(
+        "DELETE FROM project_members WHERE project_id = ?"
+        " AND user_id = (SELECT id FROM users WHERE username = ?)",
+        (project_id, username),
+    )
+    return cur.rowcount > 0
+
+
+def list_members(conn: sqlite3.Connection, project_id: str) -> list[tuple[str, ProjectAccess]]:
+    """``(username, access)`` of each member (the owner is not one), by username."""
+    require_project(conn, project_id)
+    rows = conn.execute(
+        "SELECT u.username, m.access FROM project_members m JOIN users u ON u.id = m.user_id"
+        " WHERE m.project_id = ? ORDER BY u.username",
+        (project_id,),
+    )
+    return [(r["username"], ProjectAccess(r["access"])) for r in rows]
 
 
 def reserve_dataset_id(conn: sqlite3.Connection) -> int:

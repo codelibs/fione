@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     max_concurrent_short_jobs: int = 4
     image_tag: str = "dev"
     serving_image: str = "ghcr.io/codelibs/fione-serving"
+    # REST API
+    runner_enabled: bool = True
+    cookie_secure: bool = False
+    session_max_age_secs: int = 7 * 24 * 3600
+    login_max_failures: int = 5
+    login_window_secs: int = 15 * 60
+    # Trust X-Forwarded-For/-Host: only behind a reverse proxy that sets them.
+    trust_proxy: bool = False
+    max_upload_bytes: int = 2**30
+    # First-admin setup token; when unset, one is generated into <data_dir>/setup-token.
+    setup_token: str | None = None
 
     @model_validator(mode="after")
     def _derive_defaults(self) -> "Settings":
@@ -43,9 +54,8 @@ SECRET_LENGTH = 32
 def load_secret(settings: Settings) -> bytes:
     """Return the server secret, creating a random 32-byte key file (mode 0600) if missing.
 
-    The key is written to a private temp file and published with ``os.link``, so the
-    key file is never visible empty or partial, even across processes or crashes.
-    An existing file of any other length is rejected, never regenerated.
+    The key file is published atomically (see ``create_private_file``). An existing file of
+    any other length is rejected, never regenerated.
     """
     path = settings.secret_key_path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,16 +68,26 @@ def load_secret(settings: Settings) -> bytes:
 
 
 def _create_secret(path: Path) -> None:
+    create_private_file(path, os.urandom(SECRET_LENGTH))
+
+
+def create_private_file(path: Path, data: bytes) -> bool:
+    """Publish ``data`` at ``path`` (mode 0600) unless the file exists; True if this call did.
+
+    The data goes to a private temp file first and is published with ``os.link``, so the
+    file is never visible empty or partial, even across processes or crashes.
+    """
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(fd, "wb") as f:
-            f.write(os.urandom(SECRET_LENGTH))
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
         try:
             os.link(tmp, path)
         except FileExistsError:
-            pass  # another process published first; its file is read by the caller
+            return False  # another process published first; its file is read by the caller
+        return True
     finally:
         tmp.unlink(missing_ok=True)

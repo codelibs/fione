@@ -202,3 +202,32 @@ def test_dataset_records_roundtrip(conn, storage, owner):
         service.get_dataset(conn, ds.id)
     with pytest.raises(service.DatasetNotFound):
         service.delete_dataset(conn, storage, ds.id)
+
+
+def test_list_members_and_unshare(conn, owner, other, admin):
+    p = service.create_project(conn, owner, "shared")
+    assert service.list_members(conn, p.id) == []
+    service.share_project(conn, owner, p.id, other.username, ProjectAccess.VIEWER)
+    service.share_project(conn, owner, p.id, admin.username, ProjectAccess.EDITOR)
+    assert service.list_members(conn, p.id) == [
+        ("other", ProjectAccess.VIEWER),
+        ("root", ProjectAccess.EDITOR),
+    ]
+    with pytest.raises(PermissionError):
+        service.unshare_project(conn, other, p.id, admin.username)
+    assert service.unshare_project(conn, owner, p.id, other.username) is True
+    assert service.unshare_project(conn, owner, p.id, other.username) is False
+    assert service.unshare_project(conn, owner, p.id, "ghost") is False
+    assert service.list_members(conn, p.id) == [("root", ProjectAccess.EDITOR)]
+    assert not roles.can_access_project(conn, other, p.id, "read")
+    with pytest.raises(ProjectNotFound):
+        service.list_members(conn, "nope")
+    with pytest.raises(ProjectNotFound):
+        service.unshare_project(conn, owner, "nope", other.username)
+
+
+def test_share_with_the_owner_is_rejected(conn, owner):
+    p = service.create_project(conn, owner, "mine")
+    with pytest.raises(ValueError, match="owner"):
+        service.share_project(conn, owner, p.id, owner.username, ProjectAccess.VIEWER)
+    assert service.list_members(conn, p.id) == []

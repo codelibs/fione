@@ -1,4 +1,6 @@
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 # Ordered, append-only: later tasks add their own migration and never edit earlier ones.
@@ -127,19 +129,38 @@ MIGRATIONS: list[str] = [
 ]
 
 
-def connect(path: Path) -> sqlite3.Connection:
+def connect(path: Path, *, check_same_thread: bool = True) -> sqlite3.Connection:
     """Open the metadata database.
 
-    Connections use sqlite3's default ``check_same_thread=True``: create one per
-    thread/request rather than sharing a connection across FastAPI worker threads.
+    Create one connection per thread/request rather than sharing one across FastAPI worker
+    threads. ``check_same_thread=False`` is only for a connection used by one request at a
+    time that FastAPI may hand from thread to thread (a dependency and its endpoint can run
+    in different threadpool threads).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, isolation_level=None)
+    conn = sqlite3.connect(path, isolation_level=None, check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
+
+
+@contextmanager
+def immediate(conn: sqlite3.Connection) -> Iterator[None]:
+    """A ``BEGIN IMMEDIATE`` transaction: committed on exit, rolled back on any exception.
+
+    The write lock is taken up front, so a check and the write it guards cannot interleave
+    with another connection's.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
 
 
 def migrate(conn: sqlite3.Connection) -> int:

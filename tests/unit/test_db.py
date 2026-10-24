@@ -133,3 +133,76 @@ def test_create_secret_loses_race_keeps_winner(tmp_path):
     _create_secret(path)
     assert path.read_bytes() == winner
     assert [p.name for p in tmp_path.iterdir()] == ["secret.key"]
+
+
+def test_connect_default_is_bound_to_its_thread(tmp_path):
+    import threading
+
+    c = db.connect(tmp_path / "fione.db")
+    errors = []
+    t = threading.Thread(target=lambda: _try_select(c, errors))
+    t.start()
+    t.join()
+    c.close()
+    assert len(errors) == 1 and isinstance(errors[0], sqlite3.ProgrammingError)
+
+
+def test_connect_check_same_thread_false_allows_other_thread(tmp_path):
+    import threading
+
+    c = db.connect(tmp_path / "fione.db", check_same_thread=False)
+    errors = []
+    t = threading.Thread(target=lambda: _try_select(c, errors))
+    t.start()
+    t.join()
+    c.close()
+    assert errors == []
+
+
+def _try_select(c, errors):
+    try:
+        c.execute("SELECT 1").fetchone()
+    except Exception as e:
+        errors.append(e)
+
+
+def test_immediate_commits_or_rolls_back(conn):
+    conn.execute("CREATE TABLE t (x INTEGER)")
+    with db.immediate(conn):
+        conn.execute("INSERT INTO t VALUES (1)")
+    assert not conn.in_transaction
+    with pytest.raises(RuntimeError):
+        with db.immediate(conn):
+            conn.execute("INSERT INTO t VALUES (2)")
+            raise RuntimeError("boom")
+    assert not conn.in_transaction
+    assert [r[0] for r in conn.execute("SELECT x FROM t")] == [1]
+
+
+def test_api_settings_defaults(tmp_path, monkeypatch):
+    for name in ("RUNNER_ENABLED", "COOKIE_SECURE", "SETUP_TOKEN", "TRUST_PROXY"):
+        monkeypatch.delenv(f"FIONE_{name}", raising=False)
+    s = Settings(data_dir=tmp_path)
+    assert s.runner_enabled is True
+    assert s.cookie_secure is False
+    assert s.session_max_age_secs == 7 * 24 * 3600
+    assert (s.login_max_failures, s.login_window_secs) == (5, 900)
+    assert s.trust_proxy is False
+    assert s.max_upload_bytes == 2**30
+    assert s.setup_token is None
+    monkeypatch.setenv("FIONE_RUNNER_ENABLED", "false")
+    monkeypatch.setenv("FIONE_SETUP_TOKEN", "from-env")
+    s = Settings(data_dir=tmp_path)
+    assert s.runner_enabled is False
+    assert s.setup_token == "from-env"
+
+
+def test_create_private_file_is_0600_and_keeps_first(tmp_path):
+    from fione.config import create_private_file
+
+    path = tmp_path / "token"
+    assert create_private_file(path, b"first") is True
+    assert create_private_file(path, b"second") is False
+    assert path.read_bytes() == b"first"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert [p.name for p in tmp_path.iterdir()] == ["token"]

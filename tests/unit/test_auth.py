@@ -321,3 +321,111 @@ def test_string_role_admin_allowed_and_require_admin(conn):
     assert roles.can_access_project(conn, admin, "anything", "write")
     with pytest.raises(PermissionError):
         roles.require_admin(User(2, "e", "editor"))  # type: ignore[arg-type]
+
+
+# --- token records and user management ---------------------------------------
+
+
+def test_create_token_returns_record_and_list_tokens(conn):
+    alice = service.create_user(conn, "alice", PW, Role.EDITOR)
+    bob = service.create_user(conn, "bob", PW, Role.EDITOR)
+    record, token = service.create_token(conn, alice.id, "ci")
+    assert token.startswith("fione_")
+    assert (record.user_id, record.name, record.revoked) == (alice.id, "ci", False)
+    assert record.created_at
+    assert service.user_from_token(conn, token) == alice
+    service.issue_token(conn, bob.id, "other")
+    assert service.list_tokens(conn, alice.id) == [record]
+    assert service.get_token(conn, record.id) == record
+    assert service.get_token(conn, 999) is None
+    service.revoke_token(conn, record.id)
+    assert service.list_tokens(conn, alice.id)[0].revoked is True
+    assert all(token not in repr(t) for t in service.list_tokens(conn, alice.id))
+
+
+def test_get_and_list_users(conn):
+    alice = service.create_user(conn, "alice", PW, Role.EDITOR)
+    root = service.create_user(conn, "root", PW, Role.ADMIN)
+    assert service.get_user(conn, alice.id) == alice
+    assert service.get_user(conn, 999) is None
+    assert service.list_users(conn) == [alice, root]
+
+
+def test_user_for_session_returns_current_hash(conn):
+    alice = service.create_user(conn, "alice", PW, Role.EDITOR)
+    user, binding = service.user_for_session(conn, alice.id)
+    assert user == alice
+    service.set_password(conn, alice.id, "another password")
+    assert service.user_for_session(conn, alice.id)[1] != binding
+    assert service.user_for_session(conn, 999) is None
+
+
+def test_set_password(conn):
+    alice = service.create_user(conn, "alice", PW, Role.EDITOR)
+    service.set_password(conn, alice.id, "another password")
+    assert service.authenticate(conn, "alice", PW) is None
+    assert service.authenticate(conn, "alice", "another password") == alice
+    with pytest.raises(ValueError):
+        service.set_password(conn, alice.id, "short")
+    with pytest.raises(service.UserNotFound):
+        service.set_password(conn, 999, "another password")
+
+
+def test_set_role_protects_last_admin(conn):
+    root = service.create_user(conn, "root", PW, Role.ADMIN)
+    alice = service.create_user(conn, "alice", PW, Role.VIEWER)
+    assert service.set_role(conn, alice.id, Role.EDITOR) == User(alice.id, "alice", Role.EDITOR)
+    with pytest.raises(service.UserConflict, match="last admin"):
+        service.set_role(conn, root.id, Role.EDITOR)
+    assert not conn.in_transaction
+    service.set_role(conn, alice.id, Role.ADMIN)
+    assert service.set_role(conn, root.id, Role.EDITOR).role == Role.EDITOR
+    with pytest.raises(service.UserNotFound):
+        service.set_role(conn, 999, Role.EDITOR)
+    with pytest.raises(ValueError):
+        service.set_role(conn, alice.id, "owner")
+
+
+def test_delete_user_protects_last_admin_and_owned_data(conn):
+    root = service.create_user(conn, "root", PW, Role.ADMIN)
+    alice = service.create_user(conn, "alice", PW, Role.EDITOR)
+    bob = service.create_user(conn, "bob", PW, Role.EDITOR)
+    with pytest.raises(service.UserConflict, match="last admin"):
+        service.delete_user(conn, root.id)
+    add_project(conn, "p1", alice.id)
+    with pytest.raises(service.UserConflict, match="owns 1 project"):
+        service.delete_user(conn, alice.id)
+    conn.execute(
+        "INSERT INTO jobs (kind, project_id, owner_id, status, payload_json, created_at)"
+        " VALUES ('automl', 'p1', ?, 'done', '{}', 0)",
+        (bob.id,),
+    )
+    with pytest.raises(service.UserConflict, match="job"):
+        service.delete_user(conn, bob.id)
+    assert not conn.in_transaction
+    conn.execute("DELETE FROM jobs")
+    service.delete_user(conn, bob.id)
+    assert service.get_user(conn, bob.id) is None
+    with pytest.raises(service.UserNotFound):
+        service.delete_user(conn, bob.id)
+
+
+def test_create_first_admin_once(conn):
+    service.create_user(conn, "alice", PW, Role.EDITOR)
+    root = service.create_first_admin(conn, "root", PW)
+    assert root.role == Role.ADMIN
+    with pytest.raises(service.AlreadySetUp):
+        service.create_first_admin(conn, "root2", PW)
+    assert not conn.in_transaction
+    assert [u.username for u in service.list_users(conn)] == ["alice", "root"]
+
+
+def test_create_first_admin_validates(conn):
+    with pytest.raises(ValueError):
+        service.create_first_admin(conn, "bad name", PW)
+    with pytest.raises(ValueError):
+        service.create_first_admin(conn, "root", "short")
+    service.create_user(conn, "root", PW, Role.EDITOR)
+    with pytest.raises(ValueError, match="exists"):
+        service.create_first_admin(conn, "root", PW)
+    assert service.needs_first_admin(conn)
