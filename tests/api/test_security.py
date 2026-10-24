@@ -53,8 +53,26 @@ def test_session_rejects_other_binding_tampering_and_other_keys():
     assert SessionSigner(b"t" * 32, max_age_secs=60).verify(value, "hash-a") is None
 
 
+def _claim(user_id) -> str:
+    payload = security._b64e(b'{"u":%d,"t":%d,"c":"x"}' % (user_id, int(time.time())))
+    return f"v1.{payload}.AAAA"
+
+
 @pytest.mark.parametrize(
-    "value", ["", "x", "v1..", "v1.e30.", "v2.e30.AAAA", "v1.!!!.AAAA", "v1." + "A" * 5000 + ".A"]
+    "value",
+    [
+        "",
+        "x",
+        "v1..",
+        "v1.e30.",
+        "v2.e30.AAAA",
+        "v1.!!!.AAAA",
+        "v1." + "A" * 5000 + ".A",
+        _claim(0),
+        _claim(-1),
+        _claim(2**63),
+        _claim(2**64),
+    ],
 )
 def test_session_rejects_garbage(value):
     signer = SessionSigner(SECRET, max_age_secs=60)
@@ -82,46 +100,78 @@ def test_throttle_blocks_after_max_failures_within_window():
     t = LoginThrottle(max_failures=3, window_secs=100, clock=clock)
     key = ("1.2.3.4", "alice")
     for _ in range(3):
-        assert t.retry_after(key) is None
-        t.failure(key)
+        assert t.attempt(key) is None  # each attempt counts as a failure until success()
         clock.now += 10
-    assert t.retry_after(key) == 70  # now 1030; the first failure leaves the window at 1100
-    assert t.retry_after(("1.2.3.4", "bob")) is None
-    assert t.retry_after(("5.6.7.8", "alice")) is None
+    assert t.attempt(key) == 70  # now 1030; the first failure leaves the window at 1100
+    assert t.attempt(key) == 70  # refused attempts are not counted
+    assert t.attempt(("1.2.3.4", "bob")) is None
+    assert t.attempt(("5.6.7.8", "alice")) is None
     clock.now = 1100
-    assert t.retry_after(key) is None
+    assert t.attempt(key) is None
 
 
-def test_throttle_success_resets():
+def test_throttle_success_clears_the_key():
     t = LoginThrottle(max_failures=2, window_secs=100, clock=Clock())
     key = ("ip", "alice")
-    t.failure(key)
+    assert t.attempt(key) is None
     t.success(key)
-    t.failure(key)
-    assert t.retry_after(key) is None
+    assert t.attempt(key) is None
+    t.success(key)
+    assert t.attempt(key) is None
+    assert t.attempt(key) is None
+    assert t.attempt(key) is not None
 
 
-def test_throttle_bounds_its_memory():
-    clock = Clock()
-    t = LoginThrottle(max_failures=2, window_secs=100, max_keys=10, clock=clock)
-    for i in range(50):
-        t.failure(("ip", f"u{i}"))
-    assert len(t._failures) <= 10
-    t.failure(("ip", "u49"))
-    assert t.retry_after(("ip", "u49")) is not None  # the newest keys survive
-
-
-def test_throttle_is_thread_safe():
-    t = LoginThrottle(max_failures=10_000, window_secs=100)
+def test_concurrent_attempts_cannot_exceed_the_limit():
+    t = LoginThrottle(max_failures=5, window_secs=100)
     key = ("ip", "alice")
-    threads = [
-        threading.Thread(target=lambda: [t.failure(key) for _ in range(500)]) for _ in range(8)
-    ]
+    allowed = []
+    barrier = threading.Barrier(30)
+
+    def go():
+        barrier.wait()
+        allowed.append(t.attempt(key) is None)
+
+    threads = [threading.Thread(target=go) for _ in range(30)]
     for th in threads:
         th.start()
     for th in threads:
         th.join()
-    assert len(t._failures[key]) == 4000
+    assert allowed.count(True) == 5
+
+
+def test_per_address_cap_bounds_username_spraying():
+    t = LoginThrottle(max_failures=5, window_secs=100, max_failures_per_ip=4, clock=Clock())
+    for i in range(4):
+        assert t.attempt(("1.2.3.4", f"user{i}")) is None
+    assert t.attempt(("1.2.3.4", "fresh")) is not None
+    assert t.attempt(("5.6.7.8", "fresh")) is None
+    t.success(("1.2.3.4", "user3"))  # a success gives back only its own attempt
+    assert t.attempt(("1.2.3.4", "fresh")) is None
+    assert t.attempt(("1.2.3.4", "fresh2")) is not None
+
+
+def test_a_locked_key_is_never_evicted():
+    clock = Clock()
+    t = LoginThrottle(max_failures=5, window_secs=900, max_keys=100, clock=clock)
+    locked = ("1.2.3.4", "alice")
+    for _ in range(5):
+        t.attempt(locked)
+    for i in range(300):
+        t.attempt((f"10.0.{i // 250}.{i % 250}", f"junk{i}"))
+    assert t.attempt(locked) is not None
+
+
+def test_expired_entries_are_pruned():
+    clock = Clock()
+    t = LoginThrottle(max_failures=2, window_secs=100, max_keys=10, clock=clock)
+    for i in range(50):
+        t.attempt((f"old{i}", "u"))
+    clock.now += 101
+    for i in range(60):
+        t.attempt((f"new{i}", "u"))
+    assert all(ip.startswith("new") for ip, _ in t._failures)
+    assert all(ip.startswith("new") for ip in t._by_ip)
 
 
 def test_password_work_caps_concurrency():
@@ -183,9 +233,9 @@ def test_setup_token_generated_once_private(tmp_path):
 
 
 def test_setup_token_from_settings_writes_no_file(tmp_path):
-    settings = Settings(data_dir=tmp_path, setup_token="from-env-token")
-    assert security.ensure_setup_token(settings) == ("from-env-token", False)
-    assert security.read_setup_token(settings) == "from-env-token"
+    settings = Settings(data_dir=tmp_path, setup_token="from-env-token-0123")
+    assert security.ensure_setup_token(settings) == ("from-env-token-0123", False)
+    assert security.read_setup_token(settings) == "from-env-token-0123"
     assert not (tmp_path / security.SETUP_TOKEN_FILE).exists()
 
 

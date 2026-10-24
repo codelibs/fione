@@ -2,7 +2,8 @@
 
 Personas: anonymous; a viewer-role user shared the project as *editor* (the global role caps
 it at read); an editor-role member (editor access); the editor-role owner; an admin; an
-editor-role non-member. Authenticated personas use bearer tokens (CSRF-exempt): cookie
+editor-role non-member; an editor-role user shared the project as *viewer* (the membership
+caps it at read). Authenticated personas use bearer tokens (CSRF-exempt): cookie
 sessions and CSRF are covered in test_auth_api.py. Each case runs on a fresh copy of one
 seeded install, so mutating rows cannot affect each other.
 """
@@ -26,7 +27,15 @@ from fione.projects.ingest import ingest_csv
 from fione.projects.service import DatasetType
 from fione.storage import open_storage
 
-PERSONAS = ("anonymous", "viewer_member", "editor_member", "owner", "admin", "outsider")
+PERSONAS = (
+    "anonymous",
+    "viewer_member",
+    "editor_member",
+    "owner",
+    "admin",
+    "outsider",
+    "editor_viewer",
+)
 MAX_UPLOAD = 64 * 1024
 
 
@@ -54,29 +63,29 @@ R_DS = R_P + "/datasets"
 R_D = R_DS + "/{dataset_id}"
 
 ROWS = [
-    Row("GET", "/api/v1/health", "/api/v1/health", e(200, 200, 200, 200, 200, 200)),
-    Row("GET", "/api/v1/auth/status", "/api/v1/auth/status", e(200, 200, 200, 200, 200, 200)),
+    Row("GET", "/api/v1/health", "/api/v1/health", e(200, 200, 200, 200, 200, 200, 200)),
+    Row("GET", "/api/v1/auth/status", "/api/v1/auth/status", e(200, 200, 200, 200, 200, 200, 200)),
     Row(
         "POST",
         "/api/v1/auth/login",
         "/api/v1/auth/login",
-        e(401, 401, 401, 401, 401, 401),
+        e(401, 401, 401, 401, 401, 401, 401),
         json={"username": "owner", "password": "wrong-password"},
     ),
     Row(
         "POST",
         "/api/v1/auth/first-admin",
         "/api/v1/auth/first-admin",
-        e(409, 409, 409, 409, 409, 409),
+        e(409, 409, 409, 409, 409, 409, 409),
         json={"username": "x", "password": PW, "setup_token": "t"},
     ),
-    Row("POST", "/api/v1/auth/logout", "/api/v1/auth/logout", e(401, 204, 204, 204, 204, 204)),
-    Row("GET", "/api/v1/auth/me", "/api/v1/auth/me", e(401, 200, 200, 200, 200, 200)),
+    Row("POST", "/api/v1/auth/logout", "/api/v1/auth/logout", e(401, 204, 204, 204, 204, 204, 204)),
+    Row("GET", "/api/v1/auth/me", "/api/v1/auth/me", e(401, 200, 200, 200, 200, 200, 200)),
     Row(
         "POST",
         "/api/v1/auth/password",
         "/api/v1/auth/password",
-        e(401, 403, 403, 403, 403, 403),
+        e(401, 403, 403, 403, 403, 403, 403),
         json={"current_password": "wrong-password", "new_password": "new-password-1"},
         note="wrong current password",
     ),
@@ -84,23 +93,23 @@ ROWS = [
         "POST",
         "/api/v1/auth/password",
         "/api/v1/auth/password",
-        e(401, 422, 422, 422, 422, 422),
+        e(401, 422, 422, 422, 422, 422, 422),
         json={"current_password": PW, "new_password": "short"},
         note="new password too short",
     ),
-    Row("GET", "/api/v1/users", "/api/v1/users", e(401, 403, 403, 403, 200, 403)),
+    Row("GET", "/api/v1/users", "/api/v1/users", e(401, 403, 403, 403, 200, 403, 403)),
     Row(
         "POST",
         "/api/v1/users",
         "/api/v1/users",
-        e(401, 403, 403, 403, 201, 403),
+        e(401, 403, 403, 403, 201, 403, 403),
         json={"username": "newbie", "password": PW, "role": "editor"},
     ),
     Row(
         "POST",
         "/api/v1/users",
         "/api/v1/users",
-        e(401, 403, 403, 403, 422, 403),
+        e(401, 403, 403, 403, 422, 403, 403),
         json={"username": "victim", "password": PW, "role": "editor"},
         note="duplicate username",
     ),
@@ -108,14 +117,14 @@ ROWS = [
         "PATCH",
         "/api/v1/users/{user_id}",
         "/api/v1/users/{victim}",
-        e(401, 403, 403, 403, 200, 403),
+        e(401, 403, 403, 403, 200, 403, 403),
         json={"role": "viewer"},
     ),
     Row(
         "PATCH",
         "/api/v1/users/{user_id}",
         "/api/v1/users/{admin_id}",
-        e(401, 403, 403, 403, 409, 403),
+        e(401, 403, 403, 403, 409, 403, 403),
         json={"role": "editor"},
         note="demoting the last admin",
     ),
@@ -123,74 +132,74 @@ ROWS = [
         "PATCH",
         "/api/v1/users/{user_id}",
         "/api/v1/users/999999",
-        e(401, 403, 403, 403, 404, 403),
+        e(401, 403, 403, 403, 404, 403, 403),
         json={"role": "editor"},
     ),
     Row(
         "DELETE",
         "/api/v1/users/{user_id}",
         "/api/v1/users/{victim}",
-        e(401, 403, 403, 403, 204, 403),
+        e(401, 403, 403, 403, 204, 403, 403),
     ),
     Row(
         "DELETE",
         "/api/v1/users/{user_id}",
         "/api/v1/users/{owner_id}",
-        e(401, 403, 403, 403, 409, 403),
+        e(401, 403, 403, 403, 409, 403, 403),
         note="owns a project",
     ),
     Row(
         "POST",
         "/api/v1/tokens",
         "/api/v1/tokens",
-        e(401, 201, 201, 201, 201, 201),
+        e(401, 201, 201, 201, 201, 201, 201),
         json={"name": "ci"},
     ),
-    Row("GET", "/api/v1/tokens", "/api/v1/tokens", e(401, 200, 200, 200, 200, 200)),
+    Row("GET", "/api/v1/tokens", "/api/v1/tokens", e(401, 200, 200, 200, 200, 200, 200)),
     Row(
         "GET",
         "/api/v1/tokens",
         "/api/v1/tokens?user_id={owner_id}",
-        e(401, 403, 403, 200, 200, 403),
+        e(401, 403, 403, 200, 200, 403, 403),
         note="another user's tokens",
     ),
     Row(
         "DELETE",
         "/api/v1/tokens/{token_id}",
         "/api/v1/tokens/{owner_token}",
-        e(401, 404, 404, 204, 204, 404),
+        e(401, 404, 404, 204, 204, 404, 404),
     ),
-    Row("GET", "/api/v1/projects", "/api/v1/projects", e(401, 200, 200, 200, 200, 200)),
+    Row("GET", "/api/v1/projects", "/api/v1/projects", e(401, 200, 200, 200, 200, 200, 200)),
     Row(
         "POST",
         "/api/v1/projects",
         "/api/v1/projects",
-        e(401, 403, 201, 201, 201, 201),
+        e(401, 403, 201, 201, 201, 201, 201),
         json={"name": "新しい project"},
     ),
     Row(
         "POST",
         "/api/v1/projects",
         "/api/v1/projects",
-        e(401, 422, 422, 422, 422, 422),
+        e(401, 422, 422, 422, 422, 422, 422),
         json={"name": "x", "owner_id": 1},
         note="unknown field",
     ),
-    Row("GET", R_P, P, e(401, 200, 200, 200, 200, 404)),
-    Row("GET", R_P, "/api/v1/projects/missing", e(401, 404, 404, 404, 404, 404)),
-    Row("DELETE", R_P, P, e(401, 403, 403, 204, 204, 404)),
+    Row("GET", R_P, P, e(401, 200, 200, 200, 200, 404, 200)),
+    Row("GET", R_P, "/api/v1/projects/missing", e(401, 404, 404, 404, 404, 404, 404)),
+    Row("DELETE", R_P, P, e(401, 403, 403, 204, 204, 404, 403)),
     Row(
         "POST",
         R_P + "/share",
         P + "/share",
-        e(401, 403, 403, 204, 204, 404),
+        e(401, 403, 403, 204, 204, 404, 403),
         json={"username": "outsider", "access": "viewer"},
     ),
     Row(
         "POST",
         R_P + "/share",
         P + "/share",
-        e(401, 403, 403, 422, 422, 404),
+        e(401, 403, 403, 422, 422, 404, 403),
         json={"username": "ghost", "access": "viewer"},
         note="unknown user",
     ),
@@ -198,22 +207,22 @@ ROWS = [
         "DELETE",
         R_P + "/share/{username}",
         P + "/share/editor_member",
-        e(401, 403, 403, 204, 204, 404),
+        e(401, 403, 403, 204, 204, 404, 403),
     ),
     Row(
         "DELETE",
         R_P + "/share/{username}",
         P + "/share/outsider",
-        e(401, 403, 403, 404, 404, 404),
+        e(401, 403, 403, 404, 404, 404, 403),
         note="not a member",
     ),
-    Row("GET", R_DS, P + "/datasets", e(401, 200, 200, 200, 200, 404)),
-    Row("POST", R_DS, P + "/datasets", e(401, 403, 201, 201, 201, 404), upload=CSV),
+    Row("GET", R_DS, P + "/datasets", e(401, 200, 200, 200, 200, 404, 200)),
+    Row("POST", R_DS, P + "/datasets", e(401, 403, 201, 201, 201, 404, 403), upload=CSV),
     Row(
         "POST",
         R_DS,
         P + "/datasets",
-        e(401, 403, 413, 413, 413, 404),
+        e(401, 403, 413, 413, 413, 404, 403),
         upload=b"a,b\n" + b"1,2\n" * (MAX_UPLOAD // 4 + 1),
         note="over max_upload_bytes",
     ),
@@ -221,49 +230,49 @@ ROWS = [
         "POST",
         R_DS,
         P + "/datasets",
-        e(401, 403, 422, 422, 422, 404),
+        e(401, 403, 422, 422, 422, 404, 403),
         upload=b"\xff\xfe\x00\x01" * 10,
         note="not a CSV",
     ),
-    Row("GET", R_D, D, e(401, 200, 200, 200, 200, 404)),
+    Row("GET", R_D, D, e(401, 200, 200, 200, 200, 404, 200)),
     Row(
         "GET",
         R_D,
         P + "/datasets/{D2}",
-        e(401, 404, 404, 404, 404, 404),
+        e(401, 404, 404, 404, 404, 404, 404),
         note="dataset of another project",
     ),
-    Row("GET", R_D + "/download", D + "/download", e(401, 200, 200, 200, 200, 404)),
-    Row("GET", R_D + "/preview", D + "/preview?rows=2", e(401, 200, 200, 200, 200, 404)),
+    Row("GET", R_D + "/download", D + "/download", e(401, 200, 200, 200, 200, 404, 200)),
+    Row("GET", R_D + "/preview", D + "/preview?rows=2", e(401, 200, 200, 200, 200, 404, 200)),
     Row(
         "GET",
         R_D + "/preview",
         D + "/preview?rows=201",
-        e(401, 422, 422, 422, 422, 404),
+        e(401, 422, 422, 422, 422, 404, 422),
         note="too many rows",
     ),
-    Row("GET", R_D + "/profile", D + "/profile?target=label", e(401, 200, 200, 200, 200, 404)),
+    Row("GET", R_D + "/profile", D + "/profile?target=label", e(401, 200, 200, 200, 200, 404, 200)),
     Row(
         "GET",
         R_D + "/profile",
         D + "/profile?target=nope",
-        e(401, 422, 422, 422, 422, 404),
+        e(401, 422, 422, 422, 422, 404, 422),
         note="unknown target",
     ),
     Row(
         "GET",
         R_D + "/columns/{column}",
         D + "/columns/a",
-        e(401, 200, 200, 200, 200, 404),
+        e(401, 200, 200, 200, 200, 404, 200),
     ),
     Row(
         "GET",
         R_D + "/columns/{column}",
         D + "/columns/nope",
-        e(401, 404, 404, 404, 404, 404),
+        e(401, 404, 404, 404, 404, 404, 404),
         note="unknown column",
     ),
-    Row("DELETE", R_D, D, e(401, 403, 204, 204, 204, 404)),
+    Row("DELETE", R_D, D, e(401, 403, 204, 204, 204, 404, 403)),
 ]
 
 
@@ -283,11 +292,13 @@ def seed(tmp_path_factory):
             "editor_member": auth.create_user(conn, "editor_member", PW, Role.EDITOR),
             "viewer_member": auth.create_user(conn, "viewer_member", PW, Role.VIEWER),
             "outsider": auth.create_user(conn, "outsider", PW, Role.EDITOR),
+            "editor_viewer": auth.create_user(conn, "editor_viewer", PW, Role.EDITOR),
         }
         victim = auth.create_user(conn, "victim", PW, Role.EDITOR)
         p = projects.create_project(conn, users["owner"], "P")
         for member in ("editor_member", "viewer_member"):
             projects.share_project(conn, users["owner"], p.id, member, ProjectAccess.EDITOR)
+        projects.share_project(conn, users["owner"], p.id, "editor_viewer", ProjectAccess.VIEWER)
         q = projects.create_project(conn, users["outsider"], "Q")
         d = ingest_csv(storage, conn, p.id, "d", DatasetType.TRAIN, io.BytesIO(CSV))
         d2 = ingest_csv(storage, conn, q.id, "d2", DatasetType.TRAIN, io.BytesIO(CSV))

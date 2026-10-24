@@ -30,6 +30,7 @@ _SESSION_VERSION = "v1"
 _SESSION_KEY_LABEL = b"fione-session-v1"
 _MAX_COOKIE_LEN = 512
 _CLOCK_SKEW_SECS = 60
+_MAX_ROWID = 2**63 - 1
 
 PASSWORD_SLOTS = 4
 SETUP_TOKEN_FILE = "setup-token"
@@ -98,6 +99,8 @@ class SessionSigner:
             return None
         if type(data["u"]) is not int or type(data["t"]) is not int:
             return None
+        if not 1 <= session.user_id <= _MAX_ROWID:  # never reaches SQLite out of range
+            return None
         return payload, signature, session
 
     def unverified_user_id(self, value: str) -> int | None:
@@ -120,12 +123,18 @@ class SessionSigner:
 
 
 class LoginThrottle:
-    """Counts failed password checks per key (client address, lowercased username) in a
-    sliding window; a key with ``max_failures`` failures in the window is locked out until
-    the oldest one leaves it. A success clears the key.
+    """Limits password checks per key (client address, lowercased username) and per client
+    address, in a sliding window.
 
-    In memory, per process. At most ``max_keys`` keys are kept: past that, expired keys are
-    dropped, then the least recently failed ones.
+    ``attempt`` checks and counts in one step under the lock: every allowed attempt is
+    recorded as a failure up front, and ``success`` takes it back (and clears the key), so
+    concurrent requests can never run more than ``max_failures`` checks for a key, nor more
+    than ``max_failures_per_ip`` for an address. A refused attempt is not counted.
+
+    In memory, per process. Live entries are never evicted, so a lockout cannot be undone
+    by flooding with junk keys; expired ones are pruned once more than ``max_keys`` keys are
+    held. Memory stays bounded because entries are only added by allowed attempts, each of
+    which then costs a password hash (``password_work``), over a window of fixed length.
     """
 
     def __init__(
@@ -133,48 +142,69 @@ class LoginThrottle:
         max_failures: int,
         window_secs: float,
         *,
+        max_failures_per_ip: int = 50,
         max_keys: int = 10_000,
         clock: Callable[[], float] = time.monotonic,
     ):
         self._max = max_failures
+        self._max_per_ip = max_failures_per_ip
         self._window = window_secs
         self._max_keys = max_keys
         self._clock = clock
         self._lock = threading.Lock()
         self._failures: dict[tuple[str, str], list[float]] = {}
+        self._by_ip: dict[str, list[float]] = {}
+        self._prune_at = max_keys
 
-    def _live(self, key: tuple[str, str], now: float) -> list[float]:
-        times = [t for t in self._failures.get(key, ()) if t > now - self._window]
+    @staticmethod
+    def _live(table: dict, key, cutoff: float) -> list[float]:
+        times = [t for t in table.get(key, ()) if t > cutoff]
         if times:
-            self._failures[key] = times
+            table[key] = times
         else:
-            self._failures.pop(key, None)
+            table.pop(key, None)
         return times
 
-    def retry_after(self, key: tuple[str, str]) -> int | None:
-        """Seconds until the key may try again, or None if it may now."""
-        with self._lock:
-            now = self._clock()
-            times = self._live(key, now)
-            if len(times) < self._max:
-                return None
-            return max(1, math.ceil(times[-self._max] + self._window - now))
+    def _retry(self, times: list[float], limit: int, now: float) -> int | None:
+        if len(times) < limit:
+            return None
+        return max(1, math.ceil(times[-limit] + self._window - now))
 
-    def failure(self, key: tuple[str, str]) -> None:
+    def _prune(self, cutoff: float) -> None:
+        for table in (self._failures, self._by_ip):
+            for key in list(table):
+                self._live(table, key, cutoff)
+        # Amortized: the next full pass waits until the tables have grown again.
+        self._prune_at = max(self._max_keys, 2 * len(self._failures), 2 * len(self._by_ip))
+
+    def attempt(self, key: tuple[str, str]) -> int | None:
+        """None if the password check may run (it is counted as a failure until
+        ``success``), else the seconds until the key or its address may try again."""
         with self._lock:
             now = self._clock()
-            times = self._live(key, now)
-            self._failures.pop(key, None)  # re-insert last: dict order is failure recency
+            cutoff = now - self._window
+            times = self._live(self._failures, key, cutoff)
+            ip_times = self._live(self._by_ip, key[0], cutoff)
+            retry = self._retry(times, self._max, now)
+            if retry is None:
+                retry = self._retry(ip_times, self._max_per_ip, now)
+            if retry is not None:
+                return retry
             self._failures[key] = [*times, now]
-            if len(self._failures) > self._max_keys:
-                for other in list(self._failures):
-                    self._live(other, now)
-                while len(self._failures) > self._max_keys:
-                    del self._failures[next(iter(self._failures))]
+            self._by_ip[key[0]] = [*ip_times, now]
+            if max(len(self._failures), len(self._by_ip)) > self._prune_at:
+                self._prune(cutoff)
+            return None
 
     def success(self, key: tuple[str, str]) -> None:
+        """The check passed: clear the key, and give its address back this attempt."""
         with self._lock:
-            self._failures.pop(key, None)
+            times = self._failures.pop(key, None)
+            ip_times = self._by_ip.get(key[0])
+            if times and ip_times and times[-1] in ip_times:
+                ip_times.remove(times[-1])
+                if not ip_times:
+                    del self._by_ip[key[0]]
 
 
 _password_slots = threading.BoundedSemaphore(PASSWORD_SLOTS)

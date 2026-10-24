@@ -1,9 +1,10 @@
 """Request-scoped dependencies: the database connection, authentication and authorization.
 
-Authentication picks one mechanism per request. With an ``Authorization`` header the request
-is a bearer-token request and nothing else is considered; otherwise the session cookie is
-used. Both reload the user from the database, so role changes and deletions apply at once.
-Cookie-authenticated unsafe requests must echo the session's CSRF token in ``X-CSRF-Token``.
+Authentication picks one mechanism per request. With an ``Authorization: Bearer`` header the
+request is a bearer-token request and nothing else is considered; otherwise (no header, or
+another scheme, which is ignored) the session cookie is used. Both reload the user from the
+database, so role changes and deletions apply at once. Cookie-authenticated unsafe requests
+must echo the session's CSRF token in ``X-CSRF-Token``.
 """
 
 import sqlite3
@@ -49,12 +50,9 @@ def _unauthorized(message: str) -> ApiError:
 
 
 def get_auth(request: Request, conn: Conn) -> Auth:
-    header = request.headers.get("authorization")
-    if header is not None:
-        scheme, _, token = header.partition(" ")
-        user = None
-        if scheme.lower() == "bearer" and token.strip():
-            user = auth_service.user_from_token(conn, token.strip())
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() == "bearer":
+        user = auth_service.user_from_token(conn, token.strip()) if token.strip() else None
         if user is None:
             raise _unauthorized("invalid or revoked API token")
         return Auth(user, "bearer", None)

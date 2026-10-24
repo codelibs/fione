@@ -175,7 +175,8 @@ def test_forwarded_for_is_ignored_unless_trusted(client):
 
 
 def test_at_most_four_password_verifications_run_at_once(client, monkeypatch):
-    add_user(client, "alice")
+    for n in range(1, 12, 2):
+        add_user(client, f"alice{n}")
     active = peak = 0
     lock = threading.Lock()
     real = passwords.verify_password
@@ -196,7 +197,7 @@ def test_at_most_four_password_verifications_run_at_once(client, monkeypatch):
     statuses = []
 
     def attempt(n):
-        user = "alice" if n % 2 else f"user{n}"
+        user = f"alice{n}" if n % 2 else f"user{n}"  # one attempt per key: none is throttled
         r = client.post(LOGIN, json={"username": user, "password": PW})
         statuses.append(r.status_code)
 
@@ -385,7 +386,7 @@ def test_bearer_requests_are_csrf_exempt_and_never_fall_back_to_the_cookie(clien
     r = client.post("/api/v1/projects", json={"name": "p"}, headers=headers)
     assert r.status_code == 201
     assert client.get(ME, headers=headers).json()["csrf_token"] is None
-    for value in ("Bearer fione_unknown", "Basic YWxpY2U6cHc=", "Bearer "):
+    for value in ("Bearer fione_unknown", "bearer fione_unknown", "Bearer "):
         r = client.get(ME, headers={"Authorization": value})  # the valid cookie is ignored
         assert r.status_code == 401
         assert r.headers["www-authenticate"] == "Bearer"
@@ -440,3 +441,82 @@ def test_settings_used_by_the_app_are_the_ones_given(tmp_path):
     assert app.state.settings is settings
     assert app.state.db_path == tmp_path / "data" / "fione.db"
     assert app.state.runner is None
+
+
+# --- fix round 1: atomic throttle, namespaces, cookie ids, auth schemes ----------------------
+
+
+def _concurrently(n, fn):
+    barrier = threading.Barrier(n)
+    statuses = []
+    lock = threading.Lock()
+
+    def go():
+        barrier.wait()
+        status = fn()
+        with lock:
+            statuses.append(status)
+
+    threads = [threading.Thread(target=go) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return statuses
+
+
+def test_concurrent_wrong_logins_cannot_bypass_the_throttle(client):
+    add_user(client, "alice")
+    bad = {"username": "alice", "password": "wrong-password"}
+    statuses = _concurrently(12, lambda: client.post(LOGIN, json=bad).status_code)
+    assert sorted(statuses) == [401] * 5 + [429] * 7
+
+
+def test_concurrent_wrong_password_changes_cannot_bypass_the_throttle(client):
+    alice = add_user(client, "alice")
+    headers = bearer(client, alice.id)
+    body = {"current_password": "wrong-password", "new_password": "brand-new-password"}
+    statuses = _concurrently(
+        12, lambda: client.post("/api/v1/auth/password", json=body, headers=headers).status_code
+    )
+    assert sorted(statuses) == [403] * 5 + [429] * 7
+
+
+def test_one_address_cannot_spray_many_usernames(make_client):
+    client = make_client(login_max_failures_per_ip=3)
+    for name in ("a1", "a2", "a3"):
+        r = client.post(LOGIN, json={"username": name, "password": "wrong-password"})
+        assert r.status_code == 401
+    r = client.post(LOGIN, json={"username": "a4", "password": "wrong-password"})
+    assert r.status_code == 429 and int(r.headers["retry-after"]) > 0
+
+
+def test_login_failures_do_not_touch_the_setup_throttle(make_client):
+    client = make_client(login_max_failures=2)
+    token = setup_token(client)
+    for _ in range(3):
+        client.post(LOGIN, json={"username": "#first-admin", "password": "wrong-password"})
+    r = client.post(FIRST, json={"username": "root", "password": PW, "setup_token": token})
+    assert r.status_code == 200
+
+
+@pytest.mark.parametrize("user_id", [0, -1, 2**63, 2**64])
+def test_forged_cookie_ids_out_of_range_are_401(client, user_id):
+    payload = security._b64e(b'{"u":%d,"t":%d,"c":"x"}' % (user_id, int(time.time())))
+    client.cookies.set("fione_session", f"v1.{payload}.AAAA")
+    r = client.get(ME)
+    assert r.status_code == 401 and r.json()["code"] == "unauthorized"
+
+
+def test_non_bearer_authorization_falls_back_to_the_cookie(client):
+    add_user(client, "alice")
+    csrf = login(client, "alice")
+    basic = {"Authorization": "Basic YWxpY2U6cHc="}
+    assert client.get(ME, headers=basic).json()["user"]["username"] == "alice"
+    r = client.post("/api/v1/projects", json={"name": "p"}, headers=basic)
+    assert r.status_code == 403 and r.json()["code"] == "csrf"  # still the cookie path
+    r = client.post("/api/v1/projects", json={"name": "p"}, headers={**basic, "X-CSRF-Token": csrf})
+    assert r.status_code == 201
+    client.cookies.clear()
+    r = client.get(ME, headers=basic)
+    assert r.status_code == 401 and r.json()["error"] == "authentication required"

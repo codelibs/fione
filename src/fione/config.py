@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+MIN_SETUP_TOKEN_LENGTH = 16
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FIONE_")
@@ -28,6 +30,7 @@ class Settings(BaseSettings):
     session_max_age_secs: int = 7 * 24 * 3600
     login_max_failures: int = 5
     login_window_secs: int = 15 * 60
+    login_max_failures_per_ip: int = 50
     # Trust X-Forwarded-For/-Host: only behind a reverse proxy that sets them.
     trust_proxy: bool = False
     max_upload_bytes: int = 2**30
@@ -36,6 +39,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _derive_defaults(self) -> "Settings":
+        if not self.setup_token:
+            self.setup_token = None
+        elif len(self.setup_token) < MIN_SETUP_TOKEN_LENGTH:
+            raise ValueError(
+                f"FIONE_SETUP_TOKEN must be at least {MIN_SETUP_TOKEN_LENGTH} characters"
+            )
         if not self.storage_url:
             self.storage_url = (self.data_dir / "objects").as_uri()
         if self.secret_key_path is None:

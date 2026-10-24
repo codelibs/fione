@@ -91,6 +91,14 @@ def _announce_setup(settings: Settings, db_path) -> None:
         setup_log.warning("No administrator exists. Use the setup token from FIONE_SETUP_TOKEN.")
 
 
+def _throttle(settings: Settings) -> LoginThrottle:
+    return LoginThrottle(
+        settings.login_max_failures,
+        settings.login_window_secs,
+        max_failures_per_ip=settings.login_max_failures_per_ip,
+    )
+
+
 def create_app(settings: Settings | None = None, *, start_runner: bool | None = None) -> FastAPI:
     settings = settings or get_settings()
     run_jobs = settings.runner_enabled if start_runner is None else start_runner
@@ -127,7 +135,9 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.secret = secret
     app.state.runner = None
     app.state.signer = SessionSigner(secret, settings.session_max_age_secs)
-    app.state.throttle = LoginThrottle(settings.login_max_failures, settings.login_window_secs)
+    # Login and password change share one throttle; first-admin token guesses have their own.
+    app.state.throttle = _throttle(settings)
+    app.state.setup_throttle = _throttle(settings)
     install_error_handlers(app)
     app.add_middleware(BodyLimit, upload_limit=settings.max_upload_bytes + UPLOAD_SLACK_BYTES)
     for router in ROUTERS:

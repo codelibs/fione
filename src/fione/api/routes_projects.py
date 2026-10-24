@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 # How long deleting a project waits for its jobs to stop (a running worker gets the
 # runner's cancel grace, then is killed).
 CANCEL_WAIT_SECS = 15.0
+MAX_CANCEL_THREADS = 8
 
 Reader = Annotated[ProjectContext, Depends(project_access("read"))]
 Owner = Annotated[ProjectContext, Depends(project_access("owner"))]
@@ -67,7 +68,9 @@ def _stop_jobs(request: Request, conn, project_id: str) -> None:
             if not store.cancel_queued(conn, job_id):
                 store.request_cancel(conn, job_id)
         return
-    pool = ThreadPoolExecutor(max_workers=len(active), thread_name_prefix="fione-cancel")
+    pool = ThreadPoolExecutor(
+        max_workers=min(len(active), MAX_CANCEL_THREADS), thread_name_prefix="fione-cancel"
+    )
     try:
         futures = [pool.submit(runner.cancel, job_id) for job_id in active]
         done, pending = wait(futures, timeout=CANCEL_WAIT_SECS)

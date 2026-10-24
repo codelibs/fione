@@ -191,10 +191,10 @@ def test_api_settings_defaults(tmp_path, monkeypatch):
     assert s.max_upload_bytes == 2**30
     assert s.setup_token is None
     monkeypatch.setenv("FIONE_RUNNER_ENABLED", "false")
-    monkeypatch.setenv("FIONE_SETUP_TOKEN", "from-env")
+    monkeypatch.setenv("FIONE_SETUP_TOKEN", "from-env-0123456789")
     s = Settings(data_dir=tmp_path)
     assert s.runner_enabled is False
-    assert s.setup_token == "from-env"
+    assert s.setup_token == "from-env-0123456789"
 
 
 def test_create_private_file_is_0600_and_keeps_first(tmp_path):
@@ -206,3 +206,12 @@ def test_create_private_file_is_0600_and_keeps_first(tmp_path):
     assert path.read_bytes() == b"first"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert [p.name for p in tmp_path.iterdir()] == ["token"]
+
+
+def test_setup_token_must_be_long_enough(tmp_path):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="at least 16 characters"):
+        Settings(data_dir=tmp_path, setup_token="short-token")
+    assert Settings(data_dir=tmp_path, setup_token="").setup_token is None
+    assert Settings(data_dir=tmp_path, setup_token="x" * 16).setup_token == "x" * 16
