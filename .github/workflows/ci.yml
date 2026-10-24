@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
   push:
+    branches: [v2, master]
 
 jobs:
   test:
@@ -12,5 +13,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv python install 3.12
       - run: uv sync
+      - run: uv run python scripts/check_licenses.py
       - run: uv run ruff check .
       - run: uv run pytest -q
