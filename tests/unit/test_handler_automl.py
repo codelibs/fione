@@ -206,7 +206,9 @@ def quick_job(conn, owner, project, dataset):
     return models.submit_training(conn, owner, project.id, dataset.id, config, name="quick")
 
 
-def test_a_failing_save_leaves_nothing_behind(conn, run_job, quick_job, storage, monkeypatch):
+def test_a_failing_save_leaves_nothing_behind(
+    conn, run_job, quick_job, storage, project, monkeypatch
+):
     def fail(model, storage, prefix, secret, *, image_tag):
         storage.put(prefix + "model.joblib", b"partial")
         raise OSError("disk full")
@@ -215,6 +217,7 @@ def test_a_failing_save_leaves_nothing_behind(conn, run_job, quick_job, storage,
     done = run_job(quick_job)
     assert done.status is JobStatus.FAILED and "disk full" in done.message
     assert model_count(conn) == 0
+    assert storage.list(f"projects/{project.id}/models/") == []
 
 
 def test_a_failing_insert_removes_the_saved_objects(
@@ -279,3 +282,34 @@ def test_a_dataset_that_was_replaced_by_one_of_another_project_is_refused(
     )
     done = run_job(job)
     assert done.status is JobStatus.FAILED and done.message == "the dataset no longer exists"
+
+
+def test_unknown_ignored_columns_in_a_payload_fail_the_job_plainly(
+    conn, run_job, owner, project, dataset
+):
+    config = {**CONFIG, "ignored_columns": ["nope"]}
+    job = store.enqueue(
+        conn, "automl", project.id, owner.id, {"dataset_id": dataset.id, "config": config}
+    )
+    done = run_job(job)
+    assert done.status is JobStatus.FAILED
+    assert done.message == "unknown columns in ignored_columns: ['nope']"
+    assert model_count(conn) == 0
+
+
+def test_a_cancel_that_arrives_while_saving_takes_the_model_back_out(
+    conn, run_job, quick_job, storage, project, monkeypatch
+):
+    real_save = automl_handler.save_model
+
+    def save_then_cancel(*args, **kwargs):
+        manifest = real_save(*args, **kwargs)
+        store.request_cancel(conn, quick_job.id)
+        return manifest
+
+    monkeypatch.setattr(automl_handler, "save_model", save_then_cancel)
+    monkeypatch.setattr(worker, "STOP_CHECK_SECS", 0)  # no cached "not stopped" from before
+    done = run_job(quick_job)
+    assert done.status is JobStatus.CANCELLED
+    assert model_count(conn) == 0
+    assert storage.list(f"projects/{project.id}/models/") == []

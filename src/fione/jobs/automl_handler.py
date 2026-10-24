@@ -40,10 +40,10 @@ def automl(ctx: JobContext) -> None:
         return
 
     prefix = f"projects/{project_id}/models/{uuid.uuid4().hex}/"
-    save_model(
-        model, ctx.storage, prefix, load_secret(ctx.settings), image_tag=ctx.settings.image_tag
-    )
     try:
+        save_model(
+            model, ctx.storage, prefix, load_secret(ctx.settings), image_tag=ctx.settings.image_tag
+        )
         record = models_service.add_model(
             ctx.conn,
             project_id=project_id,
@@ -56,6 +56,9 @@ def automl(ctx: JobContext) -> None:
     except BaseException:
         ctx.storage.delete_prefix(prefix)
         raise
+    if ctx.should_stop():  # cancelled while saving: take the model back out
+        models_service.delete_model(ctx.conn, ctx.storage, record.id)
+        return
     result = {
         "model_id": record.id,
         "stop_reason": record.stop_reason,
