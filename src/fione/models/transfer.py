@@ -14,7 +14,12 @@ An export zip holds ``manifest.json`` and ``model.joblib`` (the artifact as stor
   re-signed under this install's secret so it loads normally, and the row is flagged
   ``trusted=0``.
 
-Everything written for a failed import is deleted again.
+``record.json`` also carries ``trusted`` (a required bool): the stored flag is that value and
+the signature check ANDed, so an export of an unverified model never comes back as trusted
+and a record cannot vouch for a file whose signature fails. The record's key set is exact, so
+exports made before ``trusted`` was added are refused (v2 was unreleased).
+
+Everything written for a failed import (objects and row) is deleted again.
 """
 
 import io
@@ -64,6 +69,7 @@ RECORD_FIELDS = (
     "trials",
     "metrics",
     "importance",
+    "trusted",
 )
 STOP_REASONS = frozenset({"time", "max_models", "no_improvement", "cancelled", "error"})
 IMPORTED_SUFFIX = " (imported)"
@@ -85,7 +91,8 @@ _ZIP_ERRORS = (
     zlib.error,
     NotImplementedError,
     RuntimeError,
-    OSError,
+    OSError,  # a crafted directory can make zipfile seek to a bad offset
+    UnicodeDecodeError,  # a name flagged UTF-8 that is not
 )
 
 
@@ -104,6 +111,7 @@ def _info(name: str, compress_type: int) -> zipfile.ZipInfo:
 
 def _record_json(record: ModelRecord) -> bytes:
     body = {field: getattr(record, field) for field in RECORD_FIELDS}
+    body["trusted"] = bool(record.trusted)
     return json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
@@ -157,11 +165,15 @@ def _check_directory(path: Path) -> None:
     """Bound the central directory before ``zipfile`` parses it (it reads every entry)."""
     size = path.stat().st_size
     with open(path, "rb") as f:
-        f.seek(max(0, size - (0xFFFF + 22)))
+        f.seek(max(0, size - (0xFFFF + 22 + 20)))
         tail = f.read()
     at = tail.rfind(b"PK\x05\x06")
     if at < 0 or len(tail) - at < 22:
         raise ModelImportError("this is not a model export file")
+    if at >= 20 and tail[at - 20 : at - 16] == b"PK\x06\x07":
+        # Python follows a zip64 locator and replaces the counts below with the zip64 ones,
+        # which this check cannot bound cheaply. Exports under 4 GiB never have one.
+        raise ModelImportError("zip64 archives are not supported")
     entries, directory_bytes = struct.unpack_from("<HI", tail, at + 10)
     if entries > MAX_DIRECTORY_ENTRIES or directory_bytes > MAX_DIRECTORY_BYTES:
         raise ModelImportError("the file has too many entries")
@@ -185,27 +197,34 @@ def _members(zf: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     return {i.filename: i for i in infos}
 
 
+def _member_chunks(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> Iterator[bytes]:
+    """The member's bytes; only errors from reading the zip become ``ModelImportError``."""
+    try:
+        with zf.open(info) as source:
+            while chunk := source.read(READ_CHUNK):
+                yield chunk
+    except _ZIP_ERRORS as e:
+        raise ModelImportError(f"{info.filename} is damaged") from e
+
+
 def _copy_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo, out: BinaryIO, cap: int) -> None:
     """Copy one member, enforcing ``cap`` and the ratio limit on what is actually read.
 
-    Reads to the end of the member, which is when ``zipfile`` checks its CRC.
+    Reads to the end of the member, which is when ``zipfile`` checks its CRC. A failure to
+    write to ``out`` (a full disk) is not the file's fault and surfaces as itself.
     """
     if info.file_size > cap:
         raise ModelImportError(f"{info.filename} is too large")
     total = 0
-    try:
-        with zf.open(info) as source:
-            while chunk := source.read(READ_CHUNK):
-                total += len(chunk)
-                if total > cap:
-                    raise ModelImportError(f"{info.filename} is too large")
-                if info.compress_type == zipfile.ZIP_DEFLATED and total > MAX_RATIO * max(
-                    info.compress_size, 1
-                ):
-                    raise ModelImportError(f"{info.filename} has a suspicious compression ratio")
-                out.write(chunk)
-    except _ZIP_ERRORS as e:
-        raise ModelImportError(f"{info.filename} is damaged") from e
+    for chunk in _member_chunks(zf, info):
+        total += len(chunk)
+        if total > cap:
+            raise ModelImportError(f"{info.filename} is too large")
+        if info.compress_type == zipfile.ZIP_DEFLATED and total > MAX_RATIO * max(
+            info.compress_size, 1
+        ):
+            raise ModelImportError(f"{info.filename} has a suspicious compression ratio")
+        out.write(chunk)
 
 
 def _read_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo, cap: int) -> bytes:
@@ -246,12 +265,16 @@ def _parse_record(raw: bytes, manifest: Manifest) -> dict:
         raise _bad_record("it does not match the manifest")
     if record["stop_reason"] not in STOP_REASONS:
         raise _bad_record("unknown stop_reason")
+    if not isinstance(record["trusted"], bool):
+        raise _bad_record("trusted must be true or false")
     if not isinstance(record["config"], dict):
         raise _bad_record("config must be an object")
     try:
         record["config"] = TrainConfig.from_dict(record["config"]).to_dict()
     except (ValueError, TypeError) as e:  # ConfigError is a ValueError
         raise _bad_record(f"config: {e}") from e
+    if record["config"]["target"] != manifest.target:
+        raise _bad_record("config does not match the manifest")
     for field in ("leaderboard", "trials"):
         rows = record[field]
         if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
@@ -326,8 +349,8 @@ def _store(
             storage.put(prefix + MODEL_FILE, f)
         storage.put(prefix + MANIFEST_FILE, manifest_bytes)  # last: the artifact is complete
         manifest = verify_artifact(storage, prefix, secret, require_hmac=not trust_foreign)
-        trusted = verify_manifest_hmac(manifest, secret)
-        if not trusted:  # only reachable with trust_foreign
+        signed_here = verify_manifest_hmac(manifest, secret)
+        if not signed_here:  # only reachable with trust_foreign
             storage.put(
                 prefix + MANIFEST_FILE, resign_manifest(manifest, secret).to_json().encode()
             )
@@ -336,13 +359,14 @@ def _store(
             project_id=project_id,
             dataset_id=None,
             job_id=None,
-            name=fields["name"] + IMPORTED_SUFFIX,
+            name=fields["name"][: MAX_NAME_CHARS - len(IMPORTED_SUFFIX)] + IMPORTED_SUFFIX,
             task=fields["task"],
             target=fields["target"],
             best_model=fields["best_model"],
             stop_reason=fields["stop_reason"],
             storage_prefix=prefix,
-            trusted=trusted,
+            # The signature governs; the record can only lower trust, never raise it.
+            trusted=signed_here and fields["trusted"],
             config=fields["config"],
             leaderboard=fields["leaderboard"],
             trials=fields["trials"],
@@ -350,10 +374,14 @@ def _store(
             importance=fields["importance"],
         )
     except BaseException:
+        # Never mask the original error (a JobAbort must stay a JobAbort).
+        try:  # the row too: an interrupt right after the INSERT can leave one behind
+            conn.execute("DELETE FROM models WHERE storage_prefix = ?", (prefix,))
+        except Exception:
+            log.exception("could not remove the model row for %s", prefix)
         try:
             storage.delete_prefix(prefix)
         except Exception:
-            # Never mask the original error (a JobAbort must stay a JobAbort).
             log.exception("could not remove the objects under %s", prefix)
         raise
 

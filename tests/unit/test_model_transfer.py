@@ -1,8 +1,10 @@
 import dataclasses
+import errno
 import io
 import json
 import os
 import pickle
+import sqlite3
 import struct
 import warnings
 import zipfile
@@ -589,7 +591,8 @@ def test_the_export_is_a_zip_of_manifest_model_and_record(source):
     assert source.parts["manifest.json"] == env.storage.get(record.storage_prefix + "manifest.json")
     assert source.parts["model.joblib"] == env.storage.get(record.storage_prefix + MODEL_FILE)
     body = json.loads(source.parts["record.json"])
-    assert set(body) == {"name", *COPIED, "metrics", "importance"}
+    assert set(body) == {"name", *COPIED, "metrics", "importance", "trusted"}
+    assert body["trusted"] is True
     assert body["name"] == "日本語モデル" and body["leaderboard"] == record.leaderboard
     assert "日本語モデル".encode() in source.parts["record.json"]  # not \u-escaped
 
@@ -645,3 +648,193 @@ def test_japanese_column_names_survive_the_round_trip(dest, source):
     rec = do_import(dest, source.zip)
     assert models.load_trained(dest.storage, rec, dest.secret).columns == source.model.columns
     assert "幅" in source.model.columns
+
+
+# --- zip64 directories ------------------------------------------------------------------------
+
+
+def zip64_directory_zip(entries: int) -> bytes:
+    """A classic EOCD claiming 3 entries over a zip64 record that really holds ``entries``."""
+    entry = struct.pack(
+        "<4s4B4HL2L5H2L", b"PK\x01\x02", 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    )
+    directory = entry * entries
+    zip64 = struct.pack(
+        "<4sQ2H2L2Q2Q", b"PK\x06\x06", 44, 45, 45, 0, 0, entries, entries, len(directory), 0
+    )
+    locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, len(directory), 1)
+    eocd = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 3, 3, 100, 0, 0)
+    return directory + zip64 + locator + eocd
+
+
+def test_a_normal_export_has_no_zip64_locator(source):
+    at = source.zip.rfind(b"PK\x05\x06")
+    assert source.zip[at - 20 : at - 16] != b"PK\x06\x07"
+
+
+def test_a_zip64_directory_is_refused_before_zipfile_parses_it(dest, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("zipfile was asked to parse the archive")
+
+    monkeypatch.setattr(zipfile, "ZipFile", forbidden)
+    with pytest.raises(ModelImportError, match="zip64"):
+        do_import(dest, zip64_directory_zip(50))
+    assert_nothing_left(dest)
+
+
+# --- the trusted flag travels with the record -------------------------------------------------
+
+
+def set_trusted(env, record, flag):
+    env.conn.execute("UPDATE models SET trusted = ? WHERE id = ?", (int(flag), record.id))
+    return models.get_model(env.conn, record.id)
+
+
+def test_the_record_carries_trusted_as_a_bool(tmp_path):
+    env = make_env(tmp_path / "t")
+    record = add_model(env, classifier())
+    flags = []
+    for flag in (False, True):
+        data = exported(env, set_trusted(env, record, flag))
+        flags.append(json.loads(parts(data)["record.json"])["trusted"])
+    assert flags == [False, True]
+
+
+def test_an_untrusted_model_stays_untrusted_through_an_export_and_import(tmp_path, dest, source):
+    first = do_import(dest, source.zip, secret=FOREIGN_SECRET, trust_foreign=True)
+    assert first.trusted == 0
+    again = do_import(dest, exported(dest, first), secret=FOREIGN_SECRET)  # signed locally now
+    assert again.trusted == 0
+    verify_artifact(dest.storage, again.storage_prefix, FOREIGN_SECRET)
+
+
+def test_a_trusted_model_stays_trusted(dest, source):
+    assert do_import(dest, source.zip).trusted == 1
+
+
+def test_a_record_saying_untrusted_wins_over_a_valid_signature(dest, source):
+    data = rebuilt(source.parts, record=record_with(source, trusted=False))
+    rec = do_import(dest, data)
+    assert rec.trusted == 0
+    assert (
+        read_manifest(dest.storage, rec.storage_prefix).hmac
+        == json.loads(source.parts["manifest.json"])["hmac"]
+    )
+
+
+def test_a_record_claiming_trusted_does_not_override_the_signature(dest, source):
+    rec = do_import(dest, source.zip, secret=FOREIGN_SECRET, trust_foreign=True)
+    assert json.loads(source.parts["record.json"])["trusted"] is True
+    assert rec.trusted == 0
+    with pytest.raises(UntrustedArtifactError):
+        do_import(dest, source.zip, secret=FOREIGN_SECRET)
+
+
+@pytest.mark.parametrize("value", [1, 0, "true", None, [True]])
+def test_trusted_must_be_a_bool(dest, source, value):
+    with pytest.raises(ModelImportError):
+        do_import(dest, rebuilt(source.parts, record=record_with(source, trusted=value)))
+    assert_nothing_left(dest)
+
+
+def test_a_record_without_trusted_is_refused(dest, source):
+    with pytest.raises(ModelImportError):
+        do_import(dest, rebuilt(source.parts, record=without(source, "trusted")))
+    assert_nothing_left(dest)
+
+
+# --- the minor fixes --------------------------------------------------------------------------
+
+
+def test_names_that_are_not_utf8_are_refused(dest, source):
+    central = bytearray(source.zip)
+    at = central.find(b"PK\x01\x02")
+    struct.pack_into("<H", central, at + 8, struct.unpack_from("<H", central, at + 8)[0] | 0x800)
+    central[at + 46] = 0xFF
+    with pytest.raises(ModelImportError):
+        do_import(dest, bytes(central))
+    local = bytearray(source.zip)  # only the local header is bad: found when the member is opened
+    struct.pack_into("<H", local, 6, struct.unpack_from("<H", local, 6)[0] | 0x800)
+    local[30] = 0xFF
+    with pytest.raises(ModelImportError):
+        do_import(dest, bytes(local))
+    assert_nothing_left(dest)
+
+
+def test_a_disk_error_while_copying_a_member_is_not_reported_as_damage(source):
+    class Full:
+        def write(self, chunk):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    with zipfile.ZipFile(io.BytesIO(source.zip)) as zf:
+        with pytest.raises(OSError) as info:
+            transfer._copy_member(zf, zf.getinfo("model.joblib"), Full(), 512 * MIB)
+    assert not isinstance(info.value, ModelImportError)
+
+
+def test_a_storage_error_surfaces_as_itself_and_cleans_up(dest, source, monkeypatch):
+    def full(key, data):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(dest.storage, "put", full)
+    with pytest.raises(OSError, match="No space"):
+        do_import(dest, source.zip)
+    assert_nothing_left(dest)
+
+
+def test_an_interrupt_after_the_insert_leaves_no_row(dest, source, monkeypatch):
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(models, "get_model", interrupt)  # runs right after the INSERT
+    with pytest.raises(KeyboardInterrupt):
+        do_import(dest, source.zip)
+    assert_nothing_left(dest)
+
+
+def test_a_failing_row_cleanup_does_not_mask_the_original_error(dest, source, monkeypatch):
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    class Broken:
+        def __init__(self, real):
+            self.real = real
+
+        def execute(self, sql, *args):
+            if sql.startswith("DELETE"):
+                raise sqlite3.OperationalError("locked")
+            return self.real.execute(sql, *args)
+
+    monkeypatch.setattr(models, "get_model", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        import_model(
+            dest.storage,
+            Broken(dest.conn),
+            dest.admin,
+            dest.project.id,
+            io.BytesIO(source.zip),
+            dest.secret,
+            tmp_dir=dest.tmp,
+        )
+
+
+def test_a_config_for_another_target_is_refused(dest, source):
+    config = {**json.loads(source.parts["record.json"])["config"], "target": "other"}
+    with pytest.raises(ModelImportError):
+        do_import(dest, rebuilt(source.parts, record=record_with(source, config=config)))
+    assert_nothing_left(dest)
+
+
+def test_imported_names_never_exceed_the_cap_and_round_trip(tmp_path, dest):
+    env = make_env(tmp_path / "long")
+    record = add_model(env, classifier(), name="あ" * 200)
+    first = do_import(dest, exported(env, record), secret=env.secret)
+    assert len(first.name) == 200 and first.name.endswith("(imported)")
+    second = do_import(dest, exported(dest, first), secret=env.secret)
+    assert len(second.name) == 200 and second.name.endswith("(imported)")
+
+
+def test_an_already_imported_name_is_imported_again(dest, source):
+    first = do_import(dest, source.zip)
+    second = do_import(dest, exported(dest, first))
+    assert second.name == "日本語モデル (imported) (imported)"
