@@ -393,6 +393,28 @@ def read_dataset(
     return table.to_pandas(types_mapper=_NULLABLE.get if nullable_dtypes else None)
 
 
+def read_dataset_sample(
+    storage: Storage,
+    dataset: Dataset,
+    max_rows: int = 200_000,
+    columns: list[str] | None = None,
+) -> pd.DataFrame:
+    """The first ``max_rows`` rows of the dataset (all of them if it is smaller), read from the
+    start of the file without loading the rest: deterministic, and bounded by ``max_rows``."""
+    batches: list[pa.RecordBatch] = []
+    rows = 0
+    with storage.open_read(dataset.key) as f:
+        batch_rows = min(max_rows, _EXPORT_BATCH_ROWS)
+        for batch in pq.ParquetFile(f).iter_batches(batch_size=batch_rows, columns=columns):
+            batches.append(batch)
+            rows += batch.num_rows
+            if rows >= max_rows:
+                break
+    if not batches:  # a file without rows: the full read is empty too
+        return read_dataset(storage, dataset, columns)
+    return pa.Table.from_batches(batches).slice(0, max_rows).to_pandas()
+
+
 def export_csv(storage: Storage, dataset: Dataset) -> Iterator[bytes]:
     """The dataset as UTF-8 CSV with a header, yielded in batches of rows."""
     with storage.open_read(dataset.key) as f:
