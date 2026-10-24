@@ -106,7 +106,7 @@ def _inspect(path: Path) -> tuple[str, str]:
     return encoding, _detect_delimiter(text)
 
 
-def _unique_names(raw: list[str]) -> list[str]:
+def unique_names(raw: list[str]) -> list[str]:
     names: list[str] = []
     used: set[str] = set()
     for position, name in enumerate(raw, start=1):
@@ -225,7 +225,7 @@ def _convert(
         try:
             with _open_csv(path, encoding, delimiter, block_size, forced) as reader:
                 inferred = reader.schema
-                return _write_parquet(reader, _unique_names(inferred.names), out)
+                return _write_parquet(reader, unique_names(inferred.names), out)
         except pa.ArrowInvalid:
             if inferred is None:
                 raise
