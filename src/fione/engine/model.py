@@ -32,7 +32,7 @@ class TrainedModel:
     leaderboard: pd.DataFrame  # model, family, cv_score, cv_std, train_secs, weight
     trials: pd.DataFrame  # family, trial, state, score, elapsed, params (JSON)
     feature_importance: pd.Series  # per input column, summing to 1
-    stop_reason: str  # time, max_models, no_improvement or cancelled
+    stop_reason: str  # time, max_models, no_improvement, cancelled or error
     config: TrainConfig
     metrics: dict[str, float]  # of the ensemble's out-of-fold predictions
     prep: Prep
@@ -43,12 +43,14 @@ class TrainedModel:
     fold_assignment: np.ndarray | None = None
 
     def _predict(self, df: pd.DataFrame) -> np.ndarray:
-        views: dict[str, pd.DataFrame] = {}
+        # The views come first, so that missing columns raise even for an empty frame.
+        names = dict.fromkeys(member.spec.view for member in self.members)
+        views = {name: getattr(self.prep, name)(df) for name in names}
+        if len(df) == 0:  # some libraries reject empty input or print about it
+            return np.zeros((0, len(self.classes_))) if self.classes_ is not None else np.zeros(0)
         total = 0.0
         for member in self.members:
             spec = member.spec
-            if spec.view not in views:
-                views[spec.view] = getattr(self.prep, spec.view)(df)
             outputs = [spec.predict(model, views[spec.view]) for model in member.models]
             total = total + member.weight * np.mean(outputs, axis=0)
         return total

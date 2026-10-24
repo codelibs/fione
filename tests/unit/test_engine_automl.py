@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from fione.engine import automl as automl_module
 from fione.engine.automl import AutoML
 from fione.engine.config import ConfigError, DeadlineExceeded, NoModelError, TrainConfig
-from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM
+from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
 
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
 HIGHER_IS_BETTER = {"auc", "accuracy", "r2"}
@@ -429,6 +429,140 @@ def test_when_every_member_is_oversized_the_heaviest_is_kept(monkeypatch):
     )
     assert [(m.spec.name, m.weight) for m in model.members] == [("ExtraTrees", 1.0)]
     assert any("kept although" in e.data["message"] for e in events if e.type == "notice")
+
+
+# --- family failures --------------------------------------------------------------
+
+
+def _errors(events, kind):
+    return [e.data for e in events if e.type == "notice" and e.data.get("kind") == kind]
+
+
+def _boom(self, *args, **kwargs):
+    raise ValueError("library failure")
+
+
+def test_a_crashing_family_is_skipped_with_a_notice(monkeypatch):
+    monkeypatch.setattr(XGBoost, "_fit", _boom)
+    events = []
+    model = _fit(_binary(300), events, target="y", max_models=4)
+    assert "XGBoost" not in set(model.leaderboard["family"])
+    assert {"LightGBM", "CatBoost", "ExtraTrees"} <= set(model.leaderboard["family"])
+    errors = _errors(events, "family_error")
+    assert errors == [
+        {
+            "kind": "family_error",
+            "family": "XGBoost",
+            "exception": "ValueError",
+            "message": "library failure",
+        }
+    ]
+    for e in events:
+        json.dumps(e.data, allow_nan=False)
+
+
+def test_a_crash_outside_any_trial_is_caught_per_family(monkeypatch):
+    monkeypatch.setattr(XGBoost, "estimate_unit", _boom)  # runs before the first trial
+    events = []
+    model = _fit(_binary(300), events, target="y", max_models=4, max_runtime_secs_per_model=10)
+    assert "XGBoost" not in set(model.leaderboard["family"])
+    assert [e["family"] for e in _errors(events, "family_error")] == ["XGBoost"]
+
+
+def test_a_crash_after_a_good_trial_keeps_that_trial(monkeypatch):
+    calls = []
+    original = LightGBM._fit
+
+    def second_trial_fails(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) > 5:  # the first trial's five folds succeed
+            raise ValueError("late failure")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(LightGBM, "_fit", second_trial_fails)
+    monkeypatch.setattr(FamilySpec, "fit_full", _boom)  # keep the fold models to inspect
+    events = []
+    model = _fit(_binary(300), events, families=["LightGBM"], target="y", max_models=3)
+    assert len(model.trials) == 1
+    assert [len(m.models) for m in model.members] == [5]
+    assert _errors(events, "family_error")[0]["message"] == "late failure"
+    assert model.stop_reason not in {"no_improvement", "time"}
+
+
+def test_an_errored_family_never_counts_as_stagnation(monkeypatch):
+    monkeypatch.setattr(XGBoost, "_fit", _boom)
+    model = _fit(
+        _binary(300),
+        families=["LightGBM", "XGBoost"],
+        target="y",
+        stopping_rounds=1,
+        stopping_tolerance=0.5,  # LightGBM stagnates after two trials
+    )
+    assert model.stop_reason == "error"
+
+
+def test_a_crashing_refit_falls_back_to_the_fold_models(monkeypatch):
+    def refit_fails(self, *args, **kwargs):
+        raise RuntimeError("refit failure")
+
+    monkeypatch.setattr(FamilySpec, "fit_full", refit_fails)
+    events = []
+    df = _binary(300)
+    model = _fit(df, events, families=["LightGBM"], target="y", max_models=1)
+    assert [len(m.models) for m in model.members] == [5]
+    assert _errors(events, "refit_error") == [
+        {
+            "kind": "refit_error",
+            "family": "LightGBM",
+            "exception": "RuntimeError",
+            "message": "refit failure",
+        }
+    ]
+    assert model.predict(df).isin([0, 1]).all()
+
+
+def test_every_family_crashing_raises_no_model_error_with_the_cause(monkeypatch):
+    monkeypatch.setattr(FamilySpec, "fit", _boom)
+    with pytest.raises(NoModelError) as caught:
+        _fit(_binary(300), target="y")
+    assert isinstance(caught.value.__cause__, ValueError)
+    for name in ("LightGBM", "CatBoost", "XGBoost", "ExtraTrees"):
+        assert f"{name}: ValueError: library failure" in str(caught.value)
+
+
+def test_keyboard_interrupt_is_not_swallowed(monkeypatch):
+    def interrupt(self, *args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(LightGBM, "_fit", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        _fit(_binary(300), families=["LightGBM"], target="y")
+
+
+# --- empty frames -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_predicting_no_rows_returns_empty_results_quietly(name, task, capfd):
+    df = _binary(200)
+    if task == "regression":
+        df["y"] = df["x0"] * 2 + df["x1"]
+    model = _fit(df, families=[name], target="y", task=task, max_models=1)
+    capfd.readouterr()
+    empty = df.drop(columns=["y"]).iloc[:0]
+    pred = model.predict(empty)
+    assert len(pred) == 0 and pred.index.equals(empty.index)
+    if task == "classification":
+        proba = model.predict_proba(empty)
+        assert proba.shape == (0, 2) and list(proba.columns) == model.classes_
+        assert (proba.dtypes == np.float64).all()
+        assert pred.dtype == df["y"].dtype
+    else:
+        assert pred.dtype == np.float64
+    with pytest.raises(ConfigError, match="missing columns"):
+        model.predict(empty.drop(columns=["x0"]))
+    assert capfd.readouterr() == ("", "")
 
 
 # --- cancellation -------------------------------------------------------------------

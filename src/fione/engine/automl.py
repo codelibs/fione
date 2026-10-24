@@ -29,6 +29,12 @@ When ``should_stop()`` turns true, the search ends, nothing is refit, and the me
 their fold models; the model has ``stop_reason == "cancelled"``. ``NoModelError`` is raised when
 no family completed a trial, because of the cancellation or because the budget is too small.
 
+A family that raises (a library failure) is skipped with a ``notice`` of kind ``family_error``,
+keeping its best trial so far; a refit that raises falls back to the fold models with a
+``refit_error`` notice. ``stop_reason`` is ``error`` when a family failed and nothing else (time,
+``max_models``, cancellation) ended the search. ``NoModelError`` lists every family's error and
+is chained to the last one when no family produced a model.
+
 ``families`` restricts the search to some of ``FAMILY_ORDER`` (tests and advanced use).
 """
 
@@ -43,9 +49,17 @@ from fione.engine import metrics
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.ensemble import caruana
 from fione.engine.events import Event, EventSink, jsonable
+from fione.engine.families import MAX_ROUNDS
 from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep, Task, infer_task, validate_target
-from fione.engine.search import Clock, FamilyResult, Folds, make_folds, run_family
+from fione.engine.search import (
+    Clock,
+    FamilyResult,
+    Folds,
+    error_notice,
+    make_folds,
+    run_family,
+)
 
 FAMILY_ORDER = ("LightGBM", "CatBoost", "XGBoost", "ExtraTrees")
 FAMILY_WEIGHTS = {"LightGBM": 0.30, "CatBoost": 0.30, "XGBoost": 0.25, "ExtraTrees": 0.15}
@@ -128,7 +142,7 @@ class AutoML:
         left = deadline.remaining()
         reserve = max(MIN_RESERVE_SECS, RESERVE_SHARE * left)
         default_stopping = stopping_metric == metrics.ALLOWED[task][0]
-        results, logs, reasons, finished = self._search(
+        results, logs, reasons, finished, errors = self._search(
             X,
             y,
             folds,
@@ -142,6 +156,13 @@ class AutoML:
         if not results:
             if stop_reason == "cancelled":
                 raise NoModelError("cancelled before any model was trained")
+            if errors:
+                listing = "; ".join(
+                    f"{name}: {type(e).__name__}: {str(e)[:300]}" for name, e in errors.items()
+                )
+                raise NoModelError(f"no model could be trained: {listing}") from list(
+                    errors.values()
+                )[-1]
             raise NoModelError("time budget too small to train any model")
         self._event("stopped", reason=stop_reason)
 
@@ -200,16 +221,17 @@ class AutoML:
         return model
 
     def _search(self, X, y, folds, task, prep, search: Deadline, stopping_score, weight):
-        """Run the families in order; returns (results with models, trial rows, end reasons,
-        finished trial count)."""
+        """Run the families in order; returns (results with models, trial rows, end reason per
+        family, finished trial count, exception per failed family)."""
         c = self.config
         results: dict[str, FamilyResult] = {}
         logs: list[dict] = []
-        reasons: list[str] = []
+        reasons: dict[str, str] = {}
+        errors: dict[str, Exception] = {}
         finished = 0
         for i, name in enumerate(self.families):
             if self.should_stop():
-                reasons.append("cancelled")
+                reasons[name] = "cancelled"
                 break
             rest = self.families[i:]
             max_trials = None
@@ -239,10 +261,16 @@ class AutoML:
                     sample_weight=weight,
                 )
             except NoModelError:
-                reasons.append("time")
+                reasons[name] = "time"
                 continue
+            except Exception as e:  # outside any trial, e.g. building the view
+                self.emit(error_notice("family_error", name, e))
+                reasons[name], errors[name] = "error", e
+                continue
+            if result.error is not None:
+                errors[name] = result.error
             finished += result.trials
-            reasons.append(result.reason)
+            reasons[name] = result.reason
             logs += [
                 {**{k: row[k] for k in TRIAL_COLUMNS[:-1]}, "params": json.dumps(row["params"])}
                 for row in result.log
@@ -251,15 +279,18 @@ class AutoML:
                 results[name] = result
             if result.reason == "cancelled":
                 break
-        return results, logs, reasons, finished
+        return results, logs, reasons, finished, errors
 
-    def _stop_reason(self, reasons: list[str], finished: int) -> str:
-        if self.should_stop() or "cancelled" in reasons:
+    def _stop_reason(self, reasons: dict[str, str], finished: int) -> str:
+        ends = set(reasons.values())
+        if self.should_stop() or "cancelled" in ends:
             return "cancelled"
         if self.config.max_models is not None and finished >= self.config.max_models:
             return "max_models"
-        if "time" in reasons:
+        if "time" in ends:
             return "time"
+        if "error" in ends:
+            return "error"
         return "no_improvement"  # each family stagnated (or used the trials it was allotted)
 
     def _drop(self, member: Member, why: str) -> None:
@@ -276,14 +307,20 @@ class AutoML:
             models = result.models
             if stop_reason != "cancelled" and not self.should_stop():
                 start = time.monotonic()
-                model = _refit(result, X, y, prep, views, clock, weight)
+                model, problem = _refit(result, X, y, prep, views, clock, weight)
                 refit_secs[name] = time.monotonic() - start
                 if model is not None:
                     models = [model]
+                elif isinstance(problem, Exception):
+                    self.emit(error_notice("refit_error", name, problem))
                 else:
+                    why = (
+                        "was cancelled"
+                        if problem == "cancelled"
+                        else "did not fit in the time left"
+                    )
                     self._notice(
-                        f"{name}: the final refit did not fit in the time left; "
-                        f"using its {len(models)} fold models",
+                        f"{name}: the final refit {why}; using its {len(models)} fold models",
                         family=name,
                     )
             size = sum(result.spec.size_bytes(m) for m in models)
@@ -322,19 +359,23 @@ def _mb(size: float) -> str:
 
 
 def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight):
-    """The member refit on all rows, or None when it cannot finish in ``clock``'s time."""
+    """``(model refit on all rows, None)``, or ``(None, why)`` with why ``"time"``,
+    ``"cancelled"`` or the exception the refit raised."""
     spec = result.spec
     # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit.
     if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / (len(result.models) - 1):
-        return None
-    if spec.view not in views:
-        views[spec.view] = getattr(prep, spec.view)(X)
-    best = np.mean([spec.rounds(model) for model in result.models])
-    rounds = max(1, round(best * REFIT_ROUNDS_FACTOR))
+        return None, "cancelled" if clock.should_stop() else "time"
     try:
-        return spec.fit_full(result.best_params, views[spec.view], y, clock, rounds, weight)
+        if spec.view not in views:
+            views[spec.view] = getattr(prep, spec.view)(X)
+        best = np.mean([spec.rounds(model) for model in result.models])
+        rounds = min(MAX_ROUNDS, max(1, round(best * REFIT_ROUNDS_FACTOR)))
+        model = spec.fit_full(result.best_params, views[spec.view], y, clock, rounds, weight)
+        return model, None
     except DeadlineExceeded:
-        return None
+        return None, "cancelled" if clock.should_stop() else "time"
+    except Exception as e:
+        return None, e
 
 
 def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
@@ -344,6 +385,8 @@ def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
 def _leaderboard(
     results, weights, refit_secs, blended, y, folds: Folds, sort_metric, scores
 ) -> pd.DataFrame:
+    """One row per family and one for the ensemble. The ensemble's weights were chosen on the
+    same OOF predictions it is scored on, so its row is slightly optimistic."""
     rows = []
     for name, result in results.items():
         rows.append(

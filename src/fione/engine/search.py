@@ -20,6 +20,10 @@ has not improved by a relative ``stopping_tolerance`` over the last ``stopping_r
 (reason ``no_improvement``; a pruned trial counts as no improvement). ``sample_weight`` is
 passed to every fold fit; scores stay unweighted.
 
+A trial that raises an ``Exception`` (a library failure) ends the search with reason ``error``
+and a ``notice`` (``error_notice``); the best trial so far is kept, and ``FamilyResult.error``
+holds the exception. Other ``BaseException``s (KeyboardInterrupt, SystemExit) propagate.
+
 ``should_stop`` is polled after every boosting iteration and must be cheap.
 """
 
@@ -45,8 +49,8 @@ Folds = list[tuple[np.ndarray, np.ndarray]]
 
 @dataclass
 class FamilyResult:
-    """The best completed trial. A search cancelled before any trial completed has no models,
-    ``trials == 0``, an all-NaN ``oof`` and ``best_score == inf``."""
+    """The best completed trial. A search cancelled or failed before any trial completed has no
+    models, an all-NaN ``oof`` and ``best_score == inf``."""
 
     oof: np.ndarray  # (n,) for regression, (n, k) class probabilities for classification
     models: list  # one fitted model per fold, in fold order
@@ -55,10 +59,22 @@ class FamilyResult:
     best_score: float
     elapsed: float
     spec: FamilySpec  # the instance that fitted the models, with its measured unit time
-    reason: str  # why the search ended: time, cancelled, max_models or no_improvement
+    reason: str  # why the search ended: time, cancelled, max_models, no_improvement or error
     best_trial: int = -1
     best_secs: float = 0.0  # wall time of the best trial
     log: list[dict] = field(default_factory=list)  # the ``trial`` event data, in order
+    error: Exception | None = None  # what ended the search when ``reason == "error"``
+
+
+def error_notice(kind: str, family: str, error: Exception) -> Event:
+    """The ``notice`` reporting that ``family`` failed with ``error`` (kind: family/refit_error)."""
+    data = {
+        "kind": kind,
+        "family": family,
+        "exception": type(error).__name__,
+        "message": str(error)[:300],
+    }
+    return Event("notice", data=data)
 
 
 def make_folds(y: np.ndarray, task: Task, nfolds: int, seed: int = 0) -> Folds:
@@ -196,6 +212,7 @@ def run_family(
     log: list[dict] = []
     stop_best, stop_history = math.inf, []  # best stopping score after each finished trial
     raised = False  # the max_trial_secs notice was sent
+    error: Exception | None = None
     finished = 0
     while True:
         if should_stop():
@@ -224,20 +241,26 @@ def run_family(
         first = finished == 0
         trial_start = time.monotonic()
         split = first or max_trial_secs is not None
-        outcome = _run_trial(
-            spec,
-            params,
-            view,
-            y,
-            folds,
-            trial,
-            deadline,
-            cap,
-            split,
-            first,
-            should_stop,
-            sample_weight,
-        )
+        try:
+            outcome = _run_trial(
+                spec,
+                params,
+                view,
+                y,
+                folds,
+                trial,
+                deadline,
+                cap,
+                split,
+                first,
+                should_stop,
+                sample_weight,
+            )
+        except Exception as e:
+            study.tell(trial, state=optuna.trial.TrialState.FAIL)
+            emit(error_notice("family_error", name, e))
+            error, reason = e, "error"
+            break
         limit = cap()
         if limit is not None and limit > max_trial_secs and not raised:
             raised = True
@@ -295,7 +318,16 @@ def run_family(
     if best is None:
         shape = (len(y), n_classes) if task == "classification" else (len(y),)
         return FamilyResult(
-            np.full(shape, np.nan), [], {}, finished, math.inf, elapsed, spec, reason, log=log
+            np.full(shape, np.nan),
+            [],
+            {},
+            finished,
+            math.inf,
+            elapsed,
+            spec,
+            reason,
+            log=log,
+            error=error,
         )
     return FamilyResult(
         best.oof,
@@ -309,4 +341,5 @@ def run_family(
         best_trial,
         best_secs,
         log,
+        error,
     )
