@@ -65,6 +65,7 @@ class Shooter:
     def __init__(self, browser, base: str, out: Path, errors: list[str]):
         self.browser, self.base, self.out = browser, base, out
         self.errors = errors
+        self.mode: str | None = None
         self.last = "start"
 
     def page(self, scheme: str, viewport: str, lang: str = "en") -> Page:
@@ -75,6 +76,8 @@ class Shooter:
             locale="ja-JP" if lang == "ja" else "en-US",
             extra_http_headers={"Accept-Language": lang},
         )
+        if self.mode:  # the view preference (simple unless set)
+            context.add_cookies([{"name": "fione_mode", "value": self.mode, "url": self.base}])
         page = context.new_page()
         page.on("console", lambda m: self.console(page, m))
         page.on("pageerror", lambda e: self.errors.append(f"{page.url}: {e}"))
@@ -226,7 +229,10 @@ def run(base: str, out: Path, errors: list[str]) -> None:
         page.context.close()
 
         project = easyml(s, base)
+        view_preference(s, base, project)
+        s.mode = "detailed"  # the AutoML screens are the detailed view's
         automl(s, base, project)
+        model_screens(s, base, project)
         browser.close()
 
 
@@ -541,6 +547,87 @@ def automl(s: "Shooter", base: str, project: str) -> None:
     page.goto(base + project + "/jobs")
     page.locator("#job-list details.confirm-inline > summary").first.click()
     s.shot(page, "jobs-confirm-en-dark-desktop", full_page=False)
+    page.context.close()
+
+
+def view_preference(s: "Shooter", base: str, project: str) -> None:
+    """The simple and the detailed view of the same dashboard, switched from the account menu."""
+    page = s.page("light", "desktop")
+    sign_in(page, base)
+    page.goto(base + project)
+    expect(page.locator(".subnav a", has_text="Jobs")).to_have_count(0)
+    s.shot(page, "view-simple-en-light-desktop", full_page=False)
+    page.click(".menu > summary")
+    s.shot(page, "view-menu-en-light-desktop", full_page=False)
+    page.click("button[name=mode][value=detailed]")
+    page.wait_for_url(base + project)
+    expect(page.locator(".subnav a", has_text="Jobs")).to_have_count(1)
+    s.shot(page, "view-detailed-en-light-desktop", full_page=False)
+    page.click(".menu > summary")
+    page.click("button[name=mode][value=simple]")
+    page.wait_for_url(base + project)
+    page.context.close()
+
+
+def model_screens(s: "Shooter", base: str, project: str) -> None:
+    """The models list, every tab of a model page, import, and the Python modules."""
+    page = s.page("light", "desktop")
+    sign_in(page, base)
+    page.goto(base + project + "/models")
+    model = page.locator("table th.cell-name a").first.get_attribute("href")
+    page.context.close()
+    shoot_all(s, base, project + "/models", "models", charts=True)
+    shoot_all(s, base, model, "model-overview", ("en", "ja"))
+    for tab, charts in (
+        ("leaderboard", False),
+        ("importance", True),
+        ("history", True),
+        ("metrics", False),
+    ):
+        shoot_all(s, base, f"{model}?tab={tab}", f"model-{tab}", charts=charts)
+    shoot_all(s, base, f"{model}?tab=history", "model-history", ("ja",), charts=True)
+    shoot_all(s, base, project + "/models/import", "import", ("en", "ja"))
+    shoot_all(s, base, "/modules", "modules", ("en", "ja"))
+    shoot_all(s, base, "/modules/upload", "module-upload", ("en", "ja"))
+
+    page = s.page("dark", "desktop")
+    sign_in(page, base)
+    # A bad archive is explained; the trust box comes back unchecked.
+    page.goto(base + project + "/models/import")
+    with tempfile.TemporaryDirectory() as work:
+        bad = Path(work) / "not-a-model.zip"
+        bad.write_bytes(b"not a zip")
+        page.set_input_files("#import-file", str(bad))
+        page.check("#trust-foreign")
+        page.click("form[data-upload-form] button[type=submit]")
+        page.wait_for_selector("#upload-error")
+        expect(page.locator("#trust-foreign")).not_to_be_checked()
+        s.shot(page, "import-error-en-dark-desktop", full_page=False)
+        # A module upload without the acknowledgement is refused by the server.
+        source = Path(work) / "mine.py"
+        source.write_text(
+            'MODULE = {"name": "Mine", "kind": "frame",'
+            ' "params": {"type": "object", "properties": {}}}\n'
+            "def run(df, params, ctx):\n    return df\n"
+        )
+        page.goto(base + "/modules/upload")
+        page.fill("#module-id", "mine")
+        page.set_input_files("#module-file", str(source))
+        page.evaluate("() => document.getElementById('acknowledge').removeAttribute('required')")
+        page.click("form[data-upload-form] button[type=submit]")
+        page.wait_for_selector("#upload-error")
+        s.shot(page, "module-upload-error-en-dark-desktop", full_page=False)
+        page.set_input_files("#module-file", str(source))
+        page.check("#acknowledge")
+        page.click("form[data-upload-form] button[type=submit]")
+        page.wait_for_url(base + "/modules")
+    s.shot(page, "modules-uploaded-en-dark-desktop")
+    # The history chart's legend and the model delete panel.
+    page.goto(base + model + "?tab=history")
+    charts_drawn(s, page, "model-history-tab")
+    page.goto(base + project + "/models")
+    page.locator("details.confirm-inline > summary").first.click()
+    s.shot(page, "models-delete-panel-en-dark-desktop", full_page=False)
     page.context.close()
 
 

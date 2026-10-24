@@ -34,13 +34,14 @@
   // series has its own symbol as well as its own colour, and a legend names them.
   var SYMBOLS = ["circle", "rect", "triangle", "diamond", "pin", "arrow", "roundRect"];
   function scatterOption(spec, c) {
-    var axis = function (name) {
+    var axis = function (name, horizontal) {
       return {
         type: "value",
         name: name,
-        nameLocation: "middle",
-        nameGap: 32,
-        nameTextStyle: { color: c.muted },
+        // the x name centred below the axis; the y name above it, unrotated
+        nameLocation: horizontal ? "middle" : "end",
+        nameGap: horizontal ? 32 : 14,
+        nameTextStyle: { color: c.muted, align: horizontal ? "center" : "left" },
         scale: true,
         axisLine: { lineStyle: { color: c.axis } },
         axisLabel: { color: c.muted },
@@ -72,8 +73,9 @@
       animation: !reduceMotion.matches,
       aria: { enabled: true, label: { description: spec.label } },
       textStyle: { color: c.text, fontFamily: window.getComputedStyle(document.body).fontFamily },
-      legend: { top: 0, textStyle: { color: c.text } },
-      grid: { left: 12, right: 24, top: 40, bottom: 44, containLabel: true },
+      // The legend below the plot, so a wrapped legend on a phone never covers it.
+      legend: { bottom: 0, textStyle: { color: c.text } },
+      grid: { left: 12, right: 24, top: 36, bottom: 96, containLabel: true },
       tooltip: {
         trigger: "item",
         renderMode: "richText",
@@ -81,8 +83,8 @@
         borderColor: c.axis,
         textStyle: { color: c.text },
       },
-      xAxis: axis(spec.x_name),
-      yAxis: axis(spec.y_name),
+      xAxis: axis(spec.x_name, true),
+      yAxis: axis(spec.y_name, false),
       series: series,
     };
   }

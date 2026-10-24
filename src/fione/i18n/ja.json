@@ -714,5 +714,8 @@
   "modules.error.acknowledge": "アップロードの前に、このコードを信頼することをチェックで確認してください。",
   "modules.error.file": "アップロードする Python ファイルを選んでください。",
   "modules.error.refused": "モジュールを追加できませんでした。",
-  "modules.error.builtin": "組み込みのモジュールは削除できません。"
+  "modules.error.builtin": "組み込みのモジュールは削除できません。",
+  "common.yes": "はい",
+  "common.no": "いいえ",
+  "models.order_one": "全 1 件"
 }

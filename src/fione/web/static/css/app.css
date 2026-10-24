@@ -2569,3 +2569,16 @@ select.input {
 .text-xs {
   font-size: var(--text-xs);
 }
+
+.table .cell-wide {
+  min-width: 16rem;
+}
+
+.table .cell-id {
+  white-space: nowrap;
+  font-weight: var(--weight-medium);
+}
+
+.chart-short .chart {
+  height: 12rem;
+}

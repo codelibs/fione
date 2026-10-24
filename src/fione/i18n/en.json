@@ -714,5 +714,8 @@
   "modules.error.acknowledge": "Tick the box to confirm you trust this code before uploading it.",
   "modules.error.file": "Choose the Python file to upload.",
   "modules.error.refused": "The module could not be added.",
-  "modules.error.builtin": "Built-in modules cannot be deleted."
+  "modules.error.builtin": "Built-in modules cannot be deleted.",
+  "common.yes": "Yes",
+  "common.no": "No",
+  "models.order_one": "1 model"
 }

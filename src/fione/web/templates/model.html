@@ -68,7 +68,7 @@
           {% if config %}
           <dl class="facts facts-stacked">
             {% for name, value in config %}
-            <div><dt>{{ t('train.f.' ~ name) if name not in ("target", "max_runtime_secs", "ignored_columns") else t('model.cfg.' ~ name) }}</dt><dd class="cell-value">{{ value }}</dd></div>
+            <div><dt>{{ t('train.f.' ~ name) if name not in ("target", "max_runtime_secs", "ignored_columns") else t('model.cfg.' ~ name) }}</dt><dd class="cell-value">{{ t(value[1]) if value[1] else value[0] }}</dd></div>
             {% endfor %}
           </dl>
           {% else %}
@@ -103,7 +103,7 @@
               <td class="num">{{ row.cv_std|cellnum if row.cv_std is not none else "—" }}</td>
               <td class="num">{{ "%.2f"|format(row.weight) if row.weight is not none else "—" }}</td>
               <td class="num">{{ "%.1f s"|format(row.train_secs) if row.train_secs is not none else "—" }}</td>
-              <td class="cell-value text-sm">{{ row.params or "—" }}</td>
+              <td class="cell-value cell-wide text-sm">{{ row.params or "—" }}</td>
             </tr>
             {% endfor %}
           </tbody>

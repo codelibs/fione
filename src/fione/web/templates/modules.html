@@ -30,7 +30,7 @@
         {% for row in rows %}
         {% set m = row.info %}
         <tr>
-          <th scope="row" class="cell-name"><code>{{ m.id }}</code></th>
+          <th scope="row" class="cell-id"><code>{{ m.id }}</code></th>
           <td class="cell-value">{{ m.name }}</td>
           <td>{{ t('modules.kind.' ~ m.kind) if m.kind in ("frame", "train", "predict") else m.kind }}</td>
           <td class="cell-value text-sm">{{ (m.params.get("properties") or {}).keys()|join(", ") or "—" }}</td>

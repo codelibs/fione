@@ -23,7 +23,7 @@
   <section aria-labelledby="board-title" class="stack-tight">
     <div class="section-header">
       <h2 class="section-header__title" id="board-title">{{ t('models.board') }}</h2>
-      <span class="text-muted text-sm">{{ t('models.order', n=total) }}</span>
+      <span class="text-muted text-sm">{{ t('models.order_one') if total == 1 else t('models.order', n=total) }}</span>
     </div>
     {% if rows %}
     <div class="table-wrap" tabindex="0" role="region" aria-labelledby="board-title">
@@ -85,7 +85,7 @@
   {% for spec in charts %}
   <section class="card card-padded stack-tight" aria-labelledby="compare-{{ loop.index }}">
     <h2 class="section-header__title" id="compare-{{ loop.index }}">{{ spec.label }}</h2>
-    {{ chart(t, "compare-chart-" ~ loop.index, spec, "chart-tall") }}
+    {{ chart(t, "compare-chart-" ~ loop.index, spec, "chart-tall" if spec.labels|length > 8 else ("chart-short" if spec.labels|length < 4 else "")) }}
   </section>
   {% endfor %}
 

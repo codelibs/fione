@@ -313,16 +313,25 @@ def _history(record: ModelRecord, lang: str) -> dict | None:
     }
 
 
-def _config(record: ModelRecord) -> list[tuple[str, str]]:
-    """The training settings, in ``TrainConfig`` order (unknown keys left out)."""
+def _config(record: ModelRecord) -> list[tuple[str, tuple[str, str | None]]]:
+    """The training settings in ``TrainConfig`` order (unknown keys left out), each as
+    ``(text, i18n key)``: flags, the task and metrics are shown in words."""
     config = record.config if isinstance(record.config, dict) else {}
     out = []
     for name in TrainConfig.__dataclass_fields__:
-        if name in config:
-            value = config[name]
-            if isinstance(value, list):
-                value = ", ".join(str(v) for v in value) or "—"
-            out.append((name, "—" if value is None else str(value)))
+        if name not in config:
+            continue
+        value, key = config[name], None
+        if isinstance(value, bool):
+            key = "common.yes" if value else "common.no"
+        elif name == "task" and value in ("auto", "classification", "regression"):
+            key = f"train.task.{value}"
+        elif name in ("stopping_metric", "sort_metric") and isinstance(value, str):
+            known = ("auto", "logloss", "auc", "accuracy", "rmse", "mae", "r2")
+            key = f"train.metric.{value.lower()}" if value.lower() in known else None
+        if isinstance(value, list):
+            value = ", ".join(str(v) for v in value) or "—"
+        out.append((name, ("—" if value is None else str(value), key)))
     return out
 
 
