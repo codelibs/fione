@@ -55,8 +55,9 @@ def test_ingest_basic_roundtrip(conn, storage, project):
     assert storage.list("projects/") == [ds.key]
     assert service.get_dataset(conn, ds.id) == ds
     assert service.list_datasets(conn, project.id) == [ds]
-    pf = pq.ParquetFile(storage.open_read(ds.key))
-    assert pf.metadata.num_rows == ds.n_rows and pf.metadata.num_columns == ds.n_cols
+    with storage.open_read(ds.key) as f:
+        metadata = pq.ParquetFile(f).metadata
+    assert metadata.num_rows == ds.n_rows and metadata.num_columns == ds.n_cols
 
 
 def test_read_dataset_selects_columns(conn, storage, project):
@@ -285,7 +286,8 @@ def test_int_float_and_int_text_columns_in_one_file(conn, storage, project):
     ds, df = load(conn, storage, project, data, block_size=4096)
     assert ds.schema == [("f", "double"), ("t", "string"), ("i", "int64")]
     assert df["f"].iloc[-1] == 1.5 and df["t"].iloc[-1] == "x" and df["t"].iloc[0] == "0"
-    parquet_schema = pq.ParquetFile(storage.open_read(ds.key)).schema_arrow
+    with storage.open_read(ds.key) as f:
+        parquet_schema = pq.ParquetFile(f).schema_arrow
     assert [(f.name, str(f.type)) for f in parquet_schema] == ds.schema
 
 
