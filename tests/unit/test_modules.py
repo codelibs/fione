@@ -834,6 +834,26 @@ def test_delete_module(conn, storage, admin, editor):
     ]
 
 
+def test_deleting_a_module_removes_the_states_it_trained(conn, storage, admin, project):
+    upload(conn, storage, admin)
+
+    def state(module_id):
+        key = f"projects/{project.id}/module_models/{module_id}/state.json"
+        storage.put(key, b"{}")
+        conn.execute(
+            "INSERT INTO module_models (project_id, module_id, name, state_key, created_at)"
+            " VALUES (?, ?, ?, ?, 0)",
+            (project.id, module_id, module_id, key),
+        )
+        return key
+
+    mine, other = state("add_one"), state("kmeans_train")
+    service.delete_module(conn, storage, admin, "add_one")
+    rows = conn.execute("SELECT module_id FROM module_models").fetchall()
+    assert [r[0] for r in rows] == ["kmeans_train"]
+    assert not storage.exists(mine) and storage.exists(other)
+
+
 # --- submitting -----------------------------------------------------------------------------
 
 

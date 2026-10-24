@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from fione import db
 from fione.auth.roles import User, can_access_project, require_admin
 from fione.jobs import store
 from fione.jobs.store import Job
@@ -213,13 +214,22 @@ def upload_module(
 
 
 def delete_module(conn: sqlite3.Connection, storage: Storage, admin: User, module_id) -> None:
+    """Delete an uploaded module with the states it trained (``module_models`` rows, which
+    have no foreign key to it), rows in one transaction, then their objects."""
     require_admin(admin)
     check_module_id(module_id)
     if registry.get_builtin(module_id) is not None:
         raise ValueError("built-in modules cannot be deleted")
-    if conn.execute("SELECT 1 FROM modules WHERE id = ?", (module_id,)).fetchone() is None:
-        raise ModuleNotFound(module_id)
-    conn.execute("DELETE FROM modules WHERE id = ?", (module_id,))
+    with db.immediate(conn):
+        if conn.execute("SELECT 1 FROM modules WHERE id = ?", (module_id,)).fetchone() is None:
+            raise ModuleNotFound(module_id)
+        states = conn.execute(
+            "SELECT state_key FROM module_models WHERE module_id = ?", (module_id,)
+        ).fetchall()
+        conn.execute("DELETE FROM module_models WHERE module_id = ?", (module_id,))
+        conn.execute("DELETE FROM modules WHERE id = ?", (module_id,))
+    for (key,) in states:
+        storage.delete(key)
     storage.delete_prefix(f"modules/{module_id}/")
 
 

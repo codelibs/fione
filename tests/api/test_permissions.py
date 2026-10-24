@@ -467,6 +467,13 @@ ROWS = [
         note="built-in",
     ),
     Row(
+        "DELETE",
+        "/api/v1/modules/{module_id}",
+        "/api/v1/modules/nothing_here",
+        e(*ADMIN_ONLY, 404, 403, 403),
+        note="missing",
+    ),
+    Row(
         "GET",
         "/api/v1/system/status",
         "/api/v1/system/status",

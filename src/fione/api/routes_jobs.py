@@ -103,9 +103,10 @@ def submit_module(body: ModuleJobIn, ctx: Writer, conn: Conn) -> dict:
 
 @router.post("/projects/{project_id}/jobs/export", status_code=201)
 def submit_export(ctx: Reader, conn: Conn) -> dict:
-    """Queue an export of every model of the project into one zip; read access is enough
-    (each model's export can be downloaded with read access too). Download the result from
+    """Queue an export of every model of the project into one zip. Download the result from
     ``GET /projects/{project_id}/exports/{job_id}``."""
+    # The one job a reader may submit (every other submission needs write): it yields no
+    # more than the per-model exports, which read access can already download.
     with service_errors():
         job = submit_export_all(conn, ctx.user, ctx.project.id)
     return job_out(job, admin=_admin(ctx.user))
