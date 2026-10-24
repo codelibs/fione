@@ -99,3 +99,37 @@ def test_load_secret_creates_then_reuses(tmp_path):
     assert len(first) == 32
     assert stat.S_IMODE(s.secret_key_path.stat().st_mode) == 0o600
     assert load_secret(s) == first
+
+
+@pytest.mark.parametrize("size", [0, 16, 33])
+def test_load_secret_rejects_wrong_length(tmp_path, size):
+    s = Settings(data_dir=tmp_path)
+    s.secret_key_path.write_bytes(b"x" * size)
+    with pytest.raises(RuntimeError, match="corrupt"):
+        load_secret(s)
+    assert s.secret_key_path.read_bytes() == b"x" * size
+
+
+def test_load_secret_ignores_stale_temp_file(tmp_path):
+    s = Settings(data_dir=tmp_path)
+    (tmp_path / ".secret.key.stale.tmp").write_bytes(b"")
+    key = load_secret(s)
+    assert len(key) == 32
+    assert load_secret(s) == key
+
+
+def test_load_secret_leaves_no_temp_file(tmp_path):
+    s = Settings(data_dir=tmp_path)
+    load_secret(s)
+    assert [p.name for p in tmp_path.iterdir()] == ["secret.key"]
+
+
+def test_create_secret_loses_race_keeps_winner(tmp_path):
+    from fione.config import _create_secret
+
+    path = tmp_path / "secret.key"
+    _create_secret(path)
+    winner = path.read_bytes()
+    _create_secret(path)
+    assert path.read_bytes() == winner
+    assert [p.name for p in tmp_path.iterdir()] == ["secret.key"]
