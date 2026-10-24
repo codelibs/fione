@@ -11,10 +11,12 @@ import pytest
 
 from api_helpers import add_user, connect, login, store_model
 from fione.api import routes_models
+from fione.auth import service as auth_service
 from fione.auth.roles import Role
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import service as models
+from fione.modules import service as modules_service
 from fione.projects import service as projects
 from web_helpers import FAST, make_world
 
@@ -377,8 +379,11 @@ def test_a_foreign_model_needs_trust(world, make_client, tmp_path):
     assert r.status_code == 422 and "Trust a model from another Fione installation" in r.text
     assert "signature" in r.text
     r = import_zip(world, archive, world.p, csrf, trust_foreign="true")
+    model_id = int(location(r).rsplit("/", 1)[1])
+    with closing(connect(world.client)) as conn:
+        assert models.get_model(conn, model_id).trusted == 0
     page = world.client.get(location(r)).text
-    assert "Imported, unverified" in page or "imported from another installation" in page
+    assert "imported from another installation" in page
 
 
 def test_an_import_over_the_archive_limit_is_413(world, monkeypatch):
@@ -551,3 +556,96 @@ def test_the_wizard_trained_summary_links_to_the_model_page(world):
     assert f'href="{world.path("/projects/{p}/models/{model}")}"' in page
     dashboard = world.client.get(world.path("/projects/{p}")).text
     assert f'href="{world.path("/projects/{p}/models/{model}")}"' in dashboard
+
+
+@pytest.mark.parametrize("token", [None, "wrong"])
+@pytest.mark.parametrize(
+    "kind", ["import", "module_upload", "module_delete", "model_delete", "export_all"]
+)
+def test_posts_without_the_csrf_token_change_nothing(world, kind, token):
+    world.login("admin")
+    with closing(connect(world.client)) as conn:
+        user = next(u for u in auth_service.list_users(conn) if u.username == "admin")
+        modules_service.upload_module(
+            conn,
+            world.client.app.state.storage,
+            user,
+            "mine",
+            (MODULE_SOURCE.replace("NAME", '"Mine"')).encode(),
+        )
+    before = (
+        count(world.client, "models"),
+        count(world.client, "modules"),
+        count(world.client, "jobs"),
+    )
+    data = {"csrf_token": token} if token else {}
+    if kind == "import":
+        archive = world.client.get(world.path("/projects/{p}/models/{model}/export")).content
+        r = world.client.post(
+            world.path("/projects/{p}/models/import"),
+            data=data,
+            files={"file": ("m.zip", archive, "application/zip")},
+        )
+    elif kind == "module_upload":
+        source = MODULE_SOURCE.replace("NAME", '"Other"').encode()
+        r = world.client.post(
+            "/modules/upload",
+            data=data | {"id": "other", "acknowledge": "yes"},
+            files={"file": ("m.py", source, "text/x-python")},
+        )
+    elif kind == "module_delete":
+        r = world.client.post("/modules/mine/delete", data=data)
+    elif kind == "model_delete":
+        r = world.client.post(world.path("/projects/{p}/models/{model}/delete"), data=data)
+    else:
+        r = world.client.post(world.path("/projects/{p}/models/export"), data=data)
+    assert r.status_code == 403 and "text/html" in r.headers["content-type"]
+    after = (
+        count(world.client, "models"),
+        count(world.client, "modules"),
+        count(world.client, "jobs"),
+    )
+    assert after == before
+
+
+@pytest.mark.parametrize("kind", ["import", "module_upload"])
+def test_cross_site_uploads_are_refused_before_they_are_read(world, kind):
+    csrf = world.login("admin")
+    evil = {"Origin": "https://evil.example"}
+    before = (count(world.client, "models"), count(world.client, "modules"))
+    if kind == "import":
+        archive = world.client.get(world.path("/projects/{p}/models/{model}/export")).content
+        r = world.client.post(
+            world.path("/projects/{p}/models/import"),
+            data={"csrf_token": csrf},
+            files={"file": ("m.zip", archive, "application/zip")},
+            headers=evil,
+        )
+    else:
+        source = MODULE_SOURCE.replace("NAME", '"Other"').encode()
+        r = world.client.post(
+            "/modules/upload",
+            data={"csrf_token": csrf, "id": "other", "acknowledge": "yes"},
+            files={"file": ("m.py", source, "text/x-python")},
+            headers=evil,
+        )
+    assert r.status_code == 403
+    assert (count(world.client, "models"), count(world.client, "modules")) == before
+
+
+def test_the_export_busy_page_keeps_the_switches_on_a_page(world):
+    csrf = world.login("vi")
+    world.client.post(world.path("/projects/{p}/models/export"), data={"csrf_token": csrf})
+    r = world.client.post(world.path("/projects/{p}/models/export"), data={"csrf_token": csrf})
+    assert r.status_code == 409
+    nexts = re.findall(r'<input type="hidden" name="next" value="([^"]+)">', r.text)
+    assert nexts and set(nexts) == {world.path("/projects/{p}/models")}
+
+
+def test_export_and_module_jobs_are_linked_from_the_job_list(world):
+    csrf = world.login("vi")
+    r = world.client.post(
+        world.path("/projects/{p}/models/export"), data={"csrf_token": csrf}, follow_redirects=False
+    )
+    page = world.client.get(world.path("/projects/{p}/jobs")).text
+    assert f'href="{location(r)}"' in page

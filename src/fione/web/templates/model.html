@@ -23,7 +23,7 @@
   <div class="cluster">
     {% if ctx.can_write %}<a class="btn btn-primary" href="{{ base }}/predict">{{ icon("play") }}{{ t('summary.predict') }}</a>{% endif %}
     <a class="btn btn-secondary" href="{{ base }}/summary">{{ t('summary.title') }}</a>
-    <a class="btn btn-ghost" href="{{ base }}/export" download>{{ icon("download") }}{{ t('model.export') }}</a>
+    <a class="btn btn-ghost" href="{{ base }}/export">{{ icon("download") }}{{ t('model.export') }}</a>
   </div>
   {% if not record.trusted %}<div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('model.untrusted') }}</span></div>{% endif %}
   {% if record.stop_reason == "error" %}<div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('summary.degraded') }}</span></div>{% endif %}

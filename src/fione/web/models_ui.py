@@ -121,6 +121,7 @@ def _models_view(request: Request, conn, ctx: Ctx, *, status=200, export_error=N
         "models.html",
         ctx,
         status=status,
+        here=f"/projects/{pid}/models",  # the switches never return to the POST-only export
         rows=[
             {
                 "record": r,

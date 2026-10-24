@@ -615,7 +615,7 @@ def _job_row(ctx: Ctx, job: Job, now: float) -> dict:
     info = job_out(job, admin=ctx.admin)  # the message as the API shows it to this user
     return {
         "job": job,
-        "link": link if job.kind in ("automl", "batch_predict") else None,
+        "link": link if job.kind in JOB_KINDS else None,
         "duration": _clock(duration),
         "started": started,
         "message": info["message"] if job.status == JobStatus.FAILED else None,
