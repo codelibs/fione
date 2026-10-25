@@ -177,3 +177,60 @@ def test_names_are_escaped(world):
     assert XSS not in page and escape(XSS) in page
     r = share(world, csrf, XSS + "x" * 70)
     assert r.status_code == 422 and XSS not in r.text
+
+
+def count(world, table: str, project: str) -> int:
+    with closing(connect(world.client)) as conn:
+        sql = f"SELECT COUNT(*) FROM {table} WHERE project_id = ?"
+        return conn.execute(sql, (project,)).fetchone()[0]
+
+
+def test_the_owner_deletes_the_project_with_its_jobs_and_data(world):
+    """The API's steps: queued and running jobs stopped, rows, objects and job logs gone."""
+    csrf = world.login("ed")
+    storage = world.client.app.state.storage
+    logs = world.client.app.state.settings.data_dir / "jobs"
+    with closing(connect(world.client)) as conn:
+        rows = conn.execute("SELECT id FROM jobs WHERE project_id = ?", (world.p,))
+        job_ids = [row[0] for row in rows]
+    logs.mkdir(parents=True, exist_ok=True)
+    for job_id in job_ids:
+        (logs / f"{job_id}.log").write_text("log")
+    assert storage.list(f"projects/{world.p}/") and count(world, "jobs", world.p)
+    page = world.client.get(world.path("/projects/{p}")).text
+    assert f'action="/projects/{world.p}/delete"' in page
+    r = world.client.post(
+        world.path("/projects/{p}/delete"), data={"csrf_token": csrf}, follow_redirects=False
+    )
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    for table in ("jobs", "datasets", "models"):
+        assert count(world, table, world.p) == 0, table
+    assert storage.list(f"projects/{world.p}/") == []
+    assert not any((logs / f"{job_id}.log").exists() for job_id in job_ids)
+    assert world.client.get(world.path("/projects/{p}")).status_code == 404
+    assert count(world, "datasets", world.q) > 0  # the other project is untouched
+
+
+@pytest.mark.parametrize("who", ["ed", "admin", "co", "vi"])
+def test_the_delete_button_is_for_owners_and_administrators(world, who):
+    world.login(who)
+    page = world.client.get(world.path("/projects/{p}")).text
+    assert (f'action="/projects/{world.p}/delete"' in page) == (who in ("ed", "admin"))
+
+
+@pytest.mark.parametrize("refusal", ["no_csrf", "cross_site"])
+def test_deleting_needs_the_token_and_this_site(world, refusal):
+    csrf = world.login("ed")
+    data = {"csrf_token": "" if refusal == "no_csrf" else csrf}
+    headers = EVIL if refusal == "cross_site" else {}
+    r = world.client.post(world.path("/projects/{p}/delete"), data=data, headers=headers)
+    assert r.status_code == 403 and "text/html" in r.headers["content-type"]
+    assert world.client.get(world.path("/projects/{p}")).status_code == 200
+
+
+def test_the_delete_question_escapes_the_name(world):
+    with closing(connect(world.client)) as conn:
+        conn.execute("UPDATE projects SET name = ? WHERE id = ?", (XSS, world.p))
+    world.login("ed")
+    page = world.client.get(world.path("/projects/{p}")).text
+    assert XSS not in page and escape(XSS) in page

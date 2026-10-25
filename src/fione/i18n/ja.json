@@ -803,7 +803,7 @@
   "users.refused.last_admin": "管理者が一人は必要です。先にほかのユーザーを管理者にしてください。",
   "users.refused.self_role": "自分の管理者ロールは外せません。ほかの管理者に依頼してください。",
   "users.refused.self_delete": "自分のアカウントは削除できません。ほかの管理者に依頼してください。",
-  "users.refused.owns_projects": "このユーザーは {n} 件のプロジェクトを持っています。先にそのプロジェクトを削除してください。",
+  "users.refused.owns_projects": "このユーザーは {n} 件のプロジェクトを持っています。先にそのプロジェクトを削除してください（管理者は各プロジェクトの画面の「プロジェクトを削除」から削除できます）。",
   "users.refused.owns_jobs": "このユーザーは {n} 件のジョブを持っています。先にそのジョブを削除してください。",
   "users.refused.conflict": "今はこの変更ができません。",
   "system.title": "システムの状態",
@@ -863,5 +863,11 @@
   "system.uptime_days": "{d} 日 {h} 時間",
   "system.uptime_hours": "{h} 時間 {m} 分",
   "system.uptime_minutes": "{m} 分",
-  "users.refused.self_password": "自分のパスワードはアカウント画面で変更してください。現在のパスワードの確認があります。"
+  "users.refused.self_password": "自分のパスワードはアカウント画面で変更してください。現在のパスワードの確認があります。",
+  "project.delete_title": "このプロジェクトの削除",
+  "project.delete_lead": "削除できるのはオーナーと管理者だけです。",
+  "project.delete": "プロジェクトを削除",
+  "project.delete_question": "「{name}」と中身をすべて削除しますか？",
+  "project.delete_effect": "実行中・待機中のジョブを先に止めます。データセット、モデル、ジョブ、予測結果は完全に削除され、共有していた人もアクセスできなくなります。",
+  "project.delete_yes": "削除する"
 }

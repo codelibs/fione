@@ -238,10 +238,12 @@ SHARING_ROUTES = {
     ("GET", P + "/members"): OWNER_PAGE,
     ("POST", P + "/members"): OWNER_POST,
     ("POST", P + "/members/remove"): OWNER_POST,
+    ("POST", P + "/delete"): OWNER_POST,
 }
 SHARING_PATHS = {
     "/projects/{pid}/members": P + "/members",
     "/projects/{pid}/members/remove": P + "/members/remove",
+    "/projects/{pid}/delete": P + "/delete",
 }
 
 
@@ -261,9 +263,9 @@ def sharing_request(world, method, template, csrf):
     client, path = world.client, world.path(template)
     if method == "GET":
         return client.get(path, follow_redirects=False)
-    form = (
-        {"username": "co"} if path.endswith("/remove") else {"username": "st", "access": "viewer"}
-    )
+    forms = {"/remove": {"username": "co"}, "/delete": {}}
+    form = next((f for end, f in forms.items() if path.endswith(end)), None)
+    form = {"username": "st", "access": "viewer"} if form is None else form
     return client.post(path, data={"csrf_token": csrf or ""} | form, follow_redirects=False)
 
 

@@ -91,11 +91,16 @@ def _stop_jobs(request: Request, conn, project_id: str) -> None:
 @router.delete("/{project_id}", status_code=204)
 def delete_project(ctx: Owner, request: Request, conn: Conn) -> None:
     """Cancel the project's jobs, then delete it with its datasets, models, jobs and logs."""
-    project_id = ctx.project.id
+    delete_project_and_jobs(request, conn, ctx.user, ctx.project.id)
+
+
+def delete_project_and_jobs(request: Request, conn, user, project_id: str) -> None:
+    """Stop the project's jobs, delete the project with its objects, then its job logs (the
+    API's and the web UI's project delete)."""
     _stop_jobs(request, conn, project_id)
     job_ids = [job.id for job in store.list_jobs(conn, project_id)]
     with service_errors():
-        service.delete_project(conn, request.app.state.storage, ctx.user, project_id)
+        service.delete_project(conn, request.app.state.storage, user, project_id)
     logs = request.app.state.settings.data_dir / "jobs"
     for job_id in job_ids:
         (logs / f"{job_id}.log").unlink(missing_ok=True)

@@ -5,12 +5,15 @@ Adding a member and changing one's access are the same call (``share_project``, 
 ``POST /api/v1/projects/{id}/share``); removing is ``unshare_project``. The page tells an
 unknown username apart from a refusal exactly as the API does, and no more. The owner is
 not a member: there is no owner role to give or take away here.
+
+Deleting the project (from its dashboard) is the owner's too: the API's steps, shared.
 """
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 
 from fione.api.deps import Conn
+from fione.api.routes_projects import delete_project_and_jobs
 from fione.auth import service as auth_service
 from fione.auth.roles import ProjectAccess
 from fione.projects import service as projects
@@ -91,3 +94,12 @@ def unshare(request: Request, conn: Conn, pid: str, form: SmallForm) -> Response
         error = "members.error.not_member"
         return _view(request, conn, ctx, status=404, error=error, error_params=params)
     return RedirectResponse(f"/projects/{ctx.project.id}/members?done=removed", 303)
+
+
+@router.post("/projects/{pid}/delete")
+def delete_project(request: Request, conn: Conn, pid: str, form: SmallForm) -> Response:
+    """Stop the project's jobs, then delete it with its data, models and jobs, as
+    ``DELETE /api/v1/projects/{id}`` does."""
+    ctx = _posted(request, conn, pid, form)
+    delete_project_and_jobs(request, conn, ctx.auth.user, ctx.project.id)
+    return RedirectResponse("/", 303)

@@ -803,7 +803,7 @@
   "users.refused.last_admin": "Fione needs at least one administrator: make someone else an administrator first.",
   "users.refused.self_role": "You cannot give up your own administrator role. Another administrator has to do it.",
   "users.refused.self_delete": "You cannot delete your own account. Another administrator has to do it.",
-  "users.refused.owns_projects": "They own {n} project(s). Delete those projects first.",
+  "users.refused.owns_projects": "They own {n} project(s). Delete those projects first: an administrator can, from the Delete project button on each project's page.",
   "users.refused.owns_jobs": "They own {n} job(s). Delete those jobs first.",
   "users.refused.conflict": "The change is not possible right now.",
   "system.title": "System status",
@@ -863,5 +863,11 @@
   "system.uptime_days": "{d} d {h} h",
   "system.uptime_hours": "{h} h {m} min",
   "system.uptime_minutes": "{m} min",
-  "users.refused.self_password": "Change your own password on your account page: it asks for your current one."
+  "users.refused.self_password": "Change your own password on your account page: it asks for your current one.",
+  "project.delete_title": "Delete this project",
+  "project.delete_lead": "Only the owner and administrators can do this.",
+  "project.delete": "Delete project",
+  "project.delete_question": "Delete “{name}” and everything in it?",
+  "project.delete_effect": "Running and queued jobs are stopped first. Its datasets, models, jobs and predictions are deleted for good, and the people it is shared with lose access.",
+  "project.delete_yes": "Yes, delete the project"
 }
