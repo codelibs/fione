@@ -7,6 +7,7 @@ import re
 
 import pandas as pd
 import pytest
+from playwright.sync_api import expect
 
 from e2e_helpers import sign_in, upload
 
@@ -24,6 +25,9 @@ def test_the_wizard_trains_rates_predicts_and_offers_serving(stack, admin, train
     n = int(stars.get_attribute("data-stars"))
     assert 1 <= n <= 5
     assert stars.get_attribute("aria-label") == f"{n} out of 5 stars"
+    expect(stars).to_be_visible()  # what the user sees: n of the five stars filled
+    expect(stars.locator(".star-on")).to_have_count(n)
+    expect(stars.locator(".star-off")).to_have_count(5 - n)
     command = page.locator("#run-command").inner_text().strip()
     assert command.startswith("docker run ") and command.endswith(stack.serving_image)
 

@@ -39,7 +39,7 @@ def token_of(page) -> str:
     return r.json()["token"]
 
 
-def test_roles_and_membership(stack, admin, trained, new_page):
+def test_roles_and_membership(stack, admin, trained, new_page, console):
     project = trained.project
     pid = project.rsplit("/", 1)[1]
     api = admin.api(stack)
@@ -65,6 +65,7 @@ def test_roles_and_membership(stack, admin, trained, new_page):
     assert viewer.locator("#run-button").count() == 0
     viewer.goto(project + "/datasets")
     assert viewer.locator("form[action$='/delete']").count() == 0
+    console.expect_error(stack.base + project + "/upload")
     assert viewer.goto(project + "/upload").status == 403
     headers = {"Authorization": f"Bearer {token_of(viewer)}"}
     body = {"dataset_id": dataset["id"], "config": {"target": "species", "max_runtime_secs": 60}}
@@ -76,6 +77,7 @@ def test_roles_and_membership(stack, admin, trained, new_page):
     # Someone who is no member: the project does not exist for them.
     outsider = new_page()
     sign_in(outsider, "e2e-outsider", PASSWORD)
+    console.expect_error(stack.base + project)
     assert outsider.goto(project).status == 404
     headers = {"Authorization": f"Bearer {token_of(outsider)}"}
     assert httpx.get(f"{stack.base}/api/v1/projects/{pid}", headers=headers).status_code == 404

@@ -30,9 +30,12 @@ ROOT = Path(__file__).resolve().parents[2]
 ENV_FILE = ROOT / "docker" / "e2e.env"
 ADMIN, PASSWORD = "e2e-admin", "e2e-admin-password-1"  # test-only, inside a throwaway stack
 UP_TIMEOUT_SECS = 600  # building both images from scratch included
-# Console messages a page may log without failing a test: resource loads the tests cause on
-# purpose (a 403 or 404 page). CSP violations ("Refused to ...") and script errors fail.
-IGNORED_CONSOLE = ("Failed to load resource",)
+# The browser's console line for a load that answered 4xx/5xx. It fails a test unless the
+# test opened that URL expecting the error (``console.expect_error``): a 403 or 404 page.
+FAILED_LOAD = "Failed to load resource"
+# The developer's own FIONE_* settings must not reach the throwaway stack (compose prefers
+# the shell over docker/e2e.env): only these pass.
+PASSED_SETTINGS = ("FIONE_IMAGE_TAG",)
 
 
 def _env_value(name: str) -> str:
@@ -140,7 +143,9 @@ def stack(request):
     artifacts = Path(os.environ.get("FIONE_E2E_ARTIFACTS", ROOT / "test-results" / "e2e"))
     artifacts.mkdir(parents=True, exist_ok=True)
     port = _free_port()
-    env = os.environ | {"FIONE_PORT": str(port), "FIONE_SERVING_PORT": str(_free_port())}
+    env = {
+        k: v for k, v in os.environ.items() if not k.startswith("FIONE_") or k in PASSED_SETTINGS
+    } | {"FIONE_PORT": str(port), "FIONE_SERVING_PORT": str(_free_port())}
     stack = Stack(
         project=f"fione-e2e-{secrets.token_hex(3)}",
         port=port,
@@ -185,15 +190,26 @@ def browser():
 
 
 class Console:
-    """The console errors pages log; CSP violations land here."""
+    """The console errors pages log; CSP violations and failed loads land here."""
 
     def __init__(self):
         self.errors: list[str] = []
+        self.expected: set[str] = set()
+
+    def expect_error(self, url: str) -> None:
+        """The test opens ``url`` expecting an error status: its failed load is no error."""
+        self.expected.add(url)
 
     def watch(self, page) -> None:
         def on_console(message):
-            if message.type == "error" and not message.text.startswith(IGNORED_CONSOLE):
-                self.errors.append(f"{page.url}: {message.text}")
+            if message.type != "error":
+                return
+            if (
+                message.text.startswith(FAILED_LOAD)
+                and message.location.get("url") in self.expected
+            ):
+                return
+            self.errors.append(f"{page.url}: {message.text} ({message.location.get('url')})")
 
         page.on("console", on_console)
         page.on("pageerror", lambda error: self.errors.append(f"{page.url}: {error}"))

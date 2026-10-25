@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# One nightly run at a time (a manual run waits for the scheduled one).
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
 jobs:
   acceptance:
     # Accuracy, size and latency targets on real datasets (downloaded from the network).
@@ -22,7 +27,14 @@ jobs:
           enable-cache: true
       - run: uv python install 3.12
       - run: uv sync --frozen
-      - run: uv run pytest -m acceptance -v
+      - run: uv run pytest -m acceptance -v --junitxml=test-results/acceptance/junit.xml
+      - name: Keep the test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-failure
+          path: test-results/acceptance
+          if-no-files-found: ignore
 
   e2e:
     runs-on: ubuntu-latest

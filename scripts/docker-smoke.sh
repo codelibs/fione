@@ -13,6 +13,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 project="${FIONE_SMOKE_PROJECT:-fione-e2e}"
+# The shell's own FIONE_* settings (a real deployment's keys, say) must not reach this
+# throwaway stack: compose prefers them over docker/e2e.env. Only the tag and port pass.
+for name in $(compgen -e); do
+    case "$name" in
+        FIONE_IMAGE_TAG | FIONE_PORT) ;;
+        FIONE_*) unset "$name" ;;
+    esac
+done
 compose=(docker compose -p "$project" --env-file docker/e2e.env
     -f docker/compose.yaml -f docker/compose.e2e.yaml)
 base="http://127.0.0.1:${FIONE_PORT:-18080}"
