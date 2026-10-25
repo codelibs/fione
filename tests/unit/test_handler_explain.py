@@ -512,6 +512,18 @@ def test_the_contribution_rows_shrink_for_wide_multiclass(
     assert explanations.get_explanation(conn, record.id).payload["n_rows"] == 40
 
 
+def test_the_curve_rows_shrink_for_wide_models(conn, run_job, owner, project, record, monkeypatch):
+    """The stored curves keep rows x grid x columns within the cell cap, as requests do."""
+    width = explain.PD_GRID * len(classifier().columns)
+    monkeypatch.setattr(explain, "CELLS", width * 30)
+    assert explain.pd_rows(classifier(), explain.PD_ROWS, explain.PD_GRID) == 30
+    done = run_job(submit(conn, owner, project, record))
+    assert done.status is JobStatus.DONE, done.message
+    curves = explanations.get_explanation(conn, record.id).payload["partial_dependence"]
+    assert curves and {c["n_rows"] for c in curves} == {30}
+    assert all(len(c["ice"]) <= 30 for c in curves)
+
+
 # --- the pieces, on synthetic data ----------------------------------------------------
 
 
@@ -560,8 +572,8 @@ def test_the_ice_output_is_one_of_the_kept_outputs(monkeypatch):
     average[1, 7] = 0.5  # varies most among the kept
     calls = []
 
-    def fake(model, background, column, *, class_index=None):
-        calls.append(class_index)
+    def fake(model, background, column, *, max_rows, class_index=None):
+        calls.append((class_index, max_rows))
         ice_output = 2 if class_index is None else class_index
         ice = np.full((3, 2), float(ice_output))
         return PartialDependence(
@@ -570,8 +582,8 @@ def test_the_ice_output_is_one_of_the_kept_outputs(monkeypatch):
 
     monkeypatch.setattr(explain, "partial_dependence", fake)
     kept = list(range(5, 25))
-    entry = explain_handler._curve(None, pd.DataFrame(), "a", kept)
-    assert calls == [None, 7]
+    entry = explain_handler._curve(None, pd.DataFrame(), "a", kept, 123)
+    assert calls == [(None, 123), (7, 123)]  # both calls take the capped rows
     assert entry["outputs"] == kept and entry["outputs"][entry["ice_output"]] == 7
     assert entry["ice"] == [[7.0, 7.0]] * 3
     assert len(entry["average"][0]) == 20 and entry["average"][1][2] == 0.5

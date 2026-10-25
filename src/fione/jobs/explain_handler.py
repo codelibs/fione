@@ -74,14 +74,19 @@ def _rounded(values: np.ndarray) -> list:
     return [[_num(v) for v in row] for row in values]
 
 
-def _curve(model: TrainedModel, background: pd.DataFrame, column: str, kept: list[int]) -> dict:
-    """The partial dependence of ``column`` as payload JSON, for the ``kept`` outputs; the
-    ICE curves show the kept output that varies most when the overall one is not kept."""
-    curve = explain.partial_dependence(model, background, column)
+def _curve(
+    model: TrainedModel, background: pd.DataFrame, column: str, kept: list[int], rows: int
+) -> dict:
+    """The partial dependence of ``column`` over ``rows`` background rows as payload JSON, for
+    the ``kept`` outputs; the ICE curves show the kept output that varies most when the overall
+    one is not kept."""
+    curve = explain.partial_dependence(model, background, column, max_rows=rows)
     if curve.ice_output not in kept:
         swing = curve.average.max(axis=0) - curve.average.min(axis=0)
         best = kept[int(np.argmax(swing[kept]))]
-        curve = explain.partial_dependence(model, background, column, class_index=best)
+        curve = explain.partial_dependence(
+            model, background, column, max_rows=rows, class_index=best
+        )
     return {
         "column": column,
         "kind": curve.kind,
@@ -106,7 +111,8 @@ def build_explanation(
     Importance comes from the contributions of at most ``IMPORTANCE_ROWS`` rows (fewer when
     rows x classes x features would pass ``explain.CELLS``), stratified by the target
     when ``frame`` has it and the model classifies. Partial dependence covers
-    the ``PD_COLUMNS`` most important columns, on ``frame`` as the background, skipping a
+    the ``PD_COLUMNS`` most important columns, on ``frame`` as the background (averaged over
+    at most ``explain.pd_rows`` of its rows, as requests are), skipping a
     column without values there; ``should_stop`` is asked before each curve (``_Cancelled``)
     and ``progress(done, total)`` told after each. Floats keep 6 significant digits.
     """
@@ -119,13 +125,14 @@ def build_explanation(
     importance = explain.global_importance(c)
     total = float(importance.sum())
     kept = _kept_outputs(c)
+    pd_rows = explain.pd_rows(model, explain.PD_ROWS, explain.PD_GRID)  # wide models: fewer
     top = list(importance.index[:PD_COLUMNS])
     curves = []
     for done, column in enumerate(top, start=1):
         if should_stop():
             raise _Cancelled
         try:
-            curves.append(_curve(model, frame, column, kept))
+            curves.append(_curve(model, frame, column, kept, pd_rows))
         except ValueError as e:
             if isinstance(e, ConfigError) or "has no values in the background" not in str(e):
                 raise
