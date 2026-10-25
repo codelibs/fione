@@ -1,10 +1,33 @@
+import functools
+import itertools
+import time
+
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.datasets import (
+    load_breast_cancer,
+    load_diabetes,
+    load_digits,
+    load_iris,
+    make_classification,
+    make_regression,
+)
 
 from fione.data import profile as profile_module
 from fione.data.frames import change_column_type
-from fione.data.profile import profile_dataset
+from fione.data.profile import (
+    CORRELATED,
+    LEAK_STRONG,
+    ORDERED_BY_TARGET,
+    PREDICTS_ALONE,
+    SCORE_REASONS,
+    LeakCheck,
+    flag_scores,
+    leak_check,
+    profile_dataset,
+    single_column_score,
+)
 
 
 def _col(profile, name):
@@ -362,6 +385,216 @@ def test_leaks_ignore_rows_where_either_is_null():
     t = pd.Series(["a", "b", None, "a", "b"] * 12)
     c = pd.Series(["a", "b", "zzz", "a", "b"] * 12)
     assert "c" in _suspects(pd.DataFrame({"t": t, "c": c}), "t")
+
+
+# --- out-of-fold single-column score ------------------------------------------
+
+
+def _ticking_clock(step=2.0):
+    ticks = itertools.count(0.0, step)
+    return lambda: next(ticks)
+
+
+def test_reason_strings_are_exact():
+    # Task 6 maps these strings to UI keys
+    assert PREDICTS_ALONE == "predicts the target on its own"
+    assert ORDERED_BY_TARGET == "row order follows the target"
+    assert CORRELATED == "near-perfect correlation with target"
+    assert SCORE_REASONS == {CORRELATED, PREDICTS_ALONE, ORDERED_BY_TARGET}
+    assert LEAK_STRONG == 0.99
+
+
+def test_flag_rule():
+    cls, reg = "classification", "regression"
+    assert flag_scores({"petal": 0.968, "sepal": 0.916}, cls) == set()
+    assert flag_scores({"copy": 0.971, "relationship": 0.777}, cls) == {"copy"}
+    assert flag_scores({"a": 0.99, "b": 0.98, "c": 0.60}, cls) == {"a", "b"}
+    # nothing below the threshold: compared with chance
+    assert flag_scores({"a": 0.97, "b": 0.96}, cls) == {"a", "b"}
+    assert flag_scores({"log": 0.984, "MedInc": 0.478}, reg) == {"log"}
+    assert flag_scores({"x": 0.91, "y": 0.85}, reg) == set()
+    assert flag_scores({"a": 0.95}, reg) == {"a"}
+    assert flag_scores({"a": 0.99, "b": 0.89}, cls) == {"a"}  # exactly the margin
+    assert flag_scores({}, cls) == set()
+
+
+def _flagged(df, target):
+    return {s.column: s for s in profile_dataset(df, target=target).leak_suspects}
+
+
+def test_injected_classification_leaks():
+    rng = np.random.default_rng(1)
+    X, y = make_classification(n_samples=5000, random_state=0)
+    n = len(y)
+    df = pd.DataFrame(X, columns=[f"x{i}" for i in range(X.shape[1])])
+    df["t"] = y
+    df["flipped"] = np.where(rng.random(n) < 0.03, 1 - y, y)
+    df["noisy"] = y + rng.normal(0, 0.1, n)
+    df["threshold"] = np.where(y == 1, 1 + rng.random(n), rng.random(n))
+    rank = np.empty(n, dtype=np.int64)
+    rank[np.argsort(y + 0.5 * rng.random(n), kind="stable")] = np.arange(n)
+    df["row_id"] = rank
+    df["created"] = (pd.Timestamp("2024-01-01") + pd.to_timedelta(rank, unit="min")).astype(str)
+    level = np.where(rng.random(n) < 0.98, y, 1 - y) * 750 + rng.integers(0, 750, n)
+    df["code"] = [f"L{v}" for v in level]
+    df["amount"] = np.where((y == 1) & (rng.random(n) < 0.98), rng.lognormal(3, 1, n), 0.0)
+    found = _flagged(df, "t")
+    for name in ("flipped", "noisy", "threshold", "row_id", "created", "code", "amount"):
+        assert name in found, name
+        assert found[name].reason in SCORE_REASONS, name
+    assert found["row_id"].reason == ORDERED_BY_TARGET
+    assert found["created"].reason == ORDERED_BY_TARGET
+    assert found["threshold"].reason == PREDICTS_ALONE
+
+
+def test_amount_for_most_positives_stays_below_the_threshold():
+    """A documented miss: zero for every negative and for 20% of the positives caps the
+    AUC at 0.8 + 0.2 / 2 = 0.9, below the threshold."""
+    rng = np.random.default_rng(1)
+    X, y = make_classification(n_samples=5000, random_state=0)
+    df = pd.DataFrame({"t": y, "x": X[:, 0]})
+    df["amount"] = np.where((y == 1) & (rng.random(len(y)) < 0.8), rng.lognormal(3, 1, len(y)), 0)
+    score = single_column_score(df["amount"], "numeric", df["t"], "classification")
+    assert score == pytest.approx(0.9, abs=0.02)
+    assert "amount" not in _flagged(df, "t")
+
+
+def test_injected_regression_leaks():
+    rng = np.random.default_rng(1)
+    X, t = make_regression(n_samples=5000, n_features=10, noise=10, random_state=0)
+    t = t - t.min() + 1
+    n = len(t)
+    df = pd.DataFrame(X, columns=[f"x{i}" for i in range(X.shape[1])])
+    df["t"] = t
+    df["log"] = np.log(t) + rng.normal(0, 0.05, n)
+    df["square"] = t**2 + rng.normal(0, 100, n)
+    df["rounded"] = np.round(t).astype(int).astype(str)
+    rank = np.empty(n, dtype=np.int64)
+    rank[np.argsort(t, kind="stable")] = np.arange(n)
+    df["rank_id"] = rank
+    found = _flagged(df, "t")
+    for name in ("log", "square", "rounded", "rank_id"):
+        assert name in found, name
+        assert found[name].reason in SCORE_REASONS, name
+    assert found["rank_id"].reason == ORDERED_BY_TARGET
+    assert not {f"x{i}" for i in range(X.shape[1])} & set(found)
+
+
+@pytest.mark.parametrize("loader", [load_breast_cancer, load_digits, load_diabetes])
+def test_clean_datasets_raise_no_score_suspects(loader):
+    df = loader(as_frame=True).frame
+    reasons = {s.reason for s in profile_dataset(df, target="target").leak_suspects}
+    assert not reasons & {PREDICTS_ALONE, ORDERED_BY_TARGET}
+
+
+def test_few_rows_skip_the_score():
+    p = profile_dataset(load_iris(as_frame=True).frame, target="target")
+    assert not {s.reason for s in p.leak_suspects} & {PREDICTS_ALONE, ORDERED_BY_TARGET}
+    assert p.leak_partial is False
+
+
+def test_time_budget_sets_partial(monkeypatch):
+    rng = np.random.default_rng(0)
+    y = rng.integers(0, 2, 300)
+    df = pd.DataFrame({"t": y, **{f"c{i}": y + rng.normal(0, 0.1, 300) for i in range(5)}})
+    columns = profile_dataset(df).columns
+    check = leak_check(df, columns, "t", clock=_ticking_clock())
+    assert isinstance(check, LeakCheck)
+    assert check.partial is True
+    assert 1 <= len(check.suspects) < 5  # the clock ran out before every column was scored
+    unhurried = leak_check(df, columns, "t", clock=lambda: 0.0)
+    assert unhurried.partial is False and len(unhurried.suspects) == 5
+    monkeypatch.setattr(
+        profile_module, "leak_check", functools.partial(leak_check, clock=_ticking_clock())
+    )
+    assert profile_dataset(df, target="t").leak_partial is True
+
+
+def test_exact_reason_wins():
+    rng = np.random.default_rng(0)
+    t = rng.integers(0, 2, 400)
+    df = pd.DataFrame({"t": t, "same": t, "x": rng.normal(size=400)})
+    got = [s for s in profile_dataset(df, target="t").leak_suspects if s.column == "same"]
+    assert [s.reason for s in got] == ["identical to target"]
+
+
+def test_correlated_column_is_listed_once():
+    rng = np.random.default_rng(0)
+    t = rng.normal(size=1000)
+    df = pd.DataFrame({"t": t, "double": 2 * t, "x": rng.normal(size=1000)})
+    got = [s for s in profile_dataset(df, target="t").leak_suspects if s.column == "double"]
+    assert [s.reason for s in got] == [CORRELATED]
+
+
+def test_high_cardinality_noise_scores_near_chance():
+    rng = np.random.default_rng(0)
+    n = 10_000
+    t = pd.Series(rng.integers(0, 2, n))
+    code = pd.Series([f"k{v}" for v in rng.integers(0, 5000, n)])
+    assert single_column_score(code, "categorical", t, "classification") <= 0.6
+
+
+def test_score_is_out_of_fold_and_deterministic():
+    rng = np.random.default_rng(0)
+    t = pd.Series(rng.integers(0, 2, 2000))
+    unique = pd.Series([f"u{i}" for i in range(2000)])  # in-sample this would score 1.0
+    assert single_column_score(unique, "id", t, "classification") == pytest.approx(0.5, abs=0.05)
+    x = pd.Series(t + rng.normal(0, 1, 2000))
+    first = single_column_score(x, "numeric", t, "classification")
+    assert first == single_column_score(x, "numeric", t, "classification")
+    assert 0.6 < first < 0.9
+
+
+def test_score_of_missing_values_multiclass_and_constant_target():
+    rng = np.random.default_rng(0)
+    t = pd.Series(rng.integers(0, 3, 1000))
+    # missing exactly where the class is 2: missingness reveals that class
+    s = pd.Series(np.where(t == 2, np.nan, rng.normal(size=1000)))
+    assert single_column_score(s, "numeric", t, "classification") > 0.6
+    assert single_column_score(s, "numeric", pd.Series(np.ones(1000)), "regression") is None
+
+
+def test_score_of_datetimes_with_time_zone_and_missing_values():
+    rng = np.random.default_rng(0)
+    t = pd.Series(rng.integers(0, 2, 1000))
+    stamps = pd.Series(pd.Timestamp("2024-01-01", tz="Asia/Tokyo") + pd.to_timedelta(t, "D"))
+    stamps[::50] = pd.NaT
+    assert single_column_score(stamps, "datetime", t, "classification") > 0.95
+
+
+def test_large_frames_are_sampled_for_the_score(monkeypatch):
+    rng = np.random.default_rng(0)
+    y = rng.integers(0, 2, 3000)
+    df = pd.DataFrame({"t": y, "near": y + rng.normal(0, 0.1, 3000)})
+    columns = profile_dataset(df).columns
+    sizes = []
+    real = profile_module.single_column_score
+
+    def spy(s, kind, t, task, **kw):
+        sizes.append(len(s))
+        return real(s, kind, t, task, **kw)
+
+    monkeypatch.setattr(profile_module, "single_column_score", spy)
+    first = leak_check(df, columns, "t", max_rows=1000).suspects
+    assert sizes == [1000]
+    assert first and first == leak_check(df, columns, "t", max_rows=1000).suspects
+
+
+@pytest.mark.timing
+def test_leak_check_of_21_columns_and_10k_rows_takes_at_most_3_seconds():
+    rng = np.random.default_rng(0)
+    n = 10_000
+    data = {f"f{i}": rng.normal(size=n) for i in range(15)}
+    data.update({f"c{i}": rng.choice([f"v{j}" for j in range(50)], size=n) for i in range(5)})
+    created = pd.Timestamp("2024-01-01") + pd.to_timedelta(rng.permutation(n), unit="min")
+    data["created"] = created.astype(str)
+    data["t"] = rng.integers(0, 2, n)
+    df = pd.DataFrame(data)
+    columns = profile_dataset(df).columns
+    start = time.perf_counter()
+    check = leak_check(df, columns, "t", time_budget=60.0)
+    assert time.perf_counter() - start <= 3.0
+    assert check.partial is False
 
 
 # --- speed -----------------------------------------------------------------
