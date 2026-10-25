@@ -543,6 +543,28 @@ def test_background_is_sampled_with_the_seed():
     assert other.n_rows == PD_ROWS
     assert not np.array_equal(other.average, first.average)
     assert partial_dependence(fit, background, "幅", max_rows=100).n_rows == 100
+    # The grid comes from the whole background, not from the sampled rows.
+    assert other.grid == first.grid
+    assert partial_dependence(fit, background.iloc[::-1], "幅").grid == first.grid
+
+
+def test_frequency_column_is_reported_as_category():
+    fit = _fit("regression")
+    rng = np.random.default_rng(3)
+    X = pd.DataFrame({"ids": [f"k{i % 260}" for i in range(400)], "n": rng.normal(size=400)})
+    y = X["n"].to_numpy() + rng.normal(scale=0.1, size=400)
+    prep = Prep().fit(X)
+    assert prep.kind_of("ids") == "frequency"
+    spec = _spec(fit, "ExtraTrees")
+    view = prep.dense(X)
+    model = spec.fit(spec.defaults, view[100:], y[100:], view[:100], y[:100], Deadline(120))
+    small = replace(fit, prep=prep, columns=prep.columns, members=[Member(spec, 1.0, [model])])
+    background = X.iloc[:PD_ROWS]  # every row is used
+    result = partial_dependence(small, background, "ids", grid_size=5)
+    _assert_grid(result, "category")
+    assert result.grid[-1] is None
+    curves = _curves(small, background, "ids", result.grid)
+    assert_allclose(result.average, curves.mean(0), rtol=0, atol=1e-12)
 
 
 def test_multiclass_ice_defaults_to_the_most_varying_class():
@@ -566,6 +588,9 @@ def test_multiclass_ice_defaults_to_the_most_varying_class():
     assert binary.outputs == [True]
     assert binary.ice_output == 0
     assert binary.average.shape == (len(binary.grid), 1)
+    # The positive class, classes_[1], as in Contributions.outputs.
+    curves = _curves(_fit("binary"), background, "<b>x</b>", binary.grid)
+    assert_allclose(binary.average, curves.mean(0), rtol=0, atol=1e-12)
     with pytest.raises(ValueError):
         partial_dependence(_fit("binary"), background, "<b>x</b>", class_index=1)
 

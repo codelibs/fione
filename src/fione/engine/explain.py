@@ -255,7 +255,8 @@ class PartialDependence:
 
     ``average[point, output]`` is their mean over the rows; ``ice[row, point]`` holds single
     rows' curves for ``outputs[ice_output]``. ``None`` in the grid means missing; datetimes
-    are ISO strings.
+    are ISO strings, in UTC without a zone marker when the column was tz-aware. ``grid`` has
+    a single point when a numeric or datetime column holds a single value in the background.
     """
 
     column: str
