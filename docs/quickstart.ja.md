@@ -62,7 +62,7 @@ docker compose -f docker/compose.yaml --env-file docker/.env exec -T fione pytho
 
 ## 6. 予測する
 
-サマリーの「**予測する**」を押し、同じ入力列を持つ CSV をアップロードします（予測する列は不要です。`iris.csv` でも試せます）。予測と並べて残す列を選んで「**予測を実行**」を押すと、結果画面に先頭の行が表示され、`predict_<名前>.csv` をダウンロードできます。予測したクラスの `predict` 列と、クラスごとの確率の `p_<クラス>` 列が付きます。
+サマリーの「**予測する**」を押し、同じ入力列を持つ CSV を選んで「**アップロード**」を押します（予測する列は不要です。`iris.csv` でも試せます）。予測と並べて残す列を選んで「**予測を実行**」を押すと、結果画面に先頭の行が表示され、`predict_<名前>.csv` をダウンロードできます。予測したクラスの `predict` 列と、クラスごとの確率の `p_<クラス>` 列が付きます。
 
 ## 7. 予測 API を動かす（Fione Serving）
 
@@ -112,18 +112,22 @@ docker run --rm -u 0 -v fione_fione-data:/data:ro --entrypoint tar ghcr.io/codel
 docker run --rm -u 0 -v fione_seaweed-data:/data:ro --entrypoint tar ghcr.io/codelibs/fione:dev czf - -C /data . > seaweed-data.tgz
 ```
 
-`fione-data.tgz` にはデータベースと秘密鍵が入っています。厳重に保管してください。空のボリュームへ戻すには（新しいマシンで初回起動の前など）、次を実行してから通常どおり起動します（Compose がボリュームは既にあると警告しますが、問題ありません）。
+`fione-data.tgz` にはデータベースと秘密鍵が入っています。厳重に保管してください。`docker/.env` はアーカイブに含まれないので、一緒に保管するか、手順 1 の `printf` で作り直してください。
+
+空のボリュームへ戻すには（新しいマシンで初回起動の前など）、イメージをビルドしてから戻し、通常どおり起動します（Compose がボリュームは既にあると警告しますが、問題ありません）。
 
 ```sh
+docker compose -f docker/compose.yaml --env-file docker/.env build
 docker run --rm -i -u 0 -v fione_fione-data:/data --entrypoint tar ghcr.io/codelibs/fione:dev xzf - -C /data < fione-data.tgz
 docker run --rm -i -u 0 -v fione_seaweed-data:/data --entrypoint tar ghcr.io/codelibs/fione:dev xzf - -C /data < seaweed-data.tgz
 ```
 
-更新するときは、バックアップしてから新しい版を取得し、ビルドし直します。
+更新するときは、バックアップし、今のサービング用イメージを別の名前で残してから（ビルドし直すと `ghcr.io/codelibs/fione-serving:dev` が置き換わるため）、新しい版を取得してビルドし直します。
 
 ```sh
+docker tag ghcr.io/codelibs/fione-serving:dev fione-serving:before-upgrade
 git pull
 docker compose -f docker/compose.yaml --env-file docker/.env up -d --build --wait
 ```
 
-データはそのまま残ります。古い版で学習したモデルが新しい版で読み込める保証はありません（Fione のコードの pickle のため）。頼りにしているモデルは更新後に学習し直し、それまでは配信に使っているサービング用イメージを残しておいてください。
+データはそのまま残ります。古い版で学習したモデルが新しい版で読み込める保証はありません（Fione のコードの pickle のため）。頼りにしているモデルは更新後に学習し直してください。それまでは、`docker run` コマンドの `ghcr.io/codelibs/fione-serving:dev` を `fione-serving:before-upgrade` に置き換えて、残したイメージで配信できます（版ごとに `docker/.env` の `FIONE_IMAGE_TAG` を変えておけば、両方のイメージのタグに版が入るので、この手間は不要です）。

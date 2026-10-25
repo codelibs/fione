@@ -50,7 +50,7 @@ The Japanese screen terms are kept.
 |---|---|
 | Create and delete projects | Shipped |
 | Datasets (training, test, prediction), CSV upload and download | Shipped |
-| Frame parsing, type changes, export, save | Shipped (CSV is converted to Parquet on upload; Python modules transform data) |
+| Frame parsing, type changes, export, save | Partly: CSV parsing with type inference (stored as Parquet), CSV download, and Python modules that save their result as a new dataset. Changing a column's type by hand is not available yet |
 | Column view, data view, per-column EDA | Shipped, extended: missing values, correlations, outliers, leak suspects, inferred types |
 | EasyML wizard and AutoML screens | Shipped (the simple and detailed views) |
 | AutoML run with its parameters (folds, class balancing, seed, maximum models and run time, per-model time, stopping rounds/metric/tolerance, sort metric, keeping CV predictions/models/fold assignment, excluded columns) | Shipped |

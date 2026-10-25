@@ -78,9 +78,9 @@ This writes `iris.csv`: 150 rows, four measurements and the `species` column.
 
 ## 6. Make predictions
 
-On the summary, press **Make predictions**, upload a CSV with the same input columns (the
-column to predict is not needed; `iris.csv` works), choose the columns to keep next to the
-prediction and press **Predict**. The result page shows the first rows and offers the file,
+On the summary, press **Make predictions**, choose a CSV with the same input columns (the
+column to predict is not needed; `iris.csv` works) and press **Upload**. Then choose the
+columns to keep next to the prediction and press **Predict**. The result page shows the first rows and offers the file,
 `predict_<name>.csv`, with a `predict` column (the predicted class) and one `p_<class>`
 probability column per class.
 
@@ -138,22 +138,31 @@ docker run --rm -u 0 -v fione_fione-data:/data:ro --entrypoint tar ghcr.io/codel
 docker run --rm -u 0 -v fione_seaweed-data:/data:ro --entrypoint tar ghcr.io/codelibs/fione:dev czf - -C /data . > seaweed-data.tgz
 ```
 
-`fione-data.tgz` holds the database and the secret key: keep it private. To restore into
-empty volumes (for example on a new machine, before the first start), run, then start as
-usual (Compose warns that the volumes already exist; that is expected):
+`fione-data.tgz` holds the database and the secret key: keep it private. `docker/.env` is not
+in the archives; keep it with them, or create a new one with the `printf` command of step 1.
+
+To restore into empty volumes (for example on a new machine, before the first start), build
+the images, restore, then start as usual (Compose warns that the volumes already exist; that
+is expected):
 
 ```sh
+docker compose -f docker/compose.yaml --env-file docker/.env build
 docker run --rm -i -u 0 -v fione_fione-data:/data --entrypoint tar ghcr.io/codelibs/fione:dev xzf - -C /data < fione-data.tgz
 docker run --rm -i -u 0 -v fione_seaweed-data:/data --entrypoint tar ghcr.io/codelibs/fione:dev xzf - -C /data < seaweed-data.tgz
 ```
 
-To upgrade, back up, then get the new version and rebuild:
+To upgrade, back up, keep the current serving image under another name (the rebuild
+replaces `ghcr.io/codelibs/fione-serving:dev`), then get the new version and rebuild:
 
 ```sh
+docker tag ghcr.io/codelibs/fione-serving:dev fione-serving:before-upgrade
 git pull
 docker compose -f docker/compose.yaml --env-file docker/.env up -d --build --wait
 ```
 
 The data stays. Models trained by an older version are not guaranteed to load in a newer one
-(they are pickles of Fione's code), so retrain the models you rely on after an upgrade, and
-keep the serving image you serve them with until then.
+(they are pickles of Fione's code), so retrain the models you rely on after an upgrade. Until
+then, serve their bundles with the kept image: replace `ghcr.io/codelibs/fione-serving:dev`
+with `fione-serving:before-upgrade` in the `docker run` command. (Setting a different
+`FIONE_IMAGE_TAG` in `docker/.env` for each version avoids this: both images then carry the
+version in their tag.)

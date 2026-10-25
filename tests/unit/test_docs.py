@@ -59,6 +59,14 @@ def test_docs_name_no_setting_that_does_not_exist():
         assert not unknown, (page.name, unknown)
 
 
+def test_docs_japanese_quickstart_runs_the_same_commands():
+    blocks = [
+        re.findall(r"```sh\n(.*?)```", (ROOT / "docs" / name).read_text(), re.S)
+        for name in ("quickstart.md", "quickstart.ja.md")
+    ]
+    assert blocks[0] == blocks[1]
+
+
 def _slug(heading: str) -> str:
     """GitHub's anchor of a heading."""
     text = re.sub(r"[`*_]", "", heading.strip().lower())
