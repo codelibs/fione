@@ -143,6 +143,7 @@
     {% else %}
     <p class="text-muted text-sm">{{ t('project.sharing_none') }}</p>
     {% endif %}
+    <p><a class="btn btn-secondary btn-sm" href="/projects/{{ pid }}/members">{{ icon("users", "icon icon-sm") }}{{ t('members.manage') }}</a></p>
   </section>
   {% endif %}
 </div>

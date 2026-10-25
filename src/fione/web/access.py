@@ -6,12 +6,16 @@ anonymous visitors to the login page; form posts check the session's CSRF token 
 """
 
 from dataclasses import dataclass
+from typing import Annotated
 
-from fastapi import Request
+from fastapi import Depends, Request
+from starlette.datastructures import FormData
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from fione.api.deps import Auth, authorize, cookie_auth
+from fione.api.deps import Auth, authorize, cookie_auth, request_host
 from fione.api.errors import ApiError
 from fione.api.schemas import MAX_ID
+from fione.api.security import origin_matches
 from fione.auth.roles import ProjectAccess, Role
 from fione.jobs import store
 from fione.jobs.store import Job
@@ -22,6 +26,7 @@ from fione.projects.service import Dataset, DatasetNotFound, Project, ProjectNot
 from fione.web.views import UiError, action_auth
 
 WRITE = (ProjectAccess.OWNER, ProjectAccess.EDITOR)
+SMALL_FORM_FIELDS = 16  # the account, user and sharing forms have a handful each
 
 
 @dataclass(frozen=True)
@@ -101,3 +106,47 @@ def job_in(conn, ctx: Ctx, jid) -> Job:
     if job.project_id != ctx.project.id:
         raise UiError(404, "error.not_found")
     return job
+
+
+def signed_in(request: Request, conn) -> Auth:
+    """A page view outside a project: anonymous visitors are sent to the login page."""
+    auth = cookie_auth(request, conn)
+    if auth is None:
+        raise UiError(401, "error.session")
+    return auth
+
+
+def admin_only(auth: Auth) -> Auth:
+    """Administrators only (403 for everyone else), as the API's admin dependency."""
+    if auth.user.role != Role.ADMIN:
+        raise UiError(403, "error.admin_only")
+    return auth
+
+
+def same_site(request: Request) -> None:
+    """Refuse a form posted from another site (a foreign ``Origin``)."""
+    if not origin_matches(request.headers.get("origin"), request_host(request)):
+        raise UiError(403, "error.forbidden")
+
+
+async def _small_form(request: Request) -> FormData:
+    try:
+        return await request.form(max_fields=SMALL_FORM_FIELDS, max_files=0)
+    except StarletteHTTPException as e:
+        if e.status_code != 400:
+            raise
+        raise UiError(400, "error.form") from None
+
+
+SmallForm = Annotated[FormData, Depends(_small_form)]
+
+
+def field(form: FormData, name: str) -> str:
+    value = form.get(name)
+    return value if isinstance(value, str) else ""
+
+
+def form_auth(request: Request, conn, form: FormData) -> Auth:
+    """A form post outside a project: same site, then the session and its CSRF token."""
+    same_site(request)
+    return action_auth(request, conn, field(form, "csrf_token"))

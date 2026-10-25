@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, pager, secret_panel, field_error %}
+{% block title %}{{ t('account.title') }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="container page page-narrow">
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('account.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('account.lead') }}</p>
+  </header>
+  {% if done %}
+  <div class="alert alert-success" role="status">{{ icon("check") }}<span>{{ t('account.done.' ~ done) }}</span></div>
+  {% endif %}
+  {% if errors.form %}
+  <div class="alert alert-danger" role="alert" tabindex="-1" autofocus>{{ icon("alert") }}<span>{{ t(errors.form) }}</span></div>
+  {% endif %}
+
+  {% if created %}
+  {{ secret_panel(t, "new-token", t('account.token_created', name=created.name), created.secret) }}
+  {% endif %}
+
+  <section class="card card-padded stack" aria-labelledby="who-title">
+    <h2 class="section-header__title" id="who-title">{{ t('account.who') }}</h2>
+    <dl class="facts facts-stacked">
+      <div><dt>{{ t('account.username') }}</dt><dd>{{ user.username }}</dd></div>
+      <div><dt>{{ t('account.role') }}</dt><dd><span class="badge badge-info">{{ t('role.' ~ user.role.value) }}</span></dd></div>
+    </dl>
+    <h3 class="card__title">{{ t('account.roles_title') }}</h3>
+    <ul class="role-list" role="list">
+      {% for role in roles %}
+      <li class="role-list__item{% if role == user.role.value %} is-current{% endif %}">
+        <p><strong>{{ t('role.' ~ role) }}</strong>{% if role == user.role.value %} <span class="badge badge-neutral">{{ t('account.role_yours') }}</span>{% endif %}</p>
+        <p class="text-muted text-sm">{{ t('account.role.' ~ role) }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="text-muted text-sm">{{ t('account.roles_note') }}</p>
+  </section>
+
+  <section class="card card-padded stack" aria-labelledby="password-title">
+    <h2 class="section-header__title" id="password-title">{{ icon("key") }} {{ t('account.password_title') }}</h2>
+    <p class="text-muted text-sm">{{ t('account.password_lead') }}</p>
+    <form class="stack" method="post" action="/account/password" data-busy-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input class="visually-hidden" type="text" name="username" value="{{ user.username }}" autocomplete="username" readonly tabindex="-1" aria-hidden="true">
+      <div class="field">
+        <label class="field__label" for="current-password">{{ t('account.current_password') }}</label>
+        <input class="input input-md" type="password" id="current-password" name="current_password" autocomplete="current-password" required maxlength="{{ max_password }}"{% if errors.current %} aria-invalid="true" aria-describedby="current-password-error" autofocus{% endif %}>
+        {{ field_error(t, "current-password-error", errors.current) }}
+      </div>
+      <div class="field">
+        <label class="field__label" for="new-password">{{ t('account.new_password') }}</label>
+        <input class="input input-md" type="password" id="new-password" name="new_password" autocomplete="new-password" required minlength="{{ min_password }}" maxlength="{{ max_password }}" aria-describedby="new-password-hint{% if errors.new %} new-password-error{% endif %}"{% if errors.new %} aria-invalid="true" autofocus{% endif %}>
+        <p class="field__hint" id="new-password-hint">{{ t('account.new_password_hint', n=min_password) }}</p>
+        {{ field_error(t, "new-password-error", errors.new, n=min_password) }}
+      </div>
+      <div class="field">
+        <label class="field__label" for="confirm-password">{{ t('account.confirm_password') }}</label>
+        <input class="input input-md" type="password" id="confirm-password" name="confirm_password" autocomplete="new-password" required maxlength="{{ max_password }}"{% if errors.confirm %} aria-invalid="true" aria-describedby="confirm-password-error" autofocus{% endif %}>
+        {{ field_error(t, "confirm-password-error", errors.confirm) }}
+      </div>
+      <div class="form-actions form-actions-start">
+        <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span>{{ t('account.password_submit') }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card card-padded stack" aria-labelledby="tokens-title">
+    <h2 class="section-header__title" id="tokens-title">{{ icon("terminal") }} {{ t('account.tokens_title') }}</h2>
+    <p class="text-muted text-sm">{{ t('account.tokens_lead') }}</p>
+    <form class="stack-tight" method="post" action="/account/tokens" data-busy-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="field">
+        <label class="field__label" for="token-name">{{ t('account.token_name') }}</label>
+        <div class="cluster">
+          <input class="input input-md" type="text" id="token-name" name="name" value="{{ token_name }}" required maxlength="{{ max_token_name }}" autocomplete="off" aria-describedby="token-name-hint{% if errors.token %} token-name-error{% endif %}"{% if errors.token %} aria-invalid="true" autofocus{% endif %}>
+          <button type="submit" class="btn btn-secondary"><span class="spinner" aria-hidden="true"></span>{{ icon("plus", "icon icon-sm") }}{{ t('account.token_create') }}</button>
+        </div>
+        <p class="field__hint" id="token-name-hint">{{ t('account.token_name_hint') }}</p>
+        {{ field_error(t, "token-name-error", errors.token, n=max_token_name) }}
+      </div>
+    </form>
+    {% if tokens %}
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="tokens-title">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">{{ t('account.col.name') }}</th>
+            <th scope="col">{{ t('account.col.created') }}</th>
+            <th scope="col">{{ t('account.col.state') }}</th>
+            <th scope="col"><span class="visually-hidden">{{ t('datasets.col.actions') }}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for token in tokens %}
+          <tr>
+            <th scope="row" class="cell-value">{{ token.name }}</th>
+            <td><time datetime="{{ token.created_at|iso }}">{{ t('time.utc', time=token.created_at|utc) }}</time></td>
+            <td>{% if token.revoked %}<span class="badge badge-neutral">{{ t('account.token_revoked') }}</span>{% else %}<span class="badge badge-success">{{ t('account.token_active') }}</span>{% endif %}</td>
+            <td>
+              {% if not token.revoked %}
+              <details class="confirm confirm-inline" data-confirm-panel>
+                <summary class="btn btn-ghost btn-sm">{{ t('account.revoke') }}<span class="visually-hidden">: {{ token.name }}</span></summary>
+                <div class="confirm__panel" role="group" aria-labelledby="revoke-q-{{ token.id }}">
+                  <p id="revoke-q-{{ token.id }}"><strong>{{ t('account.revoke_question', name=token.name) }}</strong></p>
+                  <p class="text-muted text-sm">{{ t('account.revoke_effect') }}</p>
+                  <form class="cluster" method="post" action="/account/tokens/{{ token.id }}/revoke" data-busy-form>
+                    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                    <button type="submit" class="btn btn-danger btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('account.revoke_yes') }}</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('action.keep') }}</button>
+                  </form>
+                </div>
+              </details>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {{ pager(t, ("?page=" ~ (page_number - 1)) if page_number > 1 else none, ("?page=" ~ (page_number + 1)) if page_number < pages else none, t('account.token_pages')) }}
+    {% else %}
+    <p class="empty-line text-muted">{{ t('account.tokens_empty') }}</p>
+    {% endif %}
+    <p class="text-muted text-sm">{{ t('account.tokens_unrecorded') }}</p>
+    <div class="copy-box">
+      <p class="field__label" id="curl-label">{{ t('account.curl') }}</p>
+      <pre class="code-block" aria-labelledby="curl-label">curl -H "Authorization: Bearer YOUR_TOKEN" {{ api_base }}/api/v1/auth/me</pre>
+    </div>
+  </section>
+</div>
+{% endblock %}

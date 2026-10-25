@@ -52,6 +52,11 @@
                 </div>
                 <p class="text-muted text-xs">{{ t('mode.hint') }}</p>
               </form>
+              <a class="menu__link" href="/account"{% if nav == "account" %} aria-current="page"{% endif %}>{{ icon("key", "icon icon-sm") }}{{ t('account.title') }}</a>
+              {% if user.role.value == "admin" %}
+              <a class="menu__link" href="/admin/users"{% if nav == "users" %} aria-current="page"{% endif %}>{{ icon("users", "icon icon-sm") }}{{ t('users.title') }}</a>
+              <a class="menu__link" href="/admin/system"{% if nav == "system" %} aria-current="page"{% endif %}>{{ icon("chart", "icon icon-sm") }}{{ t('system.title') }}</a>
+              {% endif %}
               {% if user.role.value == "admin" or mode == "detailed" %}
               <a class="menu__link" href="/modules">{{ icon("terminal", "icon icon-sm") }}{{ t('modules.title') }}</a>
               {% endif %}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import icon, toast %}
+{% from "_macros.html" import icon, toast, secret_panel %}
 {% block title %}{{ t('design.title') }}{% endblock %}
 
 {% macro gallery(scheme) %}
@@ -123,6 +123,9 @@
     </li>
     {% endfor %}
   </ol>
+
+  <h3 class="design-section">{{ t('design.secret') }}</h3>
+  {{ secret_panel(t, scheme ~ "-secret", t('design.secret_title'), "fione_EXAMPLE-not-a-real-token", "h4", False) }}
 
   <h3 class="design-section">{{ t('design.skeleton') }}</h3>
   <div class="card card-padded stack" aria-busy="true">

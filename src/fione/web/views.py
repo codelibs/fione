@@ -348,7 +348,7 @@ def error_page(request: Request, status: int, key: str) -> HTMLResponse:
         _signed_in(request),
         status=status,
         message=i18n.t(key, language(request)),
-        hint=ERROR_HINTS.get(status),
+        hint=KEY_HINTS.get(key, ERROR_HINTS.get(status)),
         here="/",
     )
 
@@ -370,6 +370,7 @@ async def _ui_error(request: Request, exc: UiError) -> Response:
 # Status -> message of the error page for errors raised outside the UI's own checks.
 HTTP_ERROR_KEYS = {404: "error.not_found", 405: "error.method", 413: "error.too_large"}
 ERROR_HINTS = {404: "error.not_found_hint", 403: "error.forbidden_hint"}
+KEY_HINTS = {"error.admin_only": "error.admin_only_hint"}
 
 
 def wants_html(request: Request) -> bool:
@@ -382,7 +383,15 @@ def wants_html(request: Request) -> bool:
 def install(app: FastAPI) -> None:
     """Serve the UI's pages at ``/`` and its assets under ``/static``, and show errors of
     browser requests outside the API (unknown paths, oversized uploads) as HTML pages."""
-    from fione.web import automl, easyml, models_ui, modules_ui  # import this module
+    from fione.web import (  # they import this module
+        account_ui,
+        admin_ui,
+        automl,
+        easyml,
+        models_ui,
+        modules_ui,
+        sharing_ui,
+    )
 
     app.mount(STATIC_PREFIX, StaticFiles(directory=WEB_DIR / "static"), name="static")
     app.include_router(router)
@@ -390,6 +399,9 @@ def install(app: FastAPI) -> None:
     app.include_router(automl.router)
     app.include_router(models_ui.router)
     app.include_router(modules_ui.router)
+    app.include_router(account_ui.router)
+    app.include_router(admin_ui.router)
+    app.include_router(sharing_ui.router)
     app.add_exception_handler(UiError, _ui_error)
     api_http_error = app.exception_handlers[StarletteHTTPException]
 
@@ -418,3 +430,4 @@ def install(app: FastAPI) -> None:
     app.state.ui_baselines = LruCache(BASELINE_CACHE_SIZE)
     app.state.ui_leaks = LruCache(LEAK_CACHE_SIZE)
     app.state.ui_sizes = LruCache(SIZE_CACHE_SIZE)
+    app.state.ui_token_handoff = account_ui.SecretHandoff()  # new tokens' one-time view

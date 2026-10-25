@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, pager, field_error %}
+{% block title %}{{ t('users.title') }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="container page">
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('users.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('users.lead') }}</p>
+  </header>
+  {% if done %}
+  <div class="alert alert-success" role="status">{{ icon("check") }}<span>{{ t('users.done.' ~ done) }}</span></div>
+  {% endif %}
+  {% if problem %}
+  <div class="alert alert-danger" role="alert" id="users-problem" tabindex="-1" autofocus>{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('users.refused', username=problem.username) }}</strong></p><p>{{ t(problem.key, **problem.params) }}</p></div></div>
+  {% endif %}
+
+  <details class="card card-padded details"{% if errors %} open{% endif %}>
+    <summary>{{ icon("plus") }} {{ t('users.create') }}</summary>
+    <form class="stack" method="post" action="/admin/users" data-busy-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="form-grid">
+        <div class="field">
+          <label class="field__label" for="new-username">{{ t('users.username') }}</label>
+          <input class="input input-md" type="text" id="new-username" name="username" value="{{ new.username }}" required maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="new-username-hint{% if errors.username %} new-username-error{% endif %}"{% if errors.username %} aria-invalid="true" autofocus{% endif %}>
+          <p class="field__hint" id="new-username-hint">{{ t('users.username_hint') }}</p>
+          {{ field_error(t, "new-username-error", errors.username) }}
+        </div>
+        <div class="field">
+          <label class="field__label" for="new-password">{{ t('users.initial_password') }}</label>
+          <input class="input input-md" type="password" id="new-password" name="password" required minlength="{{ min_password }}" maxlength="{{ max_password }}" autocomplete="new-password" aria-describedby="new-password-hint{% if errors.password %} new-password-error{% endif %}"{% if errors.password %} aria-invalid="true"{% if not errors.username %} autofocus{% endif %}{% endif %}>
+          <p class="field__hint" id="new-password-hint">{{ t('users.password_hint', n=min_password) }}</p>
+          {{ field_error(t, "new-password-error", errors.password, n=min_password) }}
+        </div>
+        <div class="field">
+          <label class="field__label" for="new-role">{{ t('users.role') }}</label>
+          <select class="input input-md" id="new-role" name="role"{% if errors.role %} aria-invalid="true" aria-describedby="new-role-error"{% endif %}>
+            {% for role in roles %}<option value="{{ role }}"{% if role == new.role %} selected{% endif %}>{{ t('role.' ~ role) }}</option>{% endfor %}
+          </select>
+          {{ field_error(t, "new-role-error", errors.role) }}
+        </div>
+      </div>
+      <div class="form-actions form-actions-end">
+        <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span>{{ icon("plus") }}{{ t('users.create_submit') }}</button>
+      </div>
+    </form>
+  </details>
+
+  <section class="stack-tight" aria-labelledby="users-list-title">
+    <div class="section-header">
+      <h2 class="section-header__title" id="users-list-title">{{ t('users.list') }}</h2>
+      <span class="text-muted text-sm">{{ t('users.count', n=total) }}</span>
+    </div>
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="users-list-title">
+      <table class="table table-wide">
+        <thead>
+          <tr>
+            <th scope="col">{{ t('users.username') }}</th>
+            <th scope="col">{{ t('users.role') }}</th>
+            <th scope="col">{{ t('users.created') }}</th>
+            <th scope="col">{{ t('datasets.col.actions') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for person, created in rows %}
+          {% set self = person.id == user.id %}
+          <tr>
+            <th scope="row" class="cell-value">{{ person.username }}{% if self %} <span class="badge badge-info">{{ t('users.you') }}</span>{% endif %}</th>
+            <td><span class="badge badge-{{ 'info' if person.role.value == 'admin' else 'neutral' }}">{{ t('role.' ~ person.role.value) }}</span></td>
+            <td><time datetime="{{ created|iso }}">{{ t('time.utc', time=created|utc) }}</time></td>
+            <td>
+              {% if self %}
+              <a class="btn btn-ghost btn-sm" href="/account">{{ t('users.your_account') }}</a>
+              {% else %}
+              <div class="row-actions">
+                <form class="cluster-tight" method="post" action="/admin/users/{{ person.id }}/role" data-busy-form>
+                  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                  <input type="hidden" name="page" value="{{ page_number }}">
+                  <label class="visually-hidden" for="role-{{ person.id }}">{{ t('users.role_of', username=person.username) }}</label>
+                  <select class="input input-sm" id="role-{{ person.id }}" name="role">
+                    {% for role in roles %}<option value="{{ role }}"{% if role == person.role.value %} selected{% endif %}>{{ t('role.' ~ role) }}</option>{% endfor %}
+                  </select>
+                  <button type="submit" class="btn btn-secondary btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('users.role_save') }}<span class="visually-hidden">: {{ person.username }}</span></button>
+                </form>
+                <details class="confirm confirm-inline" data-confirm-panel>
+                  <summary class="btn btn-ghost btn-sm">{{ t('users.reset') }}<span class="visually-hidden">: {{ person.username }}</span></summary>
+                  <div class="confirm__panel confirm__panel-neutral" role="group" aria-labelledby="reset-q-{{ person.id }}">
+                    <p id="reset-q-{{ person.id }}"><strong>{{ t('users.reset_question', username=person.username) }}</strong></p>
+                    <p class="text-muted text-sm">{{ t('users.reset_effect') }}</p>
+                    <form class="stack-tight" method="post" action="/admin/users/{{ person.id }}/password" data-busy-form>
+                      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                      <input type="hidden" name="page" value="{{ page_number }}">
+                      <label class="field__label" for="reset-{{ person.id }}">{{ t('users.new_password') }}</label>
+                      <input class="input input-md" type="password" id="reset-{{ person.id }}" name="password" required minlength="{{ min_password }}" maxlength="{{ max_password }}" autocomplete="new-password">
+                      <div class="cluster">
+                        <button type="submit" class="btn btn-primary btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('users.reset_yes') }}</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('action.keep') }}</button>
+                      </div>
+                    </form>
+                  </div>
+                </details>
+                <details class="confirm confirm-inline" data-confirm-panel>
+                  <summary class="btn btn-ghost btn-sm">{{ t('datasets.delete') }}<span class="visually-hidden">: {{ person.username }}</span></summary>
+                  <div class="confirm__panel" role="group" aria-labelledby="del-q-{{ person.id }}">
+                    <p id="del-q-{{ person.id }}"><strong>{{ t('users.delete_question', username=person.username) }}</strong></p>
+                    <p class="text-muted text-sm">{{ t('users.delete_effect') }}</p>
+                    <form class="cluster" method="post" action="/admin/users/{{ person.id }}/delete" data-busy-form>
+                      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                      <input type="hidden" name="page" value="{{ page_number }}">
+                      <button type="submit" class="btn btn-danger btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('datasets.delete_yes') }}</button>
+                      <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('action.keep') }}</button>
+                    </form>
+                  </div>
+                </details>
+              </div>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {{ pager(t, ("?page=" ~ (page_number - 1)) if page_number > 1 else none, ("?page=" ~ (page_number + 1)) if page_number < pages else none, t('users.pages')) }}
+    <p class="text-muted text-sm">{{ t('users.unrecorded') }}</p>
+  </section>
+</div>
+{% endblock %}

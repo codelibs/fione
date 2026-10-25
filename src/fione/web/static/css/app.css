@@ -2588,3 +2588,53 @@ select.input {
 .table-wide {
   min-width: 64rem;
 }
+
+/* ---------- Account and administration ---------- */
+/* A secret shown once (a new API token): it stands out, and it wraps on phones */
+.secret-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 2px solid var(--color-warning-text);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.secret-panel__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-lg);
+  overflow-wrap: anywhere;
+}
+
+.secret-panel__value {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* A confirm panel for a change that is not destructive (setting a new password) */
+.confirm__panel-neutral {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-2);
+}
+
+.role-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.role-list__item {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.role-list__item.is-current {
+  border-color: var(--color-primary);
+}

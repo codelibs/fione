@@ -6,14 +6,23 @@ from contextlib import closing
 
 import pytest
 
-from api_helpers import add_user, connect, iris_csv, login, make_settings
+from api_helpers import PW, add_user, connect, iris_csv, login, make_settings
 from fione.api.app import create_app
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
 from fione.models import service as models_service
 from fione.models.transfer import export_model
 from fione.modules import service as modules_service
-from fione.web import automl, easyml, models_ui, modules_ui, views
+from fione.web import (
+    account_ui,
+    admin_ui,
+    automl,
+    easyml,
+    models_ui,
+    modules_ui,
+    sharing_ui,
+    views,
+)
 from web_helpers import iris_test_csv, make_world
 
 # (method, path) -> (anonymous status, logged-in status); 303s for anonymous page views go
@@ -195,6 +204,69 @@ def run(df, params, ctx):
 """
 
 
+# The account and administration screens x anonymous and the global roles (a viewer, an
+# editor, an administrator). Posts carry a valid form; the account's revoke is of one's own
+# token, the users' changes are made to ``st``, who owns nothing.
+GLOBAL_PERSONAS = {"anonymous": None, "viewer": "gv", "editor": "ed", "admin": "admin"}
+ACCOUNT_ROUTES = {
+    ("GET", "/account"): (303, 200, 200, 200),
+    ("POST", "/account/password"): (401, 303, 303, 303),
+    ("POST", "/account/tokens"): (401, 303, 303, 303),
+    ("POST", "/account/tokens/{tid}/revoke"): (401, 303, 303, 303),
+}
+ADMIN_ROUTES = {
+    ("GET", "/admin/users"): (303, 403, 403, 200),
+    ("POST", "/admin/users"): (401, 403, 403, 303),
+    ("POST", "/admin/users/{uid}/role"): (401, 403, 403, 303),
+    ("POST", "/admin/users/{uid}/password"): (401, 403, 403, 303),
+    ("POST", "/admin/users/{uid}/delete"): (401, 403, 403, 303),
+    ("GET", "/admin/system"): (303, 403, 403, 200),
+}
+GLOBAL_FORMS = {
+    "/account/password": {"current_password": PW, "new_password": "a-new-password-1"}
+    | {"confirm_password": "a-new-password-1"},
+    "/account/tokens": {"name": "script"},
+    "/admin/users": {"username": "newbie", "password": PW, "role": "viewer"},
+    "/role": {"role": "viewer"},
+    "/password": {"password": "a-new-password-1"},
+}
+# Project sharing x the AutoML personas: the owner's (and admins') only, 403 for the
+# project's other readers.
+OWNER_PAGE = (303, 200, 403, 403, 404, 200)
+OWNER_POST = (401, 303, 403, 403, 404, 303)
+SHARING_ROUTES = {
+    ("GET", P + "/members"): OWNER_PAGE,
+    ("POST", P + "/members"): OWNER_POST,
+    ("POST", P + "/members/remove"): OWNER_POST,
+}
+SHARING_PATHS = {
+    "/projects/{pid}/members": P + "/members",
+    "/projects/{pid}/members/remove": P + "/members/remove",
+}
+
+
+def global_request(world, method, template, csrf, username):
+    client = world.client
+    with closing(connect(client)) as conn:
+        ids = dict(conn.execute("SELECT username, id FROM users").fetchall())
+        token, _ = auth_service.create_token(conn, ids[username or "st"], "mine")
+    path = template.replace("{uid}", str(ids["st"])).replace("{tid}", str(token.id))
+    if method == "GET":
+        return client.get(path, follow_redirects=False)
+    form = next((f for suffix, f in GLOBAL_FORMS.items() if path.endswith(suffix)), {})
+    return client.post(path, data={"csrf_token": csrf or ""} | form, follow_redirects=False)
+
+
+def sharing_request(world, method, template, csrf):
+    client, path = world.client, world.path(template)
+    if method == "GET":
+        return client.get(path, follow_redirects=False)
+    form = (
+        {"username": "co"} if path.endswith("/remove") else {"username": "st", "access": "viewer"}
+    )
+    return client.post(path, data={"csrf_token": csrf or ""} | form, follow_redirects=False)
+
+
 def model_request(world, method, template, csrf, objects=None):
     client, path = world.client, world.path(template, None, objects)
     if method == "GET":
@@ -223,6 +295,45 @@ def test_table_covers_every_ui_route():
     assert routes == set(MODEL_ROUTES)
     routes = {(m, r.path) for r in modules_ui.router.routes for m in r.methods - {"HEAD"}}
     assert routes == set(MODULE_ROUTES)
+    routes = {(m, r.path) for r in account_ui.router.routes for m in r.methods - {"HEAD"}}
+    assert routes == set(ACCOUNT_ROUTES)
+    routes = {(m, r.path) for r in admin_ui.router.routes for m in r.methods - {"HEAD"}}
+    assert routes == set(ADMIN_ROUTES)
+    routes = {
+        (m, SHARING_PATHS[r.path]) for r in sharing_ui.router.routes for m in r.methods - {"HEAD"}
+    }
+    assert routes == set(SHARING_ROUTES)
+
+
+@pytest.mark.parametrize("persona", list(GLOBAL_PERSONAS))
+@pytest.mark.parametrize("route", sorted(ACCOUNT_ROUTES) + sorted(ADMIN_ROUTES))
+def test_account_and_admin_route(make_client, route, persona):
+    world = make_world(make_client())
+    add_user(world.client, "gv", Role.VIEWER)
+    username = GLOBAL_PERSONAS[persona]
+    csrf = world.login(username)
+    table = ACCOUNT_ROUTES if route in ACCOUNT_ROUTES else ADMIN_ROUTES
+    expected = table[route][list(GLOBAL_PERSONAS).index(persona)]
+    r = global_request(world, *route, csrf, username)
+    assert r.status_code == expected, r.text
+    if expected == 303 and persona == "anonymous":
+        assert r.headers["location"].startswith("/login?next=")
+    if expected in (401, 403, 404):
+        assert "text/html" in r.headers["content-type"]
+
+
+@pytest.mark.parametrize("persona", list(AUTOML_PERSONAS))
+@pytest.mark.parametrize("route", sorted(SHARING_ROUTES))
+def test_sharing_route(make_client, route, persona):
+    world = make_world(make_client())
+    csrf = world.login(AUTOML_PERSONAS[persona])
+    expected = SHARING_ROUTES[route][list(AUTOML_PERSONAS).index(persona)]
+    r = sharing_request(world, *route, csrf)
+    assert r.status_code == expected, r.text
+    if expected == 303 and persona == "anonymous":
+        assert r.headers["location"].startswith("/login?next=")
+    if expected in (403, 404):
+        assert "text/html" in r.headers["content-type"]
 
 
 @pytest.mark.parametrize("persona", list(AUTOML_PERSONAS))
