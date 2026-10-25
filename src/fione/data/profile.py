@@ -345,7 +345,11 @@ def single_column_score(
     """How well ``s`` alone predicts ``t``, out of fold: the column is binned, each row is
     predicted by its bin's target mean over the other of two folds, and the predictions are
     scored by AUC (classification; the mean one-vs-rest AUC for more than two classes) or R^2.
-    ``None`` when the target leaves nothing to score."""
+    ``None`` when the target leaves nothing to score.
+
+    Known limitation: the smoothing pulls small bins towards the mean, which costs R^2 but not
+    AUC. Regression leaks in fewer than about 3,000 rows therefore mostly score below the
+    threshold (a noisy log of the target: about 0.6 at 1,000 rows, 0.3 at 300)."""
     if task == "regression":
         y = _as_float(t)
         keep = ~np.isnan(y)
