@@ -4,16 +4,21 @@ Responses are built field by field here, so internal fields (password hashes, to
 storage keys) can never leak by being added to a record.
 """
 
+import math
 from typing import Annotated, Any, Literal
 
+import numpy as np
 from fastapi import Path
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import ProjectAccess, Role, User
 from fione.auth.service import ApiToken
+from fione.engine.diagnostics import _label
 from fione.engine.events import Event
+from fione.engine.explain import ICE_ROWS, PD_GRID, PD_ROWS, Contributions, PartialDependence
 from fione.jobs.store import Job
+from fione.models.explanations import Explanation
 from fione.models.service import ModelRecord
 from fione.modules.registry import redact
 from fione.modules.service import ModuleInfo
@@ -96,6 +101,45 @@ class ModuleJobIn(Body):
     dataset_id: DbId
     params: dict[str, Any] = Field(default_factory=dict)
     name: Name | None = None
+
+
+MAX_CONTRIBUTION_ROWS = 100
+Scalar = str | int | float | bool | None
+ClassIndex = Annotated[int, Field(strict=True, ge=0)]  # not a bool
+
+
+class ContributionsIn(Body):
+    """The rows to explain: ``instances`` (objects keyed by column, like Fione Serving's), or
+    ``limit`` rows of ``dataset_id`` from ``offset``."""
+
+    instances: (
+        Annotated[list[dict[str, Scalar]], Field(min_length=1, max_length=MAX_CONTRIBUTION_ROWS)]
+        | None
+    ) = None
+    dataset_id: DbId | None = None
+    offset: Annotated[int, Field(ge=0, le=MAX_ID)] = 0
+    limit: Annotated[int, Field(ge=1, le=MAX_CONTRIBUTION_ROWS)] = 10
+    class_index: ClassIndex | None = None
+
+    @model_validator(mode="after")
+    def _one_source(self):
+        if (self.instances is None) == (self.dataset_id is None):
+            raise ValueError("give either instances or dataset_id")
+        return self
+
+
+class PartialDependenceIn(Body):
+    column: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    dataset_id: DbId | None = None
+    grid: Annotated[int, Field(ge=2, le=PD_GRID)] = PD_GRID
+    rows: Annotated[int, Field(ge=1, le=PD_ROWS)] = PD_ROWS
+    ice: Annotated[int, Field(ge=0, le=ICE_ROWS)] = ICE_ROWS
+    class_index: ClassIndex | None = None
+
+
+class ExplainJobIn(Body):
+    model_id: DbId
+    dataset_id: DbId | None = None
 
 
 def user_out(user: User) -> dict:
@@ -213,6 +257,77 @@ def model_out(record: ModelRecord, *, detail: bool = False) -> dict:
             "importance": record.importance,
         }
     return out
+
+
+def _float(value) -> float | None:
+    value = float(value)
+    return value if math.isfinite(value) else None
+
+
+def _floats(values: np.ndarray) -> list:
+    """``values`` as nested lists of floats (None where not finite)."""
+    if values.ndim == 1:
+        return [_float(v) for v in values]
+    return [_floats(row) for row in values]
+
+
+def diagnostics_out(record: ModelRecord) -> dict:
+    """The model's stored diagnostics (``None`` before Phase 2a, or when they could not be
+    stored). Their size is capped when stored; labels in them are data, not markup."""
+    return {"model_id": record.id, "diagnostics": record.diagnostics}
+
+
+def explanation_out(
+    model_id: int, status: str, job: Job | None, explanation: Explanation | None
+) -> dict:
+    """``status`` and its ``job_id``: the stored explanation's job when ``done``, else the
+    latest explain job. The stored ``explanation`` (``None`` if there is none) is served even
+    while a newer job runs; it may have been trimmed to its size cap, and its names and
+    labels are data, not markup."""
+    done = status == "done" and explanation is not None
+    return {
+        "model_id": model_id,
+        "status": status,
+        "job_id": explanation.job_id if done else (job.id if job is not None else None),
+        "dataset_id": explanation.dataset_id if explanation is not None else None,
+        "computed_at": explanation.created_at if explanation is not None else None,
+        "explanation": explanation.payload if explanation is not None else None,
+    }
+
+
+def contributions_out(
+    model_id: int, c: Contributions, slots: np.ndarray, first_row: int, multiclass: bool
+) -> dict:
+    """Per row, the output ``slots`` picks: its prediction, the bias and each column's
+    contribution, which add up to the prediction. ``class_index`` is set for multiclass."""
+    rows = []
+    for i, slot in enumerate(slots.tolist()):
+        values = c.values[i, slot]
+        rows.append(
+            {
+                "row": first_row + i,
+                "prediction": _float(c.prediction[i, slot]),
+                "class_index": slot if multiclass else None,
+                "bias": _float(c.bias[i, slot]),
+                "contributions": {
+                    column: _float(v) for column, v in zip(c.columns, values, strict=True)
+                },
+            }
+        )
+    return {"model_id": model_id, "outputs": [_label(o) for o in c.outputs], "rows": rows}
+
+
+def partial_dependence_out(curve: PartialDependence) -> dict:
+    return {
+        "column": curve.column,
+        "kind": curve.kind,
+        "grid": [_label(value) for value in curve.grid],
+        "outputs": [_label(output) for output in curve.outputs],
+        "average": _floats(curve.average),
+        "ice": _floats(curve.ice),
+        "ice_output": curve.ice_output,
+        "n_rows": curve.n_rows,
+    }
 
 
 def module_out(info: ModuleInfo) -> dict:

@@ -1,5 +1,5 @@
-"""Jobs: submitting training, prediction, module and export jobs; following, cancelling and
-deleting them.
+"""Jobs: submitting training, prediction, explanation, module and export jobs; following,
+cancelling and deleting them.
 
 A job id is resolved first and then authorized on the job's own project: without read access
 it is a 404, as for a missing job. Non-admins see error messages but not tracebacks.
@@ -16,6 +16,7 @@ from fione.api.schemas import (
     MAX_ID,
     AutomlIn,
     BatchPredictIn,
+    ExplainJobIn,
     IdPath,
     ModuleJobIn,
     event_out,
@@ -24,6 +25,7 @@ from fione.api.schemas import (
 from fione.auth.roles import Role, User
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
+from fione.models import explanations
 from fione.models import service as models
 from fione.models.transfer import submit_export_all
 from fione.modules import service as modules
@@ -84,6 +86,18 @@ def submit_batch_predict(body: BatchPredictIn, ctx: Writer, conn: Conn) -> dict:
             body.dataset_id,
             include_columns=body.include_columns,
             name=body.name,
+        )
+    return job_out(job, admin=_admin(ctx.user))
+
+
+@router.post("/projects/{project_id}/jobs/explain", status_code=201)
+def submit_explain(body: ExplainJobIn, ctx: Writer, conn: Conn) -> dict:
+    """Queue the explain job of a model of the project, on ``dataset_id`` or its training
+    data; while one for the same dataset is queued or running, that job is returned. It also
+    explains imports this install did not sign, which the synchronous routes refuse."""
+    with service_errors():
+        job = explanations.submit_explain(
+            conn, ctx.user, ctx.project.id, body.model_id, body.dataset_id
         )
     return job_out(job, admin=_admin(ctx.user))
 
