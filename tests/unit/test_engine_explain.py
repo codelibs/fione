@@ -166,6 +166,19 @@ def test_saabas_matches_the_tree(kind):
     assert phi.shape == (200, k, 5)
     assert bias.shape == (200, k)
     assert_allclose(phi.sum(-1) + bias, expected, rtol=0, atol=1e-12)
+    # Each split credits its own feature: walk the tree row by row.
+    t = tree.tree_
+    value = t.value[:, 0, :k] / (t.value[:, 0, :].sum(1, keepdims=True) if k > 1 else 1)
+    for row in range(20):
+        walked, node = np.zeros((k, 5)), 0
+        while t.children_left[node] >= 0:
+            feature = t.feature[node]
+            left = X[row, feature] <= t.threshold[node]
+            child = t.children_left[node] if left else t.children_right[node]
+            walked[:, feature] += value[child] - value[node]
+            node = child
+        assert_allclose(phi[row], walked, rtol=0, atol=1e-12)
+        assert_allclose(bias[row], value[0], rtol=0, atol=0)
 
 
 # --- real models -------------------------------------------------------------------------
@@ -235,6 +248,17 @@ def test_datetime_parts_sum_into_their_column():
     assert c.columns == fit.columns
     assert "when" in c.columns
     assert not any("__" in column for column in c.columns)
+    # Each feature lands on its source column: one unconverted model, grouped independently.
+    regression = _fit("regression")
+    one = _with_members(regression, [("ExtraTrees", 1.0, regression.cv_models["ExtraTrees"][:1])])
+    spec = one.members[0].spec
+    X = _features()
+    phi, _ = explain.native_contributions(spec, one.members[0].models[0], one.prep.dense(X))
+    parts = [i for i, name in enumerate(one.prep.feature_names) if name.startswith("when__")]
+    assert np.abs(phi[:, 0, parts]).sum() > 0
+    by_feature = pd.DataFrame(phi[:, 0], columns=one.prep.sources)
+    expected = by_feature.T.groupby(level=0, sort=False).sum().T[one.columns]
+    assert_allclose(contributions(one, X).values[:, 0], expected.to_numpy(), rtol=0, atol=1e-12)
 
 
 @pytest.mark.parametrize("task", TASKS)
