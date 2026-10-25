@@ -130,7 +130,8 @@ training (so its probabilities differ from the example above):
 - Contributions cost much more than a prediction. One request takes at most 1,000 instances
   (413 beyond that), and a model with very many classes and columns takes fewer (422).
   At most 2 such requests run at once; another one gets 503 with `Retry-After: 1` straight
-  away. Both numbers can be changed (see below).
+  away. Both numbers can be changed (see below). Like predictions, contributions may use every
+  CPU core of the container: these caps are what keeps their cost bounded.
 - `"contributions"` must be `true` or `false` (400 otherwise). Without it, or with `false`, the
   response is exactly the same as before contributions existed.
 
