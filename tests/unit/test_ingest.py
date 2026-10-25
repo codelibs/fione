@@ -462,3 +462,9 @@ def test_read_dataset_rows_reads_a_page_from_the_row_groups_that_hold_it(
     assert ingest.read_dataset_rows(storage, dataset, 0, 3, ["s"]).columns.tolist() == ["s"]
     past = ingest.read_dataset_rows(storage, dataset, 400, 10)
     assert past.empty and past.columns.tolist() == ["n", "s"]
+    monkeypatch.setattr(ingest, "_PAGE_BATCH_ROWS", 7)  # pages across read batches too
+    assert ingest.read_dataset_rows(storage, dataset, 95, 10)["n"].tolist() == list(range(95, 105))
+    assert ingest.read_dataset_rows(storage, dataset, 0, 30)["n"].tolist() == list(range(30))
+    assert ingest.read_dataset_rows(storage, dataset, 343, 10)["s"].tolist() == [
+        f"v{i}" for i in range(343, 350)
+    ]

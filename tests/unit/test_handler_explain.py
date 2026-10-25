@@ -506,7 +506,7 @@ def test_the_contribution_rows_shrink_for_wide_multiclass(
     conn, run_job, owner, project, record, monkeypatch
 ):
     cells = len(classifier().classes_) * len(classifier().prep.sources)
-    monkeypatch.setattr(explain_handler, "CONTRIBUTION_CELLS", cells * 40)
+    monkeypatch.setattr(explain, "CELLS", cells * 40)
     done = run_job(submit(conn, owner, project, record))
     assert done.status is JobStatus.DONE, done.message
     assert explanations.get_explanation(conn, record.id).payload["n_rows"] == 40
@@ -619,6 +619,35 @@ def test_read_dataset_spread_is_not_head_biased(conn, storage, project, tmp_path
     assert list(two.columns) == ["row"] and set(two["row"] // 50_000) == {0, 3}
     everything = ingest.read_dataset_spread(storage, dataset, n + 1)
     assert len(everything) == n
+
+
+def test_read_dataset_spread_per_group_reads_only_the_heads(
+    conn, storage, project, tmp_path, monkeypatch
+):
+    n = 200_000
+    table = pa.table({"row": np.arange(n), "target": np.random.default_rng(0).random(n)})
+    path = tmp_path / "groups.parquet"
+    pq.write_table(table, path, row_group_size=50_000)
+    dataset_id = projects.reserve_dataset_id(conn)
+    key = f"projects/{project.id}/datasets/{dataset_id}/data.parquet"
+    with path.open("rb") as f:
+        storage.put(key, f)
+    schema = [("row", "int64"), ("target", "double")]
+    dataset = projects.add_dataset(
+        conn, project.id, "groups", DatasetType.TRAIN, n, 2, schema, key, dataset_id
+    )
+    whole = ingest.read_dataset_spread(storage, dataset, 300)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("whole row groups were read")
+
+    monkeypatch.setattr(pq.ParquetFile, "read_row_groups", refuse)
+    heads = ingest.read_dataset_spread(storage, dataset, 300, per_group=300)
+    few = ingest.read_dataset_spread(storage, dataset, 300, ["row"], per_group=50)
+    assert len(heads) == 300 and heads.dtypes.equals(whole.dtypes)
+    assert set(heads["row"] // 50_000) == {0, 1, 2, 3} and (heads["row"] % 50_000 < 300).all()
+    assert heads["row"].is_monotonic_increasing and list(heads.index) == list(range(300))
+    assert len(few) == 200 and list(few.columns) == ["row"]  # four heads of 50
 
 
 # --- submit_explain and the service ----------------------------------------------------

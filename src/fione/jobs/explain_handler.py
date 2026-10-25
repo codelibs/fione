@@ -34,7 +34,6 @@ log = logging.getLogger(__name__)
 
 SAMPLE_ROWS = 10_000  # read from the dataset; the partial dependence grids come from them
 IMPORTANCE_ROWS = 1_000
-CONTRIBUTION_CELLS = 10_000_000  # rows x outputs x features: 80 MB per float64 array
 PD_COLUMNS = 10
 IMPORTANCE_FLOOR = 1_000  # columns kept in the importance list before curves are trimmed
 MAX_OUTPUTS = 20  # classes kept in a partial dependence curve
@@ -105,7 +104,7 @@ def build_explanation(
     """The explanation payload of ``model`` on ``frame`` (version 1, strict JSON values).
 
     Importance comes from the contributions of at most ``IMPORTANCE_ROWS`` rows (fewer when
-    rows x classes x features would pass ``CONTRIBUTION_CELLS``), stratified by the target
+    rows x classes x features would pass ``explain.CELLS``), stratified by the target
     when ``frame`` has it and the model classifies. Partial dependence covers
     the ``PD_COLUMNS`` most important columns, on ``frame`` as the background, skipping a
     column without values there; ``should_stop`` is asked before each curve (``_Cancelled``)
@@ -114,8 +113,7 @@ def build_explanation(
     start = time.monotonic()
     check_inputs(model, frame)  # PredictInputError for text in a numeric column...
     classify = model.task == "classification"
-    cells = (len(model.classes_) if classify else 1) * max(1, len(model.prep.sources))
-    limit = max(1, min(IMPORTANCE_ROWS, CONTRIBUTION_CELLS // cells))  # wide multiclass
+    limit = max(1, explain.contribution_rows(model, IMPORTANCE_ROWS))  # wide multiclass
     rows = _importance_rows(frame, model.target, classify, limit)
     c = explain.contributions(model, frame.iloc[rows])
     importance = explain.global_importance(c)

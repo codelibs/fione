@@ -36,6 +36,28 @@ PD_GRID = 20  # most points of a partial dependence grid
 PD_ROWS = 300  # most background rows it averages over
 ICE_ROWS = 50  # most single-row (ICE) curves it keeps
 THREADS = n_threads(PD_ROWS * PD_GRID)  # explanations make small predictions
+CELLS = 10_000_000  # rows x outputs x features of one explanation: 80 MB per float64 array
+
+
+def explained_outputs(model: TrainedModel) -> list:
+    """What the explanations explain: ``[classes_[1]]`` for binary, every class for
+    multiclass, ``[target]`` for regression."""
+    if model.task == "regression":
+        return [model.target]
+    return [model.classes_[1]] if len(model.classes_) == 2 else list(model.classes_)
+
+
+def contribution_rows(model: TrainedModel, limit: int) -> int:
+    """How many of ``limit`` rows one ``contributions`` call may take, so that rows x
+    classes x features stays within ``CELLS``; 0 for a model too wide for a single row."""
+    classes = len(model.classes_) if model.task == "classification" else 1
+    return max(0, min(limit, CELLS // (classes * max(1, len(model.prep.sources)))))
+
+
+def pd_rows(model: TrainedModel, rows: int, grid_size: int) -> int:
+    """``rows``, lowered so that the rows x ``grid_size`` copies of the model's columns that
+    ``partial_dependence`` predicts on stay within ``CELLS`` (at least 1)."""
+    return max(1, min(rows, CELLS // (grid_size * max(1, len(model.columns)))))
 
 
 def cap_threads(model: TrainedModel, threads: int = THREADS) -> TrainedModel:
@@ -242,11 +264,8 @@ def contributions(model: TrainedModel, df: pd.DataFrame) -> Contributions:
     # The views come first, so that missing columns raise even for an empty frame.
     names = dict.fromkeys(member.spec.view for member in model.members)
     views = {name: getattr(model.prep, name)(df) for name in names}
-    if model.task == "regression":
-        outputs, k = [model.target], 1
-    else:
-        k = len(model.classes_)
-        outputs = [model.classes_[1]] if k == 2 else list(model.classes_)
+    outputs = explained_outputs(model)
+    k = 1 if model.task == "regression" else len(model.classes_)
     phi = np.zeros((len(df), k, len(model.prep.sources)))
     bias = np.zeros((len(df), k))
     if len(df):  # some libraries reject empty input or print about it
@@ -366,10 +385,7 @@ def partial_dependence(
         kind = model.prep.kind_of(column)
     except KeyError:
         raise ValueError(f"the model does not use the column {column!r}") from None
-    if model.task == "regression":
-        outputs = [model.target]
-    else:
-        outputs = [model.classes_[1]] if len(model.classes_) == 2 else list(model.classes_)
+    outputs = explained_outputs(model)
     if class_index is not None:
         _check_int("class_index", class_index, 0, len(outputs) - 1)
     grid, values = [], None
