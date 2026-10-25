@@ -41,6 +41,7 @@ class TrainedModel:
     cv_predictions: np.ndarray | None = None
     cv_models: dict | None = None
     fold_assignment: np.ndarray | None = None
+    diagnostics: dict | None = None  # fione.engine.diagnostics of the OOF predictions; JSON
 
     def _predict(self, df: pd.DataFrame) -> np.ndarray:
         # The views come first, so that missing columns raise even for an empty frame.

@@ -15,7 +15,8 @@ spec 5.1/5.7) and spends it in phases:
    ``notice``, for a refit that is not expected to fit in the time left (from its best trial's
    time) or that the deadline cuts short.
 5. Reserve: max(0.5 s, 0.15 L), for packaging and for what deadlines cannot interrupt (the
-   families' probes, first fits on small data, an iteration slower than measured).
+   families' probes, first fits on small data, an iteration slower than measured). Packaging
+   includes ``fione.engine.diagnostics`` on the blended OOF predictions (at most 200,000 rows).
 
 Members whose final models are estimated (``FamilySpec.size_bytes``) above ``SIZE_CAP`` are
 dropped, with a ``notice``, then the lightest-weighted ones until all together fit in
@@ -31,9 +32,10 @@ no family completed a trial, because of the cancellation or because the budget i
 
 A family that raises (a library failure) is skipped with a ``notice`` of kind ``family_error``,
 keeping its best trial so far; a refit that raises falls back to the fold models with a
-``refit_error`` notice. ``stop_reason`` is ``error`` when a family failed and nothing else (time,
-``max_models``, cancellation) ended the search. ``NoModelError`` lists every family's error and
-is chained to the last one when no family produced a model.
+``refit_error`` notice; diagnostics that raise leave ``diagnostics`` None, with a
+``diagnostics_error`` notice. ``stop_reason`` is ``error`` when a family failed and nothing
+else (time, ``max_models``, cancellation) ended the search. ``NoModelError`` lists every
+family's error and is chained to the last one when no family produced a model.
 
 ``families`` restricts the search to some of ``FAMILY_ORDER`` (tests and advanced use).
 """
@@ -47,6 +49,7 @@ import pandas as pd
 
 from fione.engine import metrics
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
+from fione.engine.diagnostics import diagnostics
 from fione.engine.ensemble import caruana
 from fione.engine.events import Event, EventSink, jsonable
 from fione.engine.families import MAX_ROUNDS
@@ -187,6 +190,15 @@ class AutoML:
             stop_reason = "cancelled"
         final = {member.spec.name: member.weight for member in members}
         blended = _blend(oof, final)
+        try:
+            found = diagnostics(task, y, blended, classes, seed=c.seed)
+        except Exception as e:
+            found = None
+            self._notice(
+                f"the training diagnostics could not be computed: {str(e)[:300]}",
+                kind="diagnostics_error",
+                exception=type(e).__name__,
+            )
         leaderboard = _leaderboard(
             results, final, refit_secs, blended, y, folds, sort_metric, scores
         )
@@ -210,6 +222,7 @@ class AutoML:
             cv_predictions=blended if c.keep_cv_predictions else None,
             cv_models={n: r.models for n, r in results.items()} if c.keep_cv_models else None,
             fold_assignment=assignment if c.keep_cv_fold_assignment else None,
+            diagnostics=found,
         )
         self._event(
             "finished",
