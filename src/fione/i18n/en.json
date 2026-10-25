@@ -682,7 +682,7 @@
   "model.importance.chart": "The {n} inputs the model relied on most",
   "model.importance.share": "Share (%)",
   "model.metrics_note": "Measured on rows the models did not learn from (cross-validation), for the final blend.",
-  "model.diagnostics_missing": "No confusion matrix, per-class figures or residual charts are stored with this model: models trained before Fione kept them, and their exports, do not have them.",
+  "model.diagnostics_missing": "No confusion matrix, per-class figures or residual charts are stored with this model. Models trained before Fione kept them do not have them, nor do models whose diagnostics could not be computed or stored.",
   "model.diag.unreadable": "The diagnostics stored with this model cannot be read, so they are not shown.",
   "model.diag.partial": "Part of the diagnostics stored with this model could not be read and is left out.",
   "model.diag.rows": "From the cross-validation predictions of {n} training rows.",
