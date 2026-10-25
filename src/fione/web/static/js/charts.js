@@ -1,10 +1,12 @@
 // Charts under the strict CSP: each [data-chart] element names a JSON block (plain data, read
-// with JSON.parse, never as markup) that is drawn with ECharts' canvas renderer. Tooltips are
+// with JSON.parse, never as markup) that is drawn with ECharts' canvas renderer; in fragments
+// HTMX swaps in (which lose their script elements), [data-chart-spec] holds the JSON itself. Tooltips are
 // drawn on the canvas too (renderMode "richText"), so no HTML or inline style is added to the
 // page. Colours come from the design tokens (resolved through hidden probe elements), the
 // chart is redrawn when the theme changes, sized when its container gets a size (charts in a
 // hidden tab start at zero) and animated only when motion is welcome. Charts are found at
-// start-up and in content HTMX adds (each element is set up once: data-chart-ready).
+// start-up and in content HTMX adds (each element is set up once: data-chart-ready); charts
+// whose element HTMX has taken out of the page are released then.
 (function () {
   "use strict";
   if (!window.echarts) return;
@@ -148,11 +150,20 @@
   }
 
   // Curves (ROC, precision-recall, calibration, partial dependence): one line per series on a
-  // value or category x axis. Faint series (a reference diagonal) are thin and muted, left out
-  // of the legend and silent; short series show their points.
+  // value or category x axis (category points are [index, y], in the order of ``categories``).
+  // Faint series (a reference diagonal, single-row curves) are thin and muted, dashed unless
+  // ``solid``, left out of the legend and silent; short series show their points.
   function linesOption(spec, c) {
+    var onCategories = spec.x_type === "category";
+    var data = function (points) {
+      return onCategories
+        ? points.map(function (p) {
+            return p[1];
+          })
+        : points;
+    };
     var axis = function (horizontal) {
-      var category = horizontal && spec.x_type === "category";
+      var category = horizontal && onCategories;
       return {
         type: category ? "category" : "value",
         data: category ? spec.categories : undefined,
@@ -174,11 +185,16 @@
         return {
           type: "line",
           name: s.name,
-          data: s.points,
+          data: data(s.points),
           symbol: "none",
           silent: true,
           tooltip: { show: false },
-          lineStyle: { color: c.muted, width: 1, type: "dashed" },
+          lineStyle: {
+            color: c.muted,
+            width: 1,
+            type: s.solid ? "solid" : "dashed",
+            opacity: s.solid ? 0.45 : 1,
+          },
           itemStyle: { color: c.muted },
           z: 1,
         };
@@ -187,7 +203,7 @@
       return {
         type: "line",
         name: s.name,
-        data: s.points,
+        data: data(s.points),
         symbol: SYMBOLS[(shown - 1) % SYMBOLS.length],
         showSymbol: s.points.length <= 20,
         symbolSize: 7,
@@ -239,14 +255,18 @@
 
   function setUp(el) {
     if (el.hasAttribute("data-chart-ready")) return;
-    var source = document.getElementById(el.getAttribute("data-chart"));
-    if (!source) return;
+    var text = el.getAttribute("data-chart-spec");
+    if (text === null) {
+      var source = document.getElementById(el.getAttribute("data-chart"));
+      if (!source) return;
+      text = source.textContent;
+    }
     el.setAttribute("data-chart-ready", "");
-    var spec = JSON.parse(source.textContent);
-    var entry = { el: el, spec: spec, figure: el.closest("figure"), chart: null };
+    var spec = JSON.parse(text);
+    var entry = { el: el, spec: spec, figure: el.closest("figure"), chart: null, observer: null };
     charts.push(entry);
     // Started once the element has a size: a chart in a hidden tab waits until it is shown.
-    new ResizeObserver(function () {
+    entry.observer = new ResizeObserver(function () {
       if (!el.clientWidth || !el.clientHeight) return;
       if (!entry.chart) {
         entry.chart = window.echarts.init(el, null, { renderer: "canvas" });
@@ -255,17 +275,31 @@
         entry.chart.resize();
         draw(entry); // the label width follows the chart's width
       }
-    }).observe(el);
+    });
+    entry.observer.observe(el);
+  }
+
+  // Charts whose element is no longer in the page (HTMX swapped it out): their ECharts
+  // instance, observer and entry go, so swapped fragments do not pile up.
+  function release() {
+    charts = charts.filter(function (entry) {
+      if (entry.el.isConnected) return true;
+      entry.observer.disconnect();
+      if (entry.chart) entry.chart.dispose();
+      return false;
+    });
   }
 
   // The charts in ``root`` (the element itself included) not set up yet.
   function scan(root) {
-    if (root.matches && root.matches("[data-chart]")) setUp(root);
-    if (root.querySelectorAll) root.querySelectorAll("[data-chart]").forEach(setUp);
+    var selector = "[data-chart], [data-chart-spec]";
+    if (root.matches && root.matches(selector)) setUp(root);
+    if (root.querySelectorAll) root.querySelectorAll(selector).forEach(setUp);
   }
 
   scan(document);
   document.addEventListener("htmx:load", function (event) {
+    release();
     scan(event.target);
   });
 

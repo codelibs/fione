@@ -209,14 +209,20 @@
 {% endif %}
 {% endmacro %}
 
-{% macro chart(t, id, spec, cls="") %}
+{% macro chart(t, id, spec, cls="", swapped=False) %}
 {# An ECharts chart drawn by charts.js from a JSON block (|tojson escapes <, > and &, so no
-   value can end the script element). The table below is its text alternative: the spec's
-   labels and values, under its own caption and column names when it has a ``table``. #}
+   value can end the script element). ``swapped``: for a fragment HTMX swaps in, which drops
+   script elements, the JSON goes in a single-quoted attribute instead (|tojson escapes ' as
+   well). The table below is its text alternative: the spec's labels and values, under its
+   own caption and column names when it has a ``table``. #}
 {% set table = spec.table or {} %}
 <figure class="chart-figure {{ cls }}">
+  {% if swapped %}
+  <div class="chart" id="{{ id }}" data-chart-spec='{{ spec|tojson }}' role="img" aria-label="{{ spec.label }}"></div>
+  {% else %}
   <div class="chart" id="{{ id }}" data-chart="{{ id }}-data" role="img" aria-label="{{ spec.label }}"></div>
   <script type="application/json" id="{{ id }}-data">{{ spec|tojson }}</script>
+  {% endif %}
   <figcaption class="visually-hidden">
     <table>
       <caption>{{ table.caption or spec.label }}</caption>
