@@ -45,6 +45,7 @@ TOOL_NAMES = [
     "propose_training_config",
 ]
 NEW_TOOLS = ["get_feature_importance", "get_model_diagnostics", "get_partial_dependence"]
+TAB_NAME = "tab\tname"  # a column name with a control character: shown as "tab name"
 NOT_COMPUTED = "contribution importance is not computed yet; run the explain job"
 
 
@@ -1138,6 +1139,9 @@ def hostile_classification(labels) -> dict:
     d["per_class"][0]["class"] = TAMPERED
     d["per_class"][1][TAMPERED] = TAMPERED
     d["confusion"]["matrix"][0][1] = TAMPERED
+    d["confusion"]["classes"].append(TAMPERED)
+    d["per_class"][1]["precision"] = True  # a bool is no number
+    d["roc"]["tpr"][1] = False
     d["confusion"][TAMPERED] = [TAMPERED]
     d["roc"]["fpr"][0] = TAMPERED
     d["calibration"][0]["observed"] = TAMPERED
@@ -1178,11 +1182,13 @@ def hostile_explanation() -> dict:
             {"column": EVIL, "mean_abs": 0.1, "share": 0.25},
             {"column": "color", "mean_abs": 0.1, "share": 0.25},
             {"column": 7, "mean_abs": 0.1, "share": 0.1},  # not a name: left out
+            {"column": {"num": 1}, "mean_abs": 0.1, "share": 0.1},  # nor is this
         ],
         "partial_dependence": [
             stored_pd("color", "category", [SECRET, "x" * 70, None], [SECRET, "o\nther"]),
             stored_pd("num", "numeric", [1, 2.5, TAMPERED], [SECRET, "other"]),
             stored_pd("when", "datetime", ["2020-01-01T00:00:00", TAMPERED], [SECRET, "o"]),
+            stored_pd(TAB_NAME, "numeric", [1, 2], ["o", "p"]),
         ],
     }
 
@@ -1232,7 +1238,8 @@ def test_sentinel_never_leaks_from_new_tools(env):
     assert d["n_classes"] == 2 and d["labels_hidden"] is True and "labels" not in d
     assert d["per_class"][0] == {**d["per_class"][0], "class": None}
     assert set(d["per_class"][1]) == {"class", "precision", "recall", "f1", "support"}
-    assert d["confusion"] == {"classes": [0, 1], "matrix": [[2, None], [1, 2]]}
+    assert d["confusion"] == {"classes": [0, 1, None], "matrix": [[2, None], [1, 2]]}
+    assert d["per_class"][1]["precision"] is None and d["roc"]["tpr"][1] is None
     assert d["roc"]["fpr"][0] is None and d["auc"] is None
     assert len(d["roc"]["fpr"]) == len(d["roc"]["tpr"]) == len(d["roc"]["threshold"])
     r = call(env, "get_model_diagnostics", {"model_id": regression.id})
@@ -1342,11 +1349,14 @@ def test_importance_source_contributions(env):
     shares = [e["share"] for e in result["importance"]]
     assert shares == sorted(shares, reverse=True)
 
-    explained = bare_model(env)
+    names = {**{f"c{i}": 0.0 for i in range(60)}, "num": 0.0, "color": 0.0, EVIL: 0.0}
+    explained = bare_model(env, importance=names)
     wide = hostile_explanation()
     wide["importance"] = [
-        {"column": f"c{i}", "mean_abs": i / 1000, "share": i / 2000} for i in range(60)
-    ] + wide["importance"]
+        {"column": "intruder", "mean_abs": 9.0, "share": 0.9},  # no column of the model
+        *[{"column": f"c{i}", "mean_abs": i / 1000, "share": i / 2000} for i in range(60)],
+        *wide["importance"],
+    ]
     explanations.save_explanation(env.conn, explained.id, None, None, wide)
     result = call(
         env, "get_feature_importance", {"model_id": explained.id, "source": "contributions"}
@@ -1354,6 +1364,7 @@ def test_importance_source_contributions(env):
     assert len(result["importance"]) == 30 and result["n_features"] == 63
     assert result["importance"][0]["column"] == "num"
     assert clean_text(EVIL) in [e["column"] for e in result["importance"]]
+    assert "intruder" not in dump(result)
 
     bare = bare_model(env)
     with pytest.raises(ToolError) as e:
@@ -1391,11 +1402,13 @@ def test_pd_not_available(env, monkeypatch):
     result = call(env, "get_partial_dependence", {"model_id": bare.id, "column": "num"})
     assert result["status"] == "failed" and SECRET not in dump(result)
 
-    explained = bare_model(env, importance={"num": 0.5, "color": 0.3, "rest": 0.2})
+    importance = {"num": 0.5, "color": 0.3, "rest": 0.2, TAB_NAME: 0.1}
+    explained = bare_model(env, importance=importance)
     explanations.save_explanation(env.conn, explained.id, None, None, hostile_explanation())
     result = call(env, "get_partial_dependence", {"model_id": explained.id, "column": "rest"})
     assert (result["available"], result["status"]) == (False, "done")
-    assert result["computed_columns"] == ["color", "num"]  # "when" is no model column
+    # cleaned names; "when" is no model column
+    assert result["computed_columns"] == ["color", "num", "tab name"]
     found = call(env, "get_partial_dependence", {"model_id": explained.id, "column": "num"})
     assert found["available"] is True and found["status"] == "done"
     with pytest.raises(ToolError, match="column not found in the model"):

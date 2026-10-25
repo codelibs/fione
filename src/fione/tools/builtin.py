@@ -11,6 +11,7 @@ class labels            only ``n_classes``                     up to 50, each cu
 diagnostics labels      only ``n_classes`` (``labels_hidden``) up to 50, each cut to 50 chars
 regression points       removed (``points_hidden``)            up to 200 pairs
 PD category levels      positions (``grid_hidden``)            each cut to 50 chars
+PD numeric/time grids   kept (quantile points, like stats)     kept
 PD class outputs        only ``n_outputs`` (``outputs_hidden``) each cut to 50 chars
 event/job messages      removed (kind/family/exception kept)   kept, cut to 200 chars
 numeric statistics      kept (min, max, quantiles are stats)   kept
@@ -427,7 +428,12 @@ def _contribution_importance(ctx: ToolContext, record: models.ModelRecord) -> di
     entries = stored.payload.get("importance") if stored is not None else None
     if not isinstance(entries, list):
         raise ToolError("contribution importance is not computed yet; run the explain job")
-    rows = [e for e in entries if isinstance(e, dict) and isinstance(e.get("column"), str)]
+    names = set(explanations.model_columns(record))  # only the model's own columns
+    rows = [
+        e
+        for e in entries
+        if isinstance(e, dict) and isinstance(e.get("column"), str) and e["column"] in names
+    ]
     rows.sort(key=lambda e: -(_num(e.get("share")) or 0.0))  # stable: stored order on ties
     return {
         "model_id": record.id,
