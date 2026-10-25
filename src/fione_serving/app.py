@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MAX_BODY = 10 << 20
 DEFAULT_MAX_INSTANCES = 10_000
-DEFAULT_MAX_CONTRIBUTION_INSTANCES = 1_000
+DEFAULT_MAX_CONTRIBUTION_INSTANCES = 100  # as the Fione API; plain predictions wait on them
 DEFAULT_MAX_CONTRIBUTION_REQUESTS = 2  # contribution requests in flight; more get 503
 MAX_DOMAIN = 1000  # categories listed per feature by /model
 _SHOWN_CHARS = 50  # of a value echoed back in a row's error
@@ -86,7 +86,7 @@ class Predictor:
             jsonable(list(self.model.classes_)) if self.model.classes_ is not None else None
         )
         self.description = self._describe()
-        self._lock = threading.Lock()  # one prediction at a time: the libraries use all cores
+        self._lock = threading.Lock()  # one prediction at a time: the libraries use several cores
 
     def _domain(self, column: str) -> list | None:
         prep = self.model.prep
@@ -260,7 +260,9 @@ def _request(body: bytes, max_instances: int, max_contribution_instances: int) -
         raise Rejected(400, '"instances" must be a list of objects')
     if len(instances) > max_instances:
         raise Rejected(413, f"too many instances: at most {max_instances} per request")
-    contributions = payload.get("contributions", False)
+    contributions = payload.get("contributions")
+    if contributions is None:  # absent, or null as typed clients send an unset field
+        contributions = False
     if not isinstance(contributions, bool):
         raise Rejected(400, '"contributions" must be true or false')
     if contributions and len(instances) > max_contribution_instances:

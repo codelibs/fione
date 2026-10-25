@@ -31,8 +31,9 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - **Fione Serving has no authentication** and no rate or concurrency limit for predictions
   (only the request size limits). Requests for contributions are capped (2 at once by default,
   then 503), but each one holds the model while it runs, so plain predictions wait for it. The
-  command the UI shows, `docker run --rm -p 8081:8080 …`, publishes it on every network interface of the host; use `-p 127.0.0.1:8081:8080` to keep it on that machine, and a
-  reverse proxy with authentication to serve others.
+  command the UI shows, `docker run --rm -p 8081:8080 …`, publishes it on every network
+  interface of the host; use `-p 127.0.0.1:8081:8080` to keep it on that machine, and a reverse
+  proxy with authentication to serve others.
 - **Imported models** that were not made by this installation load only if an administrator
   ticks the trust option on import; the model is then marked "Imported, unverified". Loading
   a model file runs code, so trust only files you know.

@@ -48,9 +48,9 @@ The API listens on port 8080 in the container (`-p 8081:8080` publishes it on 80
 network interface of the host). **The API has no authentication** and no rate or concurrency
 limit for predictions beyond the request size limits below (only requests for
 [contributions](#contributions) are limited in number at once): to keep it on this machine,
-publish it as `-p 127.0.0.1:8081:8080`, and put a reverse proxy with authentication in front of it to serve
-others. The process runs as a non-root user and only reads `/model`. If the model cannot be served, the
-container prints one line and exits with status 1, for example:
+publish it as `-p 127.0.0.1:8081:8080`, and put a reverse proxy with authentication in front of
+it to serve others. The process runs as a non-root user and only reads `/model`. If the model
+cannot be served, the container prints one line and exits with status 1, for example:
 
 ```text
 ERROR: the model in /model was made for image tag 'dev', but this image is tag '9.9'; run it with the image tagged dev
@@ -127,13 +127,21 @@ training (so its probabilities differ from the example above):
   tree contributions (TreeSHAP for the boosters, path contributions for ExtraTrees) combined over
   the ensemble, so they are approximate: they add up to the output (to rounding), but they are
   exact Shapley values only for a single booster in its own margin units.
-- Contributions cost much more than a prediction. One request takes at most 1,000 instances
+- Contributions cost much more than a prediction. One request takes at most 100 instances
   (413 beyond that), and a model with very many classes and columns takes fewer (422).
   At most 2 such requests run at once; another one gets 503 with `Retry-After: 1` straight
-  away. Both numbers can be changed (see below). Like predictions, contributions may use every
-  CPU core of the container: these caps are what keeps their cost bounded.
-- `"contributions"` must be `true` or `false` (400 otherwise). Without it, or with `false`, the
-  response is exactly the same as before contributions existed.
+  away. Both numbers can be changed (see below).
+- Threads: LightGBM and XGBoost compute contributions on as many threads as the model's own
+  predictions, which follow the threads it was trained with; CatBoost and ExtraTrees use at
+  most 4 here. No thread limit is added: the caps above are what keep their cost bounded.
+- Plain predictions wait while a contribution request computes, because the model answers one
+  call at a time. The instance cap is the lever: a lower
+  `FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES` shortens each wait.
+- Memory: a contribution request at the 10 MiB body limit can take about 100 MiB while its
+  response is built, so two in flight can need about 0.5 GB with their bodies and contribution
+  arrays. Leave room for it when you size the container.
+- `"contributions"` must be `true`, `false` or `null` (400 otherwise). Without it, or with
+  `false` or `null`, the response is exactly the same as before contributions existed.
 
 ### `GET /model`
 
@@ -204,10 +212,10 @@ file"; the model is then shown as of unverified origin.
 | `FIONE_IMAGE_TAG` | the image's tag | Must equal the model's tag (set at build time). |
 | `FIONE_SERVING_MAX_BODY` | `10485760` | The largest request body in bytes. |
 | `FIONE_SERVING_MAX_INSTANCES` | `10000` | The most instances per request. |
-| `FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES` | `1000` | The most instances per request with `"contributions": true`. |
+| `FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES` | `100` | The most instances per request with `"contributions": true`. |
 | `FIONE_SERVING_MAX_CONTRIBUTION_REQUESTS` | `2` | How many requests with contributions may run at once; more get 503. |
 | `PORT` | `8080` | The port inside the container. |
 
-One prediction runs at a time per container (the libraries use every CPU core). A request with
+One prediction runs at a time per container (the libraries use several CPU cores). A request with
 contributions computes them in the same turn as its predictions, so plain predictions wait
 while it runs.

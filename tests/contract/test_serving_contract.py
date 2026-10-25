@@ -483,9 +483,11 @@ def test_default_bytes_are_unchanged(request, name):
     client = request.getfixturevalue(name)
     rows = _mixed_rows(CLIENT_ROWS[name])
     plain = invoke(client, rows)
-    off = invoke(client, rows, contributions=False)
-    assert plain.status_code == off.status_code == 200
-    assert off.content == plain.content and dict(off.headers) == dict(plain.headers)
+    assert plain.status_code == 200
+    for flag in (False, None):  # null counts as no key (typed clients send unset fields so)
+        off = invoke(client, rows, contributions=flag)
+        assert off.status_code == 200
+        assert off.content == plain.content and dict(off.headers) == dict(plain.headers)
     on = invoke(client, rows, contributions=True)
     assert on.status_code == 200
     assert (
@@ -494,7 +496,7 @@ def test_default_bytes_are_unchanged(request, name):
 
 
 def test_whole_request_errors_are_unchanged_by_the_flag(iris):
-    for fields in ({}, {"contributions": False}):
+    for fields in ({}, {"contributions": False}, {"contributions": None}):
         r = iris.post("/invocations", json={"instance": [SETOSA], **fields})
         assert r.status_code == 400 and r.json() == {
             "error": '"instances" must be a list of objects'
@@ -545,7 +547,7 @@ def test_contributions_are_additive(request, name, task):
     assert any(v != 0 for row in out for v in row["contributions"]["columns"].values())
 
 
-@pytest.mark.parametrize("flag", ["yes", "true", 1, 0, None, [], {}])
+@pytest.mark.parametrize("flag", ["yes", "true", "null", 1, 0, [], {}])
 def test_non_bool_contributions_is_400(iris, flag):
     r = invoke(iris, [SETOSA], contributions=flag)
     assert r.status_code == 400 and list(r.json()) == ["error"]
@@ -562,9 +564,20 @@ def test_too_many_contribution_instances_is_413(iris_model, stored, monkeypatch)
     assert invoke(client, [SETOSA] * 4, contributions=False).status_code == 200
 
 
-def test_the_contribution_limits_default_to_1000_and_2():
-    assert DEFAULT_MAX_CONTRIBUTION_INSTANCES == 1_000
+def test_the_contribution_limits_default_to_100_and_2():
+    assert DEFAULT_MAX_CONTRIBUTION_INSTANCES == 100
     assert DEFAULT_MAX_CONTRIBUTION_REQUESTS == 2
+
+
+def test_101_contribution_instances_need_a_raised_setting(iris, iris_model, stored, monkeypatch):
+    rows = [SETOSA] * 101
+    r = invoke(iris, rows, contributions=True)
+    assert r.status_code == 413 and "at most 100" in r.json()["error"]
+    assert invoke(iris, rows).status_code == 200
+    monkeypatch.setenv("FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES", "101")
+    raised = client_for(stored(iris_model)[1])
+    out = strict(invoke(raised, rows, contributions=True).text)["predictions"]
+    assert len(out) == 101 and all("contributions" in row for row in out)
 
 
 @pytest.fixture
@@ -622,11 +635,12 @@ def test_failing_row_has_no_contributions(iris):
 
 def test_a_failing_batch_is_bisected_with_contributions(counted):
     client, calls = counted
-    rows = strict(invoke(client, thousand({617}), contributions=True).text)["predictions"]
-    assert [i for i, row in enumerate(rows) if "exception" in row] == [617]
-    assert list(rows[617]) == ["exception"] and "secret" not in rows[617]["exception"]
-    assert all(list(row) == [*CLASSIFIER_KEYS, "contributions"] for row in rows[:617])
-    assert len(calls) <= 2 * 10 + 3
+    hundred = thousand({61})[:DEFAULT_MAX_CONTRIBUTION_INSTANCES]
+    rows = strict(invoke(client, hundred, contributions=True).text)["predictions"]
+    assert [i for i, row in enumerate(rows) if "exception" in row] == [61]
+    assert list(rows[61]) == ["exception"] and "secret" not in rows[61]["exception"]
+    assert all(list(row) == [*CLASSIFIER_KEYS, "contributions"] for row in rows[:61])
+    assert len(calls) <= 2 * 7 + 3
 
 
 def test_a_row_whose_contributions_fail_is_an_exception(jp, monkeypatch):
