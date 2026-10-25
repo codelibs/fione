@@ -28,6 +28,7 @@ def make_settings(data_dir, **overrides) -> Settings:
         "setup_token": None,
         "cookie_secure": False,
         "trust_proxy": False,
+        "explain_after_training": False,
         **overrides,
     }
     return Settings(**values)

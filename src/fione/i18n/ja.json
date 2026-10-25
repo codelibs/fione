@@ -407,6 +407,7 @@
   "pager.last": "末尾",
   "job.kind.module": "モジュール",
   "job.kind.export_models": "モデルのエクスポート",
+  "job.kind.explain": "説明",
   "datasets.title": "データセット",
   "datasets.lead": "このプロジェクトのデータです。学習データ、予測するデータ、予測結果があります。",
   "datasets.upload": "データセットをアップロード",

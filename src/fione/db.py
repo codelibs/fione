@@ -129,6 +129,15 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE models ADD COLUMN diagnostics_json TEXT;
     """,
+    """
+    CREATE TABLE model_explanations (
+        model_id INTEGER PRIMARY KEY REFERENCES models(id) ON DELETE CASCADE,
+        job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+        dataset_id INTEGER REFERENCES datasets(id) ON DELETE SET NULL,
+        payload_json TEXT NOT NULL,
+        created_at REAL NOT NULL
+    );
+    """,
 ]
 
 

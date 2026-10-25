@@ -407,6 +407,7 @@
   "pager.last": "Last",
   "job.kind.module": "Module",
   "job.kind.export_models": "Model export",
+  "job.kind.explain": "Explanation",
   "datasets.title": "Datasets",
   "datasets.lead": "The data of this project: training data, data to predict, and predictions.",
   "datasets.upload": "Upload a dataset",

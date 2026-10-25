@@ -14,6 +14,12 @@ from api_helpers import make_settings  # noqa: E402
 from fione.api.app import create_app  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_explain_after_training(monkeypatch):
+    """Training does not queue an explain job in tests unless a test asks for it."""
+    monkeypatch.setenv("FIONE_EXPLAIN_AFTER_TRAINING", "false")
+
+
 def _kill_workers(app) -> None:
     if app.state.runner is not None:
         app.state.runner.shutdown(kill_running=True)

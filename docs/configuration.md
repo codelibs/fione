@@ -21,6 +21,7 @@ Read by the `fione` container at start. Booleans accept `true` / `false`.
 | `FIONE_MAX_CONCURRENT_SHORT_JOBS` | `4` | How many other jobs (predictions, exports, Python modules) run at once. | Rarely. |
 | `FIONE_IMAGE_TAG` | `dev` (baked into the image) | The image's version tag. Every trained model records it, and Fione Serving only loads models of its own tag. | Set at build time (`--build-arg FIONE_IMAGE_TAG=…`), not at run time. |
 | `FIONE_SERVING_IMAGE` | `ghcr.io/codelibs/fione-serving` | The serving image named in the `docker run` command the UI shows. | If you publish the serving image elsewhere. |
+| `FIONE_EXPLAIN_AFTER_TRAINING` | `true` | Queues a short explain job after each training: the inputs' importance and the partial dependence curves of the 10 most important, computed on a sample of the training data. | Set `false` to explain models only when someone asks (saves CPU on busy installs). |
 | `FIONE_RUNNER_ENABLED` | `true` | Runs the job queue in the app. With `false`, jobs are queued but never run. | Not in normal use (tests). |
 | `FIONE_COOKIE_SECURE` | `false` | Marks the session and preference cookies `Secure` (HTTPS only). | Set `true` when users reach Fione over HTTPS. |
 | `FIONE_SESSION_MAX_AGE_SECS` | `604800` (7 days) | How long a sign-in lasts. | To sign users out sooner. |

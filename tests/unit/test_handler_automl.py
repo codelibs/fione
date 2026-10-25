@@ -122,7 +122,15 @@ def test_a_training_job_runs_end_to_end(conn, runner, owner, project, dataset, s
     done = wait_done(conn, job.id)
     assert done.status is JobStatus.DONE, done.message
 
-    assert set(done.result) == {"model_id", "stop_reason", "best_model", "metrics", "elapsed"}
+    assert set(done.result) == {
+        "model_id",
+        "stop_reason",
+        "best_model",
+        "metrics",
+        "elapsed",
+        "explain_job_id",
+    }
+    assert done.result["explain_job_id"] is None  # off in the tests (conftest)
     record = models.get_model(conn, done.result["model_id"])
     assert (record.project_id, record.dataset_id, record.job_id) == (project.id, dataset.id, job.id)
     assert record.name.startswith("species model ")

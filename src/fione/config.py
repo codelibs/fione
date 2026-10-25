@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     max_concurrent_short_jobs: int = 4
     image_tag: str = "dev"
     serving_image: str = "ghcr.io/codelibs/fione-serving"
+    # Queue an explain job (importance and partial dependence) after each training.
+    explain_after_training: bool = True
     # REST API
     runner_enabled: bool = True
     cookie_secure: bool = False

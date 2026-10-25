@@ -9,6 +9,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import BinaryIO
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -413,6 +414,32 @@ def read_dataset_sample(
     if not batches:  # a file without rows: the full read is empty too
         return read_dataset(storage, dataset, columns)
     return pa.Table.from_batches(batches).slice(0, max_rows).to_pandas()
+
+
+def read_dataset_spread(
+    storage: Storage,
+    dataset: Dataset,
+    rows: int,
+    columns: list[str] | None = None,
+    *,
+    seed: int = 0,
+    max_groups: int = 8,
+) -> pd.DataFrame:
+    """``rows`` rows drawn with ``seed`` from at most ``max_groups`` evenly spaced row groups
+    (all of their rows if there are fewer), in file order: a sample of the whole file, never
+    just its head, that reads a bounded part of it and is the same every time."""
+    with storage.open_read(dataset.key) as f:
+        parquet = pq.ParquetFile(f)
+        count = parquet.metadata.num_row_groups
+        if count == 0:
+            table = parquet.schema_arrow.empty_table()
+            return (table.select(columns) if columns is not None else table).to_pandas()
+        groups = np.unique(np.round(np.linspace(0, count - 1, min(count, max_groups))))
+        table = parquet.read_row_groups(groups.astype(int).tolist(), columns=columns)
+    if table.num_rows > rows:
+        picked = np.random.default_rng(seed).choice(table.num_rows, rows, replace=False)
+        table = table.take(np.sort(picked))
+    return table.to_pandas()
 
 
 def read_dataset_rows(
