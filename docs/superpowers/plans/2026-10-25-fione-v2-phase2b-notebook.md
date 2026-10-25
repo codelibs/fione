@@ -1,6 +1,6 @@
 # Fione v2 Phase 2b (fione-sdk and embedded JupyterLab) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Work through the plan task by task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship `fione-sdk` (a Python client of the Fione API, usable from any Jupyter) and an opt-in, per-user JupyterLab embedded in the Fione UI and signed in through Fione, with the three-layer boundary of spec 6.5.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, FastAPI, Jinja2 + HTMX, SQLite, httpx + pandas (SDK), jupyter_server 2.21.x, jupyterlab 4.6.x, tornado 6.5.x, ipykernel, Python stdlib `http.server`/`http.client` (launcher), nginx (unprivileged image), Docker Engine API, Docker Compose profiles, pytest, Playwright, uv.
 
-**Spec:** `docs/superpowers/specs/2026-10-24-fione-v2-design.md` (6.5; 4.4 roles; 4.6 licences; 10.5 tests). Supporting research, local and git-ignored, is summarized here wherever it decides something. Committed files never cite it.
+**Spec:** `docs/superpowers/specs/2026-10-24-fione-v2-design.md` (6.5; 4.4 roles; 4.6 licences; 10.5 tests).
 
 ## Global Constraints
 
