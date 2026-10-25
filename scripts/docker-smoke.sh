@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
-# Build the images, start the end-to-end stack (docker/compose.e2e.yaml: project fione-e2e,
-# port 18080), wait for it to be healthy, check the status endpoints and the vendored
-# front-end, then remove the stack with its volumes, whatever happened (trap).
+# Build the images, start the end-to-end stack (docker/compose.e2e.yaml), wait for it to be
+# healthy, check the status endpoints and the vendored front-end, then remove the stack with
+# its volumes, whatever happened (trap).
 #
 #   scripts/docker-smoke.sh
+#   FIONE_SMOKE_PROJECT=fione-smoke FIONE_PORT=18090 scripts/docker-smoke.sh   # elsewhere
 #
-# Exits non-zero on any failure. Touches only the fione-e2e project's own containers,
-# volumes and network.
+# The project defaults to fione-e2e on port 18080. The script refuses to run when that
+# project already has containers or volumes (a stack it did not start), so it only ever
+# removes what it created itself. Exits non-zero on any failure.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-compose=(docker compose --env-file docker/e2e.env -f docker/compose.yaml -f docker/compose.e2e.yaml)
-base="http://127.0.0.1:18080"
-cookies=$(mktemp)
+project="${FIONE_SMOKE_PROJECT:-fione-e2e}"
+compose=(docker compose -p "$project" --env-file docker/e2e.env
+    -f docker/compose.yaml -f docker/compose.e2e.yaml)
+base="http://127.0.0.1:${FIONE_PORT:-18080}"
 
+existing=$("${compose[@]}" ps -a -q)
+existing+=$(docker volume ls -q --filter "label=com.docker.compose.project=$project")
+if [ -n "$existing" ]; then
+    echo "project $project already has containers or volumes: not touching it" >&2
+    exit 1
+fi
+
+cookies=$(mktemp)
 cleanup() {
     status=$?
     rm -f "$cookies"
@@ -50,6 +61,7 @@ status=$(curl -fsS -b "$cookies" "$base/api/v1/system/status")
 check "system status: S3 storage" grep -q '"storage":"s3"' <<<"$status"
 check "system status: runner" grep -q '"runner":"running"' <<<"$status"
 check "system status: no credentials" bash -c '! grep -qiE "NotForRealUse|seaweedfs:8333|secret" <<<"$1"' _ "$status"
-check "runs as non-root" test "$("${compose[@]}" exec -T fione id -u)" != "0"
+uid=$("${compose[@]}" exec -T fione id -u)  # a failing exec ends the script here
+check "runs as non-root" test -n "$uid" -a "$uid" != 0
 check "one uvicorn worker" test "$("${compose[@]}" exec -T fione ps -eo args | grep -c '[u]vicorn fione.api.app')" = 1
 echo "docker smoke test passed"

@@ -56,11 +56,19 @@ services:
     # Master, volume, filer and S3 gateway on one data dir (the command verified in Task 3;
     # -ip.bind=0.0.0.0 is needed, or the S3 port answers on the container's loopback only).
     # The S3 identity is written from the environment at each start, readable by SeaweedFS
-    # only, in the container's own filesystem: never in the repository or the image.
+    # only, in the container's own filesystem: never in the repository or the image. Values
+    # outside A-Z a-z 0-9 / + = . _ - are refused (they would break the JSON).
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -eu
+        for value in "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY"; do
+          case "$$value" in
+            "" | *[!A-Za-z0-9/+=._-]*)
+              echo "FIONE_S3_ACCESS_KEY and FIONE_S3_SECRET_KEY may only use A-Z a-z 0-9 / + = . _ -" >&2
+              exit 1 ;;
+          esac
+        done
         umask 077
         mkdir -p /run/fione-s3
         printf '{"identities":[{"name":"fione","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' \
