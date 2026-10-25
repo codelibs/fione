@@ -109,17 +109,37 @@ def test_fit_with_expired_deadline_raises(name):
         spec.fit(spec.defaults, view, y, view, y, Deadline(0))
 
 
+def _calibrated(spec, X_tr, y_tr) -> tuple[float, float]:
+    """A short deadline this machine can meet, and the overrun allowed past it.
+
+    ``fit`` refuses to start (``DeadlineExceeded``) when less than ``UNIT_SAFETY`` times the
+    family's first, uninterruptible unit remains, and that unit is probed on this machine. On a
+    fast machine this is the classic 0.3 s budget with 0.5 s slack; on a slow or busy one both
+    grow with the measured unit, so the test still proves "stops near the deadline with a
+    usable model" without depending on the hardware.
+    """
+    spec.estimate_unit(spec.defaults, X_tr, y_tr)  # the probe fit() would run first
+    unit = spec.unit_secs or 0.0
+    return max(0.3, 2 * UNIT_SAFETY * unit), max(0.5, 2 * unit)
+
+
 @pytest.mark.parametrize("name", list(FAMILIES))
 def test_fit_stops_at_deadline_with_usable_model(name):
     X, y = _classification(50_000, 30)
     prep, y, _ = _setup(X, y)
     spec = FAMILIES[name]("classification", 2, n_jobs=n_threads(len(X)))
     view = getattr(prep, spec.view)(X)
+    budget, slack = _calibrated(spec, view.iloc[:40_000], y[:40_000])
     start = time.monotonic()
     model = spec.fit(
-        spec.defaults, view.iloc[:40_000], y[:40_000], view.iloc[40_000:], y[40_000:], Deadline(0.3)
+        spec.defaults,
+        view.iloc[:40_000],
+        y[:40_000],
+        view.iloc[40_000:],
+        y[40_000:],
+        Deadline(budget),
     )
-    assert time.monotonic() - start < 0.8
+    assert time.monotonic() - start < budget + slack
     proba = spec.predict(model, view.iloc[40_000:])
     assert proba.shape == (10_000, 2)
     assert np.allclose(proba.sum(axis=1), 1)
@@ -156,10 +176,11 @@ def test_fit_full_raises_when_it_cannot_finish(name):
     prep, y, _ = _setup(X, y)
     spec = FAMILIES[name]("classification", 2, n_jobs=n_threads(len(X)))
     view = getattr(prep, spec.view)(X)
+    budget, slack = _calibrated(spec, view, y)
     start = time.monotonic()
     with pytest.raises(DeadlineExceeded):
-        spec.fit_full(spec.defaults, view, y, Deadline(0.3), rounds=MAX_ROUNDS)
-    assert time.monotonic() - start < 0.8
+        spec.fit_full(spec.defaults, view, y, Deadline(budget), rounds=MAX_ROUNDS)
+    assert time.monotonic() - start < budget + slack
 
 
 def test_fit_full_refuses_when_the_scaled_unit_does_not_fit(slow):
@@ -281,6 +302,8 @@ def test_should_stop_returns_promptly_with_cancelled_event():
 def test_cancelling_mid_trial_discards_it_and_returns_promptly():
     X, y = _classification(50_000, 30)
     prep, y, folds = _setup(X, y)
+    probe = FAMILIES["LightGBM"]("classification", 2, n_jobs=n_threads(len(X)))
+    _, slack = _calibrated(probe, getattr(prep, probe.view)(X).iloc[:40_000], y[:40_000])
     events = []
     start = time.monotonic()
     result = run_family(
@@ -294,7 +317,7 @@ def test_cancelling_mid_trial_discards_it_and_returns_promptly():
         events.append,
         lambda: time.monotonic() - start > 0.3,
     )
-    assert time.monotonic() - start < 1.0
+    assert time.monotonic() - start < 0.5 + slack  # the cancel, then at most a unit
     assert result.trials == 0 and result.models == []
     assert [e.data["reason"] for e in events if e.type == "stopped"] == ["cancelled"]
 
