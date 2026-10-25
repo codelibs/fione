@@ -40,7 +40,7 @@ docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "
 
 この版は中核機能（データ、分析、AutoML、モデル、予測、サービング、ジョブ、ユーザーと共有）を備えています。**この版には含まれず、予定しているもの**：Notebook 連携（JupyterLab と Python SDK）、SHAP と部分依存、LLM アシスタント（Ollama。Mac では既定で `gemma4:12b-mlx`）、MCP サーバー、ONNX 出力。イメージはまだ公開していないため、リポジトリからビルドしてください。
 
-v1 のソース（Java、Fess プラグイン）は、メンテナーのリポジトリのタグ `v1-final` に保存されています。
+Java 版の v1（Fess プラグイン）は、このリポジトリの v2 マージ前の履歴に残っています。
 
 ## 開発
 

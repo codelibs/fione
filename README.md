@@ -53,8 +53,7 @@ Python SDK), SHAP and partial dependence, an LLM assistant (Ollama, by default w
 `gemma4:12b-mlx` on a Mac), an MCP server and ONNX export. No images are published yet;
 you build them from the repository.
 
-The v1 sources (Java, Fess plugin) are preserved at the tag `v1-final` in the maintainers'
-repository.
+The Java v1 (a Fess plugin) is preserved in this repository's history, before the merge of v2.
 
 ## Development
 

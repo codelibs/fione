@@ -83,6 +83,8 @@ def run(df, params, ctx):
     return df + 1
 ```
 
+組み込みのフレーム操作モジュールは、v1 の名前とパラメータを引き継いでいます。違いは 3 つです。`sort` の既定は昇順（v1 は降順）、`split` が返す順は train・valid・test（v1 は train・test・valid）、行の条件の `&` は AND で、`|` より先に結び付きます（v1 は `&` を OR として扱っていました）。
+
 `run` は pandas の DataFrame とパラメータ（`params` の JSON スキーマで検査済み）を受け取り、DataFrame を返します。管理者が「**Python モジュール**」画面か `POST /api/v1/modules` でアップロードし、`POST /api/v1/projects/{id}/jobs/module` のジョブで実行します。アップロードしたモジュールはサンドボックスなしで、サーバーと同じ権限でジョブのワーカー内で動きます。信頼できるコードだけをアップロードしてください。
 
 ## REST API

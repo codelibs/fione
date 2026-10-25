@@ -26,6 +26,12 @@ What this release does not do, or does with a catch. Japanese summary at the end
   you set `FIONE_SETUP_TOKEN`).
 - **The S3 credentials are visible** in the containers' environment (`docker inspect`,
   `docker exec`) to anyone who can use Docker on the host.
+- **API tokens never expire**, and Fione does not record when one was last used. Revoke tokens
+  you no longer need on the Account page.
+- **Fione Serving has no authentication** and no rate or concurrency limit (only the request
+  size limits). The command the UI shows, `docker run --rm -p 8081:8080 …`, publishes it on every
+  network interface of the host; use `-p 127.0.0.1:8081:8080` to keep it on that machine, and a
+  reverse proxy with authentication to serve others.
 - **Imported models** that were not made by this installation load only if an administrator
   ticks the trust option on import; the model is then marked "Imported, unverified". Loading
   a model file runs code, so trust only files you know.
@@ -40,6 +46,15 @@ What this release does not do, or does with a catch. Japanese summary at the end
   storage fails in between, files can be left behind in the bucket.
 - **Only the latest export of all models is kept** per project; a new export replaces it.
   Anyone who can read the project can start an export.
+- **Datasets are loaded whole into memory** for training, batch prediction and Python modules
+  (there is no out-of-core processing). Measured on a 16-core Mac, a training job peaked at about
+  1.9 GB of memory for a 150 MB CSV (200,000 rows × 42 columns) and 2.5 GB for a 750 MB CSV
+  (1,000,000 × 42); roughly 1.5 GB of that does not grow with the data (the libraries). Plan
+  for at least 4 GB of RAM, and more for wider data or larger files.
+- **Cross-validation scores are slightly optimistic.** Boosting models stop early on their
+  validation fold, and the ensemble's weights are chosen on the same out-of-fold predictions it
+  is scored on. The leaderboard's ensemble row and the star rating inherit this; test data held
+  back from training gives the honest number.
 - **The engine uses about two thirds of the maximum run time** in practice (search and final
   refit leave budget unused); a more adaptive search is planned.
 - **Training and engine messages are in English** in the Japanese UI.
@@ -82,6 +97,10 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 実行中のジョブのキャンセルには最大 10 秒かかります。プロジェクトに属さないジョブは `GET /api/v1/jobs` に出ません。削除中にストレージが失敗すると、ファイルが残ることがあります。
 - 全モデルのエクスポートは、プロジェクトごとに最新の 1 つだけ残ります。
 - エンジンは実際には最大実行時間の約 3 分の 2 を使います。学習やエンジンのメッセージは日本語画面でも英語です。
+- API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。
+- Fione Serving には認証も、リクエスト数・同時実行数の制限もありません。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
+- 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。
+- CV のスコアはやや楽観的です（早期終了とアンサンブルの重みが同じ fold の予測で決まるため）。正直な数値は、学習に使わないテストデータで確かめてください。
 - 1 プロセス・1 ワーカーで動かしてください。イメージは約 1.65 GB / 1.7 GB で、まだ公開していません（リリースは amd64 のみ、タグは CI が通ったコミットにだけ付けてください）。ベースイメージはタグ固定で、ダイジェスト固定ではありません。
 - モデルはイメージのタグに結び付いています。古い版のモデルが新しい版で読み込める保証はありません。
 - ダークモードは Chrome / Edge 123 以降、Firefox 120 以降、Safari 17.5 以降が必要です。ログインには JavaScript が必要です。簡易・詳細の表示はブラウザごとに記憶されます。

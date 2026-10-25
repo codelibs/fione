@@ -38,7 +38,8 @@ to serve others).
 
 ## 3. Create the administrator
 
-Fione has no default password. On first start it writes a one-time setup token to its log:
+Fione has no default password. Until an administrator exists, it writes a setup token to its
+log at every start:
 
 ```sh
 docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "Setup token"
@@ -111,7 +112,9 @@ curl -s -X POST localhost:8081/invocations -H 'Content-Type: application/json' -
 {"predictions":[{"label":"setosa","index":0,"class_probabilities":[0.9934803442259019,0.003455065889847104,0.0030645898842508773]}]}
 ```
 
-Press Ctrl+C to stop it. See [Fione Serving](serving.md) for the API.
+Press Ctrl+C to stop it. The prediction API has no authentication, and `-p 8081:8080` opens it on
+every network interface of this machine; to keep it on this machine only, use
+`-p 127.0.0.1:8081:8080`. See [Fione Serving](serving.md) for the API.
 
 ## Beyond the wizard
 

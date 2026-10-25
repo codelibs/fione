@@ -89,6 +89,11 @@ def run(df, params, ctx):
     return df + 1
 ```
 
+The built-in frame modules keep v1's names and parameters, with three differences: `sort`
+sorts ascending by default (v1: descending), `split` returns its parts in the order train,
+valid, test (v1: train, test, valid), and in row conditions `&` means AND and binds tighter
+than `|` (v1 treated `&` as OR).
+
 `run` receives a pandas DataFrame and the parameters (checked against the JSON schema in
 `params`) and returns a DataFrame. Administrators upload modules on the **Python modules**
 page or with `POST /api/v1/modules`; jobs run them with

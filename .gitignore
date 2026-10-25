@@ -16,3 +16,8 @@ docker/.env
 
 # End-to-end failure artifacts (traces, screenshots, compose logs)
 test-results/
+
+# Files the quick start creates in the checkout (backups hold the secret key)
+*.tgz
+/iris.csv
+docker/model/

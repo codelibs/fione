@@ -29,7 +29,7 @@ Read by the `fione` container at start. Booleans accept `true` / `false`.
 | `FIONE_LOGIN_MAX_FAILURES_PER_IP` | `50` | Failed password checks per client address in the window, whatever the usernames. | See [Behind a reverse proxy](#behind-a-reverse-proxy). |
 | `FIONE_TRUST_PROXY` | `false` | Takes the client address and host from `X-Forwarded-For` / `X-Forwarded-Host` (the last value, the one your proxy added). | Set `true` only behind a reverse proxy that sets these headers. |
 | `FIONE_MAX_UPLOAD_BYTES` | `1073741824` (1 GiB) | The largest CSV upload. | To allow bigger or smaller uploads (mind the temp space). |
-| `FIONE_SETUP_TOKEN` | unset | The token that creates the first administrator, at least 16 characters. When unset, Fione generates one and writes it to the log once. | To choose it yourself (`docker/.env`). |
+| `FIONE_SETUP_TOKEN` | unset | The token that creates the first administrator, at least 16 characters. When unset, Fione generates one and writes it to the log at every start until an administrator exists. | To choose it yourself (`docker/.env`). |
 
 Fixed limits that are not settings: a model import file can be up to 512 MiB, an uploaded
 Python module up to 256 KiB.
@@ -122,7 +122,7 @@ Keep the `Host` line: sign-in and every form post compare the browser's `Origin`
 
 While no administrator exists, the first-administrator page asks for a setup token. Unless
 `FIONE_SETUP_TOKEN` is set, Fione generates one, stores it in `<data dir>/setup-token` and
-writes it to the log:
+writes it to the log at every start until an administrator exists:
 
 ```sh
 docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "Setup token"
@@ -150,5 +150,7 @@ copy), so keep at least 2 GiB free for the default 1 GiB limit.
 
 SeaweedFS stores the datasets and models (volume `seaweed-data`; Docker names the volumes
 `fione_seaweed-data` and `fione_fione-data` after the Compose project `fione`). Its S3 port is not published
-on the host; only `fione` reaches it on the Compose network. Its other ports (master, filer,
-volume) need no credentials on that network, which only `fione` joins.
+on the host; only `fione` reaches it, on the Compose network `backend`. Its other ports (master,
+filer, volume) need no credentials on that network, which only `fione` and SeaweedFS join. The
+optional `fione-serving` service runs on a network of its own (`serving`) and cannot reach
+them.

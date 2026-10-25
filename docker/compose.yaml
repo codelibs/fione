@@ -41,7 +41,7 @@ services:
       FIONE_S3_ACCESS_KEY: ${FIONE_S3_ACCESS_KEY:?set FIONE_S3_ACCESS_KEY in docker/.env (see docker/.env.example)}
       FIONE_S3_SECRET_KEY: ${FIONE_S3_SECRET_KEY:?set FIONE_S3_SECRET_KEY in docker/.env (see docker/.env.example)}
       # Optional: a fixed first-admin setup token (16+ characters); otherwise one is
-      # generated and written to the log once.
+      # generated and written to the log at every start until an administrator exists.
       FIONE_SETUP_TOKEN: ${FIONE_SETUP_TOKEN:-}
       # FIONE_TRUST_PROXY: "true"
       # FIONE_COOKIE_SECURE: "true"
@@ -49,6 +49,7 @@ services:
       - "127.0.0.1:${FIONE_PORT:-8080}:8080"
     volumes:
       - fione-data:/data
+    networks: [backend]
     restart: unless-stopped
 
   seaweedfs:
@@ -91,6 +92,8 @@ services:
     #   ports: ["127.0.0.1:8333:8333"]
     volumes:
       - seaweed-data:/data
+    # Only fione shares its network: the master, volume and filer ports need no credentials.
+    networks: [backend]
     restart: unless-stopped
 
   # Fione Serving, built from docker/Dockerfile.serving with the same FIONE_IMAGE_TAG (a
@@ -110,7 +113,12 @@ services:
       - "127.0.0.1:${FIONE_SERVING_PORT:-8081}:8080"
     volumes:
       - ${FIONE_MODEL_DIR:-./model}:/model:ro
+    networks: [serving]  # its own: a served model cannot reach the storage
 
 volumes:
   fione-data:
   seaweed-data:
+
+networks:
+  backend:
+  serving:

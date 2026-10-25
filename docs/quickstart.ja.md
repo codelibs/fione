@@ -32,7 +32,7 @@ docker compose -f docker/compose.yaml --env-file docker/.env up -d --build --wai
 
 ## 3. 管理者の作成
 
-Fione には既定のパスワードがありません。初回起動時に、一度だけ使うセットアップトークンをログに出力します。
+Fione には既定のパスワードがありません。管理者ができるまで、起動のたびにセットアップトークンをログに出力します。
 
 ```sh
 docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "Setup token"
@@ -89,7 +89,7 @@ curl -s -X POST localhost:8081/invocations -H 'Content-Type: application/json' -
 {"predictions":[{"label":"setosa","index":0,"class_probabilities":[0.9934803442259019,0.003455065889847104,0.0030645898842508773]}]}
 ```
 
-Ctrl+C で止まります。API の詳細は [Fione Serving](serving.md)（英語）を参照してください。
+Ctrl+C で止まります。予測 API には認証がなく、`-p 8081:8080` はこのマシンのすべてのネットワークインターフェースで公開します。このマシンだけで使う場合は `-p 127.0.0.1:8081:8080` にしてください。API の詳細は [Fione Serving](serving.md)（英語）を参照してください。
 
 ## ウィザードの先へ
 
