@@ -70,8 +70,10 @@ This writes `iris.csv`: 150 rows, four measurements and the `species` column.
 2. Press **Upload training data**, choose `iris.csv` and press **Upload and analyze**.
 3. **Data analysis** shows each column. Fione suggests the column to predict
    (**What do you want to predict?**: `species`), the **Prediction type** (classification) and
-   which columns to learn from. Columns that would only leak the answer or identify rows are
-   unchecked, with the reason.
+   which columns to learn from. Columns that are a copy of the answer, or whose value decides
+   it, and columns that only identify rows are unchecked, with the reason. A column that only
+   predicts the answer suspiciously well stays checked, with a warning: check that its value is
+   known when you make predictions.
 4. Under **Maximum run time** choose **1 min**, then press **Run**.
 5. The progress page shows what is being tried. When training ends, the
    **Prediction summary** opens: the best model, a rating from 1 to 5 stars, what the score

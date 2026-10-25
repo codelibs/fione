@@ -10,10 +10,16 @@ This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinI
 
 - **EasyML wizard** for people new to machine learning: upload → data analysis (the column to
   predict, the input columns, the prediction type, the maximum run time) → run → prediction
-  summary with a 1–5 star rating and Fione-kun's comment → predictions as a CSV.
+  summary with a 1–5 star rating and Fione-kun's comment → predictions as a CSV, with the
+  reasons for the first rows.
 - **AutoML screens** for experts (the detailed view): column statistics and charts,
-  correlations, leak suspects, every training setting, the job list, leaderboards, variable
+  correlations, leak warnings, every training setting, the job list, leaderboards, variable
   importance, score history, CV metrics, model export and import.
+- **Model explanations**: diagnostics from the cross-validation predictions (confusion matrix,
+  per-class metrics, ROC and precision-recall curves, calibration, residuals), importance from
+  each column's contributions, partial dependence curves, and each prediction's contributions
+  in the UI, the API, batch predictions and Fione Serving. Columns that predict the answer
+  suspiciously well are flagged as possible leaks.
 - **Its own AutoML engine**: LightGBM, XGBoost, CatBoost and ExtraTrees, tuned with Optuna and
   ensembled, within the run time you set.
 - **Fione Serving**: a small prediction API (`/invocations`, `/model`, `/ping`) for any trained
@@ -47,9 +53,9 @@ The full walk-through, with a sample dataset: [Quick start](docs/quickstart.md).
 
 ## Status
 
-This release covers the core: data, analysis, AutoML, models, predictions, serving, jobs,
-users and sharing. **Planned, not in this release**: Notebook integration (JupyterLab and a
-Python SDK), SHAP and partial dependence, an LLM assistant (Ollama, by default with
+This release covers the core: data, analysis, AutoML, models and their explanations,
+predictions, serving, jobs, users and sharing. **Planned, not in this release**: Notebook
+integration (JupyterLab and a Python SDK), an LLM assistant (Ollama, by default with
 `gemma4:12b-mlx` on a Mac), an MCP server and ONNX export. No images are published yet;
 you build them from the repository.
 
