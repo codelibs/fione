@@ -42,6 +42,8 @@ docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "
 
 Java 版の v1（Fess プラグイン）は、このリポジトリの v2 マージ前の履歴に残っています。
 
+**バージョン:** このリリースは 20.0.0 です。Fione 13〜15 は Fess のバージョン番号に合わせていました。v2 は Fess に依存しないため、番号は独立し、20 から始まります。
+
 ## 開発
 
 [uv](https://docs.astral.sh/uv/) と Python 3.12 が必要です。

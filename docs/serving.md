@@ -102,7 +102,7 @@ What the model expects and predicts. From the same iris model:
  "responseColumn":"species","category":"Multinomial","nclasses":3,"nfeatures":4,
  "uuid":"bae3b2e75a8474233aab6ce1ad9163b8",
  "instance":{"sepal length (cm)":"?","sepal width (cm)":"?","petal length (cm)":"?","petal width (cm)":"?"},
- "engine":"fione","fioneVersion":"2.0.0.dev0"}
+ "engine":"fione","fioneVersion":"20.0.0"}
 ```
 
 | Field | Meaning |

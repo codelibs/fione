@@ -278,7 +278,7 @@ def test_the_system_page_says_how_the_server_is(client):
     assert stat("Worker processes") == "0"
     assert "Stopped" in stat("Job runner")
     assert re.fullmatch(r"\d+ min", stat("Up for"))
-    assert "2.0.0" in stat("Version") and stat("Storage") == "Local disk"
+    assert "20.0.0" in stat("Version") and stat("Storage") == "Local disk"
     assert "Not configured" in page and "Ollama" in page
     assert 'hx-trigger="every 10s"' in page and 'aria-live="polite"' in page
     assert "/static/js/system.js" in page

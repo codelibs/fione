@@ -55,6 +55,8 @@ you build them from the repository.
 
 The Java v1 (a Fess plugin) is preserved in this repository's history, before the merge of v2.
 
+**Versioning:** this release is 20.0.0. Fione 13–15 followed Fess's version numbers; v2 no longer depends on Fess, so its numbers are independent and continue from 20.
+
 ## Development
 
 Requires [uv](https://docs.astral.sh/uv/) and Python 3.12.
