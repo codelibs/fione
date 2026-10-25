@@ -1,5 +1,6 @@
 """The serving bundle of the trained model, downloaded from the summary page and run in the
-serving image exactly as the page's command says (only the host port and a name added)."""
+serving image exactly as the page's command says (only the host port and a name added),
+asked for a prediction and then for the same prediction with its contributions."""
 
 import json
 import re
@@ -104,6 +105,18 @@ def test_the_bundle_runs_as_the_page_says(
     assert len(probabilities) == 3 and all(isinstance(p, float) for p in probabilities)
     assert abs(sum(probabilities) - 1) < 1e-6
     assert prediction["label"] == "virginica"
+
+    r = httpx.post(
+        f"{base}/invocations", json={"instances": [row], "contributions": True}, timeout=30
+    )
+    assert r.status_code == 200, r.text
+    (explained,) = r.json()["predictions"]
+    assert list(explained) == ["label", "index", "class_probabilities", "contributions"]
+    assert {k: explained[k] for k in prediction} == prediction  # the same prediction
+    contributions = explained["contributions"]
+    assert list(contributions) == ["bias", "columns"] and set(contributions["columns"]) == set(row)
+    total = contributions["bias"] + sum(contributions["columns"].values())
+    assert abs(total - probabilities[prediction["index"]]) < 1e-5  # the predicted class
 
     model = httpx.get(f"{base}/model", timeout=10)
     assert model.status_code == 200 and isinstance(json.loads(model.text), dict)

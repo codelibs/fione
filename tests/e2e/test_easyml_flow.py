@@ -1,7 +1,8 @@
 """The EasyML wizard end to end, in a real browser against the Compose stack: the first
 administrator (the ``admin`` fixture, through the first-admin page), a project, iris, the
 analysis defaults, the 1-minute preset, Run, the live progress to the summary (the
-``trained`` fixture), then the star rating, a new prediction and the serving card."""
+``trained`` fixture), then the star rating, the serving card, the Explain tab's importance
+chart, a new prediction and its per-row reasons."""
 
 import re
 
@@ -31,11 +32,19 @@ def test_the_wizard_trains_rates_predicts_and_offers_serving(stack, admin, train
     command = page.locator("#run-command").inner_text().strip()
     assert command.startswith("docker run ") and command.endswith(stack.serving_image)
 
+    # the explain job the training queued has run (the fixture waits for it): its chart draws
+    page.goto(trained.model + "?tab=explain")
+    expect(page.locator("#contrib-chart canvas").first).to_be_visible(timeout=15_000)
+
     page.goto(trained.model + "/predict")
     upload(page, data["new"])
     page.wait_for_url("**/predict?dataset=*")
     page.click("form[data-run-form] button[type=submit]")
     page.wait_for_url("**/result", timeout=120_000)
+    # the reasons for each of the 3 rows load by themselves on the result page
+    rows = page.locator("#why .why-row")
+    expect(rows).to_have_count(3, timeout=30_000)
+    expect(rows.locator(".why-total")).to_have_count(3)
     with page.expect_download() as caught:
         page.locator("a[download][href*='/download']").first.click()
     download = caught.value
