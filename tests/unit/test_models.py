@@ -1,5 +1,7 @@
+import dataclasses
 import io
 import json
+import logging
 
 import pandas as pd
 import pytest
@@ -133,6 +135,70 @@ def test_get_and_list_models_newest_first(conn, project, stored, trained, datase
     assert models.list_models(conn, "no-such-project") == []
     with pytest.raises(ModelNotFound):
         models.get_model(conn, 9999)
+
+
+def test_add_model_stores_diagnostics(conn, stored, trained):
+    model, _ = trained
+    assert model.diagnostics["task"] == "classification"
+    assert stored.diagnostics == model.diagnostics
+    row = conn.execute("SELECT diagnostics_json FROM models WHERE id = ?", (stored.id,)).fetchone()
+    assert json.loads(row[0]) == model.diagnostics
+
+
+def test_brief_records_have_no_diagnostics(conn, project, stored):
+    assert stored.diagnostics is not None
+    assert [r.diagnostics for r in models.list_models_brief(conn, project.id)] == [None]
+
+
+def add_with_diagnostics(conn, project, trained, diagnostics):
+    model, _ = trained
+    return models.add_model(
+        conn,
+        project_id=project.id,
+        dataset_id=None,
+        job_id=None,
+        name="d",
+        model=dataclasses.replace(model, diagnostics=diagnostics),
+        storage_prefix=f"projects/{project.id}/models/d/",
+    )
+
+
+def test_a_model_without_diagnostics_stores_null(conn, project, trained):
+    record = add_with_diagnostics(conn, project, trained, None)
+    assert record.diagnostics is None
+    row = conn.execute("SELECT diagnostics_json FROM models WHERE id = ?", (record.id,)).fetchone()
+    assert row[0] is None
+
+
+def padded(size: int) -> dict:
+    """Diagnostics whose JSON is ``size`` bytes of UTF-8."""
+    empty = len(json.dumps({"pad": ""}).encode())
+    return {"pad": "a" * (size - empty)}
+
+
+@pytest.mark.parametrize(
+    "diagnostics",
+    [
+        {"version": 1, "auc": float("nan")},
+        {"version": 1, "labels": [pd.Timestamp("2020-01-01")]},
+        {"version": 1, "labels": ["\ud800"]},
+        ["not", "an", "object"],
+        padded(models.MAX_DIAGNOSTICS_BYTES + 1),
+    ],
+    ids=["nan", "not-json", "surrogate", "list", "too-large"],
+)
+def test_diagnostics_that_cannot_be_stored_never_fail_the_model(
+    conn, project, trained, diagnostics, caplog
+):
+    with caplog.at_level(logging.WARNING, logger="fione.models.service"):
+        record = add_with_diagnostics(conn, project, trained, diagnostics)
+    assert record.diagnostics is None and record.name == "d"
+    assert "diagnostics" in caplog.text
+
+
+def test_diagnostics_up_to_the_cap_are_stored(conn, project, trained):
+    diagnostics = padded(models.MAX_DIAGNOSTICS_BYTES)
+    assert add_with_diagnostics(conn, project, trained, diagnostics).diagnostics == diagnostics
 
 
 def test_load_trained_predicts_the_training_labels(stored, storage, trained):

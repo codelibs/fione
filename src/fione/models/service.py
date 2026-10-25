@@ -1,6 +1,7 @@
 """Trained-model records (the ``models`` table), their artifacts in storage, and training jobs."""
 
 import json
+import logging
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -20,7 +21,10 @@ from fione.projects.ingest import read_dataset
 from fione.projects.service import DatasetNotFound, DatasetType
 from fione.storage import Storage
 
+log = logging.getLogger(__name__)
+
 ENSEMBLE = "Ensemble"
+MAX_DIAGNOSTICS_BYTES = 256 * 1024  # of UTF-8 JSON; typical diagnostics take 13-42 KB
 
 
 class ModelNotFound(KeyError):
@@ -46,9 +50,11 @@ class ModelRecord:
     metrics: dict
     importance: dict[str, float]
     created_at: float
+    diagnostics: dict | None = None  # fione.engine.diagnostics; None before Phase 2a
 
 
 def _record(row: sqlite3.Row) -> ModelRecord:
+    diagnostics = row["diagnostics_json"]
     return ModelRecord(
         id=row["id"],
         project_id=row["project_id"],
@@ -67,11 +73,31 @@ def _record(row: sqlite3.Row) -> ModelRecord:
         metrics=json.loads(row["metrics_json"]),
         importance=json.loads(row["importance_json"]),
         created_at=row["created_at"],
+        diagnostics=None if diagnostics is None else json.loads(diagnostics),
     )
 
 
 def _dumps(value) -> str:
     return json.dumps(jsonable(value), ensure_ascii=False, allow_nan=False)
+
+
+def _diagnostics_json(diagnostics) -> str | None:
+    """``diagnostics`` as strict JSON, or None when it cannot be stored (a warning is logged):
+    diagnostics are a by-product, and must never stop a trained model from being recorded."""
+    if diagnostics is None:
+        return None
+    try:
+        if not isinstance(diagnostics, dict):
+            raise TypeError(f"an object is expected, not {type(diagnostics).__name__}")
+        text = json.dumps(diagnostics, ensure_ascii=False, allow_nan=False)
+        size = len(text.encode("utf-8"))  # a lone surrogate fails here, not in sqlite
+    except (TypeError, ValueError, RecursionError) as e:
+        log.warning("the model's diagnostics are not stored: %s: %s", type(e).__name__, e)
+        return None
+    if size > MAX_DIAGNOSTICS_BYTES:
+        log.warning("the model's diagnostics are not stored: %d bytes of JSON", size)
+        return None
+    return text
 
 
 def best_model_name(leaderboard: list[dict]) -> str:
@@ -115,6 +141,7 @@ def add_model(
         trials=model.trials.to_dict("records"),
         metrics=model.metrics,
         importance=model.feature_importance.to_dict(),
+        diagnostics=model.diagnostics,
     )
 
 
@@ -136,13 +163,15 @@ def insert_model(
     trials: list[dict],
     metrics: dict,
     importance: dict,
+    diagnostics: dict | None = None,
 ) -> ModelRecord:
-    """Insert a ``models`` row from already-validated fields."""
+    """Insert a ``models`` row from already-validated fields; ``diagnostics`` that cannot be
+    stored as JSON (or exceed ``MAX_DIAGNOSTICS_BYTES``) become NULL."""
     cur = conn.execute(
         "INSERT INTO models (project_id, dataset_id, job_id, name, task, target, best_model,"
         " stop_reason, storage_prefix, trusted, config_json, leaderboard_json, trials_json,"
-        " metrics_json, importance_json, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " metrics_json, importance_json, created_at, diagnostics_json)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             project_id,
             dataset_id,
@@ -160,6 +189,7 @@ def insert_model(
             _dumps(metrics),
             _dumps(importance),
             time.time(),
+            _diagnostics_json(diagnostics),
         ),
     )
     return get_model(conn, cur.lastrowid)
@@ -183,7 +213,7 @@ def list_models(conn: sqlite3.Connection, project_id: str) -> list[ModelRecord]:
 
 def list_models_brief(conn: sqlite3.Connection, project_id: str) -> list[ModelRecord]:
     """The project's models, newest first, for lists: ``config``, ``leaderboard``, ``trials``
-    and ``importance`` (the large fields) are left empty."""
+    and ``importance`` (the large fields) are left empty, and ``diagnostics`` is None."""
     rows = conn.execute(
         "SELECT id, project_id, dataset_id, job_id, name, task, target, best_model, stop_reason,"
         " storage_prefix, trusted, metrics_json, created_at FROM models WHERE project_id = ?"

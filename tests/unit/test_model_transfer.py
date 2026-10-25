@@ -223,6 +223,27 @@ def test_a_regression_model_round_trips(tmp_path, dest):
     rec = do_import(dest, exported(env, record), secret=env.secret)
     assert rec.task == "regression" and rec.trusted == 1
     assert rec.metrics == record.metrics
+    assert rec.diagnostics["task"] == "regression" and rec.diagnostics == record.diagnostics
+
+
+@pytest.mark.parametrize(
+    ("secret", "trusted"), [(None, 1), (FOREIGN_SECRET, 0)], ids=["signed", "trust-foreign"]
+)
+def test_export_import_keeps_diagnostics(dest, source, secret, trusted):
+    assert source.record.diagnostics["task"] == "classification"
+    assert json.loads(source.parts["record.json"])["diagnostics"] == source.record.diagnostics
+    rec = do_import(dest, source.zip, secret=secret or dest.secret, trust_foreign=True)
+    assert rec.trusted == trusted
+    assert rec.diagnostics == source.record.diagnostics
+    assert models.get_model(dest.conn, rec.id).diagnostics == source.record.diagnostics
+
+
+def test_import_of_export_without_diagnostics(dest, source):
+    """A Phase 1 export has no ``diagnostics`` key; it imports, and exports again without one."""
+    rec = do_import(dest, rebuilt(source.parts, record=without(source, "diagnostics")))
+    assert rec.diagnostics is None and rec.trusted == 1
+    body = json.loads(parts(exported(dest, rec))["record.json"])
+    assert set(body) == set(transfer.RECORD_FIELDS)
 
 
 def test_importing_twice_makes_two_independent_models(dest, source):
@@ -536,6 +557,41 @@ def test_a_non_finite_number_in_the_record_is_refused(dest, source):
     assert_nothing_left(dest)
 
 
+@pytest.mark.parametrize(
+    "diagnostics",
+    [
+        [],
+        "x",
+        None,
+        {"version": 2, "task": "classification"},
+        {"version": True, "task": "classification"},
+        {"version": 1.0, "task": "classification"},
+        {"task": "classification"},
+        {"version": 1, "task": "regression"},
+        {"version": 1},
+        {"version": 1, "task": "classification", "labels": ["\ud800"]},
+        {"version": 1, "task": "classification", "pad": "a" * models.MAX_DIAGNOSTICS_BYTES},
+    ],
+    ids=[
+        "list",
+        "text",
+        "null",
+        "version-2",
+        "version-true",
+        "version-float",
+        "no-version",
+        "other-task",
+        "no-task",
+        "surrogate",
+        "too-large",
+    ],
+)
+def test_import_rejects_bad_diagnostics(dest, source, diagnostics):
+    with pytest.raises(ModelImportError, match="diagnostics"):
+        do_import(dest, rebuilt(source.parts, record=record_with(source, diagnostics=diagnostics)))
+    assert_nothing_left(dest)
+
+
 def test_a_failing_insert_removes_the_objects(dest, source, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("database is gone")
@@ -591,7 +647,7 @@ def test_the_export_is_a_zip_of_manifest_model_and_record(source):
     assert source.parts["manifest.json"] == env.storage.get(record.storage_prefix + "manifest.json")
     assert source.parts["model.joblib"] == env.storage.get(record.storage_prefix + MODEL_FILE)
     body = json.loads(source.parts["record.json"])
-    assert set(body) == {"name", *COPIED, "metrics", "importance", "trusted"}
+    assert set(body) == {"name", *COPIED, "metrics", "importance", "trusted", "diagnostics"}
     assert body["trusted"] is True
     assert body["name"] == "日本語モデル" and body["leaderboard"] == record.leaderboard
     assert "日本語モデル".encode() in source.parts["record.json"]  # not \u-escaped

@@ -126,6 +126,9 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX module_models_project_id ON module_models(project_id);
     """,
+    """
+    ALTER TABLE models ADD COLUMN diagnostics_json TEXT;
+    """,
 ]
 
 

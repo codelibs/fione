@@ -6,6 +6,7 @@ import pytest
 
 from fione import db
 from fione.config import Settings, get_settings, load_secret
+from fione.models import service as models
 
 
 @pytest.fixture
@@ -57,6 +58,26 @@ def test_failed_migration_rolls_back(conn, monkeypatch):
         db.migrate(conn)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == good
     assert conn.execute("SELECT name FROM sqlite_master WHERE name='t'").fetchone() is None
+
+
+def test_migration_keeps_existing_models(conn, monkeypatch):
+    before = next(i for i, sql in enumerate(db.MIGRATIONS) if "diagnostics_json" in sql)
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:before])
+        db.migrate(conn)
+    conn.execute("INSERT INTO users (username, password_hash, role) VALUES ('u', 'x', 'admin')")
+    conn.execute("INSERT INTO projects (id, name, owner_id) VALUES ('p', 'p', 1)")
+    conn.execute(
+        "INSERT INTO models (project_id, name, task, target, best_model, stop_reason,"
+        " storage_prefix, config_json, leaderboard_json, trials_json, metrics_json,"
+        " importance_json, created_at)"
+        " VALUES ('p', 'old', 'regression', 'y', 'A_1', 'time', 'projects/p/models/a/',"
+        " '{}', '[]', '[]', '{}', '{}', 1.0)"
+    )
+    assert db.migrate(conn) == len(db.MIGRATIONS)
+    record = models.get_model(conn, 1)
+    assert record.name == "old" and record.diagnostics is None
+    assert conn.execute("SELECT diagnostics_json FROM models").fetchone()[0] is None
 
 
 def test_data_dir_env_override(monkeypatch, tmp_path):

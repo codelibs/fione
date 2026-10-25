@@ -17,7 +17,9 @@ An export zip holds ``manifest.json`` and ``model.joblib`` (the artifact as stor
 ``record.json`` also carries ``trusted`` (a required bool): the stored flag is that value and
 the signature check ANDed, so an export of an unverified model never comes back as trusted
 and a record cannot vouch for a file whose signature fails. The record's key set is exact, so
-exports made before ``trusted`` was added are refused (v2 was unreleased).
+exports made before ``trusted`` was added are refused (v2 was unreleased), except for the
+optional ``diagnostics``: written only when the model has them, required to be a version-1
+object of the manifest's task when present.
 
 Everything written for a failed import (objects and row) is deleted again.
 """
@@ -71,6 +73,7 @@ RECORD_FIELDS = (
     "importance",
     "trusted",
 )
+OPTIONAL_RECORD_FIELDS = ("diagnostics",)
 STOP_REASONS = frozenset({"time", "max_models", "no_improvement", "cancelled", "error"})
 IMPORTED_SUFFIX = " (imported)"
 MAX_NAME_CHARS = 200
@@ -112,6 +115,8 @@ def _info(name: str, compress_type: int) -> zipfile.ZipInfo:
 def _record_json(record: ModelRecord) -> bytes:
     body = {field: getattr(record, field) for field in RECORD_FIELDS}
     body["trusted"] = bool(record.trusted)
+    if record.diagnostics is not None:
+        body["diagnostics"] = record.diagnostics
     return json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
@@ -254,7 +259,9 @@ def _parse_record(raw: bytes, manifest: Manifest) -> dict:
         record = json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
     except (ValueError, RecursionError) as e:
         raise _bad_record("it is not strict JSON") from e
-    if not isinstance(record, dict) or set(record) != set(RECORD_FIELDS):
+    if not isinstance(record, dict) or not (
+        set(RECORD_FIELDS) <= set(record) <= {*RECORD_FIELDS, *OPTIONAL_RECORD_FIELDS}
+    ):
         raise _bad_record("unexpected fields")
     for field in ("name", "task", "target", "best_model", "stop_reason"):
         if not isinstance(record[field], str):
@@ -283,11 +290,31 @@ def _parse_record(raw: bytes, manifest: Manifest) -> dict:
         values = record[field]
         if not isinstance(values, dict) or not all(_is_number(v) for v in values.values()):
             raise _bad_record(f"{field} must map names to numbers")
+    if "diagnostics" in record:
+        _check_diagnostics(record["diagnostics"], manifest)
+    else:  # an export made before diagnostics, or of a model without them
+        record["diagnostics"] = None
     try:  # the database stores UTF-8 JSON: a lone surrogate or absurd nesting must fail here
         json.dumps(record, ensure_ascii=False, allow_nan=False).encode("utf-8")
     except (ValueError, RecursionError) as e:
         raise _bad_record("it holds text that cannot be stored") from e
     return record
+
+
+def _check_diagnostics(value, manifest: Manifest) -> None:
+    if not isinstance(value, dict):
+        raise _bad_record("diagnostics must be an object")
+    version = value.get("version")
+    if type(version) is not int or version != 1:
+        raise _bad_record("diagnostics must be of version 1")
+    if value.get("task") != manifest.task:
+        raise _bad_record("diagnostics do not match the manifest")
+    try:
+        size = len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+    except (ValueError, RecursionError) as e:
+        raise _bad_record("diagnostics hold text that cannot be stored") from e
+    if size > service.MAX_DIAGNOSTICS_BYTES:
+        raise _bad_record("diagnostics are too large")
 
 
 # --- import -----------------------------------------------------------------------------------
@@ -372,6 +399,7 @@ def _store(
             trials=fields["trials"],
             metrics=fields["metrics"],
             importance=fields["importance"],
+            diagnostics=fields["diagnostics"],
         )
     except BaseException:
         # Never mask the original error (a JobAbort must stay a JobAbort).
