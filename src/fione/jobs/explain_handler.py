@@ -35,6 +35,7 @@ log = logging.getLogger(__name__)
 SAMPLE_ROWS = 10_000  # read from the dataset; the partial dependence grids come from them
 IMPORTANCE_ROWS = 1_000
 PD_COLUMNS = 10
+IMPORTANCE_FLOOR = 1_000  # columns kept in the importance list before curves are trimmed
 MAX_OUTPUTS = 20  # classes kept in a partial dependence curve
 THREADS = n_threads(explain.PD_ROWS * explain.PD_GRID)  # these are small predictions
 
@@ -50,12 +51,16 @@ def _cap_threads(model: TrainedModel, threads: int) -> TrainedModel:
     """``model`` with its fold models predicting on at most ``threads`` threads.
 
     LightGBM, XGBoost and ExtraTrees predict with the threads they were trained with, all
-    cores on large data. CatBoost takes a thread count per call and is left as it is.
+    cores on large data; fewer stay as they are (an ExtraTrees artifact predicts on one, so
+    that its sums are reproducible), and an unset or negative count counts as all cores.
+    CatBoost takes a thread count per call and is left as it is.
     """
     for member in model.members:
         if not isinstance(member.spec, CatBoost):
             for one in member.models:
-                one.set_params(n_jobs=threads)
+                current = one.get_params()["n_jobs"]
+                if current is None or current <= 0 or current > threads:
+                    one.set_params(n_jobs=threads)
     return model
 
 
@@ -160,10 +165,12 @@ def build_explanation(
 
 
 def _fit_to_cap(payload: dict, limit: int) -> dict:
-    """``payload`` (unchanged) or a smaller copy of at most ``limit`` bytes of JSON: the least
-    important columns go first (halving the list, down to one), then the ICE curves (last
-    curve first), then the curves themselves (last first). ``ValueError`` if that is not
-    enough."""
+    """``payload`` (unchanged) or a smaller copy of at most ``limit`` bytes of JSON.
+
+    The least important columns go first, halving the list down to ``IMPORTANCE_FLOOR``
+    entries; then the ICE curves, last curve first; then the curves, last first; then the
+    importance list again, down to one entry. ``ValueError`` if that is not enough.
+    """
 
     def size(value: dict) -> int:
         return len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8"))
@@ -172,12 +179,15 @@ def _fit_to_cap(payload: dict, limit: int) -> dict:
     while size(out) > limit:
         curves = out["partial_dependence"]
         with_ice = [c for c in curves if c["ice"]]
-        if len(out["importance"]) > 1:
-            out["importance"] = out["importance"][: len(out["importance"]) // 2]
+        n = len(out["importance"])
+        if n > IMPORTANCE_FLOOR:
+            out["importance"] = out["importance"][: max(IMPORTANCE_FLOOR, n // 2)]
         elif with_ice:
             with_ice[-1]["ice"] = []
         elif curves:
             curves.pop()
+        elif n > 1:
+            out["importance"] = out["importance"][: n // 2]
         else:
             raise ValueError(f"the explanation is too large to store: {size(out)} bytes")
     return out

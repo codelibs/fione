@@ -1,16 +1,20 @@
-import copy
 import io
 import json
 import signal
 import sqlite3
 import time
+from types import SimpleNamespace
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import xgboost as xgb
+from catboost import CatBoostClassifier
 from predict_models import classifier, regressor, training_frame
+from sklearn.ensemble import ExtraTreesClassifier
 
 from fione import db
 from fione.auth import service as auth
@@ -19,7 +23,7 @@ from fione.config import Settings, load_secret
 from fione.engine import explain
 from fione.engine.artifact import save_model
 from fione.engine.explain import Contributions, PartialDependence
-from fione.engine.families import CatBoost
+from fione.engine.families import CatBoost, ExtraTrees, LightGBM, XGBoost
 from fione.jobs import automl_handler, explain_handler, store, worker
 from fione.jobs.runner import TRAINING_KINDS
 from fione.jobs.store import JobStatus
@@ -418,6 +422,7 @@ def test_the_payload_is_trimmed_to_the_cap(conn, run_job, owner, project, record
     row = conn.execute("SELECT payload_json FROM model_explanations").fetchone()
     assert len(row["payload_json"].encode()) <= 6_000
     payload = json.loads(row["payload_json"])
+    assert len(payload["importance"]) == 3  # the ICE curves went, not the importance
     assert payload["partial_dependence"] and all(
         c["ice"] == [] for c in payload["partial_dependence"]
     )
@@ -440,43 +445,58 @@ def test_explain_is_a_registered_short_job():
     assert "explain" in HANDLERS
 
 
-def test_booster_threads_are_capped_without_changing_predictions():
-    model = copy.deepcopy(classifier())  # the cached one is shared
-    frame = training_frame(40, 5)
-    expected = model.predict_proba(frame)
-    capped = explain_handler._cap_threads(model, 1)
-    for member in capped.members:
-        for one in member.models:
-            if not isinstance(member.spec, CatBoost):
-                assert one.get_params()["n_jobs"] == 1
-    pd.testing.assert_frame_equal(capped.predict_proba(frame), expected)
+def test_threads_are_capped_never_raised_and_predictions_unchanged():
+    X = training_frame(60, 5)[["x", "幅"]]
+    y = (X["x"] > 0).astype(int)
+    fitted = [
+        (LightGBM("classification", 2), lgb.LGBMClassifier(n_estimators=3, n_jobs=8, verbose=-1)),
+        (LightGBM("classification", 2), lgb.LGBMClassifier(n_estimators=3, n_jobs=-1, verbose=-1)),
+        (XGBoost("classification", 2), xgb.XGBClassifier(n_estimators=3, n_jobs=8)),
+        (XGBoost("classification", 2), xgb.XGBClassifier(n_estimators=3, n_jobs=None)),
+        (ExtraTrees("classification", 2), ExtraTreesClassifier(n_estimators=3, n_jobs=1)),
+        (
+            CatBoost("classification", 2),
+            CatBoostClassifier(iterations=3, verbose=0, thread_count=8, allow_writing_files=False),
+        ),
+    ]
+    for _, one in fitted:
+        one.fit(X, y)
+    expected = [one.predict_proba(X) for _, one in fitted]
+    model = SimpleNamespace(members=[SimpleNamespace(spec=s, models=[m]) for s, m in fitted])
+    explain_handler._cap_threads(model, 2)
+    threads = [
+        one.get_params()["n_jobs" if i < 5 else "thread_count"] for i, (_, one) in enumerate(fitted)
+    ]
+    assert threads == [2, 2, 2, 2, 1, 8]  # one ExtraTrees thread stays one; CatBoost untouched
+    for (_, one), before in zip(fitted, expected, strict=True):
+        np.testing.assert_array_equal(one.predict_proba(X), before)
 
 
 # --- the pieces, on synthetic data ----------------------------------------------------
 
 
-def test_fit_to_cap_trims_importance_then_ice_then_curves():
+def test_fit_to_cap_trims_the_importance_tail_then_ice_then_curves(monkeypatch):
+    monkeypatch.setattr(explain_handler, "IMPORTANCE_FLOOR", 100)
     curve = {"column": "c", "ice": [[0.5] * 20] * 50, "average": [[0.1]] * 20, "grid": [1] * 20}
-    payload = {
-        "importance": [
-            {"column": f"col{i:05d}", "mean_abs": 0.1, "share": 0.1} for i in range(500)
-        ],
-        "partial_dependence": [dict(curve, column=f"c{i}") for i in range(3)],
-    }
-    size = len(json.dumps(payload).encode())
-    trimmed = explain_handler._fit_to_cap(payload, size - 1)
-    assert len(json.dumps(trimmed).encode()) <= size - 1
-    assert len(trimmed["importance"]) == 250
-    assert all(c["ice"] for c in trimmed["partial_dependence"])
+    importance = [{"column": f"col{i:05d}", "mean_abs": 0.1, "share": 0.1} for i in range(500)]
 
-    small = explain_handler._fit_to_cap(payload, 3_000)
-    assert len(json.dumps(small).encode()) <= 3_000
-    assert len(small["importance"]) == 1 and len(small["partial_dependence"]) == 3
-    assert all(c["ice"] == [] for c in small["partial_dependence"])
-    tiny = explain_handler._fit_to_cap(payload, 500)
-    assert len(json.dumps(tiny).encode()) <= 500
-    assert [c["column"] for c in tiny["partial_dependence"]] == ["c0"]
-    assert len(payload["importance"]) == 500 and payload["partial_dependence"][2]["ice"]
+    def variant(n_importance, n_ice, n_curves):
+        curves = [
+            dict(curve, column=f"c{i}", ice=curve["ice"] if i < n_ice else [])
+            for i in range(n_curves)
+        ]
+        return {"importance": importance[:n_importance], "partial_dependence": curves}
+
+    def size(value):
+        return len(json.dumps(value, ensure_ascii=False).encode())
+
+    payload = variant(500, 3, 3)
+    assert explain_handler._fit_to_cap(payload, size(payload)) == payload
+    # each state is the first, in trimming order, to fit within its own size
+    for state in [(250, 3, 3), (100, 3, 3), (100, 1, 3), (100, 0, 3), (100, 0, 1), (50, 0, 0)]:
+        expected = variant(*state)
+        assert explain_handler._fit_to_cap(payload, size(expected)) == expected, state
+    assert payload == variant(500, 3, 3)  # unchanged
     with pytest.raises(ValueError, match="too large"):
         explain_handler._fit_to_cap(payload, 10)
 
