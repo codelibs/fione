@@ -22,12 +22,11 @@ from fione.engine.artifact import UntrustedArtifactError
 from fione.engine.config import ConfigError
 from fione.engine.diagnostics import _label, _num
 from fione.engine.events import Event
-from fione.engine.families import CatBoost, n_threads
 from fione.engine.model import TrainedModel
 from fione.jobs.handlers import JobContext, JobUserError, register_handler
 from fione.models import explanations
 from fione.models import service as models_service
-from fione.predict.batch import PredictInputError, _check_inputs
+from fione.predict.batch import PredictInputError, check_inputs
 from fione.projects import ingest
 from fione.projects import service as projects
 
@@ -39,7 +38,6 @@ CONTRIBUTION_CELLS = 10_000_000  # rows x outputs x features: 80 MB per float64 
 PD_COLUMNS = 10
 IMPORTANCE_FLOOR = 1_000  # columns kept in the importance list before curves are trimmed
 MAX_OUTPUTS = 20  # classes kept in a partial dependence curve
-THREADS = n_threads(explain.PD_ROWS * explain.PD_GRID)  # these are small predictions
 
 # Raised for what the user can fix; JobAbort and everything else keep their own handling.
 USER_ERRORS = (PredictInputError, ConfigError, ingest.IngestError)
@@ -47,29 +45,6 @@ USER_ERRORS = (PredictInputError, ConfigError, ingest.IngestError)
 
 class _Cancelled(Exception):
     """Internal: the job was cancelled between two curves."""
-
-
-def _cap_threads(model: TrainedModel, threads: int) -> TrainedModel:
-    """``model`` with its fold models predicting on at most ``threads`` threads.
-
-    Every family predicts with the threads it was trained with, all cores on large data: the
-    fold models' ``n_jobs``, or for CatBoost (which takes a count per call) the spec's. Fewer
-    stay as they are (an ExtraTrees artifact predicts on one, so that its sums are
-    reproducible), and an unset or negative count counts as all cores.
-    """
-    for member in model.members:
-        if isinstance(member.spec, CatBoost):
-            if _lowered(member.spec.n_jobs, threads):
-                member.spec.n_jobs = threads
-            continue
-        for one in member.models:
-            if _lowered(one.get_params()["n_jobs"], threads):
-                one.set_params(n_jobs=threads)
-    return model
-
-
-def _lowered(current: int | None, threads: int) -> bool:
-    return current is None or current <= 0 or current > threads
 
 
 def _importance_rows(frame: pd.DataFrame, target: str, classify: bool, limit: int) -> np.ndarray:
@@ -137,7 +112,7 @@ def build_explanation(
     and ``progress(done, total)`` told after each. Floats keep 6 significant digits.
     """
     start = time.monotonic()
-    _check_inputs(model, frame)  # PredictInputError for text in a numeric column...
+    check_inputs(model, frame)  # PredictInputError for text in a numeric column...
     classify = model.task == "classification"
     cells = (len(model.classes_) if classify else 1) * max(1, len(model.prep.sources))
     limit = max(1, min(IMPORTANCE_ROWS, CONTRIBUTION_CELLS // cells))  # wide multiclass
@@ -237,7 +212,7 @@ def explain_model(ctx: JobContext) -> None:
         if isinstance(e.__cause__, KeyError):  # storage: the files are gone (being deleted)
             raise JobUserError("the model no longer exists") from e
         raise JobUserError("the model file failed verification") from e
-    _cap_threads(model, THREADS)
+    explain.cap_threads(model)
     present = {column for column, _ in dataset.schema}
     missing = [column for column in model.columns if column not in present]
     if missing:

@@ -35,6 +35,30 @@ MAX_PATH_STEPS = 256
 PD_GRID = 20  # most points of a partial dependence grid
 PD_ROWS = 300  # most background rows it averages over
 ICE_ROWS = 50  # most single-row (ICE) curves it keeps
+THREADS = n_threads(PD_ROWS * PD_GRID)  # explanations make small predictions
+
+
+def cap_threads(model: TrainedModel, threads: int = THREADS) -> TrainedModel:
+    """``model`` with its fold models predicting on at most ``threads`` threads.
+
+    Every family predicts with the threads it was trained with, all cores on large data: the
+    fold models' ``n_jobs``, or for CatBoost (which takes a count per call) the spec's. Fewer
+    stay as they are (an ExtraTrees artifact predicts on one, so that its sums are
+    reproducible), and an unset or negative count counts as all cores.
+    """
+    for member in model.members:
+        if isinstance(member.spec, CatBoost):
+            if _lowered(member.spec.n_jobs, threads):
+                member.spec.n_jobs = threads
+            continue
+        for one in member.models:
+            if _lowered(one.get_params()["n_jobs"], threads):
+                one.set_params(n_jobs=threads)
+    return model
+
+
+def _lowered(current: int | None, threads: int) -> bool:
+    return current is None or current <= 0 or current > threads
 
 
 @dataclass(frozen=True)

@@ -475,7 +475,7 @@ def test_threads_are_capped_never_raised_and_predictions_unchanged():
         one.fit(X, y)
     expected = [spec.predict(one, X) for spec, one in fitted]
     model = SimpleNamespace(members=[SimpleNamespace(spec=s, models=[m]) for s, m in fitted])
-    explain_handler._cap_threads(model, 2)
+    explain.cap_threads(model, 2)
     threads = [one.get_params()["n_jobs"] for _, one in fitted[:5]]
     threads += [spec.n_jobs for spec, _ in fitted[5:]]
     assert threads == [2, 2, 2, 2, 1, 2, 1]  # one thread stays one

@@ -95,7 +95,7 @@ def unreadable_numbers(values: pd.Series) -> pd.Series:
     return (pd.to_numeric(values, errors="coerce").isna() & values.notna() & ~blank) | broken
 
 
-def _check_inputs(model: TrainedModel, df: pd.DataFrame) -> None:
+def check_inputs(model: TrainedModel, df: pd.DataFrame) -> None:
     missing = [c for c in model.prep.columns if c not in df.columns]
     if missing:
         raise PredictInputError(f"missing columns: {missing}")
@@ -129,7 +129,7 @@ def predict_chunks(
     if chunk_rows < 1:
         raise ValueError("chunk_rows must be at least 1")
     kept = included_columns(model, df.columns, include_columns)
-    _check_inputs(model, df)
+    check_inputs(model, df)
     return (
         _predict(model, df.iloc[start : start + chunk_rows].reset_index(drop=True), kept)
         for start in range(0, len(df), chunk_rows) or [0]
