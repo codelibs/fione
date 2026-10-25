@@ -106,7 +106,8 @@ curl -s -X POST localhost:8081/invocations -H 'Content-Type: application/json' -
 ```
 
 Each predicted row keeps its usual keys and gains `contributions` last; a row that cannot be
-predicted stays `{"exception": "..."}`. From the same iris model:
+predicted stays `{"exception": "..."}`. From a real run with an iris model of another
+training (so its probabilities differ from the example above):
 
 ```json
 {"predictions":[
@@ -124,14 +125,14 @@ predicted stays `{"exception": "..."}`. From the same iris model:
   kept outside it, so an input column named `bias` cannot clash with it.
 - The values are in probability (or target) units, not log-odds. They come from the libraries'
   tree contributions (TreeSHAP for the boosters, path contributions for ExtraTrees) combined over
-  the ensemble, so they are approximate: they add up exactly, but they are exact Shapley values
-  only for a single booster in its own margin units.
+  the ensemble, so they are approximate: they add up to the output (to rounding), but they are
+  exact Shapley values only for a single booster in its own margin units.
 - Contributions cost much more than a prediction. One request takes at most 1,000 instances
   (413 beyond that), and a model with very many classes and columns takes fewer (422).
   At most 2 such requests run at once; another one gets 503 with `Retry-After: 1` straight
-  away. All of these can be changed (see below).
+  away. Both numbers can be changed (see below).
 - `"contributions"` must be `true` or `false` (400 otherwise). Without it, or with `false`, the
-  response is exactly the one above.
+  response is exactly the same as before contributions existed.
 
 ### `GET /model`
 
