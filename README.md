@@ -64,6 +64,7 @@ Requires [uv](https://docs.astral.sh/uv/) and Python 3.12.
 uv sync                                   # dependencies, including the dev tools
 uv run pytest -q                          # unit, API, web and contract tests
 uv run pytest tests/e2e -m e2e            # browser tests against the Compose stack (needs Docker)
+uv run pytest -m timing                   # wall-clock time budget and latency checks
 uv run pytest -m acceptance               # engine accuracy, size and speed targets (downloads data)
 uv run ruff check . && uv run ruff format --check .
 uv run python scripts/check_licenses.py   # dependency licence check

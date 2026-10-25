@@ -50,6 +50,7 @@ v1 のソース（Java、Fess プラグイン）は、メンテナーのリポ�
 uv sync                                   # 依存関係（開発用ツールを含む）
 uv run pytest -q                          # 単体・API・Web・契約テスト
 uv run pytest tests/e2e -m e2e            # Compose 環境に対するブラウザテスト（Docker が必要）
+uv run pytest -m timing                   # 時間予算と予測速度の確認（実時間に依存）
 uv run pytest -m acceptance               # エンジンの精度・サイズ・速度の受け入れテスト（データを取得）
 uv run ruff check . && uv run ruff format --check .
 uv run python scripts/check_licenses.py   # 依存ライブラリのライセンス検査

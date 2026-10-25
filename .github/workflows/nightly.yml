@@ -28,6 +28,9 @@ jobs:
       - run: uv python install 3.12
       - run: uv sync --frozen
       - run: uv run pytest -m acceptance -v --junitxml=test-results/acceptance/junit.xml
+      # Wall-clock budget checks (time budgets, prediction latency): kept out of the PR runs.
+      - if: ${{ !cancelled() }}
+        run: uv run pytest -m timing -v --junitxml=test-results/acceptance/timing.xml
       - name: Keep the test report
         if: failure()
         uses: actions/upload-artifact@v4
