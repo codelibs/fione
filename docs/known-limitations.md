@@ -48,8 +48,9 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - **Installs from before model diagnostics existed refuse exports that carry them**
   ("unexpected fields"). Both are version 20.0.0, so the version does not tell them apart.
 - **Model imports are stricter than before.** A record with a number that is not finite or an
-  integer beyond the range of a float, or with diagnostics that have unknown fields or nest
-  deeper than training writes them, is refused. Exports never hold such values.
+  integer beyond the range of a float anywhere in it, diagnostics included, or with diagnostics
+  that have unknown fields or nest deeper than training writes them, is refused. Exports never
+  hold such values.
 
 ## Jobs and data
 
@@ -201,7 +202,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - バッチ予測で「各予測の内訳を含める」を選ぶと付く列は `contrib_<列>` と `contrib_bias`（入力に `bias` という列があると `contrib_bias_2`）で、名前がぶつかる入力列は `input_<名前>` になります。1 行あたり入力の列数 + 1 個の float64 の列が増え（2,000 列のモデルで 10 万行なら約 1.6 GB）、最大 10 万行、4 スレッドまでで計算するので、通常の予測よりかなり遅くなります。
 - 診断（指標タブ）は学習時の out-of-fold 予測から作るため、CV のスコアと同じくやや楽観的です。20 万行を超えるとランダムサンプルから作ります。
 - モデルの診断には学習データの値が含まれます（クラスのラベルと、回帰では学習行から抜き出した最大 2,000 件の実際の値とその予測値）。プロジェクトを読めるすべての人に見え、モデルのエクスポートにも入り、学習データを削除しても残ります。保存した説明も、カテゴリやクラスのラベルをデータセット削除後も保持します（エクスポートはされません）。モデルファイルとサービング用ファイルには診断は入りません。
-- 診断を持つエクスポートは、診断の機能より前のインストールでは読み込めません（どちらもバージョン 20.0.0 で区別できません）。インポートは、有限でない数、float の範囲を超える整数、未知の項目や深すぎる入れ子を持つ診断を拒否するようになりました。
+- 診断を持つエクスポートは、診断の機能より前のインストールでは読み込めません（どちらもバージョン 20.0.0 で区別できません）。インポートは、有限でない数や float の範囲を超える整数（診断の中も含め、どこにあっても）、未知の項目や深すぎる入れ子を持つ診断を拒否するようになりました。
 - リークとして既定でチェックを外すのは完全なもの（予測する列と同じ列、値で答えが決まる列）だけです（行の ID の列はこれまでどおり ID としてチェックを外します）。スコアによる疑い（単独で答えをよく当てる列、並び順や欠損が答えに沿う列、相関 |r| ≥ 0.99 の列。相関の列は以前はチェックを外していました）は注意を出すだけで、チェックされたままです。
 - リークのスコアは注意であり、どちらの向きにも間違えます。強い正当な列が疑われることも、リークを見逃すこともあります。すでに 0.89〜0.95 の列がある場合は 0.99 以上だけが注意になり、値の 1% が違う答えのコピー（0.987）は報告されません。一方のクラスで常に 0 の列（もう一方の 80% だけ値がある金額など）は最大 0.90 で、報告されません。回帰のリークは約 5,000 行未満ではほとんど見逃します。101 クラス以上の目的変数にはスコアがなく、画面にもそう表示されません。200 行未満のデータセットは採点せず、3 秒で打ち切ると、採点しなかった列があることを表示します。
 - 負荷の高いマシンでは、同じ時間予算で学習できるブースティングの回数が減ります。いちばん影響を受けるのは CatBoost です。

@@ -642,6 +642,36 @@ def test_numbers_that_do_not_fit_a_float_are_refused(dest, source, changes):
     assert_nothing_left(dest)
 
 
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"auc": 10**400},
+        {"n_rows": -(10**400)},
+        {"roc": {"fpr": [0.0, 10**400]}},
+        {"confusion": {"classes": [0, 1], "matrix": [[1, 10**400], [0, 1]]}},
+        {"roc": {"fpr": [float("nan")]}},
+        {"confusion": {"classes": [0], "matrix": [[float("inf")]]}},
+        {"calibration": [{"predicted": float("-inf"), "observed": 0.5, "count": 1}]},
+    ],
+    ids=["auc", "n_rows", "roc", "confusion", "nan", "inf", "-inf"],
+)
+def test_diagnostics_check_refuses_numbers_beyond_a_float_on_its_own(part):
+    """Every number inside the diagnostics, as the import's check sees them, whatever ran
+    before it."""
+    found = {"version": 1, "task": "classification", **part}
+    with pytest.raises(ModelImportError, match="diagnostics hold a number"):
+        transfer._check_diagnostics(found, SimpleNamespace(task="classification"))
+
+
+def test_an_overflowing_float_literal_inside_diagnostics_is_refused(dest, source):
+    diag = {"version": 1, "task": source.record.task, "auc": 0.5}
+    text = record_with(source, diagnostics=diag).decode().replace('"auc": 0.5', '"auc": 1e400')
+    assert "1e400" in text
+    with pytest.raises(ModelImportError):
+        do_import(dest, rebuilt(source.parts, record=text.encode()))
+    assert_nothing_left(dest)
+
+
 def test_an_overflowing_float_literal_is_refused(dest, source):
     text = (
         source.parts["record.json"].decode().replace('"metrics": {', '"metrics": {"x": 1e400, ', 1)

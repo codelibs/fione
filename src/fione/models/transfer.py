@@ -354,6 +354,8 @@ def _check_diagnostics(value, manifest: Manifest) -> None:
         raise _bad_record("diagnostics have unknown fields")
     if _depth(value) > diagnostics.DEPTH:
         raise _bad_record("diagnostics are nested too deeply")
+    if not _numbers_fit(value):  # whatever the caller checked before
+        raise _bad_record("diagnostics hold a number that is not finite or too large")
     try:
         size = len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8"))
     except (ValueError, RecursionError) as e:
