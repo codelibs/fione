@@ -13,3 +13,6 @@ dist/
 # Deployment secrets (see docker/.env.example)
 .env
 docker/.env
+
+# End-to-end failure artifacts (traces, screenshots, compose logs)
+test-results/

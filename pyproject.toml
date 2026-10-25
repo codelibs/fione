@@ -51,5 +51,6 @@ markers = [
     "s3: needs an S3-compatible server (set FIONE_TEST_S3_ENDPOINT, _BUCKET, _ACCESS_KEY, _SECRET_KEY)",
     "timing: wall-clock time budget checks (select with -m timing)",
     "acceptance: slow end-to-end accuracy and size targets on real datasets (select with -m acceptance)",
+    "e2e: browser tests against the Docker Compose stack (select with -m e2e; needs Docker)",
 ]
-addopts = "-m 'not acceptance'"
+addopts = "-m 'not acceptance and not e2e'"
