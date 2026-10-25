@@ -262,7 +262,14 @@
       text = source.textContent;
     }
     el.setAttribute("data-chart-ready", "");
-    var spec = JSON.parse(text);
+    var spec;
+    try {
+      spec = JSON.parse(text);
+    } catch (error) {
+      // One unreadable spec leaves its chart blank (the text alternative stays), never the rest.
+      console.warn("a chart's data could not be read", error);
+      return;
+    }
     var entry = { el: el, spec: spec, figure: el.closest("figure"), chart: null, observer: null };
     charts.push(entry);
     // Started once the element has a size: a chart in a hidden tab waits until it is shown.
