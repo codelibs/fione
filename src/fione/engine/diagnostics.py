@@ -1,13 +1,16 @@
 """Training-time diagnostics from the ensemble's out-of-fold (OOF) predictions.
 
 ``diagnostics`` returns a small dict that is strict JSON: builtins only, floats rounded to 6
-significant digits, and ``None`` where a value is undefined (never NaN or infinity). Every
+significant digits (regression values: 6 significant digits of their spread, when that is
+finer), and ``None`` where a value is undefined (never NaN or infinity). Every
 result has ``version`` (1), ``task``, ``n_rows`` (the rows used) and ``sampled``: more than
 ``max_rows`` rows are first sampled without replacement, seeded, so the cost stays bounded.
 
 Classification (``y`` holds class codes 0..k-1 of ``labels``, ``pred`` the (n, k) probabilities):
 
-- ``labels``: ``jsonable(labels)``; everything else refers to a class by its index.
+- ``labels``: ``jsonable(labels)``, with any label JSON lacks (a ``Timestamp``, ``Decimal``, ...)
+  as ``str(label)``, as in the artifact manifest; everything else refers to a class by its
+  index.
 - ``confusion``: ``classes`` (indices, ``-1`` = "other") and ``matrix`` (rows actual, columns the
   argmax). Above ``MAX_CONFUSION`` classes it keeps the largest by support (ties: lower index
   first), in index order, and counts the rest as "other".
@@ -17,14 +20,18 @@ Classification (``y`` holds class codes 0..k-1 of ``labels``, ``pred`` the (n, k
 - Binary only, for the positive class ``labels[1]``: ``auc``; the ``roc`` (fpr, tpr, threshold)
   and ``pr`` (precision, recall, threshold) curves, thinned to ``MAX_CURVE_POINTS`` with both
   ends kept, with the infinite threshold (and PR's last point, which has none) as 1.0; and
-  ``calibration``: 10 equal-width bins of p(positive), empty bins omitted.
+  ``calibration``: 10 equal-width bins of p(positive), left-closed ([0, 0.1), ...; sklearn's
+  ``calibration_curve`` uses right-closed ones) with p = 1 in the last, empty bins omitted.
 
 Regression (``pred`` of shape (n,)), with residual = actual - predicted:
 
 - ``residuals``: a 30-bin histogram (``edges``, ``counts``);
 - ``by_decile``: the rows split into 10 near-equal groups by prediction (empty ones omitted);
-- ``points``: at most ``MAX_POINTS`` (actual, predicted) pairs, seeded.
+- ``points``: at most ``MAX_POINTS`` (actual, predicted) pairs, in a seeded random order (never
+  the row order, which would tie each value to its training row).
 """
+
+import math
 
 import numpy as np
 from sklearn.metrics import precision_recall_curve, roc_auc_score, roc_curve
@@ -49,6 +56,29 @@ def _num(value) -> float | None:
 
 def _nums(values: np.ndarray) -> list:
     return [_num(v) for v in values]
+
+
+def _fine(values: np.ndarray) -> list:
+    """``_nums``, but with 6 significant digits of the values' spread where that is finer, so
+    that values large against their spread (1e6 + [0, 1e-3]) stay distinct."""
+    finite = values[np.isfinite(values)]
+    spread = float(np.ptp(finite)) if len(finite) else 0.0
+    if spread <= 0:
+        return _nums(values)
+    scale = math.floor(math.log10(spread))
+    out = []
+    for value in values.tolist():
+        if not math.isfinite(value) or value == 0:
+            out.append(_num(value))
+            continue
+        digits = min(17, 6 + max(0, math.floor(math.log10(abs(value))) - scale))
+        out.append(float(f"{value:.{digits}g}"))
+    return out
+
+
+def _label(value):
+    value = jsonable(value)
+    return value if value is None or type(value) in (str, int, float, bool) else str(value)
 
 
 def _largest(support: np.ndarray, count: int) -> np.ndarray:
@@ -107,7 +137,7 @@ def _classification(y: np.ndarray, pred: np.ndarray, labels: list) -> dict:
     f1 = _ratio(2 * tp, n_predicted + support)
     listed = np.arange(k) if k <= MAX_PER_CLASS else _largest(support, MAX_PER_CLASS)
     out = {
-        "labels": jsonable(list(labels)),
+        "labels": [_label(label) for label in labels],
         "confusion": {"classes": classes, "matrix": matrix.reshape(size, size).tolist()},
         "per_class": [
             {
@@ -162,22 +192,20 @@ def _binary(y: np.ndarray, positive: np.ndarray) -> dict:
 def _regression(y: np.ndarray, pred: np.ndarray, rng: np.random.Generator) -> dict:
     residual = y - pred
     counts, edges = np.histogram(residual, bins=RESIDUAL_BINS)
-    by_decile = []
-    for group in np.array_split(np.argsort(pred, kind="stable"), DECILES):
-        if len(group):
-            by_decile.append(
-                {
-                    "predicted_mean": _num(pred[group].mean()),
-                    "residual_mean": _num(residual[group].mean()),
-                    "residual_std": _num(residual[group].std()),
-                    "count": len(group),
-                }
-            )
-    points = np.arange(len(y))
-    if len(y) > MAX_POINTS:
-        points = np.sort(rng.choice(len(y), MAX_POINTS, replace=False))
+    groups = [g for g in np.array_split(np.argsort(pred, kind="stable"), DECILES) if len(g)]
+    means = _fine(np.array([pred[group].mean() for group in groups]))
+    by_decile = [
+        {
+            "predicted_mean": mean,
+            "residual_mean": _num(residual[group].mean()),
+            "residual_std": _num(residual[group].std()),  # ddof 0
+            "count": len(group),
+        }
+        for group, mean in zip(groups, means, strict=True)
+    ]
+    points = rng.permutation(len(y))[:MAX_POINTS]
     return {
-        "residuals": {"edges": _nums(edges), "counts": counts.tolist()},
+        "residuals": {"edges": _fine(edges), "counts": counts.tolist()},
         "by_decile": by_decile,
-        "points": {"actual": _nums(y[points]), "predicted": _nums(pred[points])},
+        "points": {"actual": _fine(y[points]), "predicted": _fine(pred[points])},
     }
