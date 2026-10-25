@@ -12,7 +12,6 @@ import json
 import math
 import re
 
-import pyarrow as pa
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
@@ -42,7 +41,6 @@ from fione.jobs.store import JobStatus
 from fione.models import explanations
 from fione.models import service as models
 from fione.models.bundle import BundleError
-from fione.models.live import Busy, TooLarge, Untrusted
 from fione.models.service import ModelNotFound, ModelRecord
 from fione.models.transfer import ModelImportError
 from fione.modules.registry import redact
@@ -52,7 +50,15 @@ from fione.projects import service as projects
 from fione.projects.service import DatasetNotFound
 from fione.web.access import Ctx, action, context, dataset_in, model_in, page, same_site
 from fione.web.automl import Posted, _chart, _int_param, _text
-from fione.web.easyml import _baseline, _clock, _ratings, _score_sentence
+from fione.web.easyml import (
+    Refused,
+    _baseline,
+    _clock,
+    _ratings,
+    _score_sentence,
+    model_columns,
+    refusals,
+)
 from fione.web.uploads import UploadFormError, UploadProblem, read_form
 from fione.web.views import UiError, language, render
 
@@ -714,12 +720,6 @@ STATES = {
 }
 
 
-def _model_columns(record: ModelRecord) -> list[str]:
-    """The model's input columns as stored (its importance has one entry per column)."""
-    found = record.importance if isinstance(record.importance, dict) else {}
-    return [name for name in found if isinstance(name, str)]
-
-
 def _scalar(value) -> bool:
     return value is None or isinstance(value, str | int | float | bool)
 
@@ -864,14 +864,6 @@ def _pd_chart(record: ModelRecord, curve: dict, output: int, lang: str) -> dict:
     }
 
 
-class _Refused(Exception):
-    """Why a curve cannot be computed here: an i18n key, and a detail to show."""
-
-    def __init__(self, key: str, detail: str | None = None):
-        super().__init__(key)
-        self.key, self.detail = key, detail
-
-
 def _training_data(conn, record: ModelRecord):
     """The model's training dataset when it is still there, with the model's columns."""
     if record.dataset_id is None:
@@ -881,7 +873,7 @@ def _training_data(conn, record: ModelRecord):
     except DatasetNotFound:
         return None
     present = {name for name, _ in dataset.schema}
-    if dataset.project_id != record.project_id or not set(_model_columns(record)) <= present:
+    if dataset.project_id != record.project_id or not set(model_columns(record)) <= present:
         return None
     return dataset
 
@@ -890,14 +882,11 @@ def _live_curve(request: Request, conn, record: ModelRecord, column: str, output
     """The partial dependence of ``column`` computed now on up to ``PD_ROWS`` rows of the
     training data, in the stored curves' form (same order of steps as the API)."""
     live = request.app.state.live_models
-    try:
+    with refusals():
         live.check(record)
-    except Untrusted:
-        raise _Refused("explain.untrusted") from None
-    dataset = _training_data(conn, record)
-    if dataset is None:
-        raise _Refused("explain.no_dataset")
-    try:
+        dataset = _training_data(conn, record)
+        if dataset is None:
+            raise Refused("explain.no_dataset")
         with live.use(record) as model:
             rows = engine_explain.pd_rows(model, engine_explain.PD_ROWS, engine_explain.PD_GRID)
             try:
@@ -905,11 +894,11 @@ def _live_curve(request: Request, conn, record: ModelRecord, column: str, output
                     request.app.state.storage,
                     dataset,
                     rows,
-                    _model_columns(record),
+                    model_columns(record),
                     per_group=rows,
                 )
             except KeyError:  # storage: the file is gone (its message would name the key)
-                raise _Refused("explain.no_dataset") from None
+                raise Refused("explain.no_dataset") from None
             check_inputs(model, background)
             outputs = len(engine_explain.explained_outputs(model))
             curve = engine_explain.partial_dependence(
@@ -919,18 +908,6 @@ def _live_curve(request: Request, conn, record: ModelRecord, column: str, output
                 max_rows=rows,
                 class_index=output if output is not None and output < outputs else None,
             )
-    except Busy:
-        raise _Refused("explain.busy") from None
-    except TooLarge:
-        raise _Refused("explain.too_large") from None
-    except ModelNotFound:
-        raise _Refused("explain.model_gone") from None
-    except UntrustedArtifactError:
-        raise _Refused("explain.broken") from None
-    except ValueError as e:  # PredictInputError and the engine's checks
-        if isinstance(e, pa.ArrowException | UnicodeError):
-            raise
-        raise _Refused("explain.pd.failed", redact(str(e))) from None
     return {
         "column": curve.column,
         "kind": curve.kind,
@@ -953,14 +930,14 @@ def _pd_view(
     view = {"url": url, "column": column}
     if not column:
         return view | {"message": "explain.pd.pick"}
-    if column not in _model_columns(record):
+    if column not in model_columns(record):
         return view | {"message": "explain.pd.unknown"}
     curve = curves.get(column)
     source = "stored"
     if curve is None:
         try:
             curve = _live_curve(request, conn, record, column, output)
-        except _Refused as e:
+        except Refused as e:
             return view | {"message": e.key, "detail": e.detail}
         source = "live"
     k = len(curve["outputs"])
@@ -987,7 +964,7 @@ def _output_param(text: str | None) -> int | None:
 def _datasets_for(conn, record: ModelRecord) -> list[dict]:
     """The recompute choices: the project's datasets holding every model column, the model's
     own training data first (as ``""``, the training data the job resolves itself)."""
-    needed = set(_model_columns(record))
+    needed = set(model_columns(record))
     if not needed:
         return []
     choices = []
@@ -1005,7 +982,7 @@ def _explain_view(request: Request, conn, ctx: Ctx, record: ModelRecord, lang: s
     and the first stored curve), the column picker and, for writers, the recompute form."""
     stored = explanations.get_explanation(conn, record.id)
     job = explanations.latest_explain_job(conn, record.id)
-    columns = _model_columns(record)
+    columns = model_columns(record)
     importance, curves, partial = [], {}, False
     if stored is not None:
         importance, curves, partial = _stored(stored.payload, columns)
@@ -1062,7 +1039,7 @@ def explain_pd(request: Request, conn: Conn, pid: str, mid: str) -> Response:
     record = model_in(conn, ctx, mid)
     lang = language(request)
     stored = explanations.get_explanation(conn, record.id)
-    curves = {} if stored is None else _stored(stored.payload, _model_columns(record))[1]
+    curves = {} if stored is None else _stored(stored.payload, model_columns(record))[1]
     column = request.query_params.get("column", "")
     output = _output_param(request.query_params.get("class"))
     pd_view = _pd_view(request, conn, record, curves, column, output, lang)

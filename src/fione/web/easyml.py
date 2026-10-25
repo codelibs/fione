@@ -11,10 +11,14 @@ the session's CSRF token in ``csrf_token``. Uploads check the session, write acc
 import logging
 import math
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Annotated
 from urllib.parse import urlencode
 
+import numpy as np
+import pyarrow as pa
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
 from starlette.datastructures import FormData
@@ -37,6 +41,7 @@ from fione.data.profile import (
     SCORE_REASONS,
     LeakCheck,
 )
+from fione.engine import explain
 from fione.engine.artifact import UntrustedArtifactError, read_manifest
 from fione.engine.config import TargetError, TrainConfig
 from fione.engine.prep import validate_target
@@ -44,12 +49,13 @@ from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
 from fione.models import service as models
 from fione.models.bundle import BundleError
+from fione.models.live import Busy, TooLarge, Untrusted
 from fione.models.rating import Baseline, Rating, star_rating, target_baseline
 from fione.models.service import ModelNotFound, ModelRecord
 from fione.modules.registry import redact
-from fione.predict.batch import PREDICT
+from fione.predict.batch import PREDICT, check_inputs
 from fione.projects import service as projects
-from fione.projects.ingest import read_dataset_sample
+from fione.projects.ingest import read_dataset_rows, read_dataset_sample
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.tools.builtin import propose, sample_profile
 from fione.web.access import Ctx
@@ -75,6 +81,9 @@ MAX_RUNTIME_DIGITS = 6  # custom minutes: a whole number of 1 or more, at most 6
 TASKS = ("classification", "regression")
 PREVIEW_ROWS = 10
 RESULT_PREVIEW_ROWS = 20
+RESULT_CONTRIB_COLUMNS = 20  # contribution columns previewed (all are in the download)
+WHY_ROWS = 5  # rows of the prediction result explained
+WHY_TOP = 5  # columns shown per row; the rest are summed as "other columns"
 RECENT_JOBS = 10
 TOP_INPUTS = 5
 EVENT_DETAILS = 20
@@ -351,8 +360,8 @@ def _pct(rate: float) -> str:
     return f"{value:.1f}".removesuffix(".0") if value < 10 else f"{value:.0f}"
 
 
-def _preview(request: Request, dataset: Dataset, rows: int) -> dict:
-    frame = read_dataset_sample(_storage(request), dataset, max_rows=rows)
+def _preview(request: Request, dataset: Dataset, rows: int, columns=None) -> dict:
+    frame = read_dataset_sample(_storage(request), dataset, max_rows=rows, columns=columns)
     cells = [
         [cell(v) for v in row] for row in frame.astype(object).itertuples(index=False, name=None)
     ]
@@ -880,12 +889,184 @@ def prediction_result(request: Request, conn: Conn, pid: str, jid: str) -> Respo
     if job.status != JobStatus.DONE:
         return RedirectResponse(f"/projects/{pid}/jobs/{job.id}", 303)
     dataset = _dataset(conn, ctx, str((job.result or {}).get("dataset_id", "")))
+    names = _names(dataset)
+    contributions = None
+    if job.payload.get("include_contributions") is True:
+        # contrib_* columns come after the predictions (colliding inputs were renamed):
+        # previewed apart, behind a disclosure, so the predictions stay in view
+        found = [n for n in names if n.startswith("contrib_")]
+        names = [n for n in names if not n.startswith("contrib_")]
+        shown = found[:RESULT_CONTRIB_COLUMNS]
+        contributions = {
+            "preview": _preview(request, dataset, RESULT_PREVIEW_ROWS, shown),
+            "total": len(found),
+            "more": len(found) - len(shown),
+        }
     return _view(
         request,
         "result.html",
         ctx,
         job=job,
         dataset=dataset,
-        preview=_preview(request, dataset, RESULT_PREVIEW_ROWS),
+        preview=_preview(request, dataset, RESULT_PREVIEW_ROWS, names),
+        contributions=contributions,
         model_id=job.payload.get("model_id"),
     )
+
+
+# --- why: each row's reasons ----------------------------------------------------------------
+
+
+def model_columns(record: ModelRecord) -> list[str]:
+    """The model's input columns as stored (its importance has one entry per column)."""
+    found = record.importance if isinstance(record.importance, dict) else {}
+    return [name for name in found if isinstance(name, str)]
+
+
+class Refused(Exception):
+    """Why an explanation cannot be computed here: the i18n key shown, and a detail."""
+
+    def __init__(self, key: str, detail: str | None = None):
+        super().__init__(key)
+        self.key, self.detail = key, detail
+
+
+@contextmanager
+def refusals() -> Iterator[None]:
+    """``LiveModels``' and the engine's refusals of an explanation request as ``Refused``,
+    as the API maps them to its error codes."""
+    try:
+        yield
+    except Untrusted:
+        raise Refused("explain.untrusted") from None
+    except Busy:
+        raise Refused("explain.busy") from None
+    except TooLarge:
+        raise Refused("explain.too_large") from None
+    except ModelNotFound:
+        raise Refused("explain.model_gone") from None
+    except UntrustedArtifactError:
+        raise Refused("explain.broken") from None
+    except ValueError as e:  # PredictInputError, ConfigError and the engine's limits
+        if isinstance(e, pa.ArrowException | UnicodeError):
+            raise
+        raise Refused("explain.failed", redact(str(e))) from None
+
+
+def _signed(value: float, decimals: int) -> str:
+    return f"{value:+,.{decimals}f}".replace("-", "−")
+
+
+def _why_row(columns, values, bias: float, prediction: float, inputs, percent: bool) -> dict:
+    """One row's reasons, from the average prediction (``bias``) to ``prediction``: the
+    ``WHY_TOP`` columns with the largest effect (``values``), then the rest summed as other
+    columns. Classification in percent and percentage points, regression in target units,
+    all with one number of decimals per row; ``meter`` is the effect's size out of 1,000."""
+    scale = 100.0 if percent else 1.0
+    values = np.asarray(values, dtype=float) * scale
+    bias, prediction = bias * scale, prediction * scale
+    if percent:
+        decimals = 1
+    else:
+        largest = max(abs(prediction), abs(bias), float(np.abs(values).max(initial=0.0)))
+        decimals = min(6, max(0, 2 - math.floor(math.log10(largest)))) if largest > 0 else 2
+    order = np.argsort(-np.abs(values), kind="stable")
+    top, rest = order[:WHY_TOP], order[WHY_TOP:]
+    other = float(values[rest].sum()) if len(rest) else None
+    biggest = max([abs(float(values[i])) for i in top] + [abs(other or 0.0)])
+
+    def meter(value: float) -> int:
+        return round(abs(value) / biggest * 1000) if biggest > 0 else 0
+
+    unit = "%" if percent else ""
+    return {
+        "start": f"{bias:,.{decimals}f}{unit}",
+        "total": f"{prediction:,.{decimals}f}{unit}",
+        "items": [
+            {
+                "column": columns[i],
+                "input": inputs[i],
+                "text": _signed(float(values[i]), decimals),
+                "up": values[i] >= 0,
+                "meter": meter(float(values[i])),
+            }
+            for i in top
+        ],
+        "other": None
+        if other is None
+        else {
+            "n": len(rest),
+            "text": _signed(other, decimals),
+            "up": other >= 0,
+            "meter": meter(other),
+        },
+    }
+
+
+def _why_view(request: Request, conn, job: Job, lang: str) -> dict:
+    """The first ``WHY_ROWS`` rows of the prediction's source data with their reasons, or a
+    ``message`` saying why there are none."""
+    url = f"/projects/{job.project_id}/jobs/{job.id}/result/why"
+    view: dict = {"url": url}
+    try:
+        record = models.get_model(conn, job.payload.get("model_id"))
+    except (ModelNotFound, TypeError, ValueError):
+        record = None
+    if record is None or record.project_id != job.project_id:
+        return view | {"message": "why.no_model"}
+    try:
+        dataset = projects.get_dataset(conn, job.payload.get("dataset_id"))
+    except (DatasetNotFound, TypeError, ValueError):
+        dataset = None
+    live = request.app.state.live_models
+    try:
+        with refusals():
+            live.check(record)
+            columns = model_columns(record)
+            if (
+                dataset is None
+                or dataset.project_id != job.project_id
+                or not set(columns) <= set(_names(dataset))
+            ):
+                raise Refused("why.no_dataset")
+            with live.use(record) as model:
+                rows = explain.contribution_rows(model, WHY_ROWS)
+                if rows == 0:
+                    raise Refused("why.too_wide")
+                try:
+                    frame = read_dataset_rows(_storage(request), dataset, 0, rows, columns)
+                except KeyError:  # storage: the file is gone (its message would name the key)
+                    raise Refused("why.no_dataset") from None
+                check_inputs(model, frame)
+                c = explain.contributions(model, frame)
+    except Refused as e:
+        return view | {"message": e.key, "detail": e.detail, "retry": e.key == "explain.busy"}
+    percent = record.task == "classification"
+    binary = percent and len(c.outputs) == 1
+    out = []
+    for i, slot in enumerate(c.slots().tolist()):
+        inputs = [cell(frame[n].iloc[i]) if n in frame.columns else None for n in c.columns]
+        row = _why_row(
+            c.columns,
+            c.values[i, slot],
+            float(c.bias[i, slot]),
+            float(c.prediction[i, slot]),
+            inputs,
+            percent,
+        )
+        row["label"] = str(c.outputs[slot])
+        out.append(row)
+    kind = "positive" if binary else ("class" if percent else "value")
+    return view | {"rows": out, "kind": kind, "target": record.target}
+
+
+@router.get("/projects/{pid}/jobs/{jid}/result/why")
+def prediction_why(request: Request, conn: Conn, pid: str, jid: str) -> Response:
+    """The fragment of the result page explaining its first rows (computed when asked for:
+    the result page loads it once, never polling)."""
+    ctx = _page(request, conn, pid)
+    job = _job(conn, ctx, jid)
+    if job.kind != "batch_predict":
+        raise UiError(404, "error.not_found")
+    view = _why_view(request, conn, job, language(request))
+    return render(request, "_why.html", ctx.auth, ctx=ctx, why=view)

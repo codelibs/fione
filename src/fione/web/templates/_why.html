@@ -1,0 +1,49 @@
+{% from "_macros.html" import icon %}
+{# Each of the first rows' reasons, swapped in by the result page (loaded once, never polled).
+   The effects are text with their sign; the meter only shows their size. #}
+<section class="stack-tight" id="why" aria-labelledby="why-title">
+  <h2 class="section-header__title" id="why-title">{{ t('why.title') }}</h2>
+  {% if why.message %}
+  <p class="text-muted">{{ t(why.message) }}</p>
+  {% if why.detail %}<p class="text-muted text-sm">{{ why.detail }}</p>{% endif %}
+  {% if why.retry %}<p><button type="button" class="btn btn-secondary btn-sm" hx-get="{{ why.url }}" hx-target="#why" hx-swap="outerHTML">{{ t('why.retry') }}</button></p>{% endif %}
+  {% else %}
+  <p class="text-muted text-sm">{{ t('why.hint_percent' if why.kind != "value" else 'why.hint_value', n=why.rows|length) }}</p>
+  <div class="why-rows">
+    {% for row in why.rows %}
+    {% set n = loop.index %}
+    <section class="card card-padded stack-tight why-row" aria-labelledby="why-row-{{ n }}">
+      <h3 class="why-row__title" id="why-row-{{ n }}">{{ t('why.row', n=n) }}</h3>
+      <p class="why-prediction">{% if why.kind == "value" %}{{ t('why.predicted_value', target=why.target) }}{% elif why.kind == "positive" %}{{ t('why.predicted_positive', label=row.label|truncate(60)) }}{% else %}{{ t('why.predicted_class', label=row.label|truncate(60)) }}{% endif %} <strong class="why-total">{{ row.total }}</strong></p>
+      <div class="table-wrap" tabindex="0" role="region" aria-labelledby="why-row-{{ n }}">
+        <table class="table table-compact why-table">
+          <thead><tr>
+            <th scope="col">{{ t('why.col.column') }}</th>
+            <th scope="col" class="num">{{ t('why.col.effect') }}</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row">{{ t('why.average') }}</th>
+              <td class="num"><span class="why-start">{{ row.start }}</span></td>
+            </tr>
+            {% for item in row["items"] %}
+            <tr class="{{ 'contrib-up' if item.up else 'contrib-down' }}">
+              <th scope="row" class="cell-name">{{ item.column }}<span class="why-input">{{ t('why.input', value="—" if item.input is none else (item.input|cellnum if item.input is number else item.input|string|truncate(40))) }}</span></th>
+              <td class="num why-effect"><meter class="contrib-meter" min="0" max="1000" value="{{ item.meter }}" aria-hidden="true"></meter> <span class="why-amount">{{ item.text }}</span></td>
+            </tr>
+            {% endfor %}
+            {% if row.other %}
+            <tr class="{{ 'contrib-up' if row.other.up else 'contrib-down' }}">
+              <th scope="row">{{ t('why.other', n=row.other.n) }}</th>
+              <td class="num why-effect"><meter class="contrib-meter" min="0" max="1000" value="{{ row.other.meter }}" aria-hidden="true"></meter> <span class="why-amount">{{ row.other.text }}</span></td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+  <p class="text-muted text-sm">{{ t('why.approximate') }}</p>
+  {% endif %}
+</section>
