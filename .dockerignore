@@ -20,12 +20,3 @@ docker/.env
 .superpowers/
 tests/
 docs/
-tmp/
-dbflute_fess/
-.venv
-memo.txt
-release.sh
-freegen.sh
-.classpath
-.project
-.settings/
