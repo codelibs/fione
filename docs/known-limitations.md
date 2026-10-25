@@ -68,6 +68,12 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - **No images are published yet.** You build them from the repository. The release workflow
   publishes amd64 images only, and it does not wait for the tests of the tagged commit: tag
   only commits whose CI has passed.
+- **On Linux, XGBoost brings NVIDIA's NCCL library** (`nvidia-nccl-cu13`, about 350 MB of the
+  `fione` and `fione-serving` images), although Fione trains on CPUs only. Its package metadata
+  declares the licence `LicenseRef-NVIDIA-Proprietary`, while the licence file inside the
+  wheel is a BSD-3-Clause-style text; the licence check reports it for review rather than as
+  allowed. Review it before redistributing the images. The CPU-only `xgboost-cpu` package
+  (Apache-2.0, no NCCL) has no macOS wheels, so it is not used.
 - **Base images are pinned by tag, not by digest**, so a rebuild can pick up a patched base
   image.
 - **Models are tied to the image tag.** Fione Serving loads only models trained by an image of
@@ -101,6 +107,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - Fione Serving には認証も、リクエスト数・同時実行数の制限もありません。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
 - 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。
 - CV のスコアはやや楽観的です（早期終了とアンサンブルの重みが同じ fold の予測で決まるため）。正直な数値は、学習に使わないテストデータで確かめてください。
+- Linux では XGBoost が NVIDIA の NCCL ライブラリ（`nvidia-nccl-cu13`、イメージ内で約 350 MB）を取り込みます。パッケージのメタデータはライセンスを `LicenseRef-NVIDIA-Proprietary` としており、ホイール内のライセンス文は BSD-3-Clause 型です。イメージを再配布する前に確認してください（CPU 専用の `xgboost-cpu` は macOS 用のホイールがないため使っていません）。
 - 1 プロセス・1 ワーカーで動かしてください。イメージは約 1.65 GB / 1.7 GB で、まだ公開していません（リリースは amd64 のみ、タグは CI が通ったコミットにだけ付けてください）。ベースイメージはタグ固定で、ダイジェスト固定ではありません。
 - モデルはイメージのタグに結び付いています。古い版のモデルが新しい版で読み込める保証はありません。
 - ダークモードは Chrome / Edge 123 以降、Firefox 120 以降、Safari 17.5 以降が必要です。ログインには JavaScript が必要です。簡易・詳細の表示はブラウザごとに記憶されます。
