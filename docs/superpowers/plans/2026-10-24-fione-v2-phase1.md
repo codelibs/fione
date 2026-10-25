@@ -70,7 +70,7 @@ Removed in Task 0: all v1 Java/Maven/DBFlute files (`src/main`, `src/test`, `pom
 
 **Interfaces:** Produces `fione.version.__version__: str`.
 
-- [ ] **Step 1:** Work on the branch `v2`; the tag `v1-final` marks the last v1 commit of `master`. Delete the v1 workflow `.github/workflows/maven.yml`.
+- [ ] **Step 1:** Work on the branch `v2`; the last v1 commit stays in `master`'s history. Delete the v1 workflow `.github/workflows/maven.yml`.
 - [ ] **Step 2:** Confirm `git branch --show-current` is `v2`.
 - [ ] **Step 3: Failing test** `test_version_is_semver`: `re.fullmatch(r"\d+\.\d+\.\d+", __version__)`. Run `uv run pytest tests/unit -q` → FAIL (module missing).
 - [ ] **Step 4:** Remove v1 files, scaffold `pyproject.toml` (project `fione`, `requires-python = ">=3.12,<3.14"`, src layout, dev group: pytest, pytest-cov, ruff, playwright), `ruff.toml`, version `2.0.0.dev0`. Rewrite `README.md` (Apache license kept).

@@ -49,7 +49,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - **Datasets are loaded whole into memory** for training, batch prediction and Python modules
   (there is no out-of-core processing). Measured on a 16-core Mac, a training job peaked at about
   1.9 GB of memory for a 150 MB CSV (200,000 rows × 42 columns) and 2.5 GB for a 750 MB CSV
-  (1,000,000 × 42); roughly 1.5 GB of that does not grow with the data (the libraries). Plan
+  (1,000,000 × 42); roughly 1.5–1.7 GB of that does not grow with the data (the libraries). Plan
   for at least 4 GB of RAM, and more for wider data or larger files.
 - **Cross-validation scores are slightly optimistic.** Boosting models stop early on their
   validation fold, and the ensemble's weights are chosen on the same out-of-fold predictions it
@@ -105,7 +105,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - エンジンは実際には最大実行時間の約 3 分の 2 を使います。学習やエンジンのメッセージは日本語画面でも英語です。
 - API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。
 - Fione Serving には認証も、リクエスト数・同時実行数の制限もありません。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
-- 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。
+- 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5〜1.7 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。
 - CV のスコアはやや楽観的です（早期終了とアンサンブルの重みが同じ fold の予測で決まるため）。正直な数値は、学習に使わないテストデータで確かめてください。
 - Linux では XGBoost が NVIDIA の NCCL ライブラリ（`nvidia-nccl-cu13`、イメージ内で約 350 MB）を取り込みます。パッケージのメタデータはライセンスを `LicenseRef-NVIDIA-Proprietary` としており、ホイール内のライセンス文は BSD-3-Clause 型です。イメージを再配布する前に確認してください（CPU 専用の `xgboost-cpu` は macOS 用のホイールがないため使っていません）。
 - 1 プロセス・1 ワーカーで動かしてください。イメージは約 1.65 GB / 1.7 GB で、まだ公開していません（リリースは amd64 のみ、タグは CI が通ったコミットにだけ付けてください）。ベースイメージはタグ固定で、ダイジェスト固定ではありません。
