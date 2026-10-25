@@ -1,3 +1,4 @@
+import csv
 import datetime
 import io
 import os
@@ -6,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -758,3 +760,13 @@ def test_a_model_too_wide_to_explain_fails_the_job_plainly(
     assert done.status is JobStatus.FAILED
     assert "too wide" in done.message
     assert predict_datasets(conn, project) == []
+
+
+def test_contribution_headers_are_csv_safe(conn, storage, project):
+    hostile = ["a,b", 'q"t', "x\ny", "<script>", "=1+2", "bias"]
+    names = batch.contribution_columns(SimpleNamespace(columns=hostile))
+    assert all(name.startswith("contrib_") for name in names)  # never a formula
+    frame = pd.DataFrame([[0.5] * len(names)], columns=names)
+    out = ingest.ingest_batches(storage, conn, project.id, "c", DatasetType.PREDICT, [frame])
+    text = b"".join(ingest.export_csv(storage, out)).decode()
+    assert next(csv.reader(io.StringIO(text))) == names
