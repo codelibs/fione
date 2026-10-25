@@ -6,9 +6,13 @@ access); a dataset must belong to that project too. Reading is enough for every 
 an explanation changes nothing (recomputing the stored one is ``POST .../jobs/explain``).
 
 Contributions and partial dependence load the model in this process through ``LiveModels``:
-one request at a time (503 ``busy`` with ``Retry-After`` after the wait), and never a model
-this install did not sign (409 ``untrusted``; the explain job explains those). The routes
-are sync, so they run in the threadpool.
+one request at a time, a few more waiting (503 ``busy`` with ``Retry-After`` beyond them or
+after the wait). The explain job (``POST .../jobs/explain``, write access) explains what is
+refused here: a model this install did not sign (409 ``untrusted``), a model whose artifact
+is over the loaded-model budget of 512 MiB (409 ``too_large``), and more rows than a wide
+model allows at a time (422). Partial dependence on a wide model averages over fewer
+background rows (``n_rows`` says how many). The routes are sync, so they run in the
+threadpool.
 """
 
 from collections.abc import Iterator
@@ -22,6 +26,7 @@ from fione.api.deps import Conn, CurrentUser
 from fione.api.errors import ApiError, not_found
 from fione.api.routes_models import _model
 from fione.api.schemas import (
+    MAX_CONTRIBUTION_ROWS,
     ContributionsIn,
     IdPath,
     PartialDependenceIn,
@@ -35,7 +40,7 @@ from fione.engine.artifact import UntrustedArtifactError
 from fione.engine.model import TrainedModel
 from fione.jobs.store import JobStatus
 from fione.models import explanations
-from fione.models.live import Busy, Untrusted
+from fione.models.live import Busy, TooLarge, Untrusted
 from fione.models.service import ModelRecord
 from fione.modules.registry import redact
 from fione.predict.batch import PredictInputError, check_inputs
@@ -88,6 +93,9 @@ def _explaining() -> Iterator[None]:
         message = "another explanation is being computed; try again shortly"
         headers = {"Retry-After": str(RETRY_AFTER_SECS)}
         raise ApiError(503, "busy", message, headers) from None
+    except TooLarge:
+        message = "this model is too large to explain here; use the explain job"
+        raise ApiError(409, "too_large", message) from None
     except UntrustedArtifactError:
         raise ApiError(409, "conflict", "the model file failed verification") from None
     except ValueError as e:  # PredictInputError, ConfigError and the engine's limits
@@ -112,20 +120,43 @@ def _dataset(conn, record: ModelRecord, dataset_id: int | None) -> Dataset:
     return dataset
 
 
-def _read(read, *args) -> pd.DataFrame:
+def _read(read, *args, **kwargs) -> pd.DataFrame:
     try:
-        return read(*args)
+        return read(*args, **kwargs)
     except KeyError:  # storage: the object is gone (its message would name the key)
         raise not_found("dataset not found") from None
 
 
 def _instances(model: TrainedModel, instances: list[dict]) -> pd.DataFrame:
-    """The model's columns of ``instances`` (other keys are ignored, as in Fione Serving)."""
+    """The model's columns of ``instances`` (other keys are ignored, as in Fione Serving).
+    A numeric column takes no ``true``/``false``."""
+    numeric = set(model.prep.numeric_columns)
     for i, row in enumerate(instances):
         missing = [c for c in model.columns if c not in row]
         if missing:
             raise PredictInputError(f"instance {i}: missing columns: {missing}")
+        flags = [c for c in model.columns if c in numeric and isinstance(row[c], bool)]
+        if flags:
+            raise PredictInputError(f"instance {i}: numbers expected, not true or false: {flags}")
     return pd.DataFrame({c: [row[c] for row in instances] for c in model.columns})
+
+
+def _check_request(model: TrainedModel, rows: int, class_index: int | None) -> None:
+    """Refuse, before any work, more rows than the model's width allows here, and a
+    ``class_index`` the model has no output for."""
+    allowed = explain.contribution_rows(model, MAX_CONTRIBUTION_ROWS)
+    if rows > allowed:
+        if allowed == 0:
+            message = "this model is too wide to explain here; use the explain job"
+        else:
+            message = (
+                f"this model is explained at most {allowed} rows at a time here;"
+                " the explain job covers more"
+            )
+        raise ApiError(422, "invalid", message)
+    outputs = len(explain.explained_outputs(model))
+    if class_index is not None and class_index >= outputs:
+        raise ApiError(422, "invalid", f"class_index must be an integer in 0..{outputs - 1}")
 
 
 @router.post("/models/{model_id}/contributions")
@@ -136,13 +167,17 @@ def contributions(
     prediction: for the binary positive class, the predicted class (multiclass, unless
     ``class_index`` is given), or the value (regression). Rows are up to 100 ``instances``,
     or ``limit`` rows of ``dataset_id`` from ``offset`` (``row`` numbers them from 0 or
-    ``offset``). The values are approximate (combined over the ensemble), but always add up."""
+    ``offset``); a model with many classes x columns allows fewer (422). The values are
+    approximate (combined over the ensemble), but always add up. Instances' values are
+    scalars; numeric columns take numbers, not ``true``/``false``."""
     record = _model(conn, user, model_id, "read")
     live = request.app.state.live_models
     with _explaining():
         live.check(record)
         dataset = None if body.instances is not None else _dataset(conn, record, body.dataset_id)
         with live.use(record) as model:
+            asked = body.limit if body.instances is None else len(body.instances)
+            _check_request(model, asked, body.class_index)
             if dataset is None:
                 frame = _instances(model, body.instances)
             else:
@@ -168,7 +203,8 @@ def partial_dependence(
 ) -> dict:
     """How the model's average output changes as ``column`` varies over a grid of up to
     ``grid`` points, over ``rows`` background rows of ``dataset_id`` (else of the training
-    data), with ``ice`` single-row curves for ``outputs[ice_output]``."""
+    data; fewer for a wide model), with ``ice`` single-row curves for ``outputs[ice_output]``.
+    The background is read from the first rows of up to 8 row groups spread over the file."""
     record = _model(conn, user, model_id, "read")
     live = request.app.state.live_models
     with _explaining():
@@ -176,8 +212,14 @@ def partial_dependence(
         dataset = _dataset(conn, record, body.dataset_id)
         columns = explanations.model_columns(record)
         with live.use(record) as model:
+            rows = explain.pd_rows(model, body.rows, body.grid)  # a wide model gets fewer
             background = _read(
-                ingest.read_dataset_spread, request.app.state.storage, dataset, body.rows, columns
+                ingest.read_dataset_spread,
+                request.app.state.storage,
+                dataset,
+                rows,
+                columns,
+                per_group=rows,  # the head of each spread row group, not the whole groups
             )
             check_inputs(model, background)
             curve = explain.partial_dependence(
@@ -185,7 +227,7 @@ def partial_dependence(
                 background,
                 body.column,
                 grid_size=body.grid,
-                max_rows=body.rows,
+                max_rows=rows,
                 ice_rows=body.ice,
                 class_index=body.class_index,
             )

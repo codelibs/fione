@@ -9,7 +9,14 @@ from typing import Annotated, Any, Literal
 
 import numpy as np
 from fastapi import Path
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import ProjectAccess, Role, User
@@ -104,7 +111,7 @@ class ModuleJobIn(Body):
 
 
 MAX_CONTRIBUTION_ROWS = 100
-Scalar = str | int | float | bool | None
+SCALARS = (str, int, float, bool, type(None))
 ClassIndex = Annotated[int, Field(strict=True, ge=0)]  # not a bool
 
 
@@ -113,13 +120,22 @@ class ContributionsIn(Body):
     ``limit`` rows of ``dataset_id`` from ``offset``."""
 
     instances: (
-        Annotated[list[dict[str, Scalar]], Field(min_length=1, max_length=MAX_CONTRIBUTION_ROWS)]
+        Annotated[list[dict[str, Any]], Field(min_length=1, max_length=MAX_CONTRIBUTION_ROWS)]
         | None
     ) = None
     dataset_id: DbId | None = None
     offset: Annotated[int, Field(ge=0, le=MAX_ID)] = 0
     limit: Annotated[int, Field(ge=1, le=MAX_CONTRIBUTION_ROWS)] = 10
     class_index: ClassIndex | None = None
+
+    @field_validator("instances")
+    @classmethod
+    def _scalars(cls, instances):
+        if instances is not None and any(
+            not isinstance(v, SCALARS) for row in instances for v in row.values()
+        ):
+            raise ValueError("values must be strings, numbers, booleans or null")
+        return instances
 
     @model_validator(mode="after")
     def _one_source(self):

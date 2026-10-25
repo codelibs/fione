@@ -5,6 +5,7 @@ import dataclasses
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass
 
@@ -22,7 +23,7 @@ from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import explanations
 from fione.models import service as models
-from fione.models.live import Busy, LiveModels, Untrusted
+from fione.models.live import Busy, LiveModels, TooLarge, Untrusted
 from fione.models.service import ModelNotFound
 from fione.projects import ingest
 from fione.projects import service as projects
@@ -276,12 +277,29 @@ def test_contributions_refuse_rows_the_model_cannot_read(env):
     r = contributions(env, record.id, {"instances": text})
     assert r.status_code == 422 and "must hold numbers" in r.json()["error"]
 
-    r = contributions(env, record.id, {"instances": instances(slice(0, 1)), "class_index": 3})
-    assert r.status_code == 422 and "class_index" in r.json()["error"]
+    flag = instances(slice(0, 1))
+    flag[0][COLUMN] = True
+    r = contributions(env, record.id, {"instances": flag})
+    assert r.status_code == 422 and "not true or false" in r.json()["error"]
+
+    nested = contributions(env, record.id, {"instances": [{COLUMN: {"a": [1]}}]}).json()
+    assert nested == {
+        "error": "instances: Value error, values must be strings, numbers, booleans or null",
+        "code": "invalid",
+    }
 
     other = upload(env.client, env.p, b"a,b\n1,2\n", headers=env.h["owner"]).json()["id"]
     r = contributions(env, record.id, {"dataset_id": other})
     assert r.status_code == 422 and "lacks the model's columns" in r.json()["error"]
+
+
+def test_class_index_is_checked_before_any_work(env, monkeypatch):
+    record = env.model()
+    calls = []
+    monkeypatch.setattr(explain, "contributions", lambda *a: calls.append(a))
+    r = contributions(env, record.id, {"instances": instances(slice(0, 1)), "class_index": 3})
+    assert r.json() == {"error": "class_index must be an integer in 0..2", "code": "invalid"}
+    assert calls == []
 
 
 def test_a_dataset_of_another_project_is_not_found(env):
@@ -308,6 +326,47 @@ def test_regression_contributions_have_no_class_index(env):
     for row, want in zip(body["rows"], expected, strict=True):
         assert row["class_index"] is None
         assert row["bias"] + sum(row["contributions"].values()) == pytest.approx(want, abs=1e-5)
+
+
+def test_binary_contributions_explain_the_positive_class(env):
+    frame = iris_frame()
+    frame["species"] = frame["species"] == "versicolor"
+    config = TrainConfig(target="species", max_runtime_secs=10, max_models=1, nfolds=2)
+    model = AutoML(config, lambda event: None).fit(frame)
+    record = env.model(model=model)
+    rows = frame[FEATURES].iloc[45:56]
+    body = contributions(env, record.id, {"instances": rows.to_dict("records")}).json()
+    assert body["outputs"] == [True]
+    proba = model.predict_proba(rows).to_numpy()[:, 1]
+    for row, want in zip(body["rows"], proba, strict=True):
+        assert row["class_index"] is None
+        assert row["bias"] + sum(row["contributions"].values()) == pytest.approx(
+            row["prediction"], abs=1e-9
+        )
+        assert row["prediction"] == pytest.approx(want, abs=1e-5)
+    one = {"instances": rows.iloc[:1].to_dict("records")}
+    assert contributions(env, record.id, {**one, "class_index": 0}).status_code == 200
+    r = contributions(env, record.id, {**one, "class_index": 1})
+    assert (r.status_code, r.json()["error"]) == (422, "class_index must be an integer in 0..0")
+
+
+def test_a_wide_model_takes_fewer_rows_here(env, monkeypatch):
+    record = env.model()
+    per_row = 3 * 4  # classes x features of the iris model
+    monkeypatch.setattr(explain, "CELLS", 2 * per_row)
+    reads = []
+    real = ingest.read_dataset_rows
+    monkeypatch.setattr(ingest, "read_dataset_rows", lambda *a: reads.append(a) or real(*a))
+    message = "this model is explained at most 2 rows at a time here; the explain job covers more"
+    for body in ({"dataset_id": env.d, "limit": 3}, {"instances": instances(slice(0, 3))}):
+        r = contributions(env, record.id, body)
+        assert r.json() == {"error": message, "code": "invalid"}
+    assert reads == []
+    r = contributions(env, record.id, {"dataset_id": env.d, "limit": 2})
+    assert r.status_code == 200 and len(r.json()["rows"]) == 2 and len(reads) == 1
+    monkeypatch.setattr(explain, "CELLS", per_row - 1)
+    r = contributions(env, record.id, {"instances": instances(slice(0, 1))})
+    assert r.json()["error"] == "this model is too wide to explain here; use the explain job"
 
 
 # --- partial dependence -------------------------------------------------------------------------
@@ -343,6 +402,21 @@ def test_pd_one_column(env):
     assert (r.status_code, r.json()["error"]) == (422, "choose a dataset")
     r = pd_request(env, elsewhere.id, {"column": COLUMN, "dataset_id": env.d})
     assert r.status_code == 200 and set(r.json()) == PD_FIELDS
+
+
+def test_pd_on_a_wide_model_reads_and_averages_fewer_rows(env, monkeypatch):
+    record = env.model(dataset_id=env.d)
+    monkeypatch.setattr(explain, "CELLS", 30 * 10 * len(FEATURES))
+    reads = []
+    real = ingest.read_dataset_spread
+    monkeypatch.setattr(
+        ingest, "read_dataset_spread", lambda *a, **k: reads.append((a, k)) or real(*a, **k)
+    )
+    r = pd_request(env, record.id, {"column": COLUMN, "grid": 10})
+    assert r.status_code == 200, r.text
+    assert r.json()["n_rows"] == 30 and len(r.json()["ice"]) == 30
+    ((args, kwargs),) = reads
+    assert args[2] == 30 and kwargs == {"per_group": 30}
 
 
 @pytest.mark.parametrize(
@@ -476,6 +550,55 @@ def test_busy_is_a_fast_503(env):
     assert contributions(env, record.id, {"instances": instances()}).status_code == 200
 
 
+def test_waiters_are_capped_so_other_requests_go_on(env):
+    record = env.model()
+    live = LiveModels(env.storage, env.client.app.state.secret, wait_secs=3)
+    env.client.app.state.live_models = live
+    body = {"instances": instances()}
+    assert live.slot.acquire(timeout=1)
+    with ThreadPoolExecutor(45) as pool:  # more requests than the server has threads (40)
+        try:
+            sent = [pool.submit(contributions, env, record.id, body) for _ in range(45)]
+            time.sleep(0.5)
+            start = time.monotonic()
+            r = env.client.get(f"/api/v1/models/{record.id}", headers=env.h["viewer"])
+            assert r.status_code == 200 and time.monotonic() - start < 1
+        finally:
+            live.slot.release()
+        answers = [f.result() for f in sent]
+    busy = [a for a in answers if a.status_code == 503]
+    assert len(busy) >= len(answers) - live.max_waiting
+    assert all(a.json()["code"] == "busy" and a.headers["Retry-After"] == "5" for a in busy)
+    assert {a.status_code for a in answers} <= {200, 503} and live._waiting == 0
+
+
+def test_live_models_refuse_waiters_beyond_the_cap(env):
+    record = env.model()
+    live = LiveModels(env.storage, env.client.app.state.secret, wait_secs=5, max_waiting=1)
+    entered = []
+
+    def wait():
+        with live.use(record):
+            entered.append(True)
+
+    assert live.slot.acquire(timeout=1)
+    waiter = threading.Thread(target=wait)
+    try:
+        waiter.start()
+        deadline = time.monotonic() + 2
+        while live._waiting == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert live._waiting == 1
+        start = time.monotonic()
+        with pytest.raises(Busy, match="too many"), live.use(record):
+            pass
+        assert time.monotonic() - start < 1
+    finally:
+        live.slot.release()
+    waiter.join(10)
+    assert entered == [True] and live._waiting == 0
+
+
 def test_live_models_lru_is_bounded(env):
     secret = env.client.app.state.secret
     first, second, third = (env.model() for _ in range(3))
@@ -497,9 +620,29 @@ def test_live_models_lru_is_bounded(env):
     assert len(by_bytes) == 1  # two would pass the bytes
 
     small = LiveModels(env.storage, secret, max_bytes=size - 1)
-    with small.use(first) as model:
-        assert model.columns == FEATURES  # loaded and used
-    assert len(small) == 0  # but not kept
+    with pytest.raises(TooLarge), small.use(first):
+        pass
+    assert len(small) == 0
+
+
+def test_a_model_over_the_budget_is_refused_unloaded(env, monkeypatch):
+    record = env.model()
+    size = env.storage.size(record.storage_prefix + MODEL_FILE)
+    loads = []
+    monkeypatch.setattr(models, "load_trained", lambda *a: loads.append(a))
+    secret = env.client.app.state.secret
+    env.client.app.state.live_models = LiveModels(env.storage, secret, max_bytes=size - 1)
+    for r in (
+        contributions(env, record.id, {"instances": instances()}),
+        pd_request(env, record.id, {"column": COLUMN, "dataset_id": env.d}),
+    ):
+        assert r.json() == {
+            "error": "this model is too large to explain here; use the explain job",
+            "code": "too_large",
+        }
+        assert r.status_code == 409
+    assert loads == []
+    assert explain_job(env, {"model_id": record.id, "dataset_id": env.d}).status_code == 201
 
 
 def test_live_models_release_the_slot_on_errors(env, monkeypatch):

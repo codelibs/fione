@@ -60,6 +60,12 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - **On a heavily loaded machine the time budget buys fewer boosting rounds**; CatBoost is
   affected most.
 - **Training and engine messages are in English** in the Japanese UI.
+- **Explanations asked for on the spot are computed one at a time** in the web process
+  (contributions of up to 100 rows, partial dependence of one column). While one runs, up to
+  four more wait, for 15 s at most; any others get a "busy" answer (HTTP 503) at once. Models
+  whose file is over 512 MiB, imports not vouched for, and models with too many classes ×
+  columns for the rows asked are refused there and explained only by the explain job, which
+  needs write access.
 
 ## Deployment
 
@@ -105,6 +111,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 実行中のジョブのキャンセルには最大 10 秒かかります。プロジェクトに属さないジョブは `GET /api/v1/jobs` に出ません。削除中にストレージが失敗すると、ファイルが残ることがあります。
 - 全モデルのエクスポートは、プロジェクトごとに最新の 1 つだけ残ります。
 - エンジンは実際には最大実行時間の約 3 分の 2 を使います。学習やエンジンのメッセージは日本語画面でも英語です。
+- その場で求める説明（最大 100 行の寄与度、1 列の部分依存）は Web プロセスで 1 件ずつ計算します。待てるのは 4 件まで、最大 15 秒で、それ以外はすぐに「混雑」（HTTP 503）になります。ファイルが 512 MiB を超えるモデル、信頼を確認していないインポート、求めた行数に対してクラス × 列が多すぎるモデルはそこでは断り、書き込み権限が必要な説明ジョブでだけ説明します。
 - 負荷の高いマシンでは、同じ時間予算で学習できるブースティングの回数が減ります。いちばん影響を受けるのは CatBoost です。
 - API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。
 - Fione Serving には認証も、リクエスト数・同時実行数の制限もありません。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
