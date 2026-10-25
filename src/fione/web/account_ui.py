@@ -30,23 +30,33 @@ router = APIRouter(include_in_schema=False)
 TOKENS_PER_PAGE = 20
 MAX_TOKEN_NAME = 100  # as the API's token name
 HANDOFF_SECS = 120  # how long a new token's secret waits for its one page view
-HANDOFF_SIZE = 256
+HANDOFF_SIZE = 1024
+HANDOFF_PER_USER = 8  # one user's sessions cannot push out other users' secrets
 DONE = ("password", "revoked")  # ?done=: the confirmation shown after a change
 
 
 class SecretHandoff:
-    """At most ``size`` secrets, each for ``ttl`` seconds, taken (and so removed) by the one
-    page view that shows it. In memory, per process: the app runs as one worker."""
+    """Secrets, each for ``ttl`` seconds, taken (and so removed) by the one page view that
+    shows it. Keys are ``(user id, session)``: at most ``per_user`` per user (their oldest is
+    dropped first), and ``size`` in all. In memory, per process: the app runs as one worker."""
 
-    def __init__(self, size: int = HANDOFF_SIZE, ttl: float = HANDOFF_SECS):
-        self._size, self._ttl = size, ttl
+    def __init__(
+        self, size: int = HANDOFF_SIZE, ttl: float = HANDOFF_SECS, per_user: int = HANDOFF_PER_USER
+    ):
+        self._size, self._ttl, self._per_user = size, ttl, per_user
         self._items: OrderedDict = OrderedDict()
         self._lock = threading.Lock()
 
-    def put(self, key, value) -> None:
+    def put(self, key: tuple, value) -> None:
         with self._lock:
-            self._items[key] = (time.monotonic() + self._ttl, value)
+            now = time.monotonic()
+            for old in [k for k, (expires, _) in self._items.items() if expires <= now]:
+                del self._items[old]
+            self._items[key] = (now + self._ttl, value)
             self._items.move_to_end(key)
+            mine = [k for k in self._items if k[0] == key[0]]
+            for old in mine[: max(0, len(mine) - self._per_user)]:
+                del self._items[old]
             while len(self._items) > self._size:
                 self._items.popitem(last=False)
 

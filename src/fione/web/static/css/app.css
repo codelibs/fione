@@ -2638,3 +2638,65 @@ select.input {
 .role-list__item.is-current {
   border-color: var(--color-primary);
 }
+
+/* A table whose rows stack on phones (each cell on its own line, labelled), so the actions
+   are in view without scrolling the table sideways (users, sharing) */
+.table .cell-note {
+  white-space: normal;
+}
+
+@media (max-width: 35.99rem) {
+  .table-stack,
+  .table-stack tbody,
+  .table-stack tr,
+  .table-stack th,
+  .table-stack td {
+    display: block;
+    min-width: 0;
+  }
+
+  .table-stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .table-stack tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .table-stack tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .table-stack th,
+  .table-stack td {
+    padding: var(--space-1) 0;
+    border-bottom: 0;
+    white-space: normal;
+  }
+
+  .table-stack th.cell-value {
+    max-width: none;
+  }
+
+  .table-stack td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+
+  .table-stack .row-actions {
+    justify-content: flex-start;
+  }
+}
+
+/* Role and access selects show their whole label ("View only", 閲覧のみ) */
+.row-actions select.input-sm {
+  width: auto;
+}

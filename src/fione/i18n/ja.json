@@ -862,5 +862,6 @@
   "design.secret_title": "新しいトークン「example」",
   "system.uptime_days": "{d} 日 {h} 時間",
   "system.uptime_hours": "{h} 時間 {m} 分",
-  "system.uptime_minutes": "{m} 分"
+  "system.uptime_minutes": "{m} 分",
+  "users.refused.self_password": "自分のパスワードはアカウント画面で変更してください。現在のパスワードの確認があります。"
 }

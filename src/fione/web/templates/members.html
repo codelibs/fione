@@ -49,7 +49,7 @@
   <section class="stack-tight" aria-labelledby="members-list-title">
     <h2 class="section-header__title" id="members-list-title">{{ t('members.list') }}</h2>
     <div class="table-wrap" tabindex="0" role="region" aria-labelledby="members-list-title">
-      <table class="table">
+      <table class="table table-stack">
         <thead>
           <tr>
             <th scope="col">{{ t('members.username') }}</th>
@@ -60,14 +60,14 @@
         <tbody>
           <tr>
             <th scope="row" class="cell-value">{{ owner or "—" }}</th>
-            <td><span class="badge badge-info">{{ t('access.owner') }}</span></td>
-            <td class="text-muted text-sm">{{ t('members.owner_note') }}</td>
+            <td data-label="{{ t('members.access') }}"><span class="badge badge-info">{{ t('access.owner') }}</span></td>
+            <td class="text-muted text-sm cell-note" data-label="{{ t('datasets.col.actions') }}">{{ t('members.owner_note') }}</td>
           </tr>
           {% for username, access in members %}
           <tr>
             <th scope="row" class="cell-value">{{ username }}</th>
-            <td>{{ access_badge(t, access) }}</td>
-            <td>
+            <td data-label="{{ t('members.access') }}">{{ access_badge(t, access) }}</td>
+            <td data-label="{{ t('datasets.col.actions') }}">
               <div class="row-actions">
                 <form class="cluster-tight" method="post" action="/projects/{{ pid }}/members" data-busy-form>
                   <input type="hidden" name="csrf_token" value="{{ csrf }}">

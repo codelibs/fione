@@ -656,6 +656,18 @@ def account_and_admin(s: "Shooter", base: str, project: str) -> None:
     s.shot(page, "users-delete-panel-en-light-desktop", full_page=False)
     page.context.close()
     shoot_all(s, base, "/admin/users", "users", ("en", "ja"))
+    # On a phone the rows stack: every user's actions are in view, no sideways table.
+    page = s.page("light", "phone")
+    sign_in(page, base)
+    page.goto(base + "/admin/users")
+    box = (
+        page.locator("tr", has=page.locator("th", has_text="viewer1"))
+        .locator("details.confirm-inline > summary", has_text="Delete")
+        .bounding_box()
+    )
+    if not box or box["x"] + box["width"] > 390:
+        s.errors.append(f"users: the actions are out of view on a phone ({box})")
+    page.context.close()
     shoot_all(s, base, "/admin/system", "system", ("en", "ja"))
     shoot_all(s, base, "/account", "account", ("en", "ja"))
 
@@ -670,6 +682,10 @@ def account_and_admin(s: "Shooter", base: str, project: str) -> None:
         if not re.search(r"fione_[A-Za-z0-9_-]{20,}", page.inner_text(".secret-panel")):
             s.errors.append("account: the new token's secret is not shown")
         s.shot(page, f"account-token-{lang}-{scheme}-{viewport}", full_page=False)
+        page.goto(base + "/")
+        page.go_back()  # from the page cache or the server: either way, no secret
+        if page.locator(".secret-panel").count():
+            s.errors.append("account: the secret is shown again after Back")
         page.reload()
         if page.locator(".secret-panel").count():
             s.errors.append("account: the secret is shown again after a reload")

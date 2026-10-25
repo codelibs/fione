@@ -161,9 +161,13 @@ def change_role(request: Request, conn: Conn, uid: str, form: SmallForm) -> Resp
 @router.post("/admin/users/{uid}/password")
 def reset_password(request: Request, conn: Conn, uid: str, form: SmallForm) -> Response:
     """Set a new password, which ends the user's sessions. Like the API, no current password
-    is asked for, so there is no throttle; the hashing holds a ``password_work`` slot."""
+    is asked for, so there is no throttle; the hashing holds a ``password_work`` slot. Not
+    for one's own account (the API allows it): that goes through the account page, which
+    asks for the current password."""
     auth = _post_admin(request, conn, form)
     user = _target(conn, uid)
+    if user.id == auth.user.id:  # one's own needs the current one: the account page
+        return _refused(request, conn, auth, form, user, "users.refused.self_password")
     password = field(form, "password")
     if not _password_ok(password):
         key, n = "users.error.password", MIN_PASSWORD_LENGTH

@@ -250,7 +250,7 @@
 {% macro secret_panel(t, id, title, secret, heading="h2", focus=True) %}
 {# A secret shown once (a new API token): selectable text, a Copy button with JS. Focused on
    arrival (``focus``) so it is seen and read first. #}
-<section class="secret-panel" aria-labelledby="{{ id }}-title" tabindex="-1"{% if focus %} autofocus{% endif %}>
+<section class="secret-panel" data-secret-panel aria-labelledby="{{ id }}-title" tabindex="-1"{% if focus %} autofocus{% endif %}>
   <{{ heading }} class="secret-panel__title" id="{{ id }}-title">{{ icon("key") }}{{ title }}</{{ heading }}>
   <p><strong>{{ t('secret.once') }}</strong></p>
   <div class="copy-box">

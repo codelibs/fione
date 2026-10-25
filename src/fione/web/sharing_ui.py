@@ -67,7 +67,7 @@ def _posted(request: Request, conn, pid: str, form) -> Ctx:
 def share(request: Request, conn: Conn, pid: str, form: SmallForm) -> Response:
     """Add a member, or change a member's access (the same call)."""
     ctx = _posted(request, conn, pid, form)
-    username, access = field(form, "username").strip(), field(form, "access")
+    username, access = field(form, "username"), field(form, "access")  # as the API: unstripped
     new = {"username": username[:200], "access": access if access in ACCESS else ACCESS[1]}
     if not 1 <= len(username) <= MAX_USERNAME:
         return _view(request, conn, ctx, status=422, error="members.error.username", new=new)

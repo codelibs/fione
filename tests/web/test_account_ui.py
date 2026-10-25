@@ -4,6 +4,7 @@ policy, the session re-issued) and API tokens (the secret shown exactly once).""
 import re
 from contextlib import closing
 from html import escape
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -147,6 +148,7 @@ def test_a_new_token_is_shown_exactly_once(client):
     assert page.headers["cache-control"] == "no-store"
     secrets = SECRET.findall(page.text)
     assert len(set(secrets)) == 1
+    assert "data-secret-panel" in page.text
     (record,) = tokens_of(client, "ed")
     with closing(connect(client)) as conn:
         stored = conn.execute(
@@ -184,6 +186,21 @@ def test_the_handoff_expires_and_is_bounded(monkeypatch):
     assert handoff.take("a") is None and handoff.take("b") == 2 and handoff.take("b") is None
     clock[0] += 61
     assert handoff.take("c") is None
+
+
+def test_one_users_sessions_cannot_push_out_anothers_secret():
+    handoff = account_ui.SecretHandoff(size=100, ttl=60, per_user=8)
+    handoff.put((2, "victim"), "theirs")
+    for session in range(20):  # one user, many sessions
+        handoff.put((1, f"s{session}"), session)
+    assert handoff.take((2, "victim")) == "theirs"
+    assert [handoff.take((1, f"s{n}")) for n in range(20)] == [None] * 12 + list(range(12, 20))
+
+
+def test_the_secret_panel_goes_on_back_and_forward():
+    """Restored from the page cache, the page drops the panel (easyml.js, on pageshow)."""
+    script = (Path(account_ui.__file__).parent / "static/js/easyml.js").read_text()
+    assert 'querySelectorAll("[data-secret-panel]")' in script and "event.persisted" in script
 
 
 @pytest.mark.parametrize("name", ["", "   ", "x" * 101])

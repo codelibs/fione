@@ -89,6 +89,26 @@ def test_refusals_are_said_on_the_page(world, username, access, status, message)
         assert api.status_code == 422 and api.json()["error"] == "unknown user: ghost"
 
 
+def test_the_username_is_taken_as_typed_like_the_api(world):
+    csrf = world.login("ed")
+    r = share(world, csrf, " st")
+    assert r.status_code == 422 and "There is no user named  st." in r.text
+    assert "st" not in members(world)
+    api = world.client.post(
+        f"/api/v1/projects/{world.p}/share",
+        json={"username": " st", "access": "viewer"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert api.status_code == 422 and api.json()["error"] == "unknown user:  st"
+
+
+def test_member_rows_stack_on_phones(world):
+    world.login("ed")
+    page = world.client.get(world.path("/projects/{p}/members")).text
+    assert '<table class="table table-stack">' in page
+    assert page.count('data-label="Access"') == 3  # the owner and two members
+
+
 def test_removing_someone_who_is_not_a_member(world):
     csrf = world.login("ed")
     for username in ("st", "ed", "ghost"):

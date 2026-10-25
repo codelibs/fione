@@ -129,6 +129,25 @@ def test_a_new_password_ends_the_users_sessions(client):
     assert r.status_code == 422 and "at least 8 characters" in r.text and "short" not in r.text
 
 
+def test_ones_own_password_is_changed_on_the_account_page(client):
+    """Not through the admin route, which asks for no current password."""
+    csrf = login(client, "admin")
+    me = user_id(client, "admin")
+    r = client.post(f"/admin/users/{me}/password", data={"csrf_token": csrf, "password": NEW_PW})
+    assert r.status_code == 409 and "on your account page" in r.text
+    assert 'href="/account"' in r.text and NEW_PW not in r.text
+    assert client.get("/admin/users").status_code == 200  # the session goes on
+    login(TestClient(client.app), "admin")  # the password is unchanged
+
+
+def test_users_rows_stack_on_phones(client):
+    login(client, "admin")
+    page = client.get("/admin/users").text
+    assert '<table class="table table-wide table-stack">' in page
+    for label in ("Role", "Created", "Actions"):
+        assert page.count(f'data-label="{label}"') == 3
+
+
 def test_deleting_a_user_ends_their_sessions(client):
     csrf = login(client, "admin")
     gv = second(client, "gv")

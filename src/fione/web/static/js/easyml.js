@@ -56,6 +56,10 @@
   });
   window.addEventListener("pageshow", function (event) {
     if (!event.persisted) return;
+    // A secret shown once is not shown again by Back/Forward from the page cache.
+    document.querySelectorAll("[data-secret-panel]").forEach(function (panel) {
+      panel.remove();
+    });
     document.querySelectorAll(BUSY).forEach(function (form) {
       form.removeAttribute("data-busy");
       var button = form.querySelector('button[type="submit"]');
