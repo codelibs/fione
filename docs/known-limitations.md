@@ -135,10 +135,9 @@ What this release does not do, or does with a catch. Japanese summary at the end
   without them, or when they could not be computed or took more than 256 KiB.
 - **Only exact leaks are unchecked.** A column identical to the column to predict, or whose
   value determines it, is left out of the EasyML defaults (row IDs stay unchecked as IDs, as
-  before). A column that only scores high
-  stays checked, with a warning: one that predicts the answer on its own, one whose order or
-  gaps follow the answer, and one with a near-perfect correlation (|r| ≥ 0.99), which used to
-  be unchecked.
+  before). A column that only scores high stays checked, with a warning: one that predicts
+  the answer on its own, one whose order or gaps follow the answer, and one with a
+  near-perfect correlation (|r| ≥ 0.99), which used to be unchecked.
 - **Leak scores are warnings and can be wrong both ways.** A strong legitimate column can be
   flagged, and a leak can be missed; no warning does not mean no leak. A column is flagged at a
   single-column AUC of 0.95 (R² 0.90 for regression) and 0.10 above the best column under
