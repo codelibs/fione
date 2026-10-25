@@ -1170,16 +1170,26 @@ def test_pd_busy_message(world):
 
 def test_untrusted_model_is_not_loaded_in_the_web_process(world, spy):
     foreign = record_like(world, world.p, dataset_id=world.ids[world.p]["train"], trusted=False)
+    with closing(connect(world.client)) as conn:  # a prediction made with it
+        user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        payload = {"model_id": foreign, "dataset_id": world.ids[world.p]["test"]}
+        job = store.enqueue(conn, "batch_predict", world.p, user, payload)
+        store.claim_job(conn, job.id, "t")
+        store.finish_job(conn, job.id, JobStatus.DONE, result={"dataset_id": payload["dataset_id"]})
     world.login("ed")
     html = pd_fragment(world, foreign, column=IRIS_COLUMNS[0])
     assert "imported without this server&#39;s signature" in html
+    why = world.client.get(world.path("/projects/{p}/jobs/") + f"{job.id}/result/why")
+    assert why.status_code == 200
+    assert "imported without this server&#39;s signature" in why.text
     assert spy.calls == 0
 
 
 def test_hostile_column_names_are_escaped(world, spy):
     payload = json.loads(json.dumps(iris_explanation()))
     first = payload["partial_dependence"][0]
-    first.update(column=XSS, kind="category", grid=[XSS, "b", None], outputs=[XSS, "y", "z"])
+    quoted = "O'Brien</script>"  # the attribute holding the spec is single-quoted
+    first.update(column=XSS, kind="category", grid=[XSS, quoted, None], outputs=[XSS, "y", "z"])
     first["average"] = first["average"][:3]
     first["ice"] = [row[:3] for row in first["ice"]]
     payload["importance"][0]["column"] = XSS
@@ -1191,7 +1201,8 @@ def test_hostile_column_names_are_escaped(world, spy):
     for html in (page, fragment):
         assert "<img src=x onerror" not in html
         spec = inline_specs(html)["pd-chart"]
-        assert spec["categories"][0] == XSS and XSS in spec["label"]
+        assert spec["categories"][:2] == [XSS, quoted] and XSS in spec["label"]
+        assert "O'Brien" not in html
     assert XSS in chart_specs(page)["contrib-chart"]["labels"]
     assert escape(XSS) in page
     assert spy.calls == 0
