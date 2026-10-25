@@ -273,10 +273,13 @@ def _spread(values: np.ndarray, size: int, integral: bool) -> np.ndarray:
 
     These are the quantiles; where they coincide (a sparse column), evenly spaced points
     between both ends fill up, and ``size`` of the sorted union are kept, evenly by position.
+    When both percentiles are one value (a rare indicator), the ends are the minimum and the
+    maximum instead, so only a single-valued column gets a single point.
     """
     points = np.unique(np.quantile(values, np.linspace(0.02, 0.98, size)))
     if len(points) < size:
-        union = np.union1d(points, np.linspace(points[0], points[-1], size))
+        low, high = (points[0], points[-1]) if len(points) > 1 else (values.min(), values.max())
+        union = np.union1d(points, np.linspace(low, high, size))
         points = np.unique(union[np.round(np.linspace(0, len(union) - 1, size)).astype(int)])
     return np.unique(np.round(points)) if integral else points
 
@@ -350,7 +353,8 @@ def partial_dependence(
     if not grid:
         raise ValueError(f"the column {column!r} has no values in the background")
     rows = np.random.default_rng(seed).permutation(len(background))[:max_rows]
-    used = [c for c in background.columns if c in set(model.columns)]
+    needed = set(model.columns)
+    used = [c for c in background.columns if c in needed]
     frame = background[used].iloc[np.repeat(rows, len(grid))].reset_index(drop=True)
     frame[column] = np.tile(values, len(rows))
     if model.task == "regression":

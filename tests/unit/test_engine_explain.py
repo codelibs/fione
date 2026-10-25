@@ -434,6 +434,25 @@ def test_sparse_numeric_column_gets_an_even_spread():
     assert result.grid == sorted(set(result.grid))
 
 
+def test_rare_indicator_column_is_spread_to_its_extremes():
+    # 99% zeros: the 2nd and 98th percentiles are both 0.
+    fit = _fit("regression")
+    background = _background(200)
+    background["contrib_x"] = np.where(np.arange(200) < 2, 1, 0)
+    assert partial_dependence(fit, background, "contrib_x").grid == [0, 1]
+    background["contrib_x"] = np.where(np.arange(200) < 2, [0.3, 2.7] * 100, 0.0)
+    result = partial_dependence(fit, background, "contrib_x")
+    _assert_grid(result, "numeric")
+    assert len(result.grid) >= 10
+    assert result.grid[0] == 0.0 and result.grid[-1] == 2.7
+    # Only a column with a single value gets a single point.
+    background["contrib_x"] = 0.5
+    single = partial_dependence(fit, background, "contrib_x", ice_rows=10)
+    assert single.grid == [0.5]
+    assert single.average.shape == (1, 1)
+    assert single.ice.shape == (10, 1)
+
+
 @pytest.mark.parametrize("high", [4, 100])
 def test_integer_column_gets_integer_grid(high):
     fit = _fit("regression")
@@ -457,6 +476,7 @@ def test_categorical_grid_is_top_levels_plus_missing():
     assert result.grid == ["red", "blue", "green", None]
     curves = _curves(fit, background, "BiasTerm", result.grid)
     assert_allclose(result.average, curves.mean(0), rtol=0, atol=1e-12)
+    assert partial_dependence(fit, background, "BiasTerm", grid_size=2).grid == ["red", None]
 
 
 def test_bool_column_gets_false_true_missing():
