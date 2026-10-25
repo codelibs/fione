@@ -30,6 +30,7 @@ from fione.api.routes_models import (
 )
 from fione.api.security import origin_matches, tokens_equal
 from fione.auth.roles import Role
+from fione.engine import diagnostics
 from fione.engine import metrics as engine_metrics
 from fione.engine.artifact import UntrustedArtifactError
 from fione.engine.config import ConfigError, TrainConfig
@@ -346,6 +347,292 @@ def _sort_metric(record: ModelRecord) -> str | None:
         return None
 
 
+# --- the metrics tab: the training-time diagnostics ----------------------------------------
+#
+# The stored diagnostics (``engine.diagnostics``) are read as untrusted data: an imported
+# record is checked only for its version, task and size. Each part is checked and capped here
+# again; a part that does not fit is left out (and said so), and the page never fails on it.
+
+LABEL_CHARS = 100  # of a class label shown
+SHARE_LEVELS = (0.1, 0.25, 0.5, 0.75)  # confusion cell shades cm-1..cm-5 (cm-0: no rows)
+DIAGNOSTIC_PARTS = {
+    "confusion",
+    "per_class",
+    "roc_chart",
+    "pr_chart",
+    "calibration_chart",
+    "residual_chart",
+    "scatter_chart",
+}
+
+
+class _Unreadable(Exception):
+    """A part of the stored diagnostics that cannot be shown."""
+
+
+# What a malformed part can raise while it is read (beyond the explicit checks).
+_PART_ERRORS = (_Unreadable, TypeError, ValueError, KeyError, IndexError, AttributeError)
+
+
+def _count(value) -> int:
+    if type(value) is not int or value < 0:
+        raise _Unreadable
+    return value
+
+
+def _unit(value) -> float:
+    """A rate or probability: finite, in [0, 1]."""
+    number = _number(value)
+    if number is None or not 0 <= number <= 1:
+        raise _Unreadable
+    return number
+
+
+def _finite(value) -> float:
+    number = _number(value)
+    if number is None:
+        raise _Unreadable
+    return number
+
+
+def _fmt(value: float) -> str:
+    return f"{value:.4g}"
+
+
+def _labels(value) -> list[str] | None:
+    """The class labels as display text, or None when they are not a list of plain values."""
+    if not isinstance(value, list) or not value:
+        return None
+    if not all(v is None or isinstance(v, str | int | float | bool) for v in value):
+        return None
+    out = []
+    for v in value:
+        text = str(v)
+        out.append(text if len(text) <= LABEL_CHARS else text[: LABEL_CHARS - 1] + "…")
+    return out
+
+
+def _pairs(part, keys: tuple[str, str], cap: int, check, least: int = 2) -> list[list[float]]:
+    """Two equally long stored arrays as ``[x, y]`` points (the first ``cap``)."""
+    if not isinstance(part, dict):
+        raise _Unreadable
+    xs, ys = part.get(keys[0]), part.get(keys[1])
+    if not isinstance(xs, list) or not isinstance(ys, list) or len(xs) != len(ys):
+        raise _Unreadable
+    points = [[check(x), check(y)] for x, y in zip(xs[:cap], ys[:cap], strict=True)]
+    if len(points) < least:
+        raise _Unreadable
+    return points
+
+
+def _level(share: float) -> int:
+    if share <= 0:
+        return 0
+    return 1 + sum(share > edge for edge in SHARE_LEVELS)
+
+
+def _confusion(part, labels: list[str] | None, lang: str) -> dict:
+    if labels is None or not isinstance(part, dict):
+        raise _Unreadable
+    classes, matrix = part.get("classes"), part.get("matrix")
+    size = len(classes) if isinstance(classes, list) else 0
+    if not 2 <= size <= diagnostics.MAX_CONFUSION + 1 or not isinstance(matrix, list):
+        raise _Unreadable
+    if len(matrix) != size:
+        raise _Unreadable
+    names = []
+    for index in classes:
+        if type(index) is not int or not (index == -1 or 0 <= index < len(labels)):
+            raise _Unreadable
+        names.append(i18n.t("model.diag.other", lang) if index == -1 else labels[index])
+    rows = []
+    for row in matrix:
+        if not isinstance(row, list) or len(row) != size:
+            raise _Unreadable
+        counts = [_count(n) for n in row]
+        total = sum(counts)
+        shares = [n / total if total else 0.0 for n in counts]
+        rows.append(
+            [
+                {"count": n, "share": share, "level": _level(share)}
+                for n, share in zip(counts, shares, strict=True)
+            ]
+        )
+    return {"labels": names, "rows": rows, "other": -1 in classes}
+
+
+def _per_class(part, labels: list[str] | None, truncated) -> dict:
+    if labels is None or not isinstance(part, list) or not part:
+        raise _Unreadable
+    rows = []
+    for row in part[: diagnostics.MAX_PER_CLASS]:
+        if not isinstance(row, dict):
+            raise _Unreadable
+        index = row.get("class")
+        if type(index) is not int or not 0 <= index < len(labels):
+            raise _Unreadable
+        figures = {
+            key: None if row.get(key) is None else _unit(row.get(key))
+            for key in ("precision", "recall", "f1")
+        }
+        rows.append({"label": labels[index], **figures, "support": _count(row.get("support"))})
+    return {"rows": rows, "truncated": truncated is True}
+
+
+def _lines(points, label: str, x_name: str, y_name: str, lang: str, diagonal=None) -> dict:
+    """A ``lines`` chart of one curve on the unit square, with an optional faint diagonal."""
+    series = [{"name": i18n.t("model.diag.curve", lang), "points": points}]
+    if diagonal:
+        series.append({"name": diagonal, "points": [[0, 0], [1, 1]], "faint": True})
+    return {
+        "type": "lines",
+        "x_type": "value",
+        "series": series,
+        "labels": [_fmt(x) for x, _ in points],
+        "values": [y for _, y in points],
+        "label": label,
+        "x_name": x_name,
+        "y_name": y_name,
+        "x_min": 0,
+        "x_max": 1,
+        "y_min": 0,
+        "y_max": 1,
+    }
+
+
+def _calibration(part, positive: str, lang: str) -> dict:
+    if not isinstance(part, list):
+        raise _Unreadable
+    points = []
+    for row in part[: diagnostics.CALIBRATION_BINS]:
+        if not isinstance(row, dict):
+            raise _Unreadable
+        points.append([_unit(row.get("predicted")), _unit(row.get("observed"))])
+    if not points:
+        raise _Unreadable
+    return _lines(
+        points,
+        i18n.t("model.diag.calibration_chart", lang, positive=positive, n=len(points)),
+        i18n.t("model.diag.predicted_p", lang),
+        i18n.t("model.diag.observed", lang),
+        lang,
+        diagonal=i18n.t("model.diag.perfect", lang),
+    )
+
+
+def _residuals(part, lang: str) -> dict:
+    if not isinstance(part, dict):
+        raise _Unreadable
+    edges, counts = part.get("edges"), part.get("counts")
+    if not isinstance(edges, list) or not isinstance(counts, list):
+        raise _Unreadable
+    if not 1 <= len(counts) <= diagnostics.RESIDUAL_BINS or len(edges) != len(counts) + 1:
+        raise _Unreadable
+    edges = [_finite(edge) for edge in edges]
+    return _chart(
+        "bar",
+        [_fmt((low + high) / 2) for low, high in zip(edges, edges[1:], strict=False)],
+        [_count(n) for n in counts],
+        i18n.t("model.diag.residual_chart", lang, n=len(counts)),
+        i18n.t("model.diag.residual", lang),
+        i18n.t("model.diag.rows_axis", lang),
+    )
+
+
+def _scatter(part, lang: str) -> dict:
+    points = _pairs(part, ("actual", "predicted"), diagnostics.MAX_POINTS, _finite, least=1)
+    low = min(min(point) for point in points)
+    high = max(max(point) for point in points)
+    return {
+        "type": "scatter",
+        "series": [{"name": i18n.t("model.diag.sample", lang), "points": points}],
+        "line": {
+            "name": i18n.t("model.diag.diagonal", lang),
+            "points": [[low, low], [high, high]],
+            "step": False,
+        },
+        "labels": [_fmt(actual) for actual, _ in points],
+        "values": [predicted for _, predicted in points],
+        "label": i18n.t("model.diag.scatter_chart", lang, n=f"{len(points):,}"),
+        "x_name": i18n.t("model.diag.actual", lang),
+        "y_name": i18n.t("model.diag.predicted", lang),
+    }
+
+
+def _diagnostics_view(record: ModelRecord, lang: str) -> dict | None:
+    """What the metrics tab shows of ``record.diagnostics``: ``confusion``, ``per_class``,
+    ``roc_chart``, ``pr_chart``, ``calibration_chart`` (binary), ``residual_chart`` and
+    ``scatter_chart`` (regression), each left out when it is missing or malformed
+    (``partial``: a stored part was left out), plus the ``rows`` note. None when nothing can
+    be shown."""
+    found = record.diagnostics
+    if not isinstance(found, dict) or type(found.get("version")) is not int:
+        return None
+    if found["version"] != diagnostics.VERSION or found.get("task") != record.task:
+        return None
+    view: dict = {}
+    partial = False
+
+    def add(name: str, key: str, build) -> None:
+        nonlocal partial
+        if key not in found:
+            return
+        try:
+            view[name] = build(found[key])
+        except _PART_ERRORS:
+            partial = True
+
+    if record.task == "classification":
+        labels = _labels(found.get("labels"))
+        add("confusion", "confusion", lambda part: _confusion(part, labels, lang))
+        add(
+            "per_class",
+            "per_class",
+            lambda part: _per_class(part, labels, found.get("per_class_truncated")),
+        )
+        if labels is not None and len(labels) == 2:
+            positive = labels[1]
+            auc = _number(found.get("auc"))
+            view["auc"] = "—" if auc is None or not 0 <= auc <= 1 else f"{auc:.3f}"
+            view["positive"] = positive
+            curve = diagnostics.MAX_CURVE_POINTS
+            add(
+                "roc_chart",
+                "roc",
+                lambda part: _lines(
+                    _pairs(part, ("fpr", "tpr"), curve, _unit),
+                    i18n.t("model.diag.roc_chart", lang, positive=positive),
+                    i18n.t("model.diag.fpr", lang),
+                    i18n.t("model.diag.tpr", lang),
+                    lang,
+                    diagonal=i18n.t("model.diag.chance", lang),
+                ),
+            )
+            add(
+                "pr_chart",
+                "pr",
+                lambda part: _lines(
+                    _pairs(part, ("recall", "precision"), curve, _unit),
+                    i18n.t("model.diag.pr_chart", lang, positive=positive),
+                    i18n.t("model.diag.recall", lang),
+                    i18n.t("model.diag.precision", lang),
+                    lang,
+                ),
+            )
+            add("calibration_chart", "calibration", lambda part: _calibration(part, positive, lang))
+    elif record.task == "regression":
+        add("residual_chart", "residuals", lambda part: _residuals(part, lang))
+        add("scatter_chart", "points", lambda part: _scatter(part, lang))
+    if not view.keys() & DIAGNOSTIC_PARTS:
+        return None
+    rows = found.get("n_rows")
+    if type(rows) is int and rows > 0:
+        key = "model.diag.sampled" if found.get("sampled") is True else "model.diag.rows"
+        view["rows"] = i18n.t(key, lang, n=f"{rows:,}")
+    view["partial"] = partial
+    return view
+
+
 @router.get("/projects/{pid}/models/{mid}")
 def model_page(request: Request, conn: Conn, pid: str, mid: str) -> Response:
     ctx = page(request, conn, pid)
@@ -411,6 +698,8 @@ def model_page(request: Request, conn: Conn, pid: str, mid: str) -> Response:
         importance=ranked,
         importance_chart=importance_chart,
         metric_rows=metric_rows,
+        diagnostics=_diagnostics_view(record, lang),
+        diagnostics_stored=record.diagnostics is not None,
         bundle=bundle,
     )
 

@@ -7,17 +7,20 @@ import time
 from contextlib import closing
 from html import escape
 
+import numpy as np
 import pytest
 
 from api_helpers import add_user, connect, login, store_model
 from fione.api import routes_models
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
+from fione.engine.diagnostics import diagnostics
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import service as models
 from fione.modules import service as modules_service
 from fione.projects import service as projects
+from fione.web import models_ui
 from web_helpers import FAST, make_world
 
 HTML = {"Accept": "text/html"}
@@ -225,7 +228,11 @@ def test_the_model_page_for_trained_models(trained):
         assert specs["importance-chart"]["type"] == "hbar" and specs["importance-chart"]["values"]
         history = specs["history-chart"]
         assert history["type"] == "scatter" and history["series"] and history["line"]["points"]
-        assert "confusion matrix" in page  # the note on what is not stored
+        assert "not shown" not in page  # trained here: the diagnostics are stored
+        if task == "classification":
+            assert 'class="table table-compact confusion"' in page
+        else:
+            assert {"residual-chart", "scatter-chart"} <= set(specs)
         assert "docker run" in page and f"/api/v1/models/{model_id}/serving" in page
         metric = "Accuracy" if task == "classification" else "RMSE"
         assert f'<th scope="row">{metric}</th>' in page
@@ -689,3 +696,196 @@ def test_the_model_page_caps_what_it_shows(world):
     assert len(specs["importance-chart"]["labels"]) == 20
     panel = page[page.index('id="panel-leaderboard"') : page.index('id="panel-importance"')]
     assert panel.count('<th scope="row" class="cell-name">') == 50
+
+
+# --- the metrics tab: training-time diagnostics ---------------------------------------------
+
+
+def binary_diagnostics(labels=("no", "yes"), n=400) -> dict:
+    rng = np.random.default_rng(0)
+    y = rng.integers(0, 2, n)
+    p1 = np.clip(0.3 * y + rng.random(n) * 0.7, 0, 1)
+    return diagnostics("classification", y, np.column_stack([1 - p1, p1]), list(labels))
+
+
+def diagnostics_page(world, **changes) -> str:
+    world.login("vi")
+    mid = record_like(world, world.p, **changes)
+    r = world.client.get(world.path("/projects/{p}/models/") + f"{mid}?tab=metrics")
+    assert r.status_code == 200
+    return r.text
+
+
+def metrics_panel(page: str) -> str:
+    return page[page.index('id="panel-metrics"') :]
+
+
+def confusion_table(page: str) -> str:
+    table = page[page.index('class="table table-compact confusion"') :]
+    return table[: table.index("</table>")]
+
+
+def test_binary_diagnostics_render(world):
+    found = binary_diagnostics()
+    page = diagnostics_page(world, diagnostics=found)
+    panel = metrics_panel(page)
+    table = confusion_table(page)
+    assert re.findall(r'<th scope="col" class="cell-name">([^<]+)</th>', table) == ["no", "yes"]
+    assert re.findall(r'<th scope="row" class="cell-name">([^<]+)</th>', table) == ["no", "yes"]
+    counts = [int(n) for n in re.findall(r'<span class="cm-count">(\d+)</span>', table)]
+    assert counts == [n for row in found["confusion"]["matrix"] for n in row]
+    assert re.findall(r'class="num cm-[0-5]"', table)
+    specs = chart_specs(page)
+    for name in ("roc-chart", "pr-chart", "calibration-chart"):
+        assert specs[name]["type"] == "lines" and specs[name]["series"][0]["points"]
+    roc = specs["roc-chart"]
+    assert roc["series"][0]["points"] == [
+        [x, y] for x, y in zip(found["roc"]["fpr"], found["roc"]["tpr"], strict=True)
+    ]
+    assert roc["series"][1]["faint"] is True  # the chance diagonal
+    assert "yes" in roc["label"]  # the positive class is named
+    assert "per-class" in panel.lower() and "Precision" in panel
+    assert "residual-chart" not in specs
+    assert ECHARTS in page
+
+
+def test_multiclass_has_no_roc_and_shows_other_beyond_30(world):
+    rng = np.random.default_rng(1)
+    k, n = 40, 4000
+    y = rng.integers(0, k, n)
+    pred = rng.random((n, k))
+    pred[np.arange(n), y] += 0.5
+    pred /= pred.sum(1, keepdims=True)
+    found = diagnostics("classification", y, pred, [f"c{i}" for i in range(k)])
+    page = diagnostics_page(world, diagnostics=found)
+    table = confusion_table(page)
+    heads = re.findall(r'<th scope="col" class="cell-name">([^<]+)</th>', table)
+    assert len(heads) == 31 and heads[-1] == "Other classes"
+    assert table.count('<th scope="row" class="cell-name">') == 31
+    specs = chart_specs(page)
+    assert not {"roc-chart", "pr-chart", "calibration-chart"} & set(specs)
+
+
+def test_regression_shows_residuals_and_scatter(world):
+    rng = np.random.default_rng(2)
+    y = rng.normal(100, 10, 3000)
+    found = diagnostics("regression", y, y + rng.normal(0, 2, 3000), None)
+    page = diagnostics_page(world, task="regression", diagnostics=found)
+    specs = chart_specs(page)
+    residual = specs["residual-chart"]
+    assert residual["type"] == "bar" and residual["values"] == found["residuals"]["counts"]
+    scatter = specs["scatter-chart"]
+    assert scatter["type"] == "scatter"
+    points = scatter["series"][0]["points"]
+    assert len(points) == 2000 == len(found["points"]["actual"])
+    assert points[0] == [found["points"]["actual"][0], found["points"]["predicted"][0]]
+    assert scatter["line"]["step"] is False  # the y = x diagonal is straight
+    assert "2,000" in scatter["label"] and "random order" in scatter["label"]
+    assert "confusion" not in metrics_panel(page)
+
+
+def test_phase1_model_shows_the_missing_note(world):
+    page = diagnostics_page(world)  # record_like stores no diagnostics, as Phase 1 did
+    assert "trained before Fione kept" in metrics_panel(page)
+    assert "cannot be read" not in page
+    assert not {"roc-chart", "residual-chart"} & set(chart_specs(page))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"task": "classification", "confusion": "x"},
+        {"version": 1, "task": "classification", "labels": "ab", "confusion": {"matrix": 1}},
+        {
+            "version": 1,
+            "task": "classification",
+            "labels": ["a", "b"],
+            "confusion": {"classes": [0, 7], "matrix": [[1, 2], [3, 4]]},
+            "per_class": [{"class": True, "precision": "x", "support": -1}],
+            "roc": {"fpr": [0, 2.0], "tpr": [0], "threshold": None},
+            "pr": {"precision": [None, None], "recall": [0, 1]},
+            "calibration": [{"predicted": "a"}, 3],
+        },
+        {"version": 1, "task": "regression", "residuals": {"edges": [0, 1], "counts": [1, 2]}},
+        {"version": 1, "task": "classification", "confusion": {"classes": [0], "matrix": [[1]]}},
+        {"version": 2, "task": "classification"},
+        {"version": 1, "task": "classification", "labels": [{"a": 1}, []], "per_class": "x"},
+    ],
+)
+def test_malformed_diagnostics_do_not_break_the_page(world, bad):
+    page = diagnostics_page(world, diagnostics=bad)
+    assert "cannot be read" in metrics_panel(page)
+    assert not {"roc-chart", "pr-chart", "calibration-chart"} & set(chart_specs(page))
+
+
+@pytest.mark.parametrize("text", ["[1, 2]", '"x"', "null", "7"])
+def test_diagnostics_json_that_is_not_an_object(world, text):
+    world.login("vi")
+    mid = record_like(world, world.p)
+    with closing(connect(world.client)) as conn:
+        conn.execute("UPDATE models SET diagnostics_json = ? WHERE id = ?", (text, mid))
+        conn.commit()
+    r = world.client.get(world.path("/projects/{p}/models/") + f"{mid}?tab=metrics")
+    assert r.status_code == 200
+    assert ("cannot be read" in r.text) is (text != "null")
+
+
+def test_a_malformed_part_leaves_the_others(world):
+    found = binary_diagnostics()
+    found["roc"] = {"fpr": "broken"}
+    page = diagnostics_page(world, diagnostics=found)
+    specs = chart_specs(page)
+    assert "roc-chart" not in specs and "pr-chart" in specs
+    assert "cannot be read" not in page
+
+
+def test_hostile_label_is_escaped(world):
+    hostile = "<script>alert(1)</script>"
+    page = diagnostics_page(world, diagnostics=binary_diagnostics(("ok", hostile)))
+    assert "<script>alert" not in page and escape(hostile) in page
+    for block in re.findall(r'<script type="application/json"[^>]*>(.*?)</script>', page, re.S):
+        assert "<" not in block
+    assert hostile in chart_specs(page)["roc-chart"]["label"]
+
+
+def test_every_chart_spec_has_matching_labels_and_values(world):
+    rng = np.random.default_rng(3)
+    y = rng.normal(0, 1, 500)
+    for task, found in (
+        ("classification", binary_diagnostics()),
+        ("regression", diagnostics("regression", y, y * 0.9, None)),
+    ):
+        page = diagnostics_page(world, task=task, diagnostics=found)
+        specs = chart_specs(page)
+        assert specs
+        for name, spec in specs.items():
+            assert len(spec["labels"]) == len(spec["values"]) > 0, name
+            assert all(isinstance(label, str) for label in spec["labels"]), name
+
+
+def test_no_inline_style_attributes(world):
+    page = diagnostics_page(world, diagnostics=binary_diagnostics())
+    assert not re.search(r"<[^>]+\sstyle=", page)
+    assert not re.search(r"<script(?![^>]*\ssrc=)(?![^>]*application/json)[^>]*>", page)
+
+
+@pytest.mark.parametrize(
+    "share,level",
+    [(0.0, 0), (0.01, 1), (0.1, 1), (0.11, 2), (0.25, 2), (0.5, 3), (0.75, 4), (0.76, 5), (1, 5)],
+)
+def test_confusion_shades_bucket_the_row_share(share, level):
+    assert models_ui._level(share) == level
+
+
+def test_undefined_figures_and_japanese(world):
+    y = np.array([0, 0, 1, 1, 2, 2])
+    pred = np.eye(3)[[0, 0, 0, 1, 0, 1]]  # class 2 is never predicted
+    found = diagnostics("classification", y, pred, ["a", "b", "c"])
+    world.login("vi")
+    mid = record_like(world, world.p, diagnostics=found)
+    url = world.path("/projects/{p}/models/") + f"{mid}?tab=metrics"
+    page = world.client.get(url).text
+    rows = re.findall(r'<th scope="row" class="cell-name">c</th>(.*?)</tr>', page, re.S)
+    assert rows and "—" in rows[-1]  # c's precision: never predicted
+    ja = world.client.get(url, headers={"Accept-Language": "ja"}).text
+    assert "混同行列" in ja and "クラス別の値" in ja

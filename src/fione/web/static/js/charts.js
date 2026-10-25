@@ -3,7 +3,8 @@
 // drawn on the canvas too (renderMode "richText"), so no HTML or inline style is added to the
 // page. Colours come from the design tokens (resolved through hidden probe elements), the
 // chart is redrawn when the theme changes, sized when its container gets a size (charts in a
-// hidden tab start at zero) and animated only when motion is welcome.
+// hidden tab start at zero) and animated only when motion is welcome. Charts are found at
+// start-up and in content HTMX adds (each element is set up once: data-chart-ready).
 (function () {
   "use strict";
   if (!window.echarts) return;
@@ -63,7 +64,7 @@
         type: "line",
         name: spec.line.name,
         data: spec.line.points,
-        step: "end",
+        step: spec.line.step === undefined ? "end" : spec.line.step,
         symbol: "none",
         lineStyle: { color: c.text, width: 2, type: "dashed" },
         itemStyle: { color: c.text },
@@ -146,18 +147,101 @@
     };
   }
 
+  // Curves (ROC, precision-recall, calibration, partial dependence): one line per series on a
+  // value or category x axis. Faint series (a reference diagonal) are thin and muted, left out
+  // of the legend and silent; short series show their points.
+  function linesOption(spec, c) {
+    var axis = function (horizontal) {
+      var category = horizontal && spec.x_type === "category";
+      return {
+        type: category ? "category" : "value",
+        data: category ? spec.categories : undefined,
+        name: horizontal ? spec.x_name : spec.y_name,
+        nameLocation: horizontal ? "middle" : "end",
+        nameGap: horizontal ? 32 : 14,
+        nameTextStyle: { color: c.muted, align: horizontal ? "center" : "left" },
+        min: horizontal ? spec.x_min : spec.y_min,
+        max: horizontal ? spec.x_max : spec.y_max,
+        scale: true,
+        axisLine: { lineStyle: { color: c.axis } },
+        axisLabel: { color: c.muted, hideOverlap: true },
+        splitLine: { lineStyle: { color: c.grid } },
+      };
+    };
+    var shown = 0;
+    var series = spec.series.map(function (s) {
+      if (s.faint) {
+        return {
+          type: "line",
+          name: s.name,
+          data: s.points,
+          symbol: "none",
+          silent: true,
+          tooltip: { show: false },
+          lineStyle: { color: c.muted, width: 1, type: "dashed" },
+          itemStyle: { color: c.muted },
+          z: 1,
+        };
+      }
+      var colour = c.series[shown++ % c.series.length];
+      return {
+        type: "line",
+        name: s.name,
+        data: s.points,
+        symbol: SYMBOLS[(shown - 1) % SYMBOLS.length],
+        showSymbol: s.points.length <= 20,
+        symbolSize: 7,
+        lineStyle: { color: colour, width: 2 },
+        itemStyle: { color: colour },
+        z: 2,
+      };
+    });
+    return {
+      animation: !reduceMotion.matches,
+      aria: { enabled: true, label: { description: spec.label } },
+      textStyle: { color: c.text, fontFamily: window.getComputedStyle(document.body).fontFamily },
+      legend: {
+        bottom: 0,
+        textStyle: { color: c.text },
+        data: spec.series
+          .filter(function (s) {
+            return !s.faint;
+          })
+          .map(function (s) {
+            return s.name;
+          }),
+      },
+      grid: { left: 12, right: 24, top: 36, bottom: 72, containLabel: true },
+      tooltip: {
+        trigger: "item",
+        renderMode: "richText",
+        backgroundColor: c.surface,
+        borderColor: c.axis,
+        textStyle: { color: c.text },
+      },
+      xAxis: axis(true),
+      yAxis: axis(false),
+      series: series,
+    };
+  }
+
   function draw(entry) {
     var c = colours(entry.figure);
+    var type = entry.spec.type;
     var built =
-      entry.spec.type === "scatter"
+      type === "scatter"
         ? scatterOption(entry.spec, c)
-        : option(entry.spec, c, entry.el.clientWidth);
+        : type === "lines"
+          ? linesOption(entry.spec, c)
+          : option(entry.spec, c, entry.el.clientWidth);
     entry.chart.setOption(built, true);
   }
 
-  document.querySelectorAll("[data-chart]").forEach(function (el) {
+  function setUp(el) {
+    if (el.hasAttribute("data-chart-ready")) return;
     var source = document.getElementById(el.getAttribute("data-chart"));
     if (!source) return;
+    el.setAttribute("data-chart-ready", "");
     var spec = JSON.parse(source.textContent);
     var entry = { el: el, spec: spec, figure: el.closest("figure"), chart: null };
     charts.push(entry);
@@ -172,6 +256,17 @@
         draw(entry); // the label width follows the chart's width
       }
     }).observe(el);
+  }
+
+  // The charts in ``root`` (the element itself included) not set up yet.
+  function scan(root) {
+    if (root.matches && root.matches("[data-chart]")) setUp(root);
+    if (root.querySelectorAll) root.querySelectorAll("[data-chart]").forEach(setUp);
+  }
+
+  scan(document);
+  document.addEventListener("htmx:load", function (event) {
+    scan(event.target);
   });
 
   function redraw() {

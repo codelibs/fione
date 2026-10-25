@@ -151,7 +151,78 @@
       </div>
       {% endif %}
       <p class="text-muted text-sm">{{ t('model.metrics_note') }}</p>
-      <p class="text-muted text-sm">{{ t('model.metrics_missing') }}</p>
+      {% if diagnostics %}
+      {% set d = diagnostics %}
+      {% if d.rows %}<p class="text-muted text-sm">{{ d.rows }}</p>{% endif %}
+      {% if d.partial %}<div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('model.diag.partial') }}</span></div>{% endif %}
+      {% if d.confusion %}
+      <section class="card card-padded stack" aria-labelledby="confusion-title">
+        <h2 class="section-header__title" id="confusion-title">{{ t('model.diag.confusion') }}</h2>
+        <p class="text-muted text-sm">{{ t('model.diag.confusion_hint') }}</p>
+        <div class="table-wrap" tabindex="0" role="region" aria-labelledby="confusion-title">
+          <table class="table table-compact confusion">
+            <caption class="visually-hidden">{{ t('model.diag.confusion_caption') }}</caption>
+            <thead><tr>
+              <td>{{ t('model.diag.corner') }}</td>
+              {% for label in d.confusion.labels %}<th scope="col" class="cell-name">{{ label }}</th>{% endfor %}
+            </tr></thead>
+            <tbody>
+              {% for row in d.confusion.rows %}
+              <tr>
+                <th scope="row" class="cell-name">{{ d.confusion.labels[loop.index0] }}</th>
+                {% for cell in row %}<td class="num cm-{{ cell.level }}"><span class="cm-count">{{ "{:,}".format(cell.count) }}</span><span class="cm-share">{{ "%.0f%%"|format(cell.share * 100) }}</span></td>{% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if d.confusion.other %}<p class="text-muted text-sm">{{ t('model.diag.other_note') }}</p>{% endif %}
+      </section>
+      {% endif %}
+      {% if d.per_class %}
+      <section class="card card-padded stack" aria-labelledby="per-class-title">
+        <h2 class="section-header__title" id="per-class-title">{{ t('model.diag.per_class') }}</h2>
+        <p class="text-muted text-sm">{{ t('model.diag.per_class_hint') }}</p>
+        <div class="table-wrap" tabindex="0" role="region" aria-labelledby="per-class-title">
+          <table class="table table-compact table-data">
+            <thead><tr>
+              <th scope="col">{{ t('model.diag.col.class') }}</th>
+              {% for key in ("precision", "recall", "f1") %}<th scope="col" class="num">{{ t('model.diag.col.' ~ key) }}</th>{% endfor %}
+              <th scope="col" class="num">{{ t('model.diag.col.support') }}</th>
+            </tr></thead>
+            <tbody>
+              {% for row in d.per_class.rows %}
+              <tr>
+                <th scope="row" class="cell-name">{{ row.label }}</th>
+                {% for key in ("precision", "recall", "f1") %}<td class="num">{{ "%.3f"|format(row[key]) if row[key] is not none else "—" }}</td>{% endfor %}
+                <td class="num">{{ "{:,}".format(row.support) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if d.per_class.truncated %}<p class="text-muted text-sm">{{ t('model.diag.per_class_truncated', n=d.per_class.rows|length) }}</p>{% endif %}
+      </section>
+      {% endif %}
+      {% for key, title, hint in (
+        ("roc_chart", "model.diag.roc", "model.diag.roc_hint"),
+        ("pr_chart", "model.diag.pr", "model.diag.pr_hint"),
+        ("calibration_chart", "model.diag.calibration", "model.diag.calibration_hint"),
+        ("residual_chart", "model.diag.residuals", "model.diag.residual_hint"),
+        ("scatter_chart", "model.diag.scatter", "model.diag.scatter_hint"),
+      ) if d[key] %}
+      {% set id = key|replace("_chart", "") %}
+      <section class="card card-padded stack" aria-labelledby="{{ id }}-title">
+        <h2 class="section-header__title" id="{{ id }}-title">{{ t(title) }}</h2>
+        <p class="text-muted text-sm">{{ t(hint, positive=d.positive, auc=d.auc) }}</p>
+        {{ chart(t, id ~ "-chart", d[key]) }}
+      </section>
+      {% endfor %}
+      {% elif diagnostics_stored %}
+      <p class="empty-line text-muted">{{ t('model.diag.unreadable') }}</p>
+      {% else %}
+      <p class="empty-line text-muted">{{ t('model.diagnostics_missing') }}</p>
+      {% endif %}
     </div>
   </div>
 </div>

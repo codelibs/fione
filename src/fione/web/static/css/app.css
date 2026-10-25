@@ -2558,6 +2558,37 @@ select.input {
 .chart-probe-c3 { color: var(--color-warning-text); }
 .chart-probe-c4 { color: var(--color-danger-text); }
 
+/* Confusion matrix: each cell shaded by its share of the actual class's rows; the count and
+   the share are written in it too, so the shade is never the only cue */
+.confusion .cell-name {
+  min-width: 4rem;
+}
+
+.confusion thead th.cell-name {
+  text-transform: none; /* class labels as they are: "a" and "A" may both be classes */
+  letter-spacing: normal;
+}
+
+.confusion .cm-count,
+.confusion .cm-share {
+  display: block;
+}
+
+.confusion .cm-count {
+  font-weight: var(--weight-medium);
+}
+
+.confusion .cm-share {
+  font-size: var(--text-xs);
+}
+
+.cm-0 { background: var(--color-cm-0); color: var(--color-text); }
+.cm-1 { background: var(--color-cm-1); color: var(--color-text); }
+.cm-2 { background: var(--color-cm-2); color: var(--color-text); }
+.cm-3 { background: var(--color-cm-3); color: var(--color-text); }
+.cm-4 { background: var(--color-cm-4); color: var(--color-on-primary); }
+.cm-5 { background: var(--color-cm-5); color: var(--color-on-primary); }
+
 .input-limited {
   max-width: 24rem;
 }
