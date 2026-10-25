@@ -19,7 +19,7 @@ from fione.api.deps import Conn, ProjectContext, project_access
 from fione.api.downloads import attachment, content_disposition, tmp_dir
 from fione.api.errors import ApiError, not_found, service_errors
 from fione.api.schemas import IdPath, dataset_out
-from fione.data.profile import profile_dataset
+from fione.data.profile import SCORE_REASONS, profile_dataset
 from fione.engine.events import jsonable
 from fione.projects import service
 from fione.projects.ingest import export_csv, ingest_csv, read_dataset_sample
@@ -195,12 +195,19 @@ def profile(
     """Profile (EDA) of the first 100,000 rows: kinds, statistics, histograms, correlations
     and, with ``target``, leak suspects. For the UI, so ``top_values`` (raw cell values)
     are included, unlike the LLM-facing tools. ``n_rows`` is the whole dataset's row count,
-    ``sample_rows`` the number profiled."""
+    ``sample_rows`` the number profiled. Each leak suspect's ``kind`` is ``exact`` (the
+    column is left out of the EasyML defaults) or ``score`` (a warning only: a strong
+    legitimate column can score as high)."""
     dataset = _dataset(conn, ctx, dataset_id)
     frame = read_dataset_sample(request.app.state.storage, dataset, max_rows=PROFILE_SAMPLE_ROWS)
     with service_errors():
         result = profile_dataset(frame, target)
-    return jsonable({**asdict(result), "n_rows": dataset.n_rows, "sample_rows": len(frame)})
+    out = {**asdict(result), "n_rows": dataset.n_rows, "sample_rows": len(frame)}
+    out["leak_suspects"] = [
+        {**s, "kind": "score" if s["reason"] in SCORE_REASONS else "exact"}
+        for s in out["leak_suspects"]
+    ]
+    return jsonable(out)
 
 
 @router.get("/{dataset_id}/columns/{column:path}")

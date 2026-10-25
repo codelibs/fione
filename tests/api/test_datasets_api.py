@@ -3,6 +3,7 @@
 import io
 import json
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -232,6 +233,33 @@ def test_profile_for_the_ui_includes_top_values(client, owner, project):
     assert sorted(columns["color"]["top_values"]) == [["blue", 30], ["red", 30]]
     assert isinstance(profile["leak_suspects"], list)
     assert client.get(f"{base(project)}/{dataset['id']}/profile", headers=owner).status_code == 200
+
+
+def test_profile_says_which_leak_suspects_are_exact(client, owner, project):
+    """An exact suspect is unchecked by default in the UI; a score-based one only warns."""
+    rng = np.random.default_rng(0)
+    label = rng.choice(["yes", "no"], 300)
+    frame = pd.DataFrame(
+        {
+            "copy": label,
+            "noisy": (label == "yes") + rng.normal(0, 0.1, 300),
+            "x": rng.normal(size=300),
+            "label": label,
+        }
+    )
+    data = frame.to_csv(index=False).encode()
+    dataset = upload(client, project, data, headers=owner).json()
+    r = client.get(f"{base(project)}/{dataset['id']}/profile?target=label", headers=owner)
+    suspects = {s["column"]: s for s in strict_json(r.text)["leak_suspects"]}
+    assert set(suspects) == {"copy", "noisy"}
+    assert (suspects["copy"]["reason"], suspects["copy"]["kind"]) == (
+        "identical to target",
+        "exact",
+    )
+    assert (suspects["noisy"]["reason"], suspects["noisy"]["kind"]) == (
+        "predicts the target on its own",
+        "score",
+    )
 
 
 def test_column_profile(client, owner, project):
