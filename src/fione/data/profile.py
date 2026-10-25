@@ -300,19 +300,33 @@ def _ordered_values(s: pd.Series, kind: Kind) -> np.ndarray | None:
     return _as_float(numbers)
 
 
-def _score_bins(s: pd.Series, kind: Kind) -> np.ndarray:
-    """Bin codes: quantile bins for ordered values, one bin per value otherwise. Missing values
-    share a bin of their own."""
-    values = _ordered_values(s, kind)
-    if values is None:
-        codes, uniques = pd.factorize(s)
-        return np.where(codes < 0, len(uniques), codes)
+def _value_bins(s: pd.Series) -> np.ndarray:
+    """One bin per distinct value; missing values share a bin of their own."""
+    codes, uniques = pd.factorize(s)
+    return np.where(codes < 0, len(uniques), codes)
+
+
+def _quantile_bins(values: np.ndarray) -> np.ndarray:
+    """At most ``_SCORE_BINS`` quantile bins; NaN values share a bin of their own."""
     ok = ~np.isnan(values)
     bins = np.full(len(values), _SCORE_BINS, dtype=np.int64)
     if ok.any():
         edges = np.unique(np.quantile(values[ok], np.linspace(0, 1, _SCORE_BINS + 1)[1:-1]))
         bins[ok] = np.searchsorted(edges, values[ok], side="right")
     return bins
+
+
+def _score_binnings(s: pd.Series, kind: Kind) -> list[np.ndarray]:
+    """The ways ``s`` is binned for the score: quantile bins for ordered values, one bin per
+    value otherwise. Whole numbers get both, since they may be codes rather than quantities."""
+    values = _ordered_values(s, kind)
+    if values is None:
+        return [_value_bins(s)]
+    binnings = [_quantile_bins(values)]
+    present = values[~np.isnan(values)]
+    if kind != "datetime" and np.array_equal(present, np.round(present)):
+        binnings.append(_value_bins(s))
+    return binnings
 
 
 def _out_of_fold_means(bins: np.ndarray, y: np.ndarray, folds: np.ndarray) -> np.ndarray:
@@ -345,21 +359,22 @@ def single_column_score(
     """How well ``s`` alone predicts ``t``, out of fold: the column is binned, each row is
     predicted by its bin's target mean over the other of two folds, and the predictions are
     scored by AUC (classification; the mean one-vs-rest AUC for more than two classes) or R^2.
-    ``None`` when the target leaves nothing to score.
+    A whole-number column is binned both ways and keeps the better score. ``None`` when the
+    target leaves nothing to score, and for targets with more than ``_SCORE_MAX_CLASSES``
+    classes (one pass per class would not fit the budget).
 
     Known limitation: the smoothing pulls small bins towards the mean, which costs R^2 but not
-    AUC. Regression leaks in fewer than about 3,000 rows therefore mostly score below the
-    threshold (a noisy log of the target: about 0.6 at 1,000 rows, 0.3 at 300)."""
+    AUC. Regression leaks in fewer than roughly 5,000 rows therefore mostly score below the
+    threshold (a noisy log of the target: about 0.87 at 3,000 rows, 0.6 at 1,000)."""
     if task == "regression":
         y = _as_float(t)
         keep = ~np.isnan(y)
     else:
         keep = t.notna().to_numpy()
         codes, _ = pd.factorize(t[keep])
-    if keep.sum() < 2:
+    n = int(keep.sum())
+    if n < 2:
         return None
-    bins = _score_bins(s[keep], kind)
-    n = len(bins)
     folds = np.empty(n, dtype=np.int64)
     folds[np.random.default_rng(seed).permutation(n)] = np.arange(n) % 2
     if task == "regression":
@@ -367,30 +382,46 @@ def single_column_score(
         total = float(((y - y.mean()) ** 2).sum())
         if total == 0:
             return None
-        pred = _out_of_fold_means(bins, y, folds)
-        return 1 - float(((y - pred) ** 2).sum()) / total
-    n_classes = int(codes.max()) + 1
-    if n_classes < 2 or n_classes > _SCORE_MAX_CLASSES:
-        return None
-    # both AUCs are symmetric in the labels, so which label is "positive" does not matter
-    classes = [1] if n_classes == 2 else range(n_classes)
-    aucs = []
-    for k in classes:
-        positive = codes == k
-        found = _auc(_out_of_fold_means(bins, positive.astype("float64"), folds), positive)
-        if found is not None:
-            aucs.append(found)
-    return float(np.mean(aucs)) if aucs else None
+
+        def score(bins: np.ndarray) -> float | None:
+            pred = _out_of_fold_means(bins, y, folds)
+            return 1 - float(((y - pred) ** 2).sum()) / total
+
+    else:
+        n_classes = int(codes.max()) + 1
+        if n_classes < 2 or n_classes > _SCORE_MAX_CLASSES:
+            return None
+        # both AUCs are symmetric in the labels, so which label is "positive" does not matter
+        positives = [codes == k for k in ([1] if n_classes == 2 else range(n_classes))]
+
+        def score(bins: np.ndarray) -> float | None:
+            aucs = [
+                _auc(_out_of_fold_means(bins, positive.astype("float64"), folds), positive)
+                for positive in positives
+            ]
+            aucs = [a for a in aucs if a is not None]
+            return float(np.mean(aucs)) if aucs else None
+
+    found = [v for v in map(score, _score_binnings(s[keep], kind)) if v is not None]
+    return max(found, default=None)
 
 
 def flag_scores(scores: dict[str, float], task: Task) -> set[str]:
-    """Columns whose score is suspiciously high: at least the threshold, and clearly above the
-    best column below it (chance when there is none)."""
+    """Columns whose score is suspiciously high: at least ``LEAK_STRONG``, or at least the
+    threshold and clearly above the best column below it (chance when there is none).
+
+    Known limitation: a legitimate column just below the threshold raises the bar for every
+    other column. Once the best column below the threshold scores 0.89 or more, only scores of
+    ``LEAK_STRONG`` are flagged, so a dataset that one column already predicts well gets no
+    warning for a leak that scores, say, 0.98. A leak beside a column at 0.949 needs 0.99,
+    beside one at 0.95 it needs 0.95: the rule is not continuous."""
     threshold, chance = _SCORE_THRESHOLDS[task]
     baseline = max((v for v in scores.values() if v < threshold), default=chance)
     # rounded so that 0.99 - 0.89 counts as the full margin
     return {
-        c for c, v in scores.items() if v >= threshold and round(v - baseline, 9) >= _SCORE_MARGIN
+        c
+        for c, v in scores.items()
+        if v >= LEAK_STRONG or (v >= threshold and round(v - baseline, 9) >= _SCORE_MARGIN)
     }
 
 

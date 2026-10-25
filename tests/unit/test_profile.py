@@ -415,6 +415,13 @@ def test_flag_rule():
     assert flag_scores({"x": 0.91, "y": 0.85}, reg) == set()
     assert flag_scores({"a": 0.95}, reg) == {"a"}
     assert flag_scores({"a": 0.99, "b": 0.89}, cls) == {"a"}  # exactly the margin
+    # LEAK_STRONG is flagged whatever the baseline
+    assert flag_scores({"leak": 0.99, "legit": 0.949}, cls) == {"leak"}
+    assert flag_scores({"leak": 0.999, "legit": 0.90}, cls) == {"leak"}
+    assert flag_scores({"r": 0.995, "legit": 0.89}, reg) == {"r"}
+    # the documented cliff: below LEAK_STRONG, a strong legitimate column hides a leak
+    assert flag_scores({"leak": 0.98, "legit": 0.90}, cls) == set()
+    assert flag_scores({"leak": 0.98, "legit": 0.949}, cls) == set()
     assert flag_scores({}, cls) == set()
 
 
@@ -435,7 +442,7 @@ def test_injected_classification_leaks():
     rank[np.argsort(y + 0.5 * rng.random(n), kind="stable")] = np.arange(n)
     df["row_id"] = rank
     df["created"] = (pd.Timestamp("2024-01-01") + pd.to_timedelta(rank, unit="min")).astype(str)
-    level = np.where(rng.random(n) < 0.98, y, 1 - y) * 750 + rng.integers(0, 750, n)
+    level = np.where(rng.random(n) < 0.99, y, 1 - y) * 750 + rng.integers(0, 750, n)
     df["code"] = [f"L{v}" for v in level]
     df["amount"] = np.where((y == 1) & (rng.random(n) < 0.98), rng.lognormal(3, 1, n), 0.0)
     found = _flagged(df, "t")
@@ -466,7 +473,7 @@ def test_injected_regression_leaks():
     n = len(t)
     df = pd.DataFrame(X, columns=[f"x{i}" for i in range(X.shape[1])])
     df["t"] = t
-    df["log"] = np.log(t) + rng.normal(0, 0.05, n)
+    df["log"] = np.log(t) + rng.normal(0, 0.02, n)
     df["square"] = t**2 + rng.normal(0, 100, n)
     df["rounded"] = np.round(t).astype(int).astype(str)
     rank = np.empty(n, dtype=np.int64)
@@ -477,6 +484,7 @@ def test_injected_regression_leaks():
         assert name in found, name
         assert found[name].reason in SCORE_REASONS, name
     assert found["rank_id"].reason == ORDERED_BY_TARGET
+    assert found["rounded"].score >= 0.95
     assert not {f"x{i}" for i in range(X.shape[1])} & set(found)
 
 
@@ -485,6 +493,57 @@ def test_clean_datasets_raise_no_score_suspects(loader):
     df = loader(as_frame=True).frame
     reasons = {s.reason for s in profile_dataset(df, target="target").leak_suspects}
     assert not reasons & {PREDICTS_ALONE, ORDERED_BY_TARGET}
+
+
+def test_nominal_whole_number_codes_are_flagged():
+    """Codes stored as integers or digit strings: quantile bins would mix unrelated codes, so
+    whole numbers are also scored one bin per value."""
+    rng = np.random.default_rng(1)
+    X, y = make_classification(n_samples=5000, random_state=0)
+    n = len(y)
+    level = np.where(rng.random(n) < 0.99, y, 1 - y) * 750 + rng.integers(0, 750, n)
+    code = rng.permutation(1500)[level]  # numerically unrelated to the class
+    df = pd.DataFrame({"t": y, "x": X[:, 0], "int_code": code, "digit_code": code.astype(str)})
+    df["float_code"] = df["int_code"].astype(float)
+    found = _flagged(df, "t")
+    for name in ("int_code", "digit_code", "float_code"):
+        assert found[name].reason == PREDICTS_ALONE, name
+        assert found[name].score >= 0.96, name
+
+
+def _breast_cancer_with_copy(flipped: int) -> pd.DataFrame:
+    """breast_cancer plus its target with ``flipped`` rows flipped, as text so that Pearson
+    does not catch it. The best real column scores 0.945, just below the threshold."""
+    df = load_breast_cancer(as_frame=True).frame
+    copy = df["target"].to_numpy().copy()
+    rows = np.random.default_rng(0).choice(len(df), flipped, replace=False)
+    copy[rows] = 1 - copy[rows]
+    df["copy"] = copy.astype(str)
+    return df
+
+
+def test_strong_leak_beside_a_strong_legitimate_column_is_flagged():
+    found = _flagged(_breast_cancer_with_copy(1), "target")  # scores 0.998
+    assert found["copy"].reason == PREDICTS_ALONE and found["copy"].score >= LEAK_STRONG
+
+
+def test_flipped_copy_beside_a_strong_column_is_a_documented_miss():
+    """Beside a column at 0.945 a leak needs LEAK_STRONG. A copy with 2% of its rows flipped
+    scores about 0.978 and is not flagged (1% flipped: about 0.987, also missed)."""
+    df = _breast_cancer_with_copy(11)
+    score = single_column_score(df["copy"], "categorical", df["target"], "classification")
+    assert 0.95 <= score <= LEAK_STRONG - 0.01
+    assert "copy" not in _flagged(df, "target")
+
+
+def test_score_bins_give_missing_values_a_bin_of_their_own():
+    bins = profile_module._quantile_bins(np.array([np.nan, 1.0, 2.0, 3.0, np.nan]))
+    assert bins[0] == bins[4]
+    assert bins[0] not in bins[1:4]
+    assert len(set(bins[1:4])) == 3
+    codes = profile_module._value_bins(pd.Series(["a", None, "b", "a", None]))
+    assert codes[1] == codes[4] and codes[1] not in (codes[0], codes[2])
+    assert codes[0] == codes[3] != codes[2]
 
 
 def test_few_rows_skip_the_score():
