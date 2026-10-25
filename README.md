@@ -10,8 +10,8 @@ This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinI
 
 - **EasyML wizard** for people new to machine learning: upload → data analysis (the column to
   predict, the input columns, the prediction type, the maximum run time) → run → prediction
-  summary with a 1–5 star rating and Fione-kun's comment → predictions as a CSV, with the
-  reasons for the first rows.
+  summary with a 1–5 star rating and Fione-kun's comment → predictions as a CSV; the result
+  page also shows the reasons for the first rows.
 - **AutoML screens** for experts (the detailed view): column statistics and charts,
   correlations, leak warnings, every training setting, the job list, leaderboards, variable
   importance, score history, CV metrics, model export and import.

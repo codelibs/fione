@@ -134,7 +134,8 @@ What this release does not do, or does with a catch. Japanese summary at the end
   a random sample. A model has none when it was trained before they existed or imported
   without them, or when they could not be computed or took more than 256 KiB.
 - **Only exact leaks are unchecked.** A column identical to the column to predict, or whose
-  value determines it, is left out of the EasyML defaults. A column that only scores high
+  value determines it, is left out of the EasyML defaults (row IDs stay unchecked as IDs, as
+  before). A column that only scores high
   stays checked, with a warning: one that predicts the answer on its own, one whose order or
   gaps follow the answer, and one with a near-perfect correlation (|r| ≥ 0.99), which used to
   be unchecked.
@@ -202,7 +203,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 診断（指標タブ）は学習時の out-of-fold 予測から作るため、CV のスコアと同じくやや楽観的です。20 万行を超えるとランダムサンプルから作ります。
 - モデルの診断には学習データの値が含まれます（クラスのラベルと、回帰では学習行から抜き出した最大 2,000 件の実際の値とその予測値）。プロジェクトを読めるすべての人に見え、モデルのエクスポートにも入り、学習データを削除しても残ります。保存した説明も、カテゴリやクラスのラベルをデータセット削除後も保持します（エクスポートはされません）。モデルファイルとサービング用ファイルには診断は入りません。
 - 診断を持つエクスポートは、診断の機能より前のインストールでは読み込めません（どちらもバージョン 20.0.0 で区別できません）。インポートは、有限でない数、float の範囲を超える整数、未知の項目や深すぎる入れ子を持つ診断を拒否するようになりました。
-- リークとして既定でチェックを外すのは完全なもの（予測する列と同じ列、値で答えが決まる列）だけです。スコアによる疑い（単独で答えをよく当てる列、並び順や欠損が答えに沿う列、相関 |r| ≥ 0.99 の列。相関の列は以前はチェックを外していました）は注意を出すだけで、チェックされたままです。
+- リークとして既定でチェックを外すのは完全なもの（予測する列と同じ列、値で答えが決まる列）だけです（行の ID の列はこれまでどおり ID としてチェックを外します）。スコアによる疑い（単独で答えをよく当てる列、並び順や欠損が答えに沿う列、相関 |r| ≥ 0.99 の列。相関の列は以前はチェックを外していました）は注意を出すだけで、チェックされたままです。
 - リークのスコアは注意であり、どちらの向きにも間違えます。強い正当な列が疑われることも、リークを見逃すこともあります。すでに 0.89〜0.95 の列がある場合は 0.99 以上だけが注意になり、値の 1% が違う答えのコピー（0.987）は報告されません。一方のクラスで常に 0 の列（もう一方の 80% だけ値がある金額など）は最大 0.90 で、報告されません。回帰のリークは約 5,000 行未満ではほとんど見逃します。101 クラス以上の目的変数にはスコアがなく、画面にもそう表示されません。200 行未満のデータセットは採点せず、3 秒で打ち切ると、採点しなかった列があることを表示します。
 - 負荷の高いマシンでは、同じ時間予算で学習できるブースティングの回数が減ります。いちばん影響を受けるのは CatBoost です。
 - API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。
