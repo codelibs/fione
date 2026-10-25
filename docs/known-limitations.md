@@ -28,9 +28,10 @@ What this release does not do, or does with a catch. Japanese summary at the end
   `docker exec`) to anyone who can use Docker on the host.
 - **API tokens never expire**, and Fione does not record when one was last used. Revoke tokens
   you no longer need on the Account page.
-- **Fione Serving has no authentication** and no rate or concurrency limit (only the request
-  size limits). The command the UI shows, `docker run --rm -p 8081:8080 …`, publishes it on every
-  network interface of the host; use `-p 127.0.0.1:8081:8080` to keep it on that machine, and a
+- **Fione Serving has no authentication** and no rate or concurrency limit for predictions
+  (only the request size limits). Requests for contributions are capped (2 at once by default,
+  then 503), but each one holds the model while it runs, so plain predictions wait for it. The
+  command the UI shows, `docker run --rm -p 8081:8080 …`, publishes it on every network interface of the host; use `-p 127.0.0.1:8081:8080` to keep it on that machine, and a
   reverse proxy with authentication to serve others.
 - **Imported models** that were not made by this installation load only if an administrator
   ticks the trust option on import; the model is then marked "Imported, unverified". Loading
@@ -114,7 +115,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - その場で求める説明（最大 100 行の寄与度、1 列の部分依存）は Web プロセスで 1 件ずつ計算します。待てるのは 4 件まで、最大 15 秒で、それ以外はすぐに「混雑」（HTTP 503）になります。ファイルが 512 MiB を超えるモデル、信頼を確認していないインポート、求めた行数に対してクラス × 列が多すぎるモデルはそこでは断り、書き込み権限が必要な説明ジョブでだけ説明します。
 - 負荷の高いマシンでは、同じ時間予算で学習できるブースティングの回数が減ります。いちばん影響を受けるのは CatBoost です。
 - API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。
-- Fione Serving には認証も、リクエスト数・同時実行数の制限もありません。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
+- Fione Serving には認証も、予測のリクエスト数・同時実行数の制限もありません。寄与度を求めるリクエストだけは同時に 2 件まで（それ以上は 503）ですが、計算中はモデルを占有するので、通常の予測はその間待たされます。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
 - 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5〜1.7 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。
 - CV のスコアはやや楽観的です（早期終了とアンサンブルの重みが同じ fold の予測で決まるため）。正直な数値は、学習に使わないテストデータで確かめてください。
 - Linux では XGBoost が NVIDIA の NCCL ライブラリ（`nvidia-nccl-cu13`、イメージ内で約 350 MB）を取り込みます。パッケージのメタデータはライセンスを `LicenseRef-NVIDIA-Proprietary` としており、ホイール内のライセンス文は BSD-3-Clause 型です。イメージを再配布する前に確認してください（CPU 専用の `xgboost-cpu` は macOS 用のホイールがないため使っていません）。

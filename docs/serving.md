@@ -46,8 +46,9 @@ docker run --rm -p 8081:8080 -v "$PWD/model:/model:ro" ghcr.io/codelibs/fione-se
 
 The API listens on port 8080 in the container (`-p 8081:8080` publishes it on 8081, on every
 network interface of the host). **The API has no authentication** and no rate or concurrency
-limit beyond the request size limits below: to keep it on this machine, publish it as
-`-p 127.0.0.1:8081:8080`, and put a reverse proxy with authentication in front of it to serve
+limit for predictions beyond the request size limits below (only requests for
+[contributions](#contributions) are limited in number at once): to keep it on this machine,
+publish it as `-p 127.0.0.1:8081:8080`, and put a reverse proxy with authentication in front of it to serve
 others. The process runs as a non-root user and only reads `/model`. If the model cannot be served, the
 container prints one line and exits with status 1, for example:
 
@@ -91,6 +92,46 @@ The response has one prediction per instance, in order. A row that cannot be pre
 Whole-request errors answer `{"error": "..."}`: status 400 for a body that is not JSON (or
 holds `NaN`/`Infinity`) or has no `instances` list, 413 for a body over 10 MiB or more than
 10,000 instances. Both limits can be changed (see below).
+
+#### Contributions
+
+Add `"contributions": true` to the request to get, for each predicted row, how much each input
+column moved the prediction away from the model's average prediction (`bias`):
+
+```sh
+curl -s -X POST localhost:8081/invocations -H 'Content-Type: application/json' -d '{"instances":[
+  {"sepal length (cm)":5.1,"sepal width (cm)":3.5,"petal length (cm)":1.4,"petal width (cm)":0.2},
+  {"sepal length (cm)":6.3,"sepal width (cm)":3.3,"petal length (cm)":6.0}],
+  "contributions":true}'
+```
+
+Each predicted row keeps its usual keys and gains `contributions` last; a row that cannot be
+predicted stays `{"exception": "..."}`. From the same iris model:
+
+```json
+{"predictions":[
+  {"label":"setosa","index":0,"class_probabilities":[0.9958831248710637,0.0024227084186831337,0.0016941667102532],
+   "contributions":{"bias":0.3770290408942638,"columns":{"sepal length (cm)":0.08218648759824686,
+     "sepal width (cm)":0.12263535619818028,"petal length (cm)":0.20102939560338035,"petal width (cm)":0.21300284457699228}}},
+  {"exception":"missing columns: ['petal width (cm)']"}]}
+```
+
+- `bias` plus the values in `columns` adds up to the output explained:
+  - two classes: the probability of the second class, `class_probabilities[1]`;
+  - more classes: the probability of the predicted class, `class_probabilities[index]`;
+  - regression: `value`.
+- `columns` has one entry per input column, in the order of `GET /model`'s `names`. The bias is
+  kept outside it, so an input column named `bias` cannot clash with it.
+- The values are in probability (or target) units, not log-odds. They come from the libraries'
+  tree contributions (TreeSHAP for the boosters, path contributions for ExtraTrees) combined over
+  the ensemble, so they are approximate: they add up exactly, but they are exact Shapley values
+  only for a single booster in its own margin units.
+- Contributions cost much more than a prediction. One request takes at most 1,000 instances
+  (413 beyond that), and a model with very many classes and columns takes fewer (422).
+  At most 2 such requests run at once; another one gets 503 with `Retry-After: 1` straight
+  away. All of these can be changed (see below).
+- `"contributions"` must be `true` or `false` (400 otherwise). Without it, or with `false`, the
+  response is exactly the one above.
 
 ### `GET /model`
 
@@ -161,6 +202,10 @@ file"; the model is then shown as of unverified origin.
 | `FIONE_IMAGE_TAG` | the image's tag | Must equal the model's tag (set at build time). |
 | `FIONE_SERVING_MAX_BODY` | `10485760` | The largest request body in bytes. |
 | `FIONE_SERVING_MAX_INSTANCES` | `10000` | The most instances per request. |
+| `FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES` | `1000` | The most instances per request with `"contributions": true`. |
+| `FIONE_SERVING_MAX_CONTRIBUTION_REQUESTS` | `2` | How many requests with contributions may run at once; more get 503. |
 | `PORT` | `8080` | The port inside the container. |
 
-One prediction runs at a time per container (the libraries use every CPU core).
+One prediction runs at a time per container (the libraries use every CPU core). A request with
+contributions computes them in the same turn as its predictions, so plain predictions wait
+while it runs.

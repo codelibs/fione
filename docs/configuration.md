@@ -62,6 +62,8 @@ The serving image reads these (see [Fione Serving](serving.md)):
 | `FIONE_IMAGE_TAG` | the image's tag | Must equal the tag recorded in the model. |
 | `FIONE_SERVING_MAX_BODY` | `10485760` (10 MiB) | The largest `/invocations` request body. |
 | `FIONE_SERVING_MAX_INSTANCES` | `10000` | The most instances in one request. |
+| `FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES` | `1000` | The most instances in one request that asks for contributions (`"contributions": true`). |
+| `FIONE_SERVING_MAX_CONTRIBUTION_REQUESTS` | `2` | How many requests for contributions run at once; another one gets 503 at once. Plain predictions wait while one runs, as they share the model. |
 | `PORT` | `8080` | The port inside the container. |
 
 ## Internal variables
