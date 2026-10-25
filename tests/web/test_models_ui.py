@@ -1,25 +1,31 @@
 """The model screens (leaderboard, model page, export and import), the Python modules screens
 and the simple/detailed view preference."""
 
+import io
 import json
 import re
 import time
 from contextlib import closing
-from html import escape
+from functools import cache
+from html import escape, unescape
 
 import numpy as np
 import pytest
 
-from api_helpers import add_user, connect, login, store_model
+from api_helpers import add_user, connect, iris_frame, login, store_model, tiny_model
 from fione.api import routes_models
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
 from fione.engine.diagnostics import diagnostics
 from fione.jobs import store
+from fione.jobs.explain_handler import build_explanation
 from fione.jobs.store import JobStatus
+from fione.models import explanations
 from fione.models import service as models
 from fione.modules import service as modules_service
 from fione.projects import service as projects
+from fione.projects.ingest import ingest_csv
+from fione.projects.service import DatasetType
 from fione.web import models_ui
 from web_helpers import FAST, make_world
 
@@ -983,3 +989,319 @@ def test_the_scatter_text_alternative_is_the_decile_summary(world):
     figure = page[page.index('id="scatter-chart"') :]
     figure = figure[: figure.index("</figure>")]
     assert "Mean residual" in figure and figure.count("<tr>") == 11
+
+
+# --- the Explain tab and the partial dependence fragment -----------------------------------
+
+IRIS_COLUMNS = ["sepal length (cm)", "sepal width (cm)", "petal length (cm)", "petal width (cm)"]
+
+
+@cache
+def iris_explanation() -> dict:
+    """The explain job's payload for the tiny iris model (the real schema)."""
+    return build_explanation(tiny_model(), iris_frame(), lambda: False)
+
+
+def store_explanation(world, model_id: int, payload=None, *, text: str | None = None) -> None:
+    payload = iris_explanation() if payload is None else payload
+    with closing(connect(world.client)) as conn:
+        if text is None:
+            explanations.save_explanation(conn, model_id, None, None, payload)
+        else:  # stored as it is, as a hand-edited or imported row could be
+            conn.execute(
+                "INSERT INTO model_explanations (model_id, payload_json, created_at)"
+                " VALUES (?, ?, ?)",
+                (model_id, text, time.time()),
+            )
+
+
+def explain_job(world, model_id: int, status=None, message=None) -> int:
+    with closing(connect(world.client)) as conn:
+        user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        job = store.enqueue(conn, "explain", world.p, user, {"model_id": model_id})
+        if status is not None:
+            store.claim_job(conn, job.id, "t")
+            if status != JobStatus.RUNNING:
+                store.finish_job(conn, job.id, status, message=message)
+        return job.id
+
+
+def inline_specs(html: str) -> dict[str, dict]:
+    """The chart specs carried in data-chart-spec attributes (charts in swapped fragments)."""
+    found = re.findall(r"id=\"([^\"]+)\" data-chart-spec='([^']*)'", html)
+    return {name: json.loads(unescape(text)) for name, text in found}
+
+
+def explain_panel(page: str) -> str:
+    panel = page[page.index('id="panel-explain"') :]
+    return panel[: panel.index('id="panel-history"')]
+
+
+class UseSpy:
+    """Stands in for ``LiveModels.use``: counts the calls, then lets them through."""
+
+    def __init__(self, live):
+        self.live, self.calls, self.real = live, 0, live.use
+
+    def __call__(self, record):
+        self.calls += 1
+        return self.real(record)
+
+
+@pytest.fixture
+def spy(world):
+    live = world.client.app.state.live_models
+    found = UseSpy(live)
+    live.use = found
+    return found
+
+
+def pd_fragment(world, model_id, **params):
+    url = world.path("/projects/{p}/models/") + f"{model_id}/explain/pd"
+    r = world.client.get(url, params=params, headers={"HX-Request": "true"})
+    assert r.status_code == 200, r.text
+    assert "<html" not in r.text
+    return r.text
+
+
+@pytest.mark.parametrize("persona", ["co", "vi"])
+@pytest.mark.parametrize("state", ["none", "queued", "done", "failed"])
+def test_explain_tab_states(world, spy, state, persona):
+    model = world.ids[world.p]["model"]
+    job = None
+    if state == "queued":
+        job = explain_job(world, model)
+    elif state == "done":
+        store_explanation(world, model)
+    elif state == "failed":
+        job = explain_job(world, model, JobStatus.FAILED, "the dataset no longer exists\n/srv/x")
+    world.login(persona)
+    page = world.client.get(world.path("/projects/{p}/models/{model}") + "?tab=explain").text
+    assert 'id="tab-explain" aria-controls="panel-explain" aria-selected="true"' in page
+    panel = explain_panel(page)
+    texts = {
+        "none": "This model has no explanation yet.",
+        "queued": "An explanation is waiting to start.",
+        "done": "Which inputs matter most",
+        "failed": "The last explanation run failed.",
+    }
+    assert texts[state] in panel
+    for other in set(texts) - {state, "done"}:
+        assert texts[other] not in panel
+    if job is not None:
+        assert world.path('href="/projects/{p}/jobs/') + f'{job}"' in panel
+    if state == "failed":
+        assert "the dataset no longer exists" in panel and "/srv/x" not in panel
+    if state == "done":
+        specs = chart_specs(page)
+        shares = {s["share"] for s in iris_explanation()["importance"]}
+        assert specs["contrib-chart"]["type"] == "hbar"
+        assert set(specs["contrib-chart"]["labels"]) <= set(IRIS_COLUMNS)
+        assert sorted(specs["contrib-chart"]["values"]) == sorted(round(s * 100, 2) for s in shares)
+        first = iris_explanation()["partial_dependence"][0]
+        pd_spec = inline_specs(panel)["pd-chart"]
+        assert pd_spec["type"] == "lines" and first["column"] in pd_spec["label"]
+    form = 'action="' + world.path("/projects/{p}/models/{model}") + '/explain"'
+    assert (form in panel) is (persona == "co")
+    assert spy.calls == 0  # a page view never loads the model
+
+
+def test_precomputed_pd_does_not_load_the_model(world, spy):
+    model = world.ids[world.p]["model"]
+    store_explanation(world, model)
+    curve = iris_explanation()["partial_dependence"][1]
+    world.login("vi")
+    html = pd_fragment(world, model, column=curve["column"])
+    spec = inline_specs(html)["pd-chart"]
+    average = spec["series"][0]["points"]
+    output = curve["ice_output"]
+    assert [y for _, y in average] == [round(row[output] * 100, 4) for row in curve["average"]]
+    assert sum(1 for s in spec["series"] if s.get("faint")) == len(curve["ice"])
+    assert "From the stored explanation" in html
+    other = (output + 1) % len(curve["outputs"])
+    html = pd_fragment(world, model, column=curve["column"], **{"class": str(other)})
+    spec = inline_specs(html)["pd-chart"]
+    assert not any(s.get("faint") for s in spec["series"])  # ICE is stored for one class
+    assert f'<option value="{other}" selected>' in html
+    assert spy.calls == 0
+
+
+def test_other_column_pd_is_computed(world, spy):
+    trained_on = record_like(world, world.p, dataset_id=world.ids[world.p]["train"])
+    payload = dict(iris_explanation())
+    stored = payload["partial_dependence"][0]
+    payload["partial_dependence"] = [stored]
+    store_explanation(world, trained_on, payload)
+    other = next(c for c in IRIS_COLUMNS if c != stored["column"])
+    world.login("vi")
+    html = pd_fragment(world, trained_on, column=other, **{"class": "2"})
+    spec = inline_specs(html)["pd-chart"]
+    assert spec["x_type"] == "value" and len(spec["series"][0]["points"]) >= 2
+    assert "virginica" in spec["y_name"]
+    assert sum(1 for s in spec["series"] if s.get("faint")) == 50  # the requested class's rows
+    assert "Computed just now from 150 rows of iris" in html
+    assert "can differ from the stored" in html
+    assert spy.calls == 1
+
+
+def test_pd_messages_instead_of_errors(world, spy):
+    model = world.ids[world.p]["model"]  # no training data
+    world.login("vi")
+    assert "Choose a column" in pd_fragment(world, model)
+    assert "does not use that column" in pd_fragment(world, model, column="nope")
+    html = pd_fragment(world, model, column=IRIS_COLUMNS[0])
+    assert "training data is no longer available" in html
+    assert spy.calls == 0
+
+
+def test_pd_busy_message(world):
+    trained_on = record_like(world, world.p, dataset_id=world.ids[world.p]["train"])
+    live = world.client.app.state.live_models
+    live.wait_secs = 0.05
+    world.login("vi")
+    assert live.slot.acquire(timeout=1)
+    try:
+        html = pd_fragment(world, trained_on, column=IRIS_COLUMNS[0])
+    finally:
+        live.slot.release()
+    assert "Another explanation is being computed right now" in html
+    assert "pd-chart" not in html
+
+
+def test_untrusted_model_is_not_loaded_in_the_web_process(world, spy):
+    foreign = record_like(world, world.p, dataset_id=world.ids[world.p]["train"], trusted=False)
+    world.login("ed")
+    html = pd_fragment(world, foreign, column=IRIS_COLUMNS[0])
+    assert "imported without this server&#39;s signature" in html
+    assert spy.calls == 0
+
+
+def test_hostile_column_names_are_escaped(world, spy):
+    payload = json.loads(json.dumps(iris_explanation()))
+    first = payload["partial_dependence"][0]
+    first.update(column=XSS, kind="category", grid=[XSS, "b", None], outputs=[XSS, "y", "z"])
+    first["average"] = first["average"][:3]
+    first["ice"] = [row[:3] for row in first["ice"]]
+    payload["importance"][0]["column"] = XSS
+    crafted = record_like(world, world.p, importance={XSS: 0.5, "b": 0.5})
+    store_explanation(world, crafted, payload)
+    world.login("vi")
+    page = world.client.get(world.path("/projects/{p}/models/") + f"{crafted}?tab=explain").text
+    fragment = pd_fragment(world, crafted, column=XSS)
+    for html in (page, fragment):
+        assert "<img src=x onerror" not in html
+        spec = inline_specs(html)["pd-chart"]
+        assert spec["categories"][0] == XSS and XSS in spec["label"]
+    assert XSS in chart_specs(page)["contrib-chart"]["labels"]
+    assert escape(XSS) in page
+    assert spy.calls == 0
+
+
+def test_a_one_point_grid_and_a_trimmed_payload_still_show(world):
+    payload = json.loads(json.dumps(iris_explanation()))
+    payload["importance"] = payload["importance"][:1]  # trimmed: shares no longer sum to 1
+    first = payload["partial_dependence"][0]
+    first.update(grid=[1.5], average=first["average"][:1], ice=[r[:1] for r in first["ice"]])
+    payload["partial_dependence"] = [first]
+    model = world.ids[world.p]["model"]
+    store_explanation(world, model, payload)
+    world.login("vi")
+    page = world.client.get(world.path("/projects/{p}/models/{model}") + "?tab=explain").text
+    spec = inline_specs(explain_panel(page))["pd-chart"]
+    assert spec["series"][0]["points"][0][0] == 1.5 and len(spec["series"][0]["points"]) == 1
+    assert len(chart_specs(page)["contrib-chart"]["values"]) == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"version": 1}',
+        '{"version": 1, "importance": "x", "partial_dependence": 7}',
+        '{"version": 1, "importance": [{"column": 1, "share": 0.5}, {"column": "a", "share": '
+        + "9" * 400
+        + '}], "partial_dependence": [{"column": "a"}, {"column": "a", "kind": "numeric", '
+        '"grid": [1, 2], "outputs": ["x"], "average": [[0.1], ["y"]], "ice_output": 0, '
+        '"ice": []}]}',
+        '{"version": 1, "importance": [], "partial_dependence": [{"column": "a", "kind": '
+        '"numeric", "grid": [1, 2], "outputs": ["x"], "average": [[0.1], [0.2]], '
+        '"ice_output": 5, "ice": [[1]]}]}',
+        '{"version": 2}',
+        "not json",
+    ],
+)
+def test_malformed_explanations_never_break_the_tab(world, spy, text):
+    model = world.ids[world.p]["model"]
+    store_explanation(world, model, text=text)
+    world.login("vi")
+    r = world.client.get(world.path("/projects/{p}/models/{model}") + "?tab=explain")
+    assert r.status_code == 200
+    html = pd_fragment(world, model, column="a")
+    assert "does not use that column" in html  # the stored curve is never trusted alone
+    assert spy.calls == 0
+
+
+def recompute(world, model_id, data, **headers):
+    url = world.path("/projects/{p}/models/") + f"{model_id}/explain"
+    return world.client.post(url, data=data, headers=headers, follow_redirects=False)
+
+
+def test_recompute_needs_csrf_and_same_origin(world):
+    model = world.ids[world.p]["model"]
+    train = str(world.ids[world.p]["train"])
+    csrf = world.login("co")
+    before = count(world.client, "jobs")
+    for data, headers in (
+        ({"dataset_id": train}, {}),
+        ({"dataset_id": train, "csrf_token": "wrong"}, {}),
+        ({"dataset_id": train, "csrf_token": csrf}, {"Origin": "https://evil.example"}),
+    ):
+        r = recompute(world, model, data, **headers)
+        assert r.status_code == 403 and "text/html" in r.headers["content-type"]
+    assert count(world.client, "jobs") == before
+    r = recompute(world, model, {"dataset_id": train, "csrf_token": csrf})
+    assert location(r) == world.path("/projects/{p}/models/{model}") + "?tab=explain"
+    with closing(connect(world.client)) as conn:
+        job = explanations.latest_explain_job(conn, model)
+    assert job.payload == {"model_id": model, "dataset_id": int(train)}
+    csrf = world.login("vi")
+    r = recompute(world, model, {"dataset_id": train, "csrf_token": csrf})
+    assert r.status_code == 403
+
+
+def test_imported_model_recompute_offers_a_dataset_choice(world):
+    """The model has no training data: the datasets holding its columns are offered, and
+    a post without one is refused on the page."""
+    model = world.ids[world.p]["model"]
+    with closing(connect(world.client)) as conn:
+        other = ingest_csv(
+            world.client.app.state.storage,
+            conn,
+            world.p,
+            "unrelated",
+            DatasetType.TRAIN,
+            io.BytesIO(b"a,b\n1,2\n"),
+        )
+    csrf = world.login("co")
+    page = world.client.get(world.path("/projects/{p}/models/{model}") + "?tab=explain").text
+    select = re.search(r'<select[^>]*name="dataset_id".*?</select>', page, re.S).group(0)
+    offered = set(re.findall(r'<option value="(\d+)"', select))
+    ids = world.ids[world.p]
+    assert offered == {str(ids["train"]), str(ids["test"]), str(ids["test"] + 1)}
+    assert str(other.id) not in offered and 'value=""' not in select
+    r = recompute(world, model, {"csrf_token": csrf})
+    assert r.status_code == 422
+    assert "training data is no longer available" in r.text
+    assert 'name="next" value="' + world.path("/projects/{p}/models/{model}") in r.text
+    r = recompute(world, model, {"csrf_token": csrf, "dataset_id": str(other.id)})
+    assert r.status_code == 422 and "lacks the model" in r.text
+    r = recompute(world, model, {"csrf_token": csrf, "dataset_id": str(ids["test"])})
+    assert r.status_code == 303
+
+
+def test_the_training_data_is_offered_first(world):
+    trained_on = record_like(world, world.p, dataset_id=world.ids[world.p]["test"])
+    world.login("co")
+    page = world.client.get(world.path("/projects/{p}/models/") + f"{trained_on}?tab=explain")
+    select = re.search(r'<select[^>]*name="dataset_id".*?</select>', page.text, re.S).group(0)
+    first = re.search(r'<option value="([^"]*)"[^>]*>([^<]*)<', select)
+    assert first.group(1) == "" and "iris_test (training data)" in first.group(2)

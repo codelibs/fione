@@ -12,6 +12,7 @@ import json
 import math
 import re
 
+import pyarrow as pa
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
@@ -28,22 +29,28 @@ from fione.api.routes_models import (
     serving_bundle_of,
     too_large_for_import,
 )
+from fione.api.schemas import job_out
 from fione.api.security import origin_matches, tokens_equal
 from fione.auth.roles import Role
 from fione.engine import diagnostics
+from fione.engine import explain as engine_explain
 from fione.engine import metrics as engine_metrics
 from fione.engine.artifact import UntrustedArtifactError
 from fione.engine.config import ConfigError, TrainConfig
 from fione.jobs import store
 from fione.jobs.store import JobStatus
+from fione.models import explanations
 from fione.models import service as models
 from fione.models.bundle import BundleError
+from fione.models.live import Busy, TooLarge, Untrusted
 from fione.models.service import ModelNotFound, ModelRecord
 from fione.models.transfer import ModelImportError
 from fione.modules.registry import redact
+from fione.predict.batch import check_inputs
+from fione.projects import ingest
 from fione.projects import service as projects
 from fione.projects.service import DatasetNotFound
-from fione.web.access import Ctx, action, context, model_in, page
+from fione.web.access import Ctx, action, context, dataset_in, model_in, page, same_site
 from fione.web.automl import Posted, _chart, _int_param, _text
 from fione.web.easyml import _baseline, _clock, _ratings, _score_sentence
 from fione.web.uploads import UploadFormError, UploadProblem, read_form
@@ -688,17 +695,420 @@ def _diagnostics_view(record: ModelRecord, lang: str) -> dict | None:
     return view
 
 
+# --- the explain tab: the stored explanation and partial dependence -------------------------
+#
+# The stored explanation (the explain job's payload) is read as untrusted data, like the
+# diagnostics: it may have been trimmed to its size cap (fewer importance entries, curves or
+# single-row lines), and its names and labels are data. A page view never computes; the
+# partial dependence fragment draws a stored curve as it is, and computes any other column
+# through ``LiveModels`` (one request at a time, trusted models only).
+
+EXPLAIN_IMPORTANCE = 20  # bars of the contribution importance chart
+PICKER_COLUMNS = 500  # columns offered in the partial dependence picker
+STORED_OUTPUTS = 20  # outputs a stored curve may have (the explain job keeps at most 20)
+STATES = {
+    JobStatus.QUEUED: "queued",
+    JobStatus.RUNNING: "running",
+    JobStatus.FAILED: "failed",
+    JobStatus.CANCELLED: "cancelled",
+}
+
+
+def _model_columns(record: ModelRecord) -> list[str]:
+    """The model's input columns as stored (its importance has one entry per column)."""
+    found = record.importance if isinstance(record.importance, dict) else {}
+    return [name for name in found if isinstance(name, str)]
+
+
+def _scalar(value) -> bool:
+    return value is None or isinstance(value, str | int | float | bool)
+
+
+def _rows_of(value, width: int, check) -> list[list]:
+    """A stored matrix: a list of lists of ``width`` values, each passed through ``check``."""
+    if not isinstance(value, list):
+        raise _Unreadable
+    rows = []
+    for row in value:
+        if not isinstance(row, list) or len(row) != width:
+            raise _Unreadable
+        rows.append([check(v) for v in row])
+    return rows
+
+
+def _stored_curve(entry) -> dict:
+    """One stored partial dependence curve, checked: ``column``, ``kind``, ``grid`` (1 to 20
+    points), ``outputs`` (the kept classes), ``average[point][output]``, ``ice_output`` and
+    ``ice[row][point]`` (single rows, for ``outputs[ice_output]``) and ``n_rows``."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("column"), str):
+        raise _Unreadable
+    kind, grid, outputs = entry.get("kind"), entry.get("grid"), entry.get("outputs")
+    if kind not in ("numeric", "datetime", "category"):
+        raise _Unreadable
+    if not isinstance(grid, list) or not 1 <= len(grid) <= engine_explain.PD_GRID:
+        raise _Unreadable
+    if kind == "numeric":  # drawn on a value axis
+        if any(isinstance(v, bool) for v in grid):
+            raise _Unreadable
+        grid = [_finite(v) for v in grid]
+    elif not all(_scalar(v) for v in grid):
+        raise _Unreadable
+    if not isinstance(outputs, list) or not 1 <= len(outputs) <= STORED_OUTPUTS:
+        raise _Unreadable
+    if not all(_scalar(v) for v in outputs):
+        raise _Unreadable
+    ice_output = entry.get("ice_output")
+    if type(ice_output) is not int or not 0 <= ice_output < len(outputs):
+        raise _Unreadable
+    average = _rows_of(entry.get("average"), len(outputs), _finite)
+    if len(average) != len(grid):
+        raise _Unreadable
+    ice = _rows_of(entry.get("ice", []), len(grid), _finite)[: engine_explain.ICE_ROWS]
+    rows = entry.get("n_rows")
+    return {
+        "column": entry["column"],
+        "kind": kind,
+        "grid": grid,
+        "outputs": outputs,
+        "average": average,
+        "ice_output": ice_output,
+        "ice": ice,
+        "n_rows": rows if type(rows) is int and rows > 0 else None,
+    }
+
+
+def _stored(payload: dict, columns: list[str]) -> tuple[list, dict, bool]:
+    """``(importance, curves, partial)`` of a stored payload: the ``(column, share)`` entries
+    by share, the readable curves of the model's own columns by column, and whether anything
+    stored was left out."""
+    partial = False
+    importance = []
+    entries = payload.get("importance")
+    if isinstance(entries, list):
+        for entry in entries:
+            share = _number(entry.get("share")) if isinstance(entry, dict) else None
+            if share is None or share < 0 or not isinstance(entry.get("column"), str):
+                partial = True
+                continue
+            importance.append((entry["column"], share))
+    elif entries is not None:
+        partial = True
+    importance.sort(key=lambda kv: -kv[1])
+    curves = {}
+    found = payload.get("partial_dependence")
+    known = set(columns)
+    for entry in found if isinstance(found, list) else []:
+        try:
+            curve = _stored_curve(entry)
+        except _PART_ERRORS:
+            partial = True
+            continue
+        if curve["column"] in known:
+            curves.setdefault(curve["column"], curve)
+    if found is not None and not isinstance(found, list):
+        partial = True
+    return importance, curves, partial
+
+
+def _grid_text(value, lang: str) -> str:
+    if value is None:
+        return i18n.t("explain.pd.missing", lang)
+    if isinstance(value, float):
+        return f"{value:,.0f}" if abs(value) >= 1e4 else f"{value:.4g}"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return f"{value:,}"
+    text = str(value)
+    return text if len(text) <= LABEL_CHARS else text[: LABEL_CHARS - 1] + "…"
+
+
+def _pd_chart(record: ModelRecord, curve: dict, output: int, lang: str) -> dict:
+    """The ``lines`` chart of one output's average curve, with the single rows' faint lines
+    when they are of that output. Classification is shown in percent."""
+    labels = [_grid_text(v, lang) for v in curve["grid"]]
+    numeric = curve["kind"] == "numeric"
+    xs = curve["grid"] if numeric else list(range(len(labels)))
+    scale = 100 if record.task == "classification" else 1
+    label = _grid_text(curve["outputs"][output], lang)
+    ys = [round(row[output] * scale, 4) for row in curve["average"]]
+    series = [
+        {
+            "name": i18n.t("explain.pd.average", lang),
+            "points": [[x, y] for x, y in zip(xs, ys, strict=True)],
+        }
+    ]
+    if output == curve["ice_output"]:
+        series += [
+            {
+                "name": i18n.t("explain.pd.row", lang),
+                "points": [[x, round(y * scale, 4)] for x, y in zip(xs, row, strict=True)],
+                "faint": True,
+                "solid": True,
+            }
+            for row in curve["ice"]
+        ]
+    y_name = (
+        i18n.t("explain.pd.y_class", lang, label=label)
+        if record.task == "classification"
+        else i18n.t("explain.pd.y_value", lang, target=record.target)
+    )
+    return {
+        "type": "lines",
+        "x_type": "value" if numeric else "category",
+        "categories": None if numeric else labels,
+        "series": series,
+        "labels": labels,
+        "values": ys,
+        "label": i18n.t("explain.pd.chart", lang, column=curve["column"], y=y_name),
+        "x_name": curve["column"],
+        "y_name": y_name,
+    }
+
+
+class _Refused(Exception):
+    """Why a curve cannot be computed here: an i18n key, and a detail to show."""
+
+    def __init__(self, key: str, detail: str | None = None):
+        super().__init__(key)
+        self.key, self.detail = key, detail
+
+
+def _training_data(conn, record: ModelRecord):
+    """The model's training dataset when it is still there, with the model's columns."""
+    if record.dataset_id is None:
+        return None
+    try:
+        dataset = projects.get_dataset(conn, record.dataset_id)
+    except DatasetNotFound:
+        return None
+    present = {name for name, _ in dataset.schema}
+    if dataset.project_id != record.project_id or not set(_model_columns(record)) <= present:
+        return None
+    return dataset
+
+
+def _live_curve(request: Request, conn, record: ModelRecord, column: str, output) -> dict:
+    """The partial dependence of ``column`` computed now on up to ``PD_ROWS`` rows of the
+    training data, in the stored curves' form (same order of steps as the API)."""
+    live = request.app.state.live_models
+    try:
+        live.check(record)
+    except Untrusted:
+        raise _Refused("explain.untrusted") from None
+    dataset = _training_data(conn, record)
+    if dataset is None:
+        raise _Refused("explain.no_dataset")
+    try:
+        with live.use(record) as model:
+            rows = engine_explain.pd_rows(model, engine_explain.PD_ROWS, engine_explain.PD_GRID)
+            try:
+                background = ingest.read_dataset_spread(
+                    request.app.state.storage,
+                    dataset,
+                    rows,
+                    _model_columns(record),
+                    per_group=rows,
+                )
+            except KeyError:  # storage: the file is gone (its message would name the key)
+                raise _Refused("explain.no_dataset") from None
+            check_inputs(model, background)
+            outputs = len(engine_explain.explained_outputs(model))
+            curve = engine_explain.partial_dependence(
+                model,
+                background,
+                column,
+                max_rows=rows,
+                class_index=output if output is not None and output < outputs else None,
+            )
+    except Busy:
+        raise _Refused("explain.busy") from None
+    except TooLarge:
+        raise _Refused("explain.too_large") from None
+    except ModelNotFound:
+        raise _Refused("explain.model_gone") from None
+    except UntrustedArtifactError:
+        raise _Refused("explain.broken") from None
+    except ValueError as e:  # PredictInputError and the engine's checks
+        if isinstance(e, pa.ArrowException | UnicodeError):
+            raise
+        raise _Refused("explain.pd.failed", redact(str(e))) from None
+    return {
+        "column": curve.column,
+        "kind": curve.kind,
+        "grid": [diagnostics._label(v) for v in curve.grid],
+        "outputs": [diagnostics._label(v) for v in curve.outputs],
+        "average": curve.average.tolist(),
+        "ice_output": curve.ice_output,
+        "ice": curve.ice.tolist(),
+        "n_rows": curve.n_rows,
+        "dataset": dataset.name,
+    }
+
+
+def _pd_view(
+    request: Request, conn, record: ModelRecord, curves: dict, column: str, output, lang: str
+) -> dict:
+    """What the partial dependence fragment shows for ``column``: a stored curve as it is,
+    else one computed now; or a ``message`` saying why there is none."""
+    url = f"/projects/{record.project_id}/models/{record.id}/explain/pd"
+    view = {"url": url, "column": column}
+    if not column:
+        return view | {"message": "explain.pd.pick"}
+    if column not in _model_columns(record):
+        return view | {"message": "explain.pd.unknown"}
+    curve = curves.get(column)
+    source = "stored"
+    if curve is None:
+        try:
+            curve = _live_curve(request, conn, record, column, output)
+        except _Refused as e:
+            return view | {"message": e.key, "detail": e.detail}
+        source = "live"
+    k = len(curve["outputs"])
+    chosen = output if output is not None and output < k else curve["ice_output"]
+    return view | {
+        "chart": _pd_chart(record, curve, chosen, lang),
+        "outputs": [_grid_text(v, lang) for v in curve["outputs"]] if k > 1 else None,
+        "output": chosen,
+        "ice_label": _grid_text(curve["outputs"][curve["ice_output"]], lang),
+        "no_ice": chosen != curve["ice_output"] and bool(curve["ice"]),
+        "source": source,
+        "n_rows": curve["n_rows"],
+        "dataset": curve.get("dataset"),
+    }
+
+
+def _output_param(text: str | None) -> int | None:
+    """The ``class`` parameter: an output index, else None."""
+    if text is None or not text.isascii() or not text.isdigit() or len(text) > 6:
+        return None
+    return int(text)
+
+
+def _datasets_for(conn, record: ModelRecord) -> list[dict]:
+    """The recompute choices: the project's datasets holding every model column, the model's
+    own training data first (as ``""``, the training data the job resolves itself)."""
+    needed = set(_model_columns(record))
+    if not needed:
+        return []
+    choices = []
+    for dataset in projects.list_datasets(conn, record.project_id)[::-1]:  # newest first
+        if not needed <= {name for name, _ in dataset.schema}:
+            continue
+        own = dataset.id == record.dataset_id
+        entry = {"value": "" if own else str(dataset.id), "name": dataset.name, "own": own}
+        choices.insert(0, entry) if own else choices.append(entry)
+    return choices
+
+
+def _explain_view(request: Request, conn, ctx: Ctx, record: ModelRecord, lang: str) -> dict:
+    """The Explain tab: the latest explain job's state, the stored explanation (importance
+    and the first stored curve), the column picker and, for writers, the recompute form."""
+    stored = explanations.get_explanation(conn, record.id)
+    job = explanations.latest_explain_job(conn, record.id)
+    columns = _model_columns(record)
+    importance, curves, partial = [], {}, False
+    if stored is not None:
+        importance, curves, partial = _stored(stored.payload, columns)
+    chart = None
+    if importance:
+        shown = importance[:EXPLAIN_IMPORTANCE]
+        chart = _chart(
+            "hbar",
+            [name for name, _ in shown],
+            [round(share * 100, 2) for _, share in shown],
+            i18n.t("explain.importance_chart", lang, n=len(shown)),
+            i18n.t("explain.importance_share", lang),
+            "",
+        )
+    message = None
+    if job is not None and job.status == JobStatus.FAILED:
+        message = job_out(job, admin=ctx.admin)["message"]
+        message = message if ctx.admin else redact(message or "")
+    computed = None
+    if stored is not None:
+        dataset = None
+        if stored.dataset_id is not None:
+            try:
+                dataset = projects.get_dataset(conn, stored.dataset_id).name
+            except DatasetNotFound:
+                pass
+        rows = stored.payload.get("n_rows")
+        computed = {
+            "time": stored.created_at,
+            "rows": f"{rows:,}" if type(rows) is int and rows >= 0 else "—",
+            "dataset": dataset,
+        }
+    first = next(iter(curves), "")
+    ready = list(curves)
+    rest = [c for c in columns if c not in curves]
+    return {
+        "state": STATES.get(job.status) if job is not None else None,
+        "job": job,
+        "message": message,
+        "stored": stored is not None,
+        "computed": computed,
+        "partial": partial,
+        "chart": chart,
+        "picker": ([(c, True) for c in ready] + [(c, False) for c in rest])[:PICKER_COLUMNS],
+        "pd": _pd_view(request, conn, record, curves, first, None, lang),
+        "datasets": _datasets_for(conn, record) if ctx.can_write else [],
+    }
+
+
+@router.get("/projects/{pid}/models/{mid}/explain/pd")
+def explain_pd(request: Request, conn: Conn, pid: str, mid: str) -> Response:
+    """The partial dependence fragment for ``column`` (and ``class``, an output index)."""
+    ctx = page(request, conn, pid)
+    record = model_in(conn, ctx, mid)
+    lang = language(request)
+    stored = explanations.get_explanation(conn, record.id)
+    curves = {} if stored is None else _stored(stored.payload, _model_columns(record))[1]
+    column = request.query_params.get("column", "")
+    output = _output_param(request.query_params.get("class"))
+    pd_view = _pd_view(request, conn, record, curves, column, output, lang)
+    return render(request, "_pd.html", ctx.auth, ctx=ctx, pd=pd_view)
+
+
+@router.post("/projects/{pid}/models/{mid}/explain")
+def recompute_explanation(
+    request: Request, conn: Conn, pid: str, mid: str, form: Posted
+) -> Response:
+    """Queue the explain job on the chosen dataset (``""``: the training data)."""
+    same_site(request)
+    if form is None:
+        raise UiError(400, "error.form")
+    ctx = action(request, conn, pid, _text(form, "csrf_token"))
+    record = model_in(conn, ctx, mid)
+    chosen = _text(form, "dataset_id")
+    dataset_id = None if chosen == "" else dataset_in(conn, ctx, chosen).id
+    try:
+        explanations.submit_explain(conn, ctx.auth.user, pid, record.id, dataset_id)
+    except ValueError as e:  # no training data, or the dataset lacks the model's columns
+        return _model_view(request, conn, ctx, record, "explain", 422, redact(str(e)))
+    return RedirectResponse(f"/projects/{pid}/models/{record.id}?tab=explain", 303)
+
+
+TABS = ("overview", "leaderboard", "importance", "explain", "history", "metrics")
+
+
 @router.get("/projects/{pid}/models/{mid}")
 def model_page(request: Request, conn: Conn, pid: str, mid: str) -> Response:
     ctx = page(request, conn, pid)
     record = model_in(conn, ctx, mid)
-    lang = language(request)
     tab = request.query_params.get("tab")
-    tab = (
-        tab
-        if tab in ("overview", "leaderboard", "importance", "history", "metrics")
-        else "overview"
-    )
+    return _model_view(request, conn, ctx, record, tab if tab in TABS else "overview")
+
+
+def _model_view(
+    request: Request,
+    conn,
+    ctx: Ctx,
+    record: ModelRecord,
+    tab: str,
+    status: int = 200,
+    explain_error: str | None = None,
+) -> Response:
+    lang = language(request)
     rating = _ratings(request, conn, [record])[record.id]
     baseline = _baseline(request, conn, record)
     elapsed = dataset = None
@@ -755,7 +1165,12 @@ def model_page(request: Request, conn: Conn, pid: str, mid: str) -> Response:
         metric_rows=metric_rows,
         diagnostics=_diagnostics_view(record, lang),
         diagnostics_stored=record.diagnostics is not None,
+        explain=_explain_view(request, conn, ctx, record, lang),
+        explain_error=explain_error,
         bundle=bundle,
+        status=status,
+        # the language switch returns to the tab, never to a POST-only path
+        here=f"/projects/{ctx.project.id}/models/{record.id}?tab={tab}",
     )
 
 

@@ -30,7 +30,7 @@
 
   <div class="tabs" data-tabs>
     <div class="tabs__list" role="tablist" aria-label="{{ t('model.tabs') }}">
-      {% for key in ["overview", "leaderboard", "importance", "history", "metrics"] %}
+      {% for key in ["overview", "leaderboard", "importance", "explain", "history", "metrics"] %}
       <button type="button" class="tabs__tab" role="tab" id="tab-{{ key }}" aria-controls="panel-{{ key }}" aria-selected="{{ 'true' if tab == key else 'false' }}" tabindex="{{ '0' if tab == key else '-1' }}">{{ t('model.tab.' ~ key) }}</button>
       {% endfor %}
     </div>
@@ -121,6 +121,70 @@
       {{ chart(t, "importance-chart", importance_chart, "chart-tall") }}
       {% else %}
       <p class="empty-line text-muted">{{ t('model.not_stored') }}</p>
+      {% endif %}
+    </div>
+
+    {% set x = explain %}
+    <div class="tabs__panel stack" role="tabpanel" id="panel-explain" aria-labelledby="tab-explain" tabindex="0"{% if tab != "explain" %} hidden{% endif %}>
+      <p class="text-muted text-sm">{{ t('explain.intro') }}</p>
+      {% if explain_error %}
+      <div class="alert alert-danger" role="alert">{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('explain.recompute.error') }}</strong></p><p class="alert__detail">{{ explain_error }}</p></div></div>
+      {% endif %}
+      {% if x.state in ("queued", "running") %}
+      <div class="alert alert-info" role="note">{{ icon("clock") }}<span>{{ t('explain.state.' ~ x.state) }} <a href="/projects/{{ pid }}/jobs/{{ x.job.id }}">{{ t('explain.state.follow') }}</a></span></div>
+      {% elif x.state == "failed" %}
+      <div class="alert alert-warning" role="note">{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('explain.state.failed') }}</strong></p>{% if x.message %}<p class="alert__detail">{{ x.message }}</p>{% endif %}<p><a href="/projects/{{ pid }}/jobs/{{ x.job.id }}">{{ t('explain.state.job', id=x.job.id) }}</a></p></div></div>
+      {% elif x.state == "cancelled" %}
+      <p class="text-muted text-sm">{{ t('explain.state.cancelled') }}</p>
+      {% endif %}
+      {% if x.stored %}
+      {% if x.state %}<p class="text-muted text-sm">{{ t('explain.state.older') }}</p>{% endif %}
+      <p class="text-muted text-sm">{% if x.computed.dataset %}{{ t('explain.computed', time=t('time.utc', time=x.computed.time|utc), n=x.computed.rows, dataset=x.computed.dataset) }}{% else %}{{ t('explain.computed_gone', time=t('time.utc', time=x.computed.time|utc), n=x.computed.rows) }}{% endif %}</p>
+      {% if x.partial %}<div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('explain.partial') }}</span></div>{% endif %}
+      <section class="card card-padded stack" aria-labelledby="contrib-title">
+        <h2 class="section-header__title" id="contrib-title">{{ t('explain.importance') }}</h2>
+        <p class="text-muted text-sm">{{ t('explain.importance_hint') }}</p>
+        {% if x.chart %}{{ chart(t, "contrib-chart", x.chart, "chart-tall") }}{% else %}<p class="empty-line text-muted">{{ t('explain.importance_none') }}</p>{% endif %}
+      </section>
+      {% elif x.state not in ("queued", "running", "failed") %}
+      <p class="empty-line text-muted">{{ t('explain.state.none') }}</p>
+      {% endif %}
+      {% if x.picker %}
+      <section class="card card-padded stack" aria-labelledby="pd-title">
+        <h2 class="section-header__title" id="pd-title">{{ t('explain.pd.title') }}</h2>
+        <p class="text-muted text-sm">{{ t('explain.pd.hint') }}</p>
+        <form class="filters" method="get" action="{{ x.pd.url }}" hx-get="{{ x.pd.url }}" hx-trigger="change, submit" hx-target="#pd-panel" hx-swap="outerHTML">
+          <div class="field">
+            <label class="field__label" for="pd-column">{{ t('explain.pd.column') }}</label>
+            <select class="input input-md input-limited" id="pd-column" name="column">
+              {% if not x.pd.column %}<option value="" selected>{{ t('explain.pd.choose') }}</option>{% endif %}
+              {% for name, ready in x.picker %}<option value="{{ name }}"{% if name == x.pd.column %} selected{% endif %}>{{ t('explain.pd.ready', column=name) if ready else name }}</option>{% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-secondary">{{ t('explain.pd.show') }}</button>
+        </form>
+        {% with pd = x.pd %}{% include "_pd.html" %}{% endwith %}
+      </section>
+      {% endif %}
+      {% if ctx.can_write %}
+      <section class="card card-padded stack" aria-labelledby="recompute-title">
+        <h2 class="section-header__title" id="recompute-title">{{ t('explain.recompute.title') }}</h2>
+        <p class="text-muted text-sm">{{ t('explain.recompute.hint') }}</p>
+        {% if x.datasets %}
+        <form class="filters" method="post" action="{{ base }}/explain" data-busy-form>
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <div class="field">
+            <label class="field__label" for="explain-dataset">{{ t('explain.recompute.dataset') }}</label>
+            <select class="input input-md input-limited" id="explain-dataset" name="dataset_id">
+              {% for d in x.datasets %}<option value="{{ d.value }}">{{ t('explain.recompute.training', name=d.name) if d.own else d.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span>{{ t('explain.recompute.run') }}</button>
+        </form>
+        {% else %}
+        <p class="text-muted">{{ t('explain.recompute.none') }}</p>
+        {% endif %}
+      </section>
       {% endif %}
     </div>
 
