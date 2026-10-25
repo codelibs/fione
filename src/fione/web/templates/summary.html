@@ -93,7 +93,7 @@
 
   <p class="cluster">
     <a class="btn btn-ghost" href="/projects/{{ pid }}">{{ icon("back") }}{{ t('action.back_project') }}</a>
-    {% if mode == "detailed" %}<a class="btn btn-secondary" href="/projects/{{ pid }}/models/{{ record.id }}">{{ t('summary.advanced') }}</a>{% endif %}
+    <a class="btn btn-secondary" href="/projects/{{ pid }}/models/{{ record.id }}">{{ t('summary.advanced') }}</a>
   </p>
 </div>
 {% endblock %}

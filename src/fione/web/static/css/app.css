@@ -1410,6 +1410,7 @@ select.input {
 
 .page-header-row {
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
@@ -2581,4 +2582,9 @@ select.input {
 
 .chart-short .chart {
   height: 12rem;
+}
+
+/* A table that keeps readable columns on phones: its own container scrolls sideways */
+.table-wide {
+  min-width: 64rem;
 }

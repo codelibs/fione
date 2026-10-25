@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from fione import i18n
+from fione.api import routes_models
 from fione.api.deps import Conn, cookie_auth, request_host
 from fione.api.downloads import tmp_dir
 from fione.api.routes_jobs import EXPORT_KIND, start_export
@@ -37,7 +38,7 @@ from fione.jobs.store import JobStatus
 from fione.models import service as models
 from fione.models.bundle import BundleError
 from fione.models.service import ModelNotFound, ModelRecord
-from fione.models.transfer import MAX_ARCHIVE_BYTES, ModelImportError
+from fione.models.transfer import ModelImportError
 from fione.modules.registry import redact
 from fione.projects import service as projects
 from fione.projects.service import DatasetNotFound
@@ -176,7 +177,7 @@ def _import_view(request: Request, ctx: Ctx, *, status=200, problem=None) -> Res
         ctx,
         status=status,
         problem=problem,
-        limit_mb=MAX_ARCHIVE_BYTES // 2**20,
+        limit_mb=routes_models.MAX_ARCHIVE_BYTES // 2**20,
     )
 
 
@@ -208,7 +209,8 @@ async def import_model(request: Request, conn: Conn, pid: str) -> Response:
         if not isinstance(upload, UploadFile) or not upload.filename:
             problem = UploadProblem(422, "import.error.missing")
             return _import_view(request, ctx, status=422, problem=problem)
-        if upload.size is not None and upload.size > MAX_ARCHIVE_BYTES:
+        # the archive cap is the API's (one value, read at the call: tests patch it there)
+        if upload.size is not None and upload.size > routes_models.MAX_ARCHIVE_BYTES:
             problem = UploadProblem(413, "import.error.too_large")
             return _import_view(request, ctx, status=413, problem=problem)
         trust = form.get("trust_foreign") == "true"
@@ -222,9 +224,9 @@ async def import_model(request: Request, conn: Conn, pid: str) -> Response:
             problem = UploadProblem(422, "import.error.untrusted", redact(str(e)))
             return _import_view(request, ctx, status=422, problem=problem)
         except ModelImportError as e:
-            problem = UploadProblem(422, "import.error.invalid", redact(str(e)))
-            return _import_view(request, ctx, status=422, problem=problem)
-        except ValueError as e:  # the size cap of the service's own spool
+            if str(e) == "file too large":  # the service's own spool, with the same cap
+                problem = UploadProblem(413, "import.error.too_large")
+                return _import_view(request, ctx, status=413, problem=problem)
             problem = UploadProblem(422, "import.error.invalid", redact(str(e)))
             return _import_view(request, ctx, status=422, problem=problem)
     finally:

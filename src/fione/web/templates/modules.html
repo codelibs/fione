@@ -13,7 +13,7 @@
   </header>
   <div class="alert alert-danger" role="note">{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('modules.warning_title') }}</strong></p><p>{{ t('modules.warning') }}</p></div></div>
   <div class="table-wrap" tabindex="0" role="region" aria-label="{{ t('modules.title') }}">
-    <table class="table">
+    <table class="table table-wide">
       <thead>
         <tr>
           <th scope="col">{{ t('modules.col.id') }}</th>
@@ -31,9 +31,9 @@
         {% set m = row.info %}
         <tr>
           <th scope="row" class="cell-id"><code>{{ m.id }}</code></th>
-          <td class="cell-value">{{ m.name }}</td>
+          <td class="cell-value cell-wide">{{ m.name }}</td>
           <td>{{ t('modules.kind.' ~ m.kind) if m.kind in ("frame", "train", "predict") else m.kind }}</td>
-          <td class="cell-value text-sm">{{ (m.params.get("properties") or {}).keys()|join(", ") or "—" }}</td>
+          <td class="cell-value cell-wide text-sm">{{ (m.params.get("properties") or {}).keys()|join(", ") or "—" }}</td>
           <td>{% if m.builtin %}<span class="badge badge-neutral">{{ t('modules.builtin') }}</span>{% else %}<span class="badge badge-warning">{{ t('modules.uploaded') }}</span>{% endif %}</td>
           <td>{% if row.uploaded %}<time datetime="{{ row.uploaded|iso }}">{{ t('time.utc', time=row.uploaded|utc) }}</time>{% else %}—{% endif %}</td>
           <td class="num">{{ row.size or "—" }}</td>

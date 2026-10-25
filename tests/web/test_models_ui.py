@@ -507,7 +507,10 @@ def test_simple_hides_the_advanced_links(make_client):
     world.login("ed")
     analysis = world.client.get(world.path("/projects/{p}/datasets/{train}/analyze")).text
     summary = world.client.get(world.path("/projects/{p}/models/{model}/summary")).text
-    assert "/train?target=" not in analysis and "Open advanced details" not in summary
+    assert "/train?target=" not in analysis
+    assert "Open advanced details" in summary  # ruling: the summary's link is in both views
+    dashboard = world.client.get(world.path("/projects/{p}")).text
+    assert world.path("/projects/{p}/models/{model}") + '"' not in dashboard  # Details link
     assert ">Jobs</a>" not in analysis
     world.mode = "detailed"
     world.login("ed")
@@ -649,3 +652,40 @@ def test_export_and_module_jobs_are_linked_from_the_job_list(world):
     )
     page = world.client.get(world.path("/projects/{p}/jobs")).text
     assert f'href="{location(r)}"' in page
+
+
+def test_the_model_page_caps_what_it_shows(world):
+    """Imported or old records can hold anything: the page shows bounded slices."""
+    world.login("ed")
+    trials = [
+        {
+            "family": "LightGBM",
+            "trial": i,
+            "state": "complete",
+            "score": 1 / (i + 1),
+            "elapsed": 0.1,
+            "params": "{}",
+        }
+        for i in range(2500)
+    ]
+    board = [
+        {
+            "model": f"LightGBM_{i}",
+            "family": "LightGBM",
+            "cv_score": 0.1,
+            "cv_std": 0.0,
+            "train_secs": 1.0,
+            "weight": 0.0,
+        }
+        for i in range(60)
+    ]
+    importance = {f"f{i}": 1 / 50 for i in range(50)}
+    big = record_like(world, world.p, trials=trials, leaderboard=board, importance=importance)
+    page = world.client.get(world.path("/projects/{p}/models/") + str(big)).text
+    specs = chart_specs(page)
+    history = specs["history-chart"]
+    points = sum(len(series["points"]) for series in history["series"])
+    assert points == len(history["values"]) == 2000
+    assert len(specs["importance-chart"]["labels"]) == 20
+    panel = page[page.index('id="panel-leaderboard"') : page.index('id="panel-importance"')]
+    assert panel.count('<th scope="row" class="cell-name">') == 50
