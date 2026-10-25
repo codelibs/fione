@@ -197,8 +197,10 @@ def test_a_regression_dataset_detail(world):
     did = add_dataset(world, frame, "houses")
     page = world.client.get(world.path("/projects/{p}/datasets/") + f"{did}").text
     assert "80 rows × 3 columns" in page
-    assert "Check: predicts the answer alone (1.00)" in page  # size ~ price: only a warning
-    assert "May give the answer away" not in page
+    assert "Check: moves with the answer (|r| 1.00)" in page  # size ~ price: only a warning
+    assert "May give the answer away" not in page and "predicts the answer alone" not in page
+    size = world.client.get(world.path("/projects/{p}/datasets/") + f"{did}/columns/size").text
+    assert "Its correlation with “price”, the column to predict, is |r| = 1.00" in size
     assert (
         world.client.get(world.path("/projects/{p}/datasets/") + f"{did}/columns/price").status_code
         == 200

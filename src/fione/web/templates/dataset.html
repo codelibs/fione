@@ -82,7 +82,7 @@
                 {% if c.name == target %}<span class="badge badge-info">{{ t('analysis.is_target') }}</span>{% endif %}
                 {% set leak = leaks.get(c.name) %}
                 {% if leak and leak.exact %}<span class="badge badge-warning">{{ t('dataset.badge.leak') }}</span>
-                {% elif leak %}<span class="badge badge-warning">{{ t('dataset.badge.leak_score', score="%.2f"|format(leak.score)) }}</span>{% endif %}
+                {% elif leak %}<span class="badge badge-warning">{{ t('dataset.badge.' ~ ('leak_correlated' if leak.key == 'correlated' else 'leak_score'), score="%.2f"|format(leak.score)) }}</span>{% endif %}
               </td>
             </tr>
             {% endfor %}

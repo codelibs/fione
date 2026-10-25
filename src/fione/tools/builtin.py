@@ -26,6 +26,7 @@ from fione.data.profile import (
     SCORE_REASONS,
     ColumnProfile,
     DatasetProfile,
+    LeakCheck,
     leak_check,
     profile_dataset,
 )
@@ -390,25 +391,31 @@ def propose(
     sample_rows: int = _SAMPLE_ROWS,
     *,
     profile: DatasetProfile | None = None,
+    check: LeakCheck | None = None,
+    task: str | None = None,
 ) -> Proposal:
     """Profile ``columns`` (and ``target``) of ``dataset`` and infer the task: the rules the
     assistant's ``propose_training_config`` and the EasyML analysis screen share.
 
     ``profile``: a profile without target of the same sample (``sample_profile``), so only
-    the target's leak suspects are computed here.
+    the target's leak suspects are computed here. ``check`` and ``task``: this target's leak
+    check and task from an earlier proposal with that profile; then neither is recomputed.
     """
     read = columns if target in columns else [*columns, target]
-    frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
     if profile is None:
+        frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
         profile = profile_dataset(frame, target, sample_rows=sample_rows)
     else:
-        check = leak_check(frame, profile.columns, target)
+        if check is None:  # the sample is read only for the leak check
+            frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
+            check = leak_check(frame, profile.columns, target)
         profile = dataclasses.replace(
             profile, leak_suspects=check.suspects, leak_partial=check.partial
         )
     # the whole target column (one column) decides the task, not just the head of the file
     y = ingest.read_dataset(storage, dataset, [target])[target]
-    task = infer_task(y)
+    if task is None:
+        task = infer_task(y)
     listed = set(columns)
     ignore = [
         col

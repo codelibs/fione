@@ -25,7 +25,7 @@
   {% elif leak and leak.exact %}
   <div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('column.leak', target=target) }} {{ t('analysis.reason.leak_' ~ leak.key) }}</span></div>
   {% elif leak %}
-  <div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('column.leak_score', target=target, score="%.2f"|format(leak.score)) }} {{ t('analysis.reason.leak_' ~ leak.key) }}</span></div>
+  <div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('column.' ~ ('leak_correlated' if leak.key == 'correlated' else 'leak_score'), target=target, score="%.2f"|format(leak.score)) }} {{ t('analysis.reason.leak_' ~ leak.key) }}</span></div>
   {% endif %}
   {% if col.kind in ("id", "constant") %}
   <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('analysis.reason.' ~ col.kind) }}</span></div>

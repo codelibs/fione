@@ -40,8 +40,10 @@ from fione.web.easyml import (
     MAX_FORM_FIELDS,
     STOP_POLLING,
     _analysis,
+    _chosen,
     _clock,
     _default_target,
+    _leak_check,
     _names,
     _pct,
     _profile,
@@ -131,22 +133,18 @@ def _size(request: Request, dataset: Dataset) -> int | None:
     return request.app.state.ui_sizes.get(dataset.id, read)
 
 
-def _leaks(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str) -> dict:
-    """Column name -> ``{"key", "score", "exact"}`` of its leak reason for ``target`` (cached
-    per dataset and target). Only exact reasons are certain; the others only warn."""
-
-    def compute():
-        found, _, _ = _analysis(request, conn, ctx, dataset, target)
-        return {
-            s.column: {
-                "key": LEAK_REASONS.get(s.reason, "other"),
-                "score": s.score,
-                "exact": s.reason not in SCORE_REASONS,
-            }
-            for s in found.profile.leak_suspects
+def _leaks(request: Request, dataset: Dataset, target: str) -> dict:
+    """Column name -> ``{"key", "score", "exact"}`` of its leak reason for the column
+    ``target`` (the check is cached). Only exact reasons are certain; the others only warn."""
+    _, (check, _) = _leak_check(request, dataset, target)
+    return {
+        s.column: {
+            "key": LEAK_REASONS.get(s.reason, "other"),
+            "score": s.score,
+            "exact": s.reason not in SCORE_REASONS,
         }
-
-    return request.app.state.ui_leaks.get((dataset.id, target), compute)
+        for s in check.suspects
+    }
 
 
 # --- datasets -------------------------------------------------------------------------------
@@ -293,7 +291,7 @@ def dataset_detail(request: Request, conn: Conn, pid: str, did: str) -> Response
     if dataset.type == DatasetType.TRAIN and names:
         kinds = {c.name: c.kind for c in profile.columns}
         target = q.get("target") if q.get("target") in names else _default_target(names, kinds)
-        leaks = _leaks(request, conn, ctx, dataset, target)
+        leaks = _leaks(request, dataset, target)
     cpages = max(1, math.ceil(len(profile.columns) / COLUMNS_PER_PAGE))
     cpage = _int_param(q.get("cpage"), 1, 1, cpages)
     columns = profile.columns[(cpage - 1) * COLUMNS_PER_PAGE : cpage * COLUMNS_PER_PAGE]
@@ -385,7 +383,7 @@ def column_detail(request: Request, conn: Conn, pid: str, did: str, name: str) -
         q = request.query_params
         target = q.get("target") if q.get("target") in names else _default_target(names, kinds)
         if target != col.name:
-            leak = _leaks(request, conn, ctx, dataset, target).get(col.name)
+            leak = _leaks(request, dataset, target).get(col.name)
     return _view(
         request,
         "column.html",
@@ -574,8 +572,8 @@ def train(request: Request, conn: Conn, pid: str, did: str, form: Posted) -> Res
     dataset = dataset_in(conn, ctx, did)
     names = _names(dataset)
     target = _text(form, "target")
-    found, _, _ = _analysis(request, conn, ctx, dataset, target if target in names else None)
-    config, inputs, values, errors = _parse_train(form, names, found.task)
+    _, (_, task) = _leak_check(request, dataset, _chosen(request, dataset, target))
+    config, inputs, values, errors = _parse_train(form, names, task)
 
     def again(errors: dict, detail: str | None = None) -> Response:
         return _train_view(

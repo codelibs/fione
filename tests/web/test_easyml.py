@@ -531,19 +531,62 @@ def test_an_id_in_the_order_of_the_target_stays_unchecked_with_both_notes(owner)
     content = frame.to_csv(index=False).encode()
     page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
     assert 'value="row" aria-describedby="col-1-why col-1-warn"' in page
-    assert "Looks like an ID" in page and "Its order follows the answer" in page
+    assert "Looks like an ID" in page and "or where they are missing, follow the answer" in page
     assert not any("They stay checked" in text for text in alerts(page))  # it is not
 
 
-def test_a_partial_leak_check_is_noted(owner, monkeypatch):
+def spy_leak_check(monkeypatch, partial=False) -> list[str]:
+    """The targets ``leak_check`` runs for; with ``partial``, every check ran out of time."""
+    calls, original = [], builtin.leak_check
+
+    def spy(df, columns, target, **kwargs):
+        calls.append(target)
+        check = original(df, columns, target, **kwargs)
+        return dataclasses.replace(check, partial=True) if partial else check
+
+    monkeypatch.setattr(builtin, "leak_check", spy)
+    return calls
+
+
+def test_the_leak_check_runs_once_per_dataset_and_target(owner, monkeypatch):
     client, pid, csrf = owner
-    original = builtin.leak_check
-    monkeypatch.setattr(
-        builtin, "leak_check", lambda *a, **k: dataclasses.replace(original(*a, **k), partial=True)
-    )
+    calls = spy_leak_check(monkeypatch)
     content = leak_frame(0.1).to_csv(index=False).encode()
-    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, content))
+    base = url.removesuffix("/analyze")
+    hx = {"HX-Request": "true"}
+    for target in ("label", "label", "x", "label", "x"):  # the HTMX target switch
+        assert client.get(url, params={"target": target}, headers=hx).status_code == 200
+    assert client.get(url).status_code == 200
+    r = client.post(base + "/run", data=run_form(csrf, "label", ["x"], runtime="7"))
+    assert r.status_code == 422  # re-rendered
+    for path in ("", "?tab=columns", "/columns/noisy", "/train"):
+        assert client.get(base + path).status_code == 200
+    r = client.post(base + "/train", data={"csrf_token": csrf, "target": "label"})
+    assert r.status_code == 422
+    assert calls == ["label", "x"]
+
+
+def test_a_partial_leak_check_is_noted_and_checked_again(owner, monkeypatch):
+    client, pid, csrf = owner
+    calls = spy_leak_check(monkeypatch, partial=True)
+    content = leak_frame(0.1).to_csv(index=False).encode()
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, content))
+    page = client.get(url).text
     assert any("some columns were not checked" in text for text in alerts(page))
+    client.get(url)
+    assert calls == ["label", "label"]  # not kept
+
+
+def test_a_re_rendered_form_counts_the_posted_checkboxes(owner):
+    client, pid, csrf = owner
+    content = leak_frame(0.1).to_csv(index=False).encode()
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, content))
+    form = run_form(csrf, "label", ["x", "copy"], runtime="7")  # copy back on, noisy off
+    page = client.post(url.replace("/analyze", "/run"), data=form).text
+    assert 'value="copy" checked' in page and 'value="noisy" checked' not in page
+    texts = list(alerts(page))
+    assert not any("They stay checked" in t or "They are unchecked" in t for t in texts)
 
 
 # --- what viewers see ---------------------------------------------------------------------

@@ -35,6 +35,7 @@ from fione.data.profile import (
     ORDERED_BY_TARGET,
     PREDICTS_ALONE,
     SCORE_REASONS,
+    LeakCheck,
 )
 from fione.engine.artifact import UntrustedArtifactError, read_manifest
 from fione.engine.config import TargetError, TrainConfig
@@ -229,17 +230,57 @@ def _profile(request: Request, dataset: Dataset):
     )
 
 
+def _chosen(request: Request, dataset: Dataset, target: str | None) -> str:
+    """``target`` if it is a column of ``dataset``, else the default target."""
+    names = _names(dataset)
+    if target in names:
+        return target
+    return _default_target(names, {c.name: c.kind for c in _profile(request, dataset).columns})
+
+
+def _leak_check(request: Request, dataset: Dataset, target: str):
+    """``(proposal or None, (LeakCheck, task))`` for a column ``target`` of ``dataset``.
+
+    The leak check and the task are cached per dataset and target; the proposal is returned
+    only when it had to be made for them. A partial check (its time budget ran out) is not
+    kept, so the next request checks again."""
+    made = []
+
+    def compute():
+        found = propose(
+            _storage(request),
+            dataset,
+            target,
+            _names(dataset),
+            _profile_rows(dataset),
+            profile=_profile(request, dataset),
+        )
+        made.append(found)
+        return LeakCheck(found.profile.leak_suspects, found.profile.leak_partial), found.task
+
+    entry = request.app.state.ui_leaks.get(
+        (dataset.id, target), compute, keep=lambda e: not e[0].partial
+    )
+    return (made[0] if made else None), entry
+
+
 def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | None):
     """The analysis of ``dataset`` for ``target`` (or the default one) and the defaults."""
     names = _names(dataset)
     profile = _profile(request, dataset)
-    if target in names:
-        chosen = target
-    else:
-        chosen = _default_target(names, {col.name: col.kind for col in profile.columns})
-    found = propose(
-        _storage(request), dataset, chosen, names, _profile_rows(dataset), profile=profile
-    )
+    chosen = _chosen(request, dataset, target)
+    found, (check, task) = _leak_check(request, dataset, chosen)
+    if found is None:  # from the cache: only the target column is read
+        found = propose(
+            _storage(request),
+            dataset,
+            chosen,
+            names,
+            _profile_rows(dataset),
+            profile=profile,
+            check=check,
+            task=task,
+        )
     reasons = {col.name: col.kind for col in found.ignore}  # id, constant: unchecked
     warnings = {}  # score-based leak suspects: they stay checked
     for suspect in found.profile.leak_suspects:
@@ -270,9 +311,10 @@ def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | 
     return found, columns, defaults
 
 
-def _warnings(dataset: Dataset, found, task: str) -> list[tuple[str, str, dict]]:
-    """``(level, key, vars)`` for what training will refuse or should be checked. The whole
-    target column goes through the engine's own check, as ``submit_training`` does."""
+def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tuple[str, str, dict]]:
+    """``(level, key, vars)`` for what training will refuse or should be checked, the leak
+    notes counted over the checked ``inputs``. The whole target column goes through the
+    engine's own check, as ``submit_training`` does."""
     out = []
     if dataset.type != DatasetType.TRAIN:
         out.append(("danger", "analysis.warn.not_train", {}))
@@ -285,11 +327,11 @@ def _warnings(dataset: Dataset, found, task: str) -> list[tuple[str, str, dict]]
     if found.target.kind == "id":
         out.append(("warning", "analysis.warn.target_id", {}))
     suspects = found.profile.leak_suspects
-    exact = [s for s in suspects if s.reason not in SCORE_REASONS]
+    exact = [s for s in suspects if s.reason not in SCORE_REASONS and s.column not in inputs]
     if exact:
         out.append(("info", "analysis.warn.leaks", {"n": len(exact)}))
-    unchecked = {col.name for col in found.ignore}  # an id stays unchecked as an id
-    scored = [s for s in suspects if s.reason in SCORE_REASONS and s.column not in unchecked]
+    # by default every score suspect is checked, except an id or constant column
+    scored = [s for s in suspects if s.reason in SCORE_REASONS and s.column in inputs]
     if scored:
         level = "warning" if max(s.score for s in scored) >= LEAK_STRONG else "info"
         out.append((level, "analysis.warn.leak_scores", {"n": len(scored)}))
@@ -353,7 +395,7 @@ def _analysis_view(
         columns=columns,
         form=form,
         detected=defaults.task,
-        warnings=_warnings(dataset, found, form.task),
+        warnings=_warnings(dataset, found, form.task, form.inputs),
         target_missing=float(found.y.isna().mean()) if len(found.y) else 0.0,
         target_values=int(found.y.nunique()),
         missing_pct=_pct(sum(missing) / len(missing)) if missing else "0",

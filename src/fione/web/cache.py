@@ -15,12 +15,21 @@ class LruCache:
         self._items: OrderedDict = OrderedDict()
         self._lock = threading.Lock()
 
-    def get(self, key: Hashable, compute: Callable[[], object]):
+    def get(
+        self,
+        key: Hashable,
+        compute: Callable[[], object],
+        keep: Callable[[object], bool] | None = None,
+    ):
+        """The value of ``key``, computed if missing. A computed value that ``keep`` refuses
+        is returned without being kept, so the next call computes it again."""
         with self._lock:
             if key in self._items:
                 self._items.move_to_end(key)
                 return self._items[key]
         value = compute()
+        if keep is not None and not keep(value):
+            return value
         with self._lock:
             self._items[key] = value
             self._items.move_to_end(key)
