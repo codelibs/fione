@@ -427,7 +427,13 @@ def read_dataset_spread(
 ) -> pd.DataFrame:
     """``rows`` rows drawn with ``seed`` from at most ``max_groups`` evenly spaced row groups
     (all of their rows if there are fewer), in file order: a sample of the whole file, never
-    just its head, that reads a bounded part of it and is the same every time."""
+    just its head, that is the same every time.
+
+    Memory is bounded by the groups, not by ``rows``: up to ``max_groups`` whole groups of
+    ``columns`` are read before sampling. A CSV upload's groups hold 131,072 rows (so about
+    1M rows at most); a dataset written from frames (predictions, module output) has one
+    group per frame, which can be larger.
+    """
     with storage.open_read(dataset.key) as f:
         parquet = pq.ParquetFile(f)
         count = parquet.metadata.num_row_groups

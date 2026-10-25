@@ -306,6 +306,15 @@ def test_an_untrusted_import_is_explained_by_the_job(
     assert done.status is JobStatus.DONE, done.message
 
 
+def test_deleted_model_files_are_not_called_tampering(
+    conn, run_job, owner, project, record, storage
+):
+    job = submit(conn, owner, project, record)
+    storage.delete_prefix(record.storage_prefix)  # delete_model removes them before the row
+    done = run_job(job)
+    assert done.status is JobStatus.FAILED and done.message == "the model no longer exists"
+
+
 def test_a_tampered_model_fails_verification(conn, run_job, owner, project, record, storage):
     key = next(k for k in storage.list(record.storage_prefix) if k.endswith(".joblib"))
     storage.put(key, b"not a model")
@@ -343,36 +352,40 @@ def test_cancel_keeps_the_previous_explanation(conn, run_job, owner, project, re
     assert before.job_id == first.id
 
 
-def test_a_cancel_while_saving_restores_the_previous_explanation(
+def test_a_cancel_after_the_save_never_clobbers_a_newer_explanation(
     conn, run_job, owner, project, record, monkeypatch
 ):
     run_job(submit(conn, owner, project, record))
-    before = explanations.get_explanation(conn, record.id)
-    job = submit(conn, owner, project, record)
+    a = submit(conn, owner, project, record)
+    b = store.enqueue(conn, "explain", project.id, owner.id, {"model_id": record.id})
     real = explanations.save_explanation
 
-    def save_then_cancel(*args, **kwargs):
-        real(*args, **kwargs)
-        store.request_cancel(conn, job.id)
+    def save_then_newer_then_cancel(conn_, model_id, job_id, dataset_id, payload):
+        real(conn_, model_id, job_id, dataset_id, payload)
+        if job_id == a.id:  # B stores a newer row, then A is cancelled
+            real(conn_, model_id, b.id, dataset_id, {**payload, "elapsed": 0.0})
+            store.request_cancel(conn, a.id)
 
-    monkeypatch.setattr(explanations, "save_explanation", save_then_cancel)
-    assert run_job(job).status is JobStatus.CANCELLED
-    assert explanations.get_explanation(conn, record.id) == before
+    monkeypatch.setattr(explanations, "save_explanation", save_then_newer_then_cancel)
+    assert run_job(a).status is JobStatus.CANCELLED
+    assert explanations.get_explanation(conn, record.id).job_id == b.id
 
 
-def test_a_cancel_while_saving_the_first_explanation_leaves_none(
+def test_a_cancel_just_before_the_save_stores_nothing(
     conn, run_job, owner, project, record, monkeypatch
 ):
     job = submit(conn, owner, project, record)
-    real = explanations.save_explanation
+    real = explain_handler.build_explanation
 
-    def save_then_cancel(*args, **kwargs):
-        real(*args, **kwargs)
-        store.request_cancel(conn, job.id)
+    def build_then_cancel(*args, **kwargs):
+        payload = real(*args, **kwargs)
+        store.request_cancel(conn, job.id)  # seen by the forced check, no wait needed
+        return payload
 
-    monkeypatch.setattr(explanations, "save_explanation", save_then_cancel)
+    monkeypatch.setattr(explain_handler, "build_explanation", build_then_cancel)
     assert run_job(job).status is JobStatus.CANCELLED
     assert explanations.get_explanation(conn, record.id) is None
+    assert not conn.in_transaction
 
 
 def test_a_model_deleted_while_explaining_fails_plainly(
@@ -448,28 +461,55 @@ def test_explain_is_a_registered_short_job():
 def test_threads_are_capped_never_raised_and_predictions_unchanged():
     X = training_frame(60, 5)[["x", "幅"]]
     y = (X["x"] > 0).astype(int)
+    catboost = CatBoostClassifier(iterations=3, verbose=0, allow_writing_files=False)
     fitted = [
         (LightGBM("classification", 2), lgb.LGBMClassifier(n_estimators=3, n_jobs=8, verbose=-1)),
         (LightGBM("classification", 2), lgb.LGBMClassifier(n_estimators=3, n_jobs=-1, verbose=-1)),
         (XGBoost("classification", 2), xgb.XGBClassifier(n_estimators=3, n_jobs=8)),
         (XGBoost("classification", 2), xgb.XGBClassifier(n_estimators=3, n_jobs=None)),
         (ExtraTrees("classification", 2), ExtraTreesClassifier(n_estimators=3, n_jobs=1)),
-        (
-            CatBoost("classification", 2),
-            CatBoostClassifier(iterations=3, verbose=0, thread_count=8, allow_writing_files=False),
-        ),
+        (CatBoost("classification", 2, n_jobs=8), catboost),
+        (CatBoost("classification", 2, n_jobs=1), catboost),
     ]
     for _, one in fitted:
         one.fit(X, y)
-    expected = [one.predict_proba(X) for _, one in fitted]
+    expected = [spec.predict(one, X) for spec, one in fitted]
     model = SimpleNamespace(members=[SimpleNamespace(spec=s, models=[m]) for s, m in fitted])
     explain_handler._cap_threads(model, 2)
-    threads = [
-        one.get_params()["n_jobs" if i < 5 else "thread_count"] for i, (_, one) in enumerate(fitted)
-    ]
-    assert threads == [2, 2, 2, 2, 1, 8]  # one ExtraTrees thread stays one; CatBoost untouched
-    for (_, one), before in zip(fitted, expected, strict=True):
-        np.testing.assert_array_equal(one.predict_proba(X), before)
+    threads = [one.get_params()["n_jobs"] for _, one in fitted[:5]]
+    threads += [spec.n_jobs for spec, _ in fitted[5:]]
+    assert threads == [2, 2, 2, 2, 1, 2, 1]  # one thread stays one
+    for (spec, one), before in zip(fitted, expected, strict=True):
+        np.testing.assert_array_equal(spec.predict(one, X), before)
+
+
+def test_catboost_predicts_on_its_spec_threads():
+    calls = []
+
+    class Model:
+        def predict_proba(self, X, **options):
+            calls.append(options)
+            return np.full((len(X), 2), 0.5)
+
+        def predict(self, X, **options):
+            calls.append(options)
+            return np.zeros(len(X))
+
+    X = pd.DataFrame({"a": [1.0, 2.0]})
+    CatBoost("classification", 2, n_jobs=3).predict(Model(), X)
+    CatBoost("regression", 0, n_jobs=2).predict(Model(), X)
+    LightGBM("classification", 2, n_jobs=3).predict(Model(), X)
+    assert calls == [{"thread_count": 3}, {"thread_count": 2}, {}]
+
+
+def test_the_contribution_rows_shrink_for_wide_multiclass(
+    conn, run_job, owner, project, record, monkeypatch
+):
+    cells = len(classifier().classes_) * len(classifier().prep.sources)
+    monkeypatch.setattr(explain_handler, "CONTRIBUTION_CELLS", cells * 40)
+    done = run_job(submit(conn, owner, project, record))
+    assert done.status is JobStatus.DONE, done.message
+    assert explanations.get_explanation(conn, record.id).payload["n_rows"] == 40
 
 
 # --- the pieces, on synthetic data ----------------------------------------------------
@@ -601,8 +641,21 @@ def test_latest_explain_job_is_per_model(conn, owner, project, record, storage, 
     other = add_model(conn, storage, settings, project, classifier(), dataset.id, "two")
     first = submit(conn, owner, project, record)
     submit(conn, owner, project, other)
-    second = submit(conn, owner, project, record)
+    second = store.enqueue(conn, "explain", project.id, owner.id, {"model_id": record.id})
     assert explanations.latest_explain_job(conn, record.id).id == second.id != first.id
+
+
+def test_a_second_submit_returns_the_active_job(conn, run_job, owner, project, record, storage):
+    first = submit(conn, owner, project, record)
+    assert submit(conn, owner, project, record).id == first.id  # queued
+    assert run_job(first).status is JobStatus.DONE
+    again = submit(conn, owner, project, record)
+    assert again.id != first.id  # a finished job is not reused
+    assert store.claim_job(conn, again.id, "token")
+    assert submit(conn, owner, project, record).id == again.id  # running
+    other = add_dataset(conn, storage, project, training_frame(50, 3), "other")
+    assert submit(conn, owner, project, record, other.id).id != again.id  # another dataset
+    assert explain_jobs(conn) == 3
 
 
 def test_a_stored_payload_is_checked_when_read(conn, record):
@@ -661,6 +714,7 @@ def test_automl_enqueues_explain_when_enabled(conn, run_job, training_job, setti
 
 
 def test_automl_enqueues_no_explain_when_disabled(conn, run_job, training_job, settings):
+    assert Settings.model_fields["explain_after_training"].default is True  # in production
     assert Settings().explain_after_training is False  # the tests' default
     assert Settings(explain_after_training=True).explain_after_training is True
     done = run_job(training_job)

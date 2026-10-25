@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from fione.auth.roles import User, can_access_project
 from fione.jobs import store
-from fione.jobs.store import Job
+from fione.jobs.store import Job, JobStatus
 from fione.models.service import ModelNotFound, ModelRecord, get_model
 from fione.projects import service as projects
 from fione.projects.service import DatasetNotFound
@@ -51,33 +51,13 @@ def save_explanation(
     conn: sqlite3.Connection, model_id: int, job_id: int | None, dataset_id: int | None, payload
 ) -> None:
     """Store ``payload`` as the model's explanation, replacing any earlier one."""
-    _put(conn, Explanation(model_id, job_id, dataset_id, payload, time.time()))
-
-
-def _put(conn: sqlite3.Connection, explanation: Explanation) -> None:
     conn.execute(
         "INSERT INTO model_explanations (model_id, job_id, dataset_id, payload_json, created_at)"
         " VALUES (?, ?, ?, ?, ?) ON CONFLICT(model_id) DO UPDATE SET job_id = excluded.job_id,"
         " dataset_id = excluded.dataset_id, payload_json = excluded.payload_json,"
         " created_at = excluded.created_at",
-        (
-            explanation.model_id,
-            explanation.job_id,
-            explanation.dataset_id,
-            payload_json(explanation.payload),
-            explanation.created_at,
-        ),
+        (model_id, job_id, dataset_id, payload_json(payload), time.time()),
     )
-
-
-def restore_explanation(
-    conn: sqlite3.Connection, model_id: int, previous: Explanation | None
-) -> None:
-    """Put back ``previous`` as it was (``get_explanation``'s result), or none."""
-    if previous is None:
-        conn.execute("DELETE FROM model_explanations WHERE model_id = ?", (model_id,))
-    else:
-        _put(conn, previous)
 
 
 def get_explanation(conn: sqlite3.Connection, model_id: int) -> Explanation | None:
@@ -129,7 +109,9 @@ def submit_explain(
     """Queue an ``explain`` job for the model on ``dataset_id``, or on its training data.
 
     A model without training data (an import, or a deleted dataset) needs a dataset, and the
-    dataset must have every model column (``ValueError``).
+    dataset must have every model column (``ValueError``). When the model's latest explain
+    job, for the same ``dataset_id``, is still queued or running, that job is returned
+    instead of a second one.
     """
     projects.require_project(conn, project_id)
     if not can_access_project(conn, user, project_id, "write"):
@@ -147,5 +129,12 @@ def submit_explain(
     missing = [column for column in model_columns(record) if column not in present]
     if missing:
         raise ValueError(f"the dataset lacks the model's columns: {missing}")
+    active = latest_explain_job(conn, model_id)
+    if (
+        active is not None
+        and active.status in (JobStatus.QUEUED, JobStatus.RUNNING)
+        and active.payload.get("dataset_id") == dataset_id
+    ):
+        return active
     payload = {"model_id": model_id, "dataset_id": dataset_id}
     return store.enqueue(conn, "explain", project_id, user.id, payload)

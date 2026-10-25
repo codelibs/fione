@@ -15,6 +15,7 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
+from fione import db
 from fione.config import load_secret
 from fione.engine import explain
 from fione.engine.artifact import UntrustedArtifactError
@@ -34,6 +35,7 @@ log = logging.getLogger(__name__)
 
 SAMPLE_ROWS = 10_000  # read from the dataset; the partial dependence grids come from them
 IMPORTANCE_ROWS = 1_000
+CONTRIBUTION_CELLS = 10_000_000  # rows x outputs x features: 80 MB per float64 array
 PD_COLUMNS = 10
 IMPORTANCE_FLOOR = 1_000  # columns kept in the importance list before curves are trimmed
 MAX_OUTPUTS = 20  # classes kept in a partial dependence curve
@@ -50,18 +52,24 @@ class _Cancelled(Exception):
 def _cap_threads(model: TrainedModel, threads: int) -> TrainedModel:
     """``model`` with its fold models predicting on at most ``threads`` threads.
 
-    LightGBM, XGBoost and ExtraTrees predict with the threads they were trained with, all
-    cores on large data; fewer stay as they are (an ExtraTrees artifact predicts on one, so
-    that its sums are reproducible), and an unset or negative count counts as all cores.
-    CatBoost takes a thread count per call and is left as it is.
+    Every family predicts with the threads it was trained with, all cores on large data: the
+    fold models' ``n_jobs``, or for CatBoost (which takes a count per call) the spec's. Fewer
+    stay as they are (an ExtraTrees artifact predicts on one, so that its sums are
+    reproducible), and an unset or negative count counts as all cores.
     """
     for member in model.members:
-        if not isinstance(member.spec, CatBoost):
-            for one in member.models:
-                current = one.get_params()["n_jobs"]
-                if current is None or current <= 0 or current > threads:
-                    one.set_params(n_jobs=threads)
+        if isinstance(member.spec, CatBoost):
+            if _lowered(member.spec.n_jobs, threads):
+                member.spec.n_jobs = threads
+            continue
+        for one in member.models:
+            if _lowered(one.get_params()["n_jobs"], threads):
+                one.set_params(n_jobs=threads)
     return model
+
+
+def _lowered(current: int | None, threads: int) -> bool:
+    return current is None or current <= 0 or current > threads
 
 
 def _importance_rows(frame: pd.DataFrame, target: str, classify: bool, limit: int) -> np.ndarray:
@@ -121,8 +129,9 @@ def build_explanation(
 ) -> dict:
     """The explanation payload of ``model`` on ``frame`` (version 1, strict JSON values).
 
-    Importance comes from the contributions of at most ``IMPORTANCE_ROWS`` rows, stratified
-    by the target when ``frame`` has it and the model classifies. Partial dependence covers
+    Importance comes from the contributions of at most ``IMPORTANCE_ROWS`` rows (fewer when
+    rows x classes x features would pass ``CONTRIBUTION_CELLS``), stratified by the target
+    when ``frame`` has it and the model classifies. Partial dependence covers
     the ``PD_COLUMNS`` most important columns, on ``frame`` as the background, skipping a
     column without values there; ``should_stop`` is asked before each curve (``_Cancelled``)
     and ``progress(done, total)`` told after each. Floats keep 6 significant digits.
@@ -130,7 +139,9 @@ def build_explanation(
     start = time.monotonic()
     _check_inputs(model, frame)  # PredictInputError for text in a numeric column...
     classify = model.task == "classification"
-    rows = _importance_rows(frame, model.target, classify, IMPORTANCE_ROWS)
+    cells = (len(model.classes_) if classify else 1) * max(1, len(model.prep.sources))
+    limit = max(1, min(IMPORTANCE_ROWS, CONTRIBUTION_CELLS // cells))  # wide multiclass
+    rows = _importance_rows(frame, model.target, classify, limit)
     c = explain.contributions(model, frame.iloc[rows])
     importance = explain.global_importance(c)
     total = float(importance.sum())
@@ -197,9 +208,8 @@ def _fit_to_cap(payload: dict, limit: int) -> dict:
 def explain_model(ctx: JobContext) -> None:
     """Explain the model on its dataset and store the result, replacing an earlier one.
 
-    A cancel leaves the earlier explanation as it was: the stop flag is read forced right
-    before the result is stored, and again after, the second time putting the earlier one
-    back.
+    A cancel leaves the earlier explanation as it was: the stop flag is read forced inside
+    the transaction that stores the result, so the two cannot interleave with a cancel.
     """
     payload = ctx.job.payload
     project_id = ctx.job.project_id
@@ -224,6 +234,8 @@ def explain_model(ctx: JobContext) -> None:
     try:
         model = models_service.load_trained(ctx.storage, record, load_secret(ctx.settings))
     except UntrustedArtifactError as e:
+        if isinstance(e.__cause__, KeyError):  # storage: the files are gone (being deleted)
+            raise JobUserError("the model no longer exists") from e
         raise JobUserError("the model file failed verification") from e
     _cap_threads(model, THREADS)
     present = {column for column, _ in dataset.schema}
@@ -259,20 +271,21 @@ def explain_model(ctx: JobContext) -> None:
         result = _fit_to_cap(result, explanations.MAX_EXPLANATION_BYTES)
     except ValueError as e:  # long category levels in every curve
         raise JobUserError(str(e)) from e
-    if ctx.should_stop(force=True):
-        return
-    previous = explanations.get_explanation(ctx.conn, record.id)
     try:
-        explanations.save_explanation(ctx.conn, record.id, ctx.job.id, dataset.id, result)
+        # One write transaction: a cancel (a write too) lands before the check, and is seen,
+        # or after the commit, in the window the worker's own final check covers.
+        with db.immediate(ctx.conn):
+            if ctx.should_stop(force=True):
+                raise _Cancelled
+            explanations.save_explanation(ctx.conn, record.id, ctx.job.id, dataset.id, result)
+    except _Cancelled:  # rolled back: the earlier explanation, if any, stays
+        return
     except sqlite3.IntegrityError as e:  # a foreign key: deleted while it was explained
         try:
             models_service.get_model(ctx.conn, record.id)
         except models_service.ModelNotFound:
             raise JobUserError("the model no longer exists") from e
         raise JobUserError(gone) from e
-    if ctx.should_stop(force=True):  # cancelled while storing: put the earlier one back
-        explanations.restore_explanation(ctx.conn, record.id, previous)
-        return
     ctx.set_result(
         {
             "model_id": record.id,
