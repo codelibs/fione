@@ -25,6 +25,8 @@ from fione.engine.families import CatBoost, ExtraTrees, FamilySpec, LightGBM, XG
 from fione.engine.model import TrainedModel
 
 FLAT_MARGIN = 1e-9  # a binary margin this close to the bias is rescaled by the sigmoid's slope
+PATH_ERROR_FACTOR = 10.0  # multiclass path points: see softmax_to_probability
+MAX_PATH_STEPS = 256
 
 
 @dataclass(frozen=True)
@@ -45,8 +47,12 @@ class Contributions:
         """The output explained per row: ``class_index``, else the predicted one (multiclass)."""
         if class_index is None:
             return self.prediction.argmax(axis=1)
-        if class_index not in range(len(self.outputs)):
-            raise ValueError(f"class_index must be in 0..{len(self.outputs) - 1}")
+        if (
+            isinstance(class_index, bool)
+            or not isinstance(class_index, int | np.integer)
+            or class_index not in range(len(self.outputs))
+        ):
+            raise ValueError(f"class_index must be an integer in 0..{len(self.outputs) - 1}")
         return np.full(len(self.prediction), class_index)
 
 
@@ -69,15 +75,31 @@ def softmax_to_probability(
     """Margin contributions (n, k, f) and bias (n, k) as class probability ones.
 
     The softmax gradient is integrated along the straight path from the bias to the margin
-    (midpoint rule, ``steps`` points); the integration error is then shared out in proportion
-    to the contributions' sizes (evenly when all are 0), so the sums are exact.
+    with the midpoint rule. A row gets ``steps`` points, doubled (up to ``MAX_PATH_STEPS``)
+    while they are fewer than sqrt(``PATH_ERROR_FACTOR`` · max|phi| · spread), where spread
+    is the row's largest change of one class's margin against another's: the rule's error
+    grows with both. That keeps the error per contribution below about 1e-3 (measured up to a
+    spread of 280), and a row's result does not depend on the other rows.
+
+    The integration error is then shared out within each class in proportion to the
+    contributions' sizes (evenly when all are 0), so the sums are exact. The sharing keeps
+    every sign while the error is below the class's total size. It breaks the exact zero sum
+    of each feature's contributions over the classes, by up to about 5e-4.
     """
     total = phi.sum(axis=-1)
+    spread = total.max(axis=1) - total.min(axis=1)
+    needed = np.sqrt(PATH_ERROR_FACTOR * np.abs(phi).max(axis=(1, 2)) * spread)
+    doublings = np.ceil(np.log2(np.maximum(needed / steps, 1.0)))
+    counts = np.minimum(steps * 2**doublings, max(steps, MAX_PATH_STEPS)).astype(int)
     phi_p = np.zeros_like(phi)
-    for s in range(steps):
-        p = softmax(bias + (s + 0.5) / steps * total, axis=1)[:, :, None]
-        phi_p += p * (phi - (p * phi).sum(axis=1, keepdims=True))
-    phi_p /= steps
+    for count in np.unique(counts):
+        rows = counts == count
+        phi_r, bias_r, total_r = phi[rows], bias[rows], total[rows]
+        integral = np.zeros_like(phi_r)
+        for s in range(count):
+            p = softmax(bias_r + (s + 0.5) / count * total_r, axis=1)[:, :, None]
+            integral += p * (phi_r - (p * phi_r).sum(axis=1, keepdims=True))
+        phi_p[rows] = integral / count
     bias_p = softmax(bias, axis=1)
     residual = softmax(bias + total, axis=1) - bias_p - phi_p.sum(axis=-1)
     size = np.abs(phi_p)

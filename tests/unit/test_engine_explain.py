@@ -133,6 +133,33 @@ def test_softmax_path_integral_is_additive():
     assert_allclose(bias_p, softmax(bias, axis=1), rtol=0, atol=1e-15)
 
 
+@pytest.mark.parametrize(("scale", "atol"), [(1, 5e-4), (5, 1e-3), (20, 1e-3)])
+def test_softmax_path_integral_matches_the_two_class_closed_form(scale, atol):
+    # With two classes the softmax is the sigmoid of the margin difference, and along a
+    # straight path each feature's share of the change is exact: the binary rescale. At
+    # scale 1 the default 16 points decide the error (3.6e-4; 7.8e-4 with 1 point).
+    rng = np.random.default_rng(5)
+    phi, bias = rng.normal(size=(200, 2, 5)) * scale, rng.normal(size=(200, 2))
+    phi_p, _ = softmax_to_probability(phi, bias)
+    exact, _ = binary_to_probability(phi[:, 1] - phi[:, 0], bias[:, 1] - bias[:, 0])
+    assert_allclose(phi_p[:, 1], exact, rtol=0, atol=atol)
+    assert_allclose(phi_p[:, 0], -exact, rtol=0, atol=atol)
+
+
+def test_softmax_path_integral_matches_a_fine_reference():
+    rng = np.random.default_rng(6)
+    phi, bias = rng.normal(size=(50, 3, 4)) * 5, rng.normal(size=(50, 3))
+    total, reference, steps = phi.sum(-1), np.zeros_like(phi), 4096
+    for s in range(steps):
+        p = softmax(bias + (s + 0.5) / steps * total, axis=1)[:, :, None]
+        reference += p * (phi - (p * phi).sum(axis=1, keepdims=True)) / steps
+    phi_p, _ = softmax_to_probability(phi, bias)
+    assert_allclose(phi_p, reference, rtol=0, atol=1e-3)
+    # A row's result is its own: the same as when it is converted alone.
+    alone, _ = softmax_to_probability(phi[7:8], bias[7:8])
+    assert_allclose(alone, phi_p[7:8], rtol=0, atol=0)
+
+
 def test_feature_raising_only_class_c_never_lowers_p_c():
     rng = np.random.default_rng(2)
     phi, bias = rng.normal(size=(200, 3, 4)), rng.normal(size=(200, 3))
@@ -222,19 +249,20 @@ def test_xgboost_early_stopped_fold_model(task):
     _assert_additive(replace(fit, members=[Member(spec, 1.0, [model])]), _features())
 
 
+@pytest.mark.parametrize("missing", [0, 2])
 @pytest.mark.parametrize("family", ["ExtraTrees", "LightGBM"])
-def test_fold_model_missing_a_class(family):
+def test_fold_model_missing_a_class(family, missing):
     fit = _fit("multiclass")
     codes = pd.Categorical(_task_frame("multiclass", _frame())["判定"], fit.classes_).codes
-    spec, model = _fold_fit(fit, family, keep=codes != 2, n_classes=3)
-    assert list(model.classes_) == [0, 1]
+    spec, model = _fold_fit(fit, family, keep=codes != missing, n_classes=3)
+    assert list(model.classes_) == [c for c in range(3) if c != missing]
     one = replace(fit, members=[Member(spec, 1.0, [model])])
     X = _features()
     c = contributions(one, X)
     expected = spec.predict(model, getattr(fit.prep, spec.view)(X))
     assert_allclose(c.prediction, expected, rtol=1e-5, atol=1e-5)
-    assert (c.values[:, 2] == 0).all()
-    assert (c.bias[:, 2] == 0).all()
+    assert (c.values[:, missing] == 0).all()
+    assert (c.bias[:, missing] == 0).all()
     # Mixed with a fold model that saw every class, still additive against predict_proba.
     full = fit.cv_models[family][0]
     mixed = replace(fit, members=[Member(spec, 1.0, [model, full])])
@@ -307,7 +335,8 @@ def test_slots():
     assert (multi.slots() == multi.prediction.argmax(1)).all()
     assert (multi.slots(2) == 2).all()
     assert multi.slots(2).shape == (len(multi.prediction),)
-    for bad in (-1, 3):
+    assert (multi.slots(np.int64(1)) == 1).all()
+    for bad in (-1, 3, True, 1.0, "1"):
         with pytest.raises(ValueError):
             multi.slots(bad)
     with pytest.raises(ValueError):
