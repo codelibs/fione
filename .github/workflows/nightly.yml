@@ -1,0 +1,54 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # every day, 18:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    # Accuracy, size and latency targets on real datasets (downloaded from the network).
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - run: uv run pytest -m acceptance -v
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
+      - name: Build the fione and fione-serving images
+        run: >
+          docker compose --env-file docker/e2e.env
+          -f docker/compose.yaml -f docker/compose.e2e.yaml --profile serving build
+      - name: End-to-end tests
+        env:
+          FIONE_IMAGE_TAG: e2e
+        run: uv run pytest tests/e2e -m e2e -v
+      - name: Keep the traces, screenshots and Compose logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: test-results/e2e
+          if-no-files-found: ignore

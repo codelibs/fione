@@ -1,0 +1,48 @@
+name: Release images
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    # The only job that may write packages: it pushes the two images of the tag.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image names and tag
+        id: names
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          lower=$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "registry=ghcr.io/$lower" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Both images carry the same FIONE_IMAGE_TAG: models record it, and the serving image
+      # only loads models of its own tag.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: FIONE_IMAGE_TAG=${{ steps.names.outputs.tag }}
+          tags: ${{ steps.names.outputs.registry }}/fione:${{ steps.names.outputs.tag }}
+          push: true
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.serving
+          build-args: FIONE_IMAGE_TAG=${{ steps.names.outputs.tag }}
+          tags: ${{ steps.names.outputs.registry }}/fione-serving:${{ steps.names.outputs.tag }}
+          push: true
