@@ -1,0 +1,108 @@
+# Fione with SeaweedFS (Apache-2.0) as its S3 object storage.
+#
+#   cp docker/.env.example docker/.env     # then fill in the values it asks for
+#   docker compose -f docker/compose.yaml --env-file docker/.env up -d --build
+#   docker compose -f docker/compose.yaml logs fione | grep "Setup token"
+#
+# Open http://127.0.0.1:8080/ and create the first administrator with that setup token
+# (or set FIONE_SETUP_TOKEN in docker/.env). Data lives in the volumes fione-data (database,
+# secret key, temp files) and seaweed-data (datasets and models); `down` keeps them,
+# `down -v` deletes them.
+#
+# Ports are published on 127.0.0.1 only. To serve other machines, put a reverse proxy with
+# HTTPS in front of 127.0.0.1:8080 and set, in the fione environment below:
+#   FIONE_TRUST_PROXY: "true"     # the client address from X-Forwarded-For (only behind it)
+#   FIONE_COOKIE_SECURE: "true"   # session cookies over HTTPS only
+# Without FIONE_TRUST_PROXY every client seems to come from the proxy's address, so the
+# per-address limit of 50 failed sign-ins per 15 minutes is shared by all users.
+#
+# The serving image (prediction API for one downloaded model) is built only on request:
+#   docker compose -f docker/compose.yaml --env-file docker/.env --profile serving build
+name: fione
+
+x-image-tag: &image-tag ${FIONE_IMAGE_TAG:-dev}
+
+services:
+  fione:
+    image: ghcr.io/codelibs/fione:${FIONE_IMAGE_TAG:-dev}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        FIONE_IMAGE_TAG: *image-tag
+    # A tiny init as PID 1 reaps any process a killed job worker leaves behind.
+    init: true
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      FIONE_STORAGE_URL: s3://fione
+      FIONE_S3_ENDPOINT: http://seaweedfs:8333
+      FIONE_S3_ACCESS_KEY: ${FIONE_S3_ACCESS_KEY:?set FIONE_S3_ACCESS_KEY in docker/.env (see docker/.env.example)}
+      FIONE_S3_SECRET_KEY: ${FIONE_S3_SECRET_KEY:?set FIONE_S3_SECRET_KEY in docker/.env (see docker/.env.example)}
+      # Optional: a fixed first-admin setup token (16+ characters); otherwise one is
+      # generated and written to the log once.
+      FIONE_SETUP_TOKEN: ${FIONE_SETUP_TOKEN:-}
+      # FIONE_TRUST_PROXY: "true"
+      # FIONE_COOKIE_SECURE: "true"
+    ports:
+      - "127.0.0.1:${FIONE_PORT:-8080}:8080"
+    volumes:
+      - fione-data:/data
+    restart: unless-stopped
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    # Master, volume, filer and S3 gateway on one data dir (the command verified in Task 3;
+    # -ip.bind=0.0.0.0 is needed, or the S3 port answers on the container's loopback only).
+    # The S3 identity is written from the environment at each start, readable by SeaweedFS
+    # only, in the container's own filesystem: never in the repository or the image.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        umask 077
+        mkdir -p /run/fione-s3
+        printf '{"identities":[{"name":"fione","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' \
+          "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" > /run/fione-s3/s3.json
+        chown -R seaweed:seaweed /run/fione-s3
+        unset S3_ACCESS_KEY S3_SECRET_KEY
+        exec /entrypoint.sh server -dir=/data -ip.bind=0.0.0.0 -s3 -s3.port=8333 \
+          -s3.config=/run/fione-s3/s3.json \
+          -master.volumeSizeLimitMB=1024 -volume.max=100
+    environment:
+      S3_ACCESS_KEY: ${FIONE_S3_ACCESS_KEY:?set FIONE_S3_ACCESS_KEY in docker/.env (see docker/.env.example)}
+      S3_SECRET_KEY: ${FIONE_S3_SECRET_KEY:?set FIONE_S3_SECRET_KEY in docker/.env (see docker/.env.example)}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8333/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    # Not published: only fione talks to it. For debugging, add
+    #   ports: ["127.0.0.1:8333:8333"]
+    volumes:
+      - seaweed-data:/data
+    restart: unless-stopped
+
+  # Fione Serving, built from docker/Dockerfile.serving with the same FIONE_IMAGE_TAG (a
+  # model only loads in the serving image of the tag it was trained with). Not started by
+  # default; to run it on a downloaded model unpacked into ./model:
+  #   FIONE_MODEL_DIR=$PWD/model docker compose -f docker/compose.yaml --env-file docker/.env \
+  #       --profile serving up fione-serving
+  fione-serving:
+    profiles: ["serving"]
+    image: ghcr.io/codelibs/fione-serving:${FIONE_IMAGE_TAG:-dev}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.serving
+      args:
+        FIONE_IMAGE_TAG: *image-tag
+    ports:
+      - "127.0.0.1:${FIONE_SERVING_PORT:-8081}:8080"
+    volumes:
+      - ${FIONE_MODEL_DIR:-./model}:/model:ro
+
+volumes:
+  fione-data:
+  seaweed-data:

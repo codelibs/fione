@@ -1,13 +1,14 @@
 # Fione Serving: the prediction API for one model, mounted at /model (spec section 8).
 #
-#   docker build -f docker/Dockerfile.serving --build-arg IMAGE_TAG=<tag> -t fione-serving:<tag> .
+#   docker build -f docker/Dockerfile.serving --build-arg FIONE_IMAGE_TAG=<tag> -t fione-serving:<tag> .
 #   docker run --rm -p 8081:8080 -v "$PWD/model:/model:ro" fione-serving:<tag>
 #
 # Built from the same uv.lock and src/ as the main image, because a model is a pickle of
 # fione.engine classes; the tag is recorded in each model's manifest and checked at startup.
-FROM python:3.12-slim
+FROM python:3.12.15-slim-trixie
 
-ARG IMAGE_TAG=dev
+# The same value as the main image's (docker/Dockerfile): models record it.
+ARG FIONE_IMAGE_TAG=dev
 
 # libgomp1: the OpenMP runtime LightGBM and XGBoost need.
 RUN apt-get update \
@@ -36,7 +37,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     TMPDIR=/tmp/serving \
     HOME=/tmp/serving \
-    FIONE_IMAGE_TAG=${IMAGE_TAG} \
+    FIONE_IMAGE_TAG=${FIONE_IMAGE_TAG} \
     FIONE_MODEL_DIR=/model
 
 USER 10001

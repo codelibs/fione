@@ -1,0 +1,31 @@
+# The build context of docker/Dockerfile (docker/Dockerfile.serving has its own list):
+# nothing but what the image needs.
+*
+!pyproject.toml
+!uv.lock
+!src
+!docker/fione-entrypoint.sh
+
+# Never in the image, even inside the paths above.
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.DS_Store
+
+# Excluded by the first line already; listed so that nobody narrows it by mistake.
+.git
+.env
+docker/.env
+.superpowers/
+tests/
+docs/
+tmp/
+dbflute_fess/
+.venv
+memo.txt
+release.sh
+freegen.sh
+.classpath
+.project
+.settings/

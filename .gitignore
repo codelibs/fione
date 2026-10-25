@@ -9,3 +9,7 @@ dist/
 .superpowers/
 .idea/
 .DS_Store
+
+# Deployment secrets (see docker/.env.example)
+.env
+docker/.env
