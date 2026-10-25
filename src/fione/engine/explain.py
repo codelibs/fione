@@ -9,9 +9,13 @@ members. Binary margins are rescaled exactly; multiclass margins are integrated 
 softmax path, with the integration error folded back in. So the contributions plus the bias
 always add up to the model's output, but they are exact Shapley values only per booster in
 margin space. Expanded features (datetime parts) count for their source column.
+
+Global importance is the rows' mean absolute contribution. Partial dependence and ICE curves
+vary one input column over a small grid on a sample of background rows.
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -23,10 +27,14 @@ from sklearn.base import is_classifier
 
 from fione.engine.families import CatBoost, ExtraTrees, FamilySpec, LightGBM, XGBoost, n_threads
 from fione.engine.model import TrainedModel
+from fione.engine.prep import _EPOCH, _as_str, _datetimes
 
 FLAT_MARGIN = 1e-9  # a binary margin this close to the bias is rescaled by the sigmoid's slope
 PATH_ERROR_FACTOR = 10.0  # multiclass path points: see softmax_to_probability
 MAX_PATH_STEPS = 256
+PD_GRID = 20  # most points of a partial dependence grid
+PD_ROWS = 300  # most background rows it averages over
+ICE_ROWS = 50  # most single-row (ICE) curves it keeps
 
 
 @dataclass(frozen=True)
@@ -47,13 +55,17 @@ class Contributions:
         """The output explained per row: ``class_index``, else the predicted one (multiclass)."""
         if class_index is None:
             return self.prediction.argmax(axis=1)
-        if (
-            isinstance(class_index, bool)
-            or not isinstance(class_index, int | np.integer)
-            or class_index not in range(len(self.outputs))
-        ):
-            raise ValueError(f"class_index must be an integer in 0..{len(self.outputs) - 1}")
+        _check_int("class_index", class_index, 0, len(self.outputs) - 1)
         return np.full(len(self.prediction), class_index)
+
+
+def _check_int(name: str, value, low: int, high: int) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | np.integer)
+        or value not in range(low, high + 1)
+    ):
+        raise ValueError(f"{name} must be an integer in {low}..{high}")
 
 
 def binary_to_probability(phi: np.ndarray, bias: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -227,3 +239,136 @@ def contributions(model: TrainedModel, df: pd.DataFrame) -> Contributions:
     sources = [position[source] for source in model.prep.sources]
     np.add.at(values, (slice(None), slice(None), sources), phi)
     return Contributions(list(model.columns), outputs, values, bias, values.sum(-1) + bias)
+
+
+def global_importance(c: Contributions) -> pd.Series:
+    """Per column, the mean over the rows of its absolute contributions summed over the
+    outputs; largest first. All 0 for no rows."""
+    size = np.abs(c.values).sum(axis=1)
+    mean = size.mean(axis=0) if len(size) else np.zeros(len(c.columns))
+    return pd.Series(mean, index=c.columns).sort_values(ascending=False, kind="stable")
+
+
+@dataclass(frozen=True)
+class PartialDependence:
+    """The model's outputs with ``column`` set to each ``grid`` value, over ``n_rows`` rows.
+
+    ``average[point, output]`` is their mean over the rows; ``ice[row, point]`` holds single
+    rows' curves for ``outputs[ice_output]``. ``None`` in the grid means missing; datetimes
+    are ISO strings.
+    """
+
+    column: str
+    kind: Literal["numeric", "datetime", "category"]
+    grid: list
+    outputs: list
+    average: np.ndarray
+    ice: np.ndarray
+    ice_output: int
+    n_rows: int
+
+
+def _spread(values: np.ndarray, size: int, integral: bool) -> np.ndarray:
+    """At most ``size`` sorted points from the 2nd to the 98th percentile of ``values``.
+
+    These are the quantiles; where they coincide (a sparse column), evenly spaced points
+    between both ends fill up, and ``size`` of the sorted union are kept, evenly by position.
+    """
+    points = np.unique(np.quantile(values, np.linspace(0.02, 0.98, size)))
+    if len(points) < size:
+        union = np.union1d(points, np.linspace(points[0], points[-1], size))
+        points = np.unique(union[np.round(np.linspace(0, len(union) - 1, size)).astype(int)])
+    return np.unique(np.round(points)) if integral else points
+
+
+def _grid(s: pd.Series, kind: str, size: int) -> tuple[list, np.ndarray]:
+    """The grid as JSON values, and as the values set into the column; empty when ``s`` has
+    no values the model can read."""
+    if kind == "numeric":
+        values = pd.to_numeric(s, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan)
+        values = values.dropna().to_numpy()
+        if not len(values):
+            return [], values
+        integral = bool((values % 1 == 0).all())
+        points = _spread(values, size, integral)
+        grid = [int(p) for p in points] if integral else [float(p) for p in points]
+        return grid, np.asarray(grid)
+    if kind == "datetime":
+        seconds = (_datetimes(s) - _EPOCH).dt.total_seconds().dropna().to_numpy()
+        if not len(seconds):
+            return [], seconds
+        stamps = pd.to_datetime(_spread(seconds, size, integral=True), unit="s")
+        return [stamp.isoformat() for stamp in stamps], stamps.to_numpy()
+    counts = _as_str(s).value_counts()  # how the model reads categories
+    top = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[: size - 1]
+    levels = [label for label, _ in top]
+    if pd.api.types.infer_dtype(s, skipna=True) == "boolean":
+        levels = sorted(label == "True" for label in levels)
+    if not levels:
+        return [], np.array([], dtype=object)
+    grid = [*levels, None]
+    return grid, np.array(grid, dtype=object)
+
+
+def partial_dependence(
+    model: TrainedModel,
+    background: pd.DataFrame,
+    column: str,
+    *,
+    grid_size: int = PD_GRID,
+    max_rows: int = PD_ROWS,
+    ice_rows: int = ICE_ROWS,
+    class_index: int | None = None,
+    seed: int = 0,
+) -> PartialDependence:
+    """Partial dependence and ICE curves of ``model`` on ``column``, varied over a grid.
+
+    The grid comes from all of ``background``: numeric and datetime columns get up to
+    ``grid_size`` points between the 2nd and 98th percentiles (whole numbers for integral
+    columns, whole seconds for datetimes); categorical ones their ``grid_size − 1`` most
+    frequent levels (ties by label; bool in False, True order), then missing. The curves use
+    at most ``max_rows`` rows drawn with ``seed`` in random order, of which the first
+    ``ice_rows`` give the ICE curves, and one prediction over all their grid copies. ICE shows
+    ``class_index``, else the output whose average varies most.
+    """
+    _check_int("grid_size", grid_size, 2, PD_GRID)
+    _check_int("max_rows", max_rows, 1, PD_ROWS)
+    _check_int("ice_rows", ice_rows, 0, ICE_ROWS)
+    try:
+        kind = model.prep.kind_of(column)
+    except KeyError:
+        raise ValueError(f"the model does not use the column {column!r}") from None
+    if model.task == "regression":
+        outputs = [model.target]
+    else:
+        outputs = [model.classes_[1]] if len(model.classes_) == 2 else list(model.classes_)
+    if class_index is not None:
+        _check_int("class_index", class_index, 0, len(outputs) - 1)
+    grid, values = [], None
+    if column in background.columns:
+        grid, values = _grid(background[column], kind, grid_size)
+    if not grid:
+        raise ValueError(f"the column {column!r} has no values in the background")
+    rows = np.random.default_rng(seed).permutation(len(background))[:max_rows]
+    used = [c for c in background.columns if c in set(model.columns)]
+    frame = background[used].iloc[np.repeat(rows, len(grid))].reset_index(drop=True)
+    frame[column] = np.tile(values, len(rows))
+    if model.task == "regression":
+        predicted = model.predict(frame).to_numpy()[:, None]
+    else:
+        predicted = model.predict_proba(frame).to_numpy()  # by position: labels may be bool
+        predicted = predicted[:, 1:] if len(outputs) < predicted.shape[1] else predicted
+    curves = predicted.reshape(len(rows), len(grid), len(outputs))
+    average = curves.mean(axis=0)
+    if class_index is None:
+        class_index = int(np.argmax(average.max(axis=0) - average.min(axis=0)))
+    return PartialDependence(
+        column,
+        "category" if kind == "frequency" else kind,
+        grid,
+        outputs,
+        average,
+        curves[:ice_rows, :, class_index],
+        int(class_index),
+        len(rows),
+    )

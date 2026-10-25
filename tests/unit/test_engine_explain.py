@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from functools import cache
 
@@ -13,13 +14,20 @@ from fione.engine import explain
 from fione.engine.automl import AutoML
 from fione.engine.config import ConfigError, Deadline, TrainConfig
 from fione.engine.explain import (
+    ICE_ROWS,
+    PD_GRID,
+    PD_ROWS,
+    Contributions,
     binary_to_probability,
     contributions,
+    global_importance,
+    partial_dependence,
     saabas,
     softmax_to_probability,
 )
 from fione.engine.families import FAMILIES
 from fione.engine.model import Member, TrainedModel
+from fione.engine.prep import Prep
 
 TASKS = ("binary", "multiclass", "regression")
 TARGETS = {"binary": "good", "multiclass": "判定", "regression": "value"}
@@ -34,6 +42,7 @@ def _frame(n: int = 300, seed: int = 0) -> pd.DataFrame:
     days = rng.integers(0, 3 * 365, size=n)
     frame["when"] = pd.Timestamp("2022-01-01") + pd.to_timedelta(days, unit="D")
     frame["good"] = frame["判定"] == "良"
+    frame["constant"] = 1  # dropped by the models' prep
     return frame
 
 
@@ -341,3 +350,238 @@ def test_slots():
             multi.slots(bad)
     with pytest.raises(ValueError):
         binary.slots(1)
+
+
+# --- partial dependence and global importance ----------------------------------------------
+
+
+def _background(n: int = 40, seed: int = 7) -> pd.DataFrame:
+    return _features(n, seed)
+
+
+def _curves(model: TrainedModel, background: pd.DataFrame, column: str, grid: list):
+    """(rows, G, outputs): the outputs with ``column`` set to each grid value, one at a time."""
+    curves = []
+    for value in grid:
+        X = background.copy()
+        X[column] = pd.Series([value] * len(X), index=X.index, dtype=object)
+        if model.task == "regression":
+            curves.append(model.predict(X).to_numpy()[:, None])
+        else:
+            proba = model.predict_proba(X).to_numpy()
+            curves.append(proba[:, 1:] if len(model.classes_) == 2 else proba)
+    return np.stack(curves, axis=1)
+
+
+def _assert_grid(result, kind: str):
+    assert result.kind == kind
+    assert 2 <= len(result.grid) <= PD_GRID
+    json.dumps(result.grid, allow_nan=False)
+    assert result.average.shape == (len(result.grid), len(result.outputs))
+    assert np.isfinite(result.average).all()
+
+
+def test_kind_of():
+    prep = _fit("regression").prep
+    assert prep.kind_of("幅") == "numeric"
+    assert prep.kind_of("when") == "datetime"
+    assert prep.kind_of("BiasTerm") == "category"
+    ids = pd.DataFrame({"id": [f"k{i}" for i in range(300)], "n": np.arange(300.0)})
+    assert Prep().fit(ids).kind_of("id") == "frequency"
+    for unused in ("constant", "nope"):
+        with pytest.raises(KeyError):
+            prep.kind_of(unused)
+
+
+def test_pd_matches_a_hand_computed_average():
+    fit = _fit("regression")
+    background = _background()
+    result = partial_dependence(fit, background, "幅")
+    _assert_grid(result, "numeric")
+    assert result.column == "幅"
+    assert result.outputs == ["value"]
+    assert result.n_rows == len(background)
+    curves = _curves(fit, background, "幅", result.grid)
+    assert_allclose(result.average[:, 0], curves[:, :, 0].mean(0), rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("ice_rows", [0, 10, ICE_ROWS])
+def test_ice_rows_are_the_individual_curves(ice_rows):
+    fit = _fit("regression")
+    background = _background()
+    result = partial_dependence(fit, background, "<b>x</b>", ice_rows=ice_rows)
+    assert result.ice.shape == (min(ice_rows, len(background)), len(result.grid))
+    curves = _curves(fit, background, "<b>x</b>", result.grid)[:, :, 0]
+    # Each ICE curve is one background row's curve, each row at most once.
+    matched = [np.flatnonzero(np.abs(curves - ice).max(1) <= 1e-12) for ice in result.ice]
+    assert all(len(rows) == 1 for rows in matched)
+    assert len({int(rows[0]) for rows in matched}) == len(matched)
+    if len(result.ice) == len(background):
+        assert_allclose(result.ice.mean(0), result.average[:, 0], rtol=0, atol=1e-12)
+
+
+def test_sparse_numeric_column_gets_an_even_spread():
+    fit = _fit("regression")
+    background = _background(200)
+    sparse_values = np.zeros(200)
+    sparse_values[:10] = np.linspace(0.5, 9.7, 10)  # 95% zeros
+    background["contrib_x"] = sparse_values
+    result = partial_dependence(fit, background, "contrib_x")
+    _assert_grid(result, "numeric")
+    p2, p98 = np.quantile(sparse_values, [0.02, 0.98])
+    inside = {g for g in result.grid if p2 <= g <= p98}
+    assert len(inside) >= 10
+    assert result.grid == sorted(set(result.grid))
+
+
+@pytest.mark.parametrize("high", [4, 100])
+def test_integer_column_gets_integer_grid(high):
+    fit = _fit("regression")
+    background = _background(200)
+    background["contrib_x"] = np.random.default_rng(0).integers(0, high, 200).astype(np.int64)
+    result = partial_dependence(fit, background, "contrib_x")
+    _assert_grid(result, "numeric")
+    assert all(type(g) is int for g in result.grid)
+    assert result.grid == sorted(set(result.grid))
+    assert set(result.grid) <= set(range(high))
+
+
+def test_categorical_grid_is_top_levels_plus_missing():
+    fit = _fit("regression")
+    background = _background(170)
+    # blue and green tie: by label
+    levels = ["purple"] * 30 + ["green"] * 40 + ["red"] * 50 + ["blue"] * 40 + [None] * 10
+    background["BiasTerm"] = pd.Series(levels, index=background.index, dtype=object)
+    result = partial_dependence(fit, background, "BiasTerm", grid_size=4)
+    _assert_grid(result, "category")
+    assert result.grid == ["red", "blue", "green", None]
+    curves = _curves(fit, background, "BiasTerm", result.grid)
+    assert_allclose(result.average, curves.mean(0), rtol=0, atol=1e-12)
+
+
+def test_bool_column_gets_false_true_missing():
+    fit = _fit("regression")
+    background = _background(50)
+    background["BiasTerm"] = np.arange(50) % 3 > 0  # True is the more frequent
+    result = partial_dependence(fit, background, "BiasTerm")
+    _assert_grid(result, "category")
+    assert result.grid == [False, True, None]
+    assert [type(g) for g in result.grid[:2]] == [bool, bool]
+
+
+def test_datetime_column_is_varied_on_the_raw_column():
+    fit = _fit("regression")
+    background = _background()
+    background["when"] = background["when"].astype(str)  # raw strings, parsed by the prep
+    result = partial_dependence(fit, background, "when")
+    _assert_grid(result, "datetime")
+    assert all(isinstance(g, str) for g in result.grid)
+    assert result.grid == sorted(result.grid)
+    stamps = [pd.Timestamp(g) for g in result.grid]
+    assert all(stamp == stamp.floor("s") for stamp in stamps)
+    curves = _curves(fit, background, "when", result.grid)
+    assert_allclose(result.average, curves.mean(0), rtol=0, atol=1e-12)
+
+
+def test_limits():
+    fit = _fit("regression")
+    background = _background()
+    for bad in (
+        {"grid_size": 21},
+        {"grid_size": 1},
+        {"grid_size": 2.5},
+        {"max_rows": 301},
+        {"max_rows": 0},
+        {"ice_rows": 51},
+        {"ice_rows": -1},
+    ):
+        with pytest.raises(ValueError):
+            partial_dependence(fit, background, "幅", **bad)
+    assert "constant" in fit.prep.dropped
+    for unused in ("constant", "nope"):
+        with pytest.raises(ValueError, match=repr(unused)):
+            partial_dependence(fit, background, unused)
+    for blank in (background.assign(幅=np.nan), background.drop(columns=["幅"])):
+        with pytest.raises(ValueError, match="'幅'"):
+            partial_dependence(fit, blank, "幅")
+    with pytest.raises(ValueError, match="'BiasTerm'"):
+        partial_dependence(fit, background.assign(BiasTerm=None), "BiasTerm")
+    for limit in (2, PD_GRID):
+        assert len(partial_dependence(fit, background, "幅", grid_size=limit).grid) <= limit
+
+
+def test_background_is_sampled_with_the_seed():
+    fit = _fit("regression")
+    background = _background(1000)
+    first = partial_dependence(fit, background, "幅")
+    again = partial_dependence(fit, background, "幅")
+    assert first.n_rows == PD_ROWS
+    assert first.grid == again.grid
+    assert_allclose(first.average, again.average, rtol=0, atol=0)
+    assert_allclose(first.ice, again.ice, rtol=0, atol=0)
+    other = partial_dependence(fit, background, "幅", seed=1)
+    assert other.n_rows == PD_ROWS
+    assert not np.array_equal(other.average, first.average)
+    assert partial_dependence(fit, background, "幅", max_rows=100).n_rows == 100
+
+
+def test_multiclass_ice_defaults_to_the_most_varying_class():
+    fit = _fit("multiclass")
+    background = _background()
+    result = partial_dependence(fit, background, "<b>x</b>")
+    assert result.outputs == fit.classes_
+    assert_allclose(result.average.sum(1), 1.0, rtol=0, atol=1e-12)
+    spread = result.average.max(0) - result.average.min(0)
+    assert result.ice_output == int(np.argmax(spread))
+    assert_allclose(result.ice.mean(0), result.average[:, result.ice_output], rtol=0, atol=1e-12)
+    other = (result.ice_output + 1) % 3
+    chosen = partial_dependence(fit, background, "<b>x</b>", class_index=other)
+    assert chosen.ice_output == other
+    assert_allclose(chosen.average, result.average, rtol=0, atol=0)
+    assert_allclose(chosen.ice.mean(0), chosen.average[:, other], rtol=0, atol=1e-12)
+    for bad in (3, -1, True):
+        with pytest.raises(ValueError):
+            partial_dependence(fit, background, "<b>x</b>", class_index=bad)
+    binary = partial_dependence(_fit("binary"), background, "<b>x</b>")
+    assert binary.outputs == [True]
+    assert binary.ice_output == 0
+    assert binary.average.shape == (len(binary.grid), 1)
+    with pytest.raises(ValueError):
+        partial_dependence(_fit("binary"), background, "<b>x</b>", class_index=1)
+
+
+@pytest.mark.parametrize("task", TASKS)
+def test_pd_makes_one_predict_call(task, monkeypatch):
+    fit = _fit(task)
+    calls = []
+    original = TrainedModel._predict
+
+    def counting(self, df):
+        calls.append(len(df))
+        return original(self, df)
+
+    monkeypatch.setattr(TrainedModel, "_predict", counting)
+    result = partial_dependence(fit, _background(), "BiasTerm")
+    assert calls == [result.n_rows * len(result.grid)]
+
+
+def test_global_importance_orders_by_mean_abs():
+    values = np.array(
+        [
+            [[0.1, -2.0, 0.5], [0.0, 1.0, -0.5]],
+            [[-0.3, 0.0, 0.5], [0.2, -1.0, 3.5]],
+        ]
+    )
+    bias = np.zeros((2, 2))
+    c = Contributions(["a", "b", "c"], ["x", "y"], values, bias, values.sum(-1) + bias)
+    importance = global_importance(c)
+    assert list(importance.index) == ["c", "b", "a"]
+    assert_allclose(importance[["a", "b", "c"]], [0.3, 2.0, 2.5], rtol=0, atol=1e-15)
+    empty = Contributions(
+        ["a", "b"], ["x"], np.zeros((0, 1, 2)), np.zeros((0, 1)), np.zeros((0, 1))
+    )
+    assert (global_importance(empty) == 0).all()
+    fit = _fit("binary")
+    real = global_importance(contributions(fit, _features()))
+    assert sorted(real.index) == sorted(fit.columns)
+    assert (np.diff(real.to_numpy()) <= 0).all()
