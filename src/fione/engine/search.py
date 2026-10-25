@@ -12,7 +12,9 @@ median pruner abandons trials whose running fold loss is clearly behind.
 
 ``max_trial_secs`` caps every trial; its time is also split over the folds, so a capped trial is
 kept with truncated models instead of being discarded. The cap is raised, with a ``notice``
-event, to ``UNIT_SAFETY`` measured units per fold, since a smaller one could not fit a fold.
+event, to ``UNIT_SAFETY`` measured units per fold, since a smaller one could not fit a fold, and
+a fold whose share was eaten by the previous folds' overruns still gets that much: a cap can
+make a trial run somewhat longer, never discard it.
 
 The search also ends after ``max_trials`` finished trials (reason ``max_models``), or when the
 best ``stopping_score`` (by default the search score; lower is better) of the finished trials
@@ -45,6 +47,8 @@ from fione.engine.prep import Prep, Task
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 Folds = list[tuple[np.ndarray, np.ndarray]]
+# A capped trial's folds get this much more than the UNIT_SAFETY units they need.
+CAP_MARGIN = 1.25
 
 
 @dataclass
@@ -130,7 +134,10 @@ def _run_trial(
     """Fit all folds; None when cancelled or, unless ``keep_late``, cut off by ``deadline``.
 
     ``cap()`` is the trial's time limit, re-read before each fold because the unit time it is
-    raised to is only measured by the first fit on small data.
+    raised to is only measured by the first fit on small data. A capped trial truncates its
+    folds and never refuses one for the cap alone: every fold gets at least its quota of the
+    smallest cap (``CAP_MARGIN x UNIT_SAFETY x`` the unit), even when earlier folds overran their
+    shares by a prediction or an iteration, so only ``deadline`` can still end the trial.
     """
     oof = np.zeros((len(y), spec.n_classes)) if spec.classification else np.zeros(len(y))
     models, losses = [], []
@@ -145,6 +152,10 @@ def _run_trial(
             if split
             else trial_deadline
         )
+        if limit is not None and spec.unit_secs:
+            quota = CAP_MARGIN * UNIT_SAFETY * spec.unit_secs
+            if share.remaining() < quota:
+                share = deadline.child(quota)  # the cap truncates folds, it never discards them
         weight = None if sample_weight is None else sample_weight[train]
         try:
             model = spec.fit(
@@ -197,7 +208,7 @@ def run_family(
         if max_trial_secs is None or not spec.unit_secs:
             return max_trial_secs
         # A quarter more than the minimum, so timing jitter cannot make a fold refuse.
-        return max(max_trial_secs, 1.25 * len(folds) * UNIT_SAFETY * spec.unit_secs)
+        return max(max_trial_secs, CAP_MARGIN * len(folds) * UNIT_SAFETY * spec.unit_secs)
 
     view = None
     study = optuna.create_study(

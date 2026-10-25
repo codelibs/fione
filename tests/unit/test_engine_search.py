@@ -84,6 +84,22 @@ class _SlowFamily(FamilySpec):
         return _ConstantModel()
 
 
+class _BoostingFamily(_SlowFamily):
+    """After its first ``unit``, iterates until its deadline, then spends ``over`` seconds
+    finishing: it overruns its time share a little, as real boosting does."""
+
+    name = "Boosting"
+    unit = 0.05
+    over = 0.03
+
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
+        time.sleep(self.unit)
+        while not deadline.expired():
+            time.sleep(0.005)
+        time.sleep(self.over)
+        return _ConstantModel()
+
+
 @pytest.fixture
 def slow(monkeypatch):
     monkeypatch.setitem(FAMILIES, "Slow", _SlowFamily)
@@ -405,7 +421,34 @@ def test_max_trial_secs_truncates_trials_instead_of_discarding_them():
     )
     trials = [e for e in events if e.type == "trial"]
     assert len(trials) == 2
-    assert all(e.data["elapsed"] < 1.0 for e in trials)
+    # The cap is raised (with a notice) when a fold's measured unit needs more than 0.5 s.
+    limit = max([e.data["max_trial_secs"] for e in events if e.type == "notice"], default=0.5)
+    assert all(e.data["elapsed"] < limit + max(0.5, limit / 2) for e in trials)
+
+
+def test_a_capped_trial_keeps_its_last_fold_when_earlier_folds_overran(monkeypatch):
+    """Each fold runs until its share ends and overruns it by part of a round; under a tight
+    cap the last fold's share fell below the unit it needs and the whole trial was dropped."""
+    monkeypatch.setitem(FAMILIES, "Boosting", _BoostingFamily)
+    X, y = _classification(100, 4)
+    prep, y, folds = _setup(X, y)
+    events = []
+    run_family(
+        "Boosting",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(30),
+        events.append,
+        _until_trials(events, 2),
+        max_trial_secs=0.1,
+    )
+    trials = [e for e in events if e.type == "trial"]
+    assert [e.data["state"] for e in trials] == ["complete", "complete"]
+    limit = max(e.data["max_trial_secs"] for e in events if e.type == "notice")
+    assert all(e.data["elapsed"] < 2 * limit for e in trials)
 
 
 def test_max_trials_stops_the_search():
