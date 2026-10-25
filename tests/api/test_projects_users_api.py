@@ -104,7 +104,24 @@ def test_last_admin_cannot_be_demoted_or_deleted(client, people):
     assert client.delete(f"/api/v1/users/{root_id}", headers=root).status_code == 409
     editor_id = people["editor"][0].id
     client.patch(f"/api/v1/users/{editor_id}", json={"role": "admin"}, headers=root)
-    assert client.delete(f"/api/v1/users/{root_id}", headers=root).status_code == 204
+    r = client.delete(f"/api/v1/users/{root_id}", headers=h(people, "editor"))
+    assert r.status_code == 204
+
+
+def test_an_admin_cannot_demote_or_delete_themselves(client, people):
+    """Even with another admin: the other one has to do it."""
+    root, root_id = h(people, "root"), people["root"][0].id
+    client.patch(f"/api/v1/users/{people['editor'][0].id}", json={"role": "admin"}, headers=root)
+    r = client.patch(f"/api/v1/users/{root_id}", json={"role": "viewer"}, headers=root)
+    assert r.status_code == 409
+    assert r.json() == {"error": "you cannot remove your own admin role", "code": "conflict"}
+    r = client.delete(f"/api/v1/users/{root_id}", headers=root)
+    assert r.status_code == 409
+    assert r.json() == {"error": "you cannot delete your own account", "code": "conflict"}
+    me = client.get("/api/v1/auth/me", headers=root).json()["user"]
+    assert me["role"] == "admin"
+    r = client.patch(f"/api/v1/users/{root_id}", json={"role": "admin"}, headers=root)
+    assert r.status_code == 200  # keeping one's role is no change
 
 
 def test_deleting_an_owner_of_projects_or_jobs_is_409(client, people):

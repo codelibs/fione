@@ -16,12 +16,25 @@ class UserNotFound(KeyError):
 
 
 class UserConflict(Exception):
-    """The change would break an invariant (the last admin, owned data); the message is for
-    the user."""
+    """The change would break an invariant (the last admin, one's own account, owned data);
+    the message is for the user, ``code`` (and ``count``) name it for a translated one."""
+
+    def __init__(self, message: str, code: str = "conflict", count: int | None = None):
+        super().__init__(message)
+        self.code = code
+        self.count = count
 
 
 class AlreadySetUp(UserConflict):
     pass
+
+
+class UsernameError(ValueError):
+    """A username that cannot be used: ``code`` is ``invalid`` or ``taken``."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -68,7 +81,7 @@ def create_first_admin(conn: sqlite3.Connection, username: str, password: str) -
 
 def _check_username(username: str) -> None:
     if not _USERNAME_RE.fullmatch(username):
-        raise ValueError("username must match [A-Za-z0-9._-]{1,64}")
+        raise UsernameError("username must match [A-Za-z0-9._-]{1,64}", "invalid")
 
 
 def _insert_user(conn: sqlite3.Connection, username: str, password_hash: str, role: Role) -> User:
@@ -79,7 +92,7 @@ def _insert_user(conn: sqlite3.Connection, username: str, password_hash: str, ro
         )
     except sqlite3.IntegrityError as e:
         if "UNIQUE" in str(e):
-            raise ValueError("username already exists") from e
+            raise UsernameError("username already exists", "taken") from e
         raise
     assert cur.lastrowid is not None
     return User(id=cur.lastrowid, username=username, role=role)
@@ -112,6 +125,19 @@ def list_users(conn: sqlite3.Connection) -> list[User]:
     return [_user(r) for r in conn.execute("SELECT id, username, role FROM users ORDER BY id")]
 
 
+def page_users(conn: sqlite3.Connection, *, limit: int, offset: int = 0) -> list[tuple[User, str]]:
+    """One page of the users by id, each with its creation time (UTC)."""
+    rows = conn.execute(
+        "SELECT id, username, role, created_at FROM users ORDER BY id LIMIT ? OFFSET ?",
+        (limit, offset),
+    )
+    return [(_user(r), r["created_at"]) for r in rows]
+
+
+def count_users(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+
 def user_for_session(conn: sqlite3.Connection, user_id: int) -> tuple[User, str] | None:
     """The user and their current password hash, which sessions are bound to: a new password
     or a new user that reuses a deleted user's id must not inherit old sessions."""
@@ -136,7 +162,7 @@ def _check_not_last_admin(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
         "SELECT COUNT(*) FROM users WHERE role = ?", (Role.ADMIN.value,)
     ).fetchone()[0]
     if admins <= 1:
-        raise UserConflict("the last admin cannot be removed or demoted")
+        raise UserConflict("the last admin cannot be removed or demoted", "last_admin")
 
 
 def _locked_user(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row:
@@ -146,32 +172,43 @@ def _locked_user(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row:
     return row
 
 
-def set_role(conn: sqlite3.Connection, user_id: int, role: Role) -> User:
+def set_role(
+    conn: sqlite3.Connection, user_id: int, role: Role, *, actor_id: int | None = None
+) -> User:
+    """Change the role; refused (``UserConflict``) for the last admin and, when the admin
+    ``actor_id`` is the user, for giving up one's own admin role."""
     role = Role(role)
     with db.immediate(conn):
         row = _locked_user(conn, user_id)
         if role != Role.ADMIN:
             _check_not_last_admin(conn, row)
+            if user_id == actor_id:
+                raise UserConflict("you cannot remove your own admin role", "self_role")
         conn.execute("UPDATE users SET role = ? WHERE id = ?", (role.value, user_id))
     user = get_user(conn, user_id)
     assert user is not None
     return user
 
 
-def delete_user(conn: sqlite3.Connection, user_id: int) -> None:
+def delete_user(conn: sqlite3.Connection, user_id: int, *, actor_id: int | None = None) -> None:
     """Delete a user with their tokens and memberships; refused (``UserConflict``) for the
-    last admin and for owners of projects or jobs, which must be deleted first."""
+    last admin, for oneself (the admin ``actor_id``) and for owners of projects or jobs,
+    which must be deleted first."""
     with db.immediate(conn):
         row = _locked_user(conn, user_id)
         _check_not_last_admin(conn, row)
+        if user_id == actor_id:
+            raise UserConflict("you cannot delete your own account", "self_delete")
         projects = conn.execute(
             "SELECT COUNT(*) FROM projects WHERE owner_id = ?", (user_id,)
         ).fetchone()[0]
         if projects:
-            raise UserConflict(f"the user owns {projects} project(s); delete them first")
+            message = f"the user owns {projects} project(s); delete them first"
+            raise UserConflict(message, "owns_projects", projects)
         jobs = conn.execute("SELECT COUNT(*) FROM jobs WHERE owner_id = ?", (user_id,)).fetchone()
         if jobs[0]:
-            raise UserConflict(f"the user owns {jobs[0]} job(s); delete them first")
+            message = f"the user owns {jobs[0]} job(s); delete them first"
+            raise UserConflict(message, "owns_jobs", jobs[0])
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
@@ -217,6 +254,23 @@ def list_tokens(conn: sqlite3.Connection, user_id: int) -> list[ApiToken]:
         f"SELECT {_TOKEN_COLUMNS} FROM api_tokens WHERE user_id = ? ORDER BY id", (user_id,)
     )
     return [_api_token(r) for r in rows]
+
+
+def page_tokens(
+    conn: sqlite3.Connection, user_id: int, *, limit: int, offset: int = 0
+) -> list[ApiToken]:
+    """One page of the user's tokens, newest first."""
+    rows = conn.execute(
+        f"SELECT {_TOKEN_COLUMNS} FROM api_tokens WHERE user_id = ?"
+        " ORDER BY id DESC LIMIT ? OFFSET ?",
+        (user_id, limit, offset),
+    )
+    return [_api_token(r) for r in rows]
+
+
+def count_tokens(conn: sqlite3.Connection, user_id: int) -> int:
+    row = conn.execute("SELECT COUNT(*) FROM api_tokens WHERE user_id = ?", (user_id,))
+    return row.fetchone()[0]
 
 
 def user_from_token(conn: sqlite3.Connection, token: str) -> User | None:

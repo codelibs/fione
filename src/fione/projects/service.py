@@ -21,6 +21,14 @@ class DatasetNotFound(KeyError):
     pass
 
 
+class ShareError(ValueError):
+    """A share that cannot be made: ``code`` is ``access``, ``unknown_user`` or ``owner``."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+
+
 class DatasetType(StrEnum):
     TRAIN = "train"
     TEST = "test"
@@ -143,12 +151,12 @@ def share_project(
     _require_owner_or_admin(conn, owner, project_id)
     access = ProjectAccess(access)
     if access == ProjectAccess.OWNER:
-        raise ValueError("access must be 'editor' or 'viewer'")
+        raise ShareError("access must be 'editor' or 'viewer'", "access")
     row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
     if row is None:
-        raise ValueError(f"unknown user: {username}")
+        raise ShareError(f"unknown user: {username}", "unknown_user")
     if row["id"] == require_project(conn, project_id).owner_id:
-        raise ValueError("the owner already has full access")
+        raise ShareError("the owner already has full access", "owner")
     conn.execute(
         "INSERT INTO project_members (project_id, user_id, access) VALUES (?, ?, ?)"
         " ON CONFLICT (project_id, user_id) DO UPDATE SET access = excluded.access",

@@ -7,6 +7,7 @@ path pattern to ``UPLOAD_PATHS`` (other requests are limited to ``MAX_BODY_BYTES
 
 import logging
 import re
+import time
 from contextlib import asynccontextmanager, closing
 
 from fastapi import FastAPI, Request
@@ -166,6 +167,7 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.storage = open_storage(settings)
     app.state.secret = secret
     app.state.runner = None
+    app.state.started_at = time.monotonic()  # the system page's uptime
     app.state.signer = SessionSigner(secret, settings.session_max_age_secs)
     # Login and password change share one throttle; first-admin token guesses have their own.
     app.state.throttle = _throttle(settings)

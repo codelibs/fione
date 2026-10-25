@@ -122,10 +122,14 @@ def test_share_requires_owner_or_admin(conn, owner, other, admin):
 
 def test_share_rejects_unknown_user_and_owner_access(conn, owner, other):
     p = service.create_project(conn, owner, "shared")
-    with pytest.raises(ValueError):
-        service.share_project(conn, owner, p.id, "ghost", ProjectAccess.VIEWER)
-    with pytest.raises(ValueError):
-        service.share_project(conn, owner, p.id, other.username, ProjectAccess.OWNER)
+    for username, access, code in (
+        ("ghost", ProjectAccess.VIEWER, "unknown_user"),
+        (other.username, ProjectAccess.OWNER, "access"),
+        (owner.username, ProjectAccess.EDITOR, "owner"),
+    ):
+        with pytest.raises(service.ShareError) as caught:
+            service.share_project(conn, owner, p.id, username, access)
+        assert isinstance(caught.value, ValueError) and caught.value.code == code
 
 
 def test_missing_project_raises(conn, storage, owner, admin):

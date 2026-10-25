@@ -386,6 +386,58 @@ def test_set_role_protects_last_admin(conn):
         service.set_role(conn, alice.id, "owner")
 
 
+def test_admins_cannot_demote_or_delete_themselves(conn):
+    root = service.create_user(conn, "root", PW, Role.ADMIN)
+    other = service.create_user(conn, "other", PW, Role.ADMIN)
+    for call in (
+        lambda: service.set_role(conn, root.id, Role.EDITOR, actor_id=root.id),
+        lambda: service.delete_user(conn, root.id, actor_id=root.id),
+    ):
+        with pytest.raises(service.UserConflict) as caught:
+            call()
+        assert caught.value.code in ("self_role", "self_delete")
+        assert not conn.in_transaction
+    assert service.get_user(conn, root.id) == root
+    assert service.set_role(conn, root.id, Role.ADMIN, actor_id=root.id) == root
+    assert service.set_role(conn, other.id, Role.EDITOR, actor_id=root.id).role == Role.EDITOR
+    with pytest.raises(service.UserConflict) as caught:  # now the last admin: that comes first
+        service.set_role(conn, root.id, Role.EDITOR, actor_id=root.id)
+    assert caught.value.code == "last_admin"
+    service.delete_user(conn, other.id, actor_id=root.id)
+
+
+def test_refusals_carry_codes(conn):
+    root = service.create_user(conn, "root", PW, Role.ADMIN)
+    alice = service.create_user(conn, "alice", PW, Role.EDITOR)
+    add_project(conn, "p1", alice.id)
+    add_project(conn, "p2", alice.id)
+    with pytest.raises(service.UserConflict) as caught:
+        service.delete_user(conn, alice.id, actor_id=root.id)
+    assert (caught.value.code, caught.value.count) == ("owns_projects", 2)
+    with pytest.raises(service.UsernameError) as caught:
+        service.create_user(conn, "alice", PW, Role.EDITOR)
+    assert caught.value.code == "taken"
+    with pytest.raises(service.UsernameError) as caught:
+        service.create_user(conn, "a b", PW, Role.EDITOR)
+    assert caught.value.code == "invalid"
+
+
+def test_paged_users_and_tokens(conn):
+    for name in ("a", "b", "c"):
+        service.create_user(conn, name, PW, Role.EDITOR)
+    page = service.page_users(conn, limit=2, offset=1)
+    assert [u.username for u, _ in page] == ["b", "c"]
+    assert all(len(created) == 19 for _, created in page)  # YYYY-MM-DD HH:MM:SS
+    assert service.count_users(conn) == 3
+    user_id = page[0][0].id
+    for name in ("t1", "t2", "t3"):
+        service.create_token(conn, user_id, name)
+    assert [t.name for t in service.page_tokens(conn, user_id, limit=2)] == ["t3", "t2"]
+    assert [t.name for t in service.page_tokens(conn, user_id, limit=2, offset=2)] == ["t1"]
+    assert service.count_tokens(conn, user_id) == 3
+    assert service.count_tokens(conn, user_id + 1) == 0
+
+
 def test_delete_user_protects_last_admin_and_owned_data(conn):
     root = service.create_user(conn, "root", PW, Role.ADMIN)
     alice = service.create_user(conn, "alice", PW, Role.EDITOR)

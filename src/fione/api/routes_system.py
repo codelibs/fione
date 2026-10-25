@@ -21,6 +21,15 @@ def health() -> dict:
 def status(user: CurrentUser, conn: Conn, request: Request) -> dict:
     """Version, storage kind, job runner and queue, for anyone signed in. No secrets, paths,
     URLs or credentials: the storage is named by its kind only."""
+    return {
+        **system_status(request, conn),
+        "user": user_out(user),
+        "is_admin": user.role == Role.ADMIN,
+    }
+
+
+def system_status(request: Request, conn) -> dict:
+    """The status every signed-in user may see (also the web UI's system page)."""
     settings = request.app.state.settings
     counts = dict(conn.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall())
     scheme = urlparse(settings.storage_url).scheme
@@ -31,6 +40,4 @@ def status(user: CurrentUser, conn: Conn, request: Request) -> dict:
         "runner": "running" if request.app.state.runner is not None else "stopped",
         "jobs": {s.value: counts.get(s.value, 0) for s in (JobStatus.QUEUED, JobStatus.RUNNING)},
         "ollama": {"configured": False},  # Phase 1 has no LLM connection
-        "user": user_out(user),
-        "is_admin": user.role == Role.ADMIN,
     }

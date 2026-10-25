@@ -38,7 +38,7 @@ def _attempt(throttle: LoginThrottle, key: tuple[str, str]) -> None:
         raise ApiError(429, "throttled", message, {"Retry-After": str(retry)})
 
 
-def _start_session(request: Request, response: Response, conn, user: User) -> dict:
+def start_session(request: Request, response: Response, conn, user: User) -> dict:
     found = auth_service.user_for_session(conn, user.id)
     if found is None:
         raise ApiError(401, "unauthorized", "the user no longer exists")
@@ -66,7 +66,7 @@ def login(body: LoginIn, request: Request, response: Response, conn: Conn) -> di
     if user is None:
         raise ApiError(401, "invalid_credentials", "invalid username or password")
     throttle.success(key)
-    return _start_session(request, response, conn, user)
+    return start_session(request, response, conn, user)
 
 
 @router.post("/logout", status_code=204)
@@ -110,7 +110,22 @@ def first_admin(body: FirstAdminIn, request: Request, response: Response, conn: 
         raise already from None
     discard_setup_token(settings)
     setup_log.warning("The first administrator %r was created.", user.username)
-    return _start_session(request, response, conn, user)
+    return start_session(request, response, conn, user)
+
+
+def change_own_password(request: Request, conn, user: User, current: str, new: str) -> None:
+    """Check ``current``, then set ``new``, under the login throttle: ``ApiError`` 429
+    (throttled), 403 (wrong password) or 422 (the new one is refused). The web UI's
+    account page uses this too, so both paths share one throttle."""
+    key = _throttle_key(request, user.username)
+    throttle = request.app.state.throttle
+    _attempt(throttle, key)
+    with password_work():
+        if auth_service.authenticate(conn, user.username, current) is None:
+            raise ApiError(403, "invalid_credentials", "the current password is wrong")
+        with service_errors():
+            auth_service.set_password(conn, user.id, new)
+    throttle.success(key)
 
 
 @router.post("/password")
@@ -119,15 +134,7 @@ def change_password(
 ) -> dict:
     """Change one's own password. Every existing session of the user ends; a cookie session
     gets a new cookie (and CSRF token) in the response."""
-    key = _throttle_key(request, auth.user.username)
-    throttle = request.app.state.throttle
-    _attempt(throttle, key)
-    with password_work():
-        if auth_service.authenticate(conn, auth.user.username, body.current_password) is None:
-            raise ApiError(403, "invalid_credentials", "the current password is wrong")
-        with service_errors():
-            auth_service.set_password(conn, auth.user.id, body.new_password)
-    throttle.success(key)
+    change_own_password(request, conn, auth.user, body.current_password, body.new_password)
     if auth.via == "cookie":
-        return _start_session(request, response, conn, auth.user)
+        return start_session(request, response, conn, auth.user)
     return {"user": user_out(auth.user), "csrf_token": None}

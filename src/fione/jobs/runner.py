@@ -134,6 +134,11 @@ class JobRunner:
         with self._connect() as conn:
             self._reap(conn)
 
+    def worker_count(self) -> int:
+        """How many worker processes this runner is tracking now."""
+        with self._lock:
+            return len(self._procs)
+
     def recover_orphans(self) -> None:
         """Fail every job left running by a previous server; call once before ``start``.
 
