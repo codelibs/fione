@@ -1,6 +1,6 @@
 # Fione v2 Phase 2a (Explainability) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Work through the plan task by task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Explain Fione's models: per-row contributions, global importance from contributions, partial dependence / ICE, and training-time diagnostics (confusion matrix, per-class metrics, ROC/PR, calibration, residuals). Contributions are available through the API, batch prediction, Fione Serving and the UI. A cheap out-of-fold leak score warns about columns that predict the target suspiciously well.
 
@@ -85,7 +85,7 @@ Each decision below gives its reason after the dash.
   - every new `FIONE_*` name goes in `docs/configuration.md` (`tests/unit/test_docs.py`).
 - **Version and licences.** The version stays `20.0.0`. Licences: Apache-2.0, MIT, BSD, ISC, PSF and 0BSD only. `scipy` (BSD-3) is already installed through scikit-learn. Task 1 imports `scipy.sparse` directly, so it adds `scipy>=1.18.1` to `pyproject.toml` dependencies. `uv lock` must change no installed version, and `uv run python scripts/check_licenses.py` must still exit 0.
 - **DB migrations** are appended to `db.MIGRATIONS`, never edited (Tasks 3 and 7).
-- **Commits.** Messages are public-safe implementation summaries with no attribution lines, written to a file and committed with `git commit -F <file>`. Work on branch `v2-phase2`. Tracked files hold no local paths or user names.
+- **Commits.** Messages are public-safe implementation summaries with no attribution lines, written to a file and committed with `git commit -F <file>`. Work on branch `v2-phase2a`. Tracked files hold no local paths or user names.
 - **Machine load:**
   - Run the tests you change, plus `uv run pytest -q -x`, once per task.
   - Run `-m timing` and `-m acceptance` only where a task says so, on an idle machine (1-minute load average below 4).
@@ -113,7 +113,7 @@ Each decision below gives its reason after the dash.
 
    Tests: Tasks 8, 10, 12.
 
-**Careful (advisor-style) review required:**
+**Careful review required:**
 - Task 1: contribution maths.
 - Task 5: the leak flag rule.
 - Task 10: the serving contract.

@@ -53,6 +53,7 @@ English: [Moving from Fione v1 to v2](migrating-from-v1.md)
 | AutoML の実行とパラメータ（fold 数、クラスの均等化、シード、最大モデル数・最大実行時間、モデルごとの時間、停止条件、ソート指標、CV 予測・モデル・fold 割当の保持、除外列） | あり |
 | ジョブ一覧・削除・全削除・キャンセル | あり |
 | リーダーボード、モデル詳細（重要度、スコア履歴、CV 指標） | あり |
+| モデルの説明 | 新規：診断（混同行列、ROC 曲線と適合率-再現率曲線、キャリブレーション、残差）、予測に対する各列の寄与度、寄与度による重要度、部分依存の曲線。寄与度は各ライブラリ自身の木の説明から求め、アンサンブルでは近似です（[既知の制限](known-limitations.md#explanations-and-leak-warnings)、英語） |
 | モデルのエクスポート・インポート・全モデルのエクスポート | あり（インポートは管理者のみ） |
 | バッチ予測（予測結果をデータセットとして保存） | あり |
 | 予測結果サマリー（最良モデル、星評価、Fione 君） | あり |
@@ -69,7 +70,7 @@ English: [Moving from Fione v1 to v2](migrating-from-v1.md)
 | 3 つのロール、ユーザー別のセッション | 作り直し: admin / editor / viewer とプロジェクトの共有 |
 | 日本語と英語 | あり |
 
-**この版には含まれず、予定しているもの**：Notebook 連携（JupyterLab と Python SDK）、SHAP と部分依存、LLM アシスタント（Ollama。Mac では既定で `gemma4:12b-mlx`）、MCP サーバー、ONNX 出力。
+**この版には含まれず、予定しているもの**：Notebook 連携（JupyterLab と Python SDK）、LLM アシスタント（Ollama。Mac では既定で `gemma4:12b-mlx`）、MCP サーバー、ONNX 出力。
 
 ## Python モジュール
 
