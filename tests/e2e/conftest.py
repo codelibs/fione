@@ -29,6 +29,7 @@ from e2e_helpers import sign_in, upload
 ROOT = Path(__file__).resolve().parents[2]
 ENV_FILE = ROOT / "docker" / "e2e.env"
 ADMIN, PASSWORD = "e2e-admin", "e2e-admin-password-1"  # test-only, inside a throwaway stack
+HEALTH_PATH = "/api/v1/health"  # in the command line of the image's HEALTHCHECK
 UP_TIMEOUT_SECS = 600  # building both images from scratch included
 # The browser's console line for a load that answered 4xx/5xx. It fails a test unless the
 # test opened that URL expecting the error (``console.expect_error``): a 403 or 404 page.
@@ -97,9 +98,11 @@ class Stack:
         )
 
     def processes(self) -> list[str]:
-        """The command lines running in the fione container, but ``ps`` itself."""
+        """The command lines running in the fione container, but ``ps`` itself and the
+        image's health check (Docker runs it every few seconds; a probe may meet it)."""
         out = self.compose("exec", "-T", "fione", "ps", "-eo", "args", "--no-headers").stdout
-        return [line.strip() for line in out.splitlines() if line.strip() and "ps -eo" not in line]
+        lines = [line.strip() for line in out.splitlines() if line.strip()]
+        return [line for line in lines if "ps -eo" not in line and HEALTH_PATH not in line]
 
     def wait_healthy(self, seconds: float = 120) -> None:
         deadline = time.monotonic() + seconds
