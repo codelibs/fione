@@ -57,6 +57,8 @@ What this release does not do, or does with a catch. Japanese summary at the end
   back from training gives the honest number.
 - **The engine uses about two thirds of the maximum run time** in practice (search and final
   refit leave budget unused); a more adaptive search is planned.
+- **On a heavily loaded machine the time budget buys fewer boosting rounds**; CatBoost is
+  affected most.
 - **Training and engine messages are in English** in the Japanese UI.
 
 ## Deployment
@@ -103,6 +105,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 実行中のジョブのキャンセルには最大 10 秒かかります。プロジェクトに属さないジョブは `GET /api/v1/jobs` に出ません。削除中にストレージが失敗すると、ファイルが残ることがあります。
 - 全モデルのエクスポートは、プロジェクトごとに最新の 1 つだけ残ります。
 - エンジンは実際には最大実行時間の約 3 分の 2 を使います。学習やエンジンのメッセージは日本語画面でも英語です。
+- 負荷の高いマシンでは、同じ時間予算で学習できるブースティングの回数が減ります。いちばん影響を受けるのは CatBoost です。
 - API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。
 - Fione Serving には認証も、リクエスト数・同時実行数の制限もありません。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
 - 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5〜1.7 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。
