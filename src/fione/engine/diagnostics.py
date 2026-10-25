@@ -47,6 +47,28 @@ CALIBRATION_BINS = 10
 RESIDUAL_BINS = 30
 DECILES = 10
 MAX_POINTS = 2_000
+# Every top-level key a result can have (version 1), and how deeply its containers nest
+# (the result itself, confusion, matrix, a matrix row): imports refuse anything else.
+KEYS = frozenset(
+    {
+        "version",
+        "task",
+        "n_rows",
+        "sampled",
+        "labels",
+        "confusion",
+        "per_class",
+        "per_class_truncated",
+        "auc",
+        "roc",
+        "pr",
+        "calibration",
+        "residuals",
+        "by_decile",
+        "points",
+    }
+)
+DEPTH = 4
 
 
 def _num(value) -> float | None:

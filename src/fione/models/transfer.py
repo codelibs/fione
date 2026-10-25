@@ -19,8 +19,9 @@ the signature check ANDed, so an export of an unverified model never comes back 
 and a record cannot vouch for a file whose signature fails. The record's key set is exact, so
 exports made before ``trusted`` was added are refused (v2 was unreleased), except for the
 optional ``diagnostics``: written only when the model has them, required to be a version-1
-object of the manifest's task when present. They travel in ``record.json`` and not in the
-pickle, which the ``automl`` job saves without them.
+object of the manifest's task when present, holding only the engine's fields nested no deeper
+than it writes them. They travel in ``record.json`` and not in the pickle, which the
+``automl`` job saves without them. Every number in the record must be finite and fit a float.
 
 Everything written for a failed import (objects and row) is deleted again.
 """
@@ -28,6 +29,7 @@ Everything written for a failed import (objects and row) is deleted again.
 import io
 import json
 import logging
+import math
 import os
 import shutil
 import sqlite3
@@ -41,6 +43,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from fione.auth.roles import User, can_access_project, require_admin
+from fione.engine import diagnostics
 from fione.engine.artifact import (
     MANIFEST_FILE,
     MODEL_FILE,
@@ -251,7 +254,42 @@ def _reject_constant(name: str):
 
 
 def _is_number(value) -> bool:
-    return value is None or (isinstance(value, int | float) and not isinstance(value, bool))
+    """None, or a finite number that fits a float (an integer such as 10**400 does not, and
+    would break every page that formats it)."""
+    if value is None:
+        return True
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int beyond the float range
+        return False
+
+
+def _numbers_fit(value) -> bool:
+    """Every number anywhere in the JSON ``value`` passes ``_is_number``."""
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+        elif isinstance(item, int | float) and not isinstance(item, bool) and not _is_number(item):
+            return False
+    return True
+
+
+def _depth(value) -> int:
+    """How deeply the containers of the JSON ``value`` nest (a scalar: 0)."""
+    deepest, stack = 0, [(value, 1)]
+    while stack:
+        item, level = stack.pop()
+        if isinstance(item, dict | list):
+            deepest = max(deepest, level)
+            children = item.values() if isinstance(item, dict) else item
+            stack.extend((child, level + 1) for child in children)
+    return deepest
 
 
 def _parse_record(raw: bytes, manifest: Manifest) -> dict:
@@ -260,6 +298,8 @@ def _parse_record(raw: bytes, manifest: Manifest) -> dict:
         record = json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
     except (ValueError, RecursionError) as e:
         raise _bad_record("it is not strict JSON") from e
+    if not _numbers_fit(record):
+        raise _bad_record("a number is too large")
     if not isinstance(record, dict) or not (
         set(RECORD_FIELDS) <= set(record) <= {*RECORD_FIELDS, *OPTIONAL_RECORD_FIELDS}
     ):
@@ -310,6 +350,10 @@ def _check_diagnostics(value, manifest: Manifest) -> None:
         raise _bad_record("diagnostics must be of version 1")
     if value.get("task") != manifest.task:
         raise _bad_record("diagnostics do not match the manifest")
+    if not set(value) <= diagnostics.KEYS:
+        raise _bad_record("diagnostics have unknown fields")
+    if _depth(value) > diagnostics.DEPTH:
+        raise _bad_record("diagnostics are nested too deeply")
     try:
         size = len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8"))
     except (ValueError, RecursionError) as e:

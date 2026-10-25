@@ -11,6 +11,7 @@ import zipfile
 from types import SimpleNamespace
 
 import joblib
+import numpy as np
 import pandas as pd
 import pytest
 from predict_models import classifier, features, regressor
@@ -19,6 +20,7 @@ from fione import db
 from fione.auth import service as auth
 from fione.auth.roles import Role
 from fione.config import Settings, load_secret
+from fione.engine import diagnostics as engine_diagnostics
 from fione.engine.artifact import (
     MODEL_FILE,
     UntrustedArtifactError,
@@ -27,6 +29,7 @@ from fione.engine.artifact import (
     save_model,
     verify_artifact,
 )
+from fione.engine.diagnostics import diagnostics
 from fione.models import service as models
 from fione.models import transfer
 from fione.models.transfer import ModelImportError, export_model, import_model
@@ -484,6 +487,11 @@ def test_model_import_error_is_a_value_error():
 # --- hostile record.json ----------------------------------------------------------------------
 
 
+NESTED: list = []
+for _ in range(500):
+    NESTED = [NESTED]
+
+
 def record_with(source, **changes):
     record = json.loads(source.parts["record.json"])
     record.update(changes)
@@ -570,7 +578,10 @@ def test_a_non_finite_number_in_the_record_is_refused(dest, source):
         {"version": 1, "task": "regression"},
         {"version": 1},
         {"version": 1, "task": "classification", "labels": ["\ud800"]},
-        {"version": 1, "task": "classification", "pad": "a" * models.MAX_DIAGNOSTICS_BYTES},
+        {"version": 1, "task": "classification", "labels": ["a" * models.MAX_DIAGNOSTICS_BYTES]},
+        {"version": 1, "task": "classification", "pad": 1},
+        {"version": 1, "task": "classification", "labels": NESTED},
+        {"version": 1, "task": "classification", "confusion": {"matrix": [[[0]]]}},
     ],
     ids=[
         "list",
@@ -584,11 +595,59 @@ def test_a_non_finite_number_in_the_record_is_refused(dest, source):
         "no-task",
         "surrogate",
         "too-large",
+        "unknown-key",
+        "nested-500",
+        "deeper-than-the-schema",
     ],
 )
 def test_import_rejects_bad_diagnostics(dest, source, diagnostics):
     with pytest.raises(ModelImportError, match="diagnostics"):
         do_import(dest, rebuilt(source.parts, record=record_with(source, diagnostics=diagnostics)))
+    assert_nothing_left(dest)
+
+
+def test_every_diagnostics_layout_imports(dest, source):
+    """Binary, multiclass and regression diagnostics as the engine writes them pass the
+    import's key and depth checks."""
+    rng = np.random.default_rng(0)
+    y2, y3, yr = rng.integers(0, 2, 300), rng.integers(0, 3, 300), rng.normal(0, 1, 300)
+    binary = diagnostics("classification", y2, rng.dirichlet([1, 1], 300), ["no", "yes"])
+    for found in (
+        binary,
+        diagnostics("classification", y3, rng.dirichlet([1, 1, 1], 300), ["a", "b", "c"]),
+        diagnostics("regression", yr, yr * 0.5, None),
+    ):
+        assert set(found) <= engine_diagnostics.KEYS
+        transfer._check_diagnostics(found, SimpleNamespace(task=found["task"]))
+    rec = do_import(dest, rebuilt(source.parts, record=record_with(source, diagnostics=binary)))
+    assert rec.diagnostics == binary
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"metrics": {"accuracy": 10**400}},
+        {"importance": {"x": -(10**400)}},
+        {"leaderboard": [{"model": "x", "cv_score": 10**400}]},
+        {"trials": [{"family": "x", "score": 10**400}]},
+        {"diagnostics": {"version": 1, "task": "classification", "auc": 10**400}},
+        {"diagnostics": {"version": 1, "task": "classification", "roc": {"fpr": [10**400]}}},
+    ],
+    ids=["metrics", "importance", "leaderboard", "trials", "auc", "roc"],
+)
+def test_numbers_that_do_not_fit_a_float_are_refused(dest, source, changes):
+    """An integer beyond the float range would break every page that formats it."""
+    with pytest.raises(ModelImportError, match="number"):
+        do_import(dest, rebuilt(source.parts, record=record_with(source, **changes)))
+    assert_nothing_left(dest)
+
+
+def test_an_overflowing_float_literal_is_refused(dest, source):
+    text = (
+        source.parts["record.json"].decode().replace('"metrics": {', '"metrics": {"x": 1e400, ', 1)
+    )
+    with pytest.raises(ModelImportError):
+        do_import(dest, rebuilt(source.parts, record=text.encode()))
     assert_nothing_left(dest)
 
 
