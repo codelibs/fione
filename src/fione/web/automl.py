@@ -24,6 +24,7 @@ from fione.api.deps import Conn
 from fione.api.routes_datasets import cell
 from fione.api.routes_jobs import delete_finished_job, delete_finished_jobs_of
 from fione.api.schemas import job_out
+from fione.data.profile import SCORE_REASONS
 from fione.engine import metrics
 from fione.engine.config import ConfigError, TargetError, TrainConfig
 from fione.jobs import store
@@ -131,11 +132,19 @@ def _size(request: Request, dataset: Dataset) -> int | None:
 
 
 def _leaks(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str) -> dict:
-    """Column name -> leak reason key for ``target`` (cached per dataset and target)."""
+    """Column name -> ``{"key", "score", "exact"}`` of its leak reason for ``target`` (cached
+    per dataset and target). Only exact reasons are certain; the others only warn."""
 
     def compute():
         found, _, _ = _analysis(request, conn, ctx, dataset, target)
-        return {s.column: LEAK_REASONS.get(s.reason, "other") for s in found.profile.leak_suspects}
+        return {
+            s.column: {
+                "key": LEAK_REASONS.get(s.reason, "other"),
+                "score": s.score,
+                "exact": s.reason not in SCORE_REASONS,
+            }
+            for s in found.profile.leak_suspects
+        }
 
     return request.app.state.ui_leaks.get((dataset.id, target), compute)
 

@@ -80,7 +80,9 @@
               <td class="cell-value">{% if c.top_values %}{{ c.top_values[0][0] }} <span class="text-muted">({{ "{:,}".format(c.top_values[0][1]) }})</span>{% else %}—{% endif %}</td>
               <td>
                 {% if c.name == target %}<span class="badge badge-info">{{ t('analysis.is_target') }}</span>{% endif %}
-                {% if c.name in leaks %}<span class="badge badge-warning">{{ t('dataset.badge.leak') }}</span>{% endif %}
+                {% set leak = leaks.get(c.name) %}
+                {% if leak and leak.exact %}<span class="badge badge-warning">{{ t('dataset.badge.leak') }}</span>
+                {% elif leak %}<span class="badge badge-warning">{{ t('dataset.badge.leak_score', score="%.2f"|format(leak.score)) }}</span>{% endif %}
               </td>
             </tr>
             {% endfor %}

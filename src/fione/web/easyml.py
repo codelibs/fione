@@ -27,6 +27,15 @@ from fione.api.routes_jobs import cancel
 from fione.api.routes_models import serving_bundle_of
 from fione.api.schemas import event_out, job_out
 from fione.auth.roles import ProjectAccess, Role
+from fione.data.profile import (
+    CORRELATED,
+    DETERMINES,
+    IDENTICAL,
+    LEAK_STRONG,
+    ORDERED_BY_TARGET,
+    PREDICTS_ALONE,
+    SCORE_REASONS,
+)
 from fione.engine.artifact import UntrustedArtifactError, read_manifest
 from fione.engine.config import TargetError, TrainConfig
 from fione.engine.prep import validate_target
@@ -77,11 +86,14 @@ PROFILE_MIN_ROWS = 500
 # stays under the 1 MiB limit of non-upload requests.
 MAX_FORM_FIELDS = 20_000
 STOP_POLLING = 286  # the HTMX status that ends hx-trigger polling
-# A leak suspect's reason (data.profile) -> the key of its explanation.
+# A leak suspect's reason (data.profile) -> the key of its explanation. Reasons in
+# SCORE_REASONS only warn: a legitimate strong column can score as high as a leak.
 LEAK_REASONS = {
-    "identical to target": "identical",
-    "near-perfect correlation with target": "correlated",
-    "value determines target": "determines",
+    IDENTICAL: "identical",
+    CORRELATED: "correlated",
+    DETERMINES: "determines",
+    PREDICTS_ALONE: "predicts_alone",
+    ORDERED_BY_TARGET: "ordered",
 }
 
 
@@ -228,13 +240,27 @@ def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | 
     found = propose(
         _storage(request), dataset, chosen, names, _profile_rows(dataset), profile=profile
     )
-    reasons = {col.name: col.kind for col in found.ignore}  # id, constant
+    reasons = {col.name: col.kind for col in found.ignore}  # id, constant: unchecked
+    warnings = {}  # score-based leak suspects: they stay checked
     for suspect in found.profile.leak_suspects:
-        reasons.setdefault(suspect.column, "leak_" + LEAK_REASONS.get(suspect.reason, "other"))
-    columns = [
-        {"index": i, "profile": col, "reason": reasons.get(col.name), "target": col.name == chosen}
-        for i, col in enumerate(found.profile.columns, start=1)
-    ]
+        key = "leak_" + LEAK_REASONS.get(suspect.reason, "other")
+        if suspect.reason in SCORE_REASONS:
+            warnings[suspect.column] = (key, suspect.score)
+        else:
+            reasons.setdefault(suspect.column, key)
+    columns = []
+    for i, col in enumerate(found.profile.columns, start=1):
+        warning, score = warnings.get(col.name, (None, None))
+        columns.append(
+            {
+                "index": i,
+                "profile": col,
+                "reason": reasons.get(col.name),
+                "warning": warning,
+                "score": score,
+                "target": col.name == chosen,
+            }
+        )
     defaults = RunForm(
         target=chosen,
         inputs={n for n in names if n != chosen and n not in reasons},
@@ -258,8 +284,17 @@ def _warnings(dataset: Dataset, found, task: str) -> list[tuple[str, str, dict]]
         out.append(("danger", f"analysis.target_error.{e.code}", e.details))
     if found.target.kind == "id":
         out.append(("warning", "analysis.warn.target_id", {}))
-    if found.profile.leak_suspects:
-        out.append(("info", "analysis.warn.leaks", {"n": len(found.profile.leak_suspects)}))
+    suspects = found.profile.leak_suspects
+    exact = [s for s in suspects if s.reason not in SCORE_REASONS]
+    if exact:
+        out.append(("info", "analysis.warn.leaks", {"n": len(exact)}))
+    unchecked = {col.name for col in found.ignore}  # an id stays unchecked as an id
+    scored = [s for s in suspects if s.reason in SCORE_REASONS and s.column not in unchecked]
+    if scored:
+        level = "warning" if max(s.score for s in scored) >= LEAK_STRONG else "info"
+        out.append((level, "analysis.warn.leak_scores", {"n": len(scored)}))
+    if found.profile.leak_partial:
+        out.append(("info", "analysis.warn.leak_partial", {}))
     return out
 
 

@@ -94,13 +94,16 @@
             <span class="column-list__check" aria-hidden="true">{{ icon("check", "icon icon-sm") }}</span>
             <span class="column-list__name">{{ p.name }} <span class="badge badge-info">{{ t('analysis.is_target') }}</span></span>
             {% else %}
-            <input class="checkbox" type="checkbox" id="col-{{ col.index }}" name="inputs" value="{{ p.name }}"{% if p.name in form.inputs %} checked{% endif %}{% if col.reason %} aria-describedby="col-{{ col.index }}-why"{% endif %}>
+            <input class="checkbox" type="checkbox" id="col-{{ col.index }}" name="inputs" value="{{ p.name }}"{% if p.name in form.inputs %} checked{% endif %}{% if col.reason or col.warning %} aria-describedby="{{ ((('col-%d-why ' % col.index) if col.reason else '') ~ (('col-%d-warn' % col.index) if col.warning else ''))|trim }}"{% endif %}>
             <label class="column-list__name" for="col-{{ col.index }}">{{ p.name }}</label>
             {% endif %}
             <span class="column-list__kind">{{ kind_badge(t, p.kind) }}</span>
             <span class="column-list__missing"><span class="visually-hidden">{{ t('analysis.col.missing') }}: </span>{{ pct(p.missing_rate) }}%</span>
             {% if col.reason %}
             <p class="column-list__why" id="col-{{ col.index }}-why">{{ icon("info", "icon icon-sm") }}{{ t('analysis.reason.' ~ col.reason) }}</p>
+            {% endif %}
+            {% if col.warning %}
+            <p class="column-list__why" id="col-{{ col.index }}-warn">{{ icon("alert", "icon icon-sm") }}{{ t('analysis.reason.' ~ col.warning) }}</p>
             {% endif %}
           </li>
           {% endfor %}
@@ -168,6 +171,8 @@
           <span class="column-list__name">{{ p.name }}</span>
           <span class="column-list__kind">{{ kind_badge(t, p.kind) }}</span>
           <span class="column-list__missing"><span class="visually-hidden">{{ t('analysis.col.missing') }}: </span>{{ pct(p.missing_rate) }}%</span>
+          {% if col.reason %}<p class="column-list__why">{{ icon("info", "icon icon-sm") }}{{ t('analysis.reason.' ~ col.reason) }}</p>{% endif %}
+          {% if col.warning %}<p class="column-list__why">{{ icon("alert", "icon icon-sm") }}{{ t('analysis.reason.' ~ col.warning) }}</p>{% endif %}
         </li>
         {% endfor %}
       </ul>

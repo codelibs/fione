@@ -3,6 +3,7 @@ runner in process, and the refusals (bad files, bad settings, CSRF, other projec
 escaping, polling, cancelling, error pages and upload limits."""
 
 import csv
+import dataclasses
 import io
 import re
 import time
@@ -24,6 +25,7 @@ from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import service as models
 from fione.projects import service as projects
+from fione.tools import builtin
 from fione.web import easyml, uploads
 from fione.web.headers import CONTENT_SECURITY_POLICY
 from web_helpers import FAST, iris_test_csv, make_world
@@ -450,6 +452,98 @@ def test_a_running_job_shows_what_the_engine_does(make_client):
     assert "Trying LightGBM models" in fragment and 'hx-trigger="every 2s"' in fragment
     assert re.search(r"Models tried</dt><dd>2<", fragment) and "0.25" in fragment
     assert re.search(r'<progress class="progress" max="100" value="\d+"', fragment)
+
+
+# --- leak warnings ------------------------------------------------------------------------
+
+
+def leak_frame(noise: float, name: str = "noisy", n: int = 300) -> pd.DataFrame:
+    """``name`` is a noisy copy of the target ``label``, ``copy`` an identical one."""
+    rng = np.random.default_rng(0)
+    label = rng.choice(["no", "yes"], n)
+    return pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "z": rng.normal(size=n),
+            name: (label == "yes") + rng.normal(0, noise, n),
+            "copy": label,
+            "label": label,
+        }
+    )
+
+
+def alerts(page: str) -> dict[str, str]:
+    """The text of each note above the columns -> its level."""
+    found = re.findall(
+        r'<div class="alert alert-(\w+)" role="note">.*?<span>(.*?)</span>', page, re.S
+    )
+    return {text: level for level, text in found}
+
+
+def test_score_suspect_stays_selected(owner):
+    client, pid, csrf = owner
+    content = leak_frame(0.1, XSS[0]).to_csv(index=False).encode()  # scores 0.995
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    assert f'name="inputs" value="{escape(XSS[0])}" checked' in page
+    assert "Predicts the answer suspiciously well on its own" in page
+    assert "check that it is known at prediction time" in page
+    notes = alerts(page)
+    scores = next(text for text in notes if "suspiciously well" in text)
+    assert notes[scores] == "warning" and scores.startswith("1 columns predict")
+    assert "They stay checked" in scores
+    leaks = next(text for text in notes if "might give the answer away" in text)
+    assert notes[leaks] == "info" and leaks.startswith("1 columns")  # only the exact copy
+    assert XSS[0] not in page
+
+
+def test_a_weaker_score_suspect_is_an_info_note(owner):
+    client, pid, csrf = owner
+    content = leak_frame(0.3).to_csv(index=False).encode()  # scores 0.96
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    assert 'name="inputs" value="noisy" checked' in page
+    notes = alerts(page)
+    assert notes[next(text for text in notes if "suspiciously well" in text)] == "info"
+
+
+def test_exact_suspect_is_still_deselected(owner):
+    client, pid, csrf = owner
+    content = leak_frame(0.1).to_csv(index=False).encode()
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    assert 'name="inputs" value="copy"' in page and 'value="copy" checked' not in page
+    assert "Is identical to the column to predict" in page
+
+
+def test_iris_keeps_all_four_inputs_selected(owner):
+    """Twice the rows, so the score runs: both petal columns then score as high as a leak."""
+    client, pid, csrf = owner
+    content = pd.concat([iris_frame()] * 2).to_csv(index=False).encode()
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    for name in INPUTS:
+        assert f'name="inputs" value="{name}" checked' in page
+    assert "Predicts the answer suspiciously well on its own" in page
+
+
+def test_an_id_in_the_order_of_the_target_stays_unchecked_with_both_notes(owner):
+    client, pid, csrf = owner
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"row": range(300), "x": rng.normal(size=300)})
+    frame["label"] = np.where(frame["row"] < 150, "no", "yes")
+    content = frame.to_csv(index=False).encode()
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    assert 'value="row" aria-describedby="col-1-why col-1-warn"' in page
+    assert "Looks like an ID" in page and "Its order follows the answer" in page
+    assert not any("They stay checked" in text for text in alerts(page))  # it is not
+
+
+def test_a_partial_leak_check_is_noted(owner, monkeypatch):
+    client, pid, csrf = owner
+    original = builtin.leak_check
+    monkeypatch.setattr(
+        builtin, "leak_check", lambda *a, **k: dataclasses.replace(original(*a, **k), partial=True)
+    )
+    content = leak_frame(0.1).to_csv(index=False).encode()
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    assert any("some columns were not checked" in text for text in alerts(page))
 
 
 # --- what viewers see ---------------------------------------------------------------------

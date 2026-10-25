@@ -22,7 +22,13 @@ import dataclasses
 import pandas as pd
 
 from fione.auth.roles import Role, can_access_project
-from fione.data.profile import ColumnProfile, DatasetProfile, leak_suspects, profile_dataset
+from fione.data.profile import (
+    SCORE_REASONS,
+    ColumnProfile,
+    DatasetProfile,
+    leak_check,
+    profile_dataset,
+)
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.prep import infer_task
 from fione.jobs import store
@@ -197,9 +203,15 @@ def _describe_dataset(ctx: ToolContext, args: dict) -> dict:
             for a, b, r in profile.correlations[:_TOP_CORRELATIONS]
         ],
         "leak_suspects": [
-            {"column": clean_text(s.column), "reason": clean_text(s.reason), "score": _r(s.score)}
+            {
+                "column": clean_text(s.column),
+                "reason": clean_text(s.reason),
+                "score": _r(s.score),
+                "kind": "score" if s.reason in SCORE_REASONS else "exact",
+            }
             for s in profile.leak_suspects
         ],
+        "leak_check_partial": profile.leak_partial,
     }
     _fit_columns(result, len(names))
     return result
@@ -390,8 +402,10 @@ def propose(
     if profile is None:
         profile = profile_dataset(frame, target, sample_rows=sample_rows)
     else:
-        suspects = leak_suspects(frame, profile.columns, target)
-        profile = dataclasses.replace(profile, leak_suspects=suspects)
+        check = leak_check(frame, profile.columns, target)
+        profile = dataclasses.replace(
+            profile, leak_suspects=check.suspects, leak_partial=check.partial
+        )
     # the whole target column (one column) decides the task, not just the head of the file
     y = ingest.read_dataset(storage, dataset, [target])[target]
     task = infer_task(y)
@@ -445,9 +459,18 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                     f"column '{clean_text(col.name)}' is not plain text; ignore it by hand"
                 )
     for suspect in profile.leak_suspects:
-        reason = f"possible target leak: {clean_text(suspect.reason)}"
-        suggestions.append({"column": clean_text(suspect.column), "reason": reason})
-        warnings.append(f"column '{clean_text(suspect.column)}': {reason}")
+        name, reason = clean_text(suspect.column), clean_text(suspect.reason)
+        if suspect.reason in SCORE_REASONS:  # a strong legitimate column can score as high
+            warnings.append(
+                f"column '{name}': {reason} (score {_r(suspect.score)}); it may be a target "
+                "leak, so check that it is known at prediction time"
+            )
+            continue
+        reason = f"possible target leak: {reason}"
+        suggestions.append({"column": name, "reason": reason})
+        warnings.append(f"column '{name}': {reason}")
+    if profile.leak_partial:
+        warnings.append("the leak check ran out of time; some columns were not scored")
     try:
         config = TrainConfig(
             target=target,
@@ -486,7 +509,10 @@ for _tool in (
     Tool(
         "describe_dataset",
         "Describe a dataset: per-column kind, missing rate, statistics, the strongest "
-        "correlations and, when a target is given, columns that may leak it.",
+        "correlations and, when a target is given, columns that may leak it (exact matches, "
+        "and columns that predict it suspiciously well on their own). A score-based suspect "
+        "may be a legitimate strong column; no score is computed for a target with more than "
+        "100 classes.",
         _schema(
             {"dataset_id": _ID, "target": {**_COLUMN, "description": "optional target column"}},
             ["dataset_id"],

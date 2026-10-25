@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import logging
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ import pytest
 from fione import db
 from fione.auth import service as auth
 from fione.auth.roles import ProjectAccess, Role
+from fione.data import profile
 from fione.data.profile import profile_dataset
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
@@ -390,6 +392,8 @@ def test_describe_dataset_content(env):
     kinds = {c["name"]: c["kind"] for c in result["columns"]}
     assert kinds["ident"] == "id" and kinds["const"] == "constant" and kinds["num"] == "numeric"
     assert [s["column"] for s in result["leak_suspects"]] == ["leak"]
+    assert result["leak_suspects"][0]["kind"] == "exact"
+    assert result["leak_check_partial"] is False
     assert all(set(c) == {"a", "b", "r"} for c in result["correlations"])
     assert len(result["correlations"]) <= 10 and "n_more_columns" not in result
     assert call(env, "describe_dataset", {"dataset_id": env.dataset.id})["leak_suspects"] == []
@@ -509,6 +513,59 @@ def test_propose_training_config(env):
         env, "propose_training_config", {"dataset_id": env.dataset.id, "target": "num"}
     )
     assert regression["config"]["task"] == "regression"
+
+
+NOISY = "noisy\tcopy"  # control characters in a name: tool output shows "noisy copy"
+
+
+@pytest.fixture(scope="module")
+def scored(env):
+    """A dataset with enough rows to be scored: a noisy copy of the target (0.995) and an
+    identical one."""
+    rng = np.random.default_rng(0)
+    n = 300
+    label = rng.choice([SECRET, JA_LABEL], n)
+    frame = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            NOISY: (label == SECRET) + rng.normal(0, 0.1, n),
+            "copy": label,
+            "label": label,
+        }
+    )
+    return ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "scored", DatasetType.TRAIN, [frame]
+    )
+
+
+def test_describe_dataset_marks_score_reasons(env, scored):
+    result = call(env, "describe_dataset", {"dataset_id": scored.id, "target": "label"})
+    kinds = {s["column"]: s["kind"] for s in result["leak_suspects"]}
+    assert kinds == {"copy": "exact", "noisy copy": "score"}
+    reasons = {s["column"]: s["reason"] for s in result["leak_suspects"]}
+    assert reasons["noisy copy"] == "predicts the target on its own"
+    assert result["leak_check_partial"] is False
+    assert SECRET not in dump(result)
+
+
+def test_describe_dataset_reports_a_partial_leak_check(env, scored, monkeypatch):
+    original = profile.leak_check
+    monkeypatch.setattr(
+        profile, "leak_check", lambda *a, **k: dataclasses.replace(original(*a, **k), partial=True)
+    )
+    result = call(env, "describe_dataset", {"dataset_id": scored.id, "target": "label"})
+    assert result["leak_check_partial"] is True
+
+
+def test_proposal_does_not_suggest_ignoring_score_suspects(env, scored):
+    result = call(env, "propose_training_config", {"dataset_id": scored.id, "target": "label"})
+    suggested = {s["column"] for s in result["ignored_suggestions"]}
+    assert suggested == {"copy"}  # the exact copy only
+    assert NOISY not in result["config"]["ignored_columns"]
+    warning = next(w for w in result["warnings"] if "noisy copy" in w)
+    assert "check that it is known at prediction time" in warning
+    assert "may" in warning
+    assert SECRET not in dump(result)
 
 
 def test_propose_rejects_bad_targets_and_creates_nothing(env):

@@ -2015,6 +2015,10 @@ select.input {
   margin-top: 0.15em;
 }
 
+.column-list-readonly .column-list__why {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 35.99rem) {
   .column-list__head {
     display: none;
@@ -2048,6 +2052,10 @@ select.input {
   .column-list__why {
     grid-column: 2 / -1;
     grid-row: 3;
+  }
+
+  .column-list__why + .column-list__why {
+    grid-row: 4;
   }
 
   .column-list-readonly .column-list__item {
