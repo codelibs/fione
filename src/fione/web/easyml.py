@@ -829,7 +829,13 @@ def predict_run(request: Request, conn: Conn, pid: str, mid: str, form: Posted) 
     dataset = _dataset(conn, ctx, _text(form, "dataset_id"))
     try:
         job = models.submit_batch_predict(
-            conn, ctx.auth.user, pid, record.id, dataset.id, include_columns=_texts(form, "include")
+            conn,
+            ctx.auth.user,
+            pid,
+            record.id,
+            dataset.id,
+            include_columns=_texts(form, "include"),
+            include_contributions=_text(form, "contributions") == "true",
         )
     except (ValueError, PermissionError) as e:
         return _predict_view(

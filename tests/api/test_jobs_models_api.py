@@ -23,6 +23,7 @@ from fione.auth.roles import Role
 from fione.engine.events import Event
 from fione.jobs import store
 from fione.jobs.store import JobStatus
+from fione.predict import batch
 
 UNIT_TESTS = Path(__file__).parents[1] / "unit"
 
@@ -323,7 +324,32 @@ def test_batch_predict_checks_the_model_dataset_and_columns(env):
         "dataset_id": env.d,
         "include_columns": None,
         "name": None,
+        "include_contributions": False,
     }
+
+
+def test_batch_predict_takes_include_contributions(env, monkeypatch):
+    model = a_model(env, env.p)
+    url = f"/api/v1/projects/{env.p}/jobs/batch-predict"
+    body = {"model_id": model.id, "dataset_id": env.d}
+    for value in ("true", "yes", 1, None, []):
+        r = env.client.post(
+            url, json={**body, "include_contributions": value}, headers=env.h["owner"]
+        )
+        assert r.status_code == 422, (value, r.text)
+    monkeypatch.setattr(batch, "MAX_CONTRIBUTION_ROWS", 149)  # the dataset has 150 rows
+    r = env.client.post(url, json={**body, "include_contributions": True}, headers=env.h["owner"])
+    assert r.status_code == 422 and "contributions are limited to 149 rows" in r.text
+    r = env.client.post(url, json={**body, "include_contributions": False}, headers=env.h["owner"])
+    assert r.status_code == 201
+    assert job_count(env) == 1
+    monkeypatch.setattr(batch, "MAX_CONTRIBUTION_ROWS", 150)
+    r = env.client.post(url, json={**body, "include_contributions": True}, headers=env.h["owner"])
+    assert r.status_code == 201 and r.json()["payload"]["include_contributions"] is True
+    viewer = env.client.post(
+        url, json={**body, "include_contributions": True}, headers=env.h["viewer"]
+    )
+    assert viewer.status_code == 403
 
 
 def test_module_jobs_are_checked_before_they_are_queued(env):

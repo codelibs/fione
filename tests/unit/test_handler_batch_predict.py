@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 
+import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 import pytest
@@ -16,13 +17,14 @@ from fione import db
 from fione.auth import service as auth
 from fione.auth.roles import ProjectAccess, Role
 from fione.config import Settings, load_secret
+from fione.engine import explain
 from fione.engine.artifact import save_model
 from fione.jobs import batch_predict_handler, store, worker
 from fione.jobs.runner import TRAINING_KINDS, JobRunner
 from fione.jobs.store import JobStatus
 from fione.models import service as models
 from fione.models.service import ModelNotFound
-from fione.predict import PredictInputError, batch_predict
+from fione.predict import PredictInputError, batch, batch_predict
 from fione.projects import ingest, service
 from fione.projects import service as projects
 from fione.projects.ingest import ingest_csv, read_dataset
@@ -541,9 +543,13 @@ def test_submit_enqueues_a_batch_predict_job(conn, owner, project, record, datas
         "dataset_id": dataset.id,
         "include_columns": ["x"],
         "name": "n",
+        "include_contributions": False,
     }
     plain = submit(conn, owner, project, record, dataset)
     assert plain.payload["include_columns"] is None and plain.payload["name"] is None
+    assert plain.payload["include_contributions"] is False
+    wanted = submit(conn, owner, project, record, dataset, include_contributions=True)
+    assert wanted.payload["include_contributions"] is True
 
 
 def test_an_editor_member_can_submit(conn, owner, project, record, dataset):
@@ -601,3 +607,154 @@ def test_unknown_include_columns_are_refused_before_queueing(conn, owner, projec
     assert isinstance(e.value, ValueError)
     assert str(e.value) == "unknown columns in include_columns: ['nope']"
     assert job_count(conn) == 0
+
+
+# --- contributions ------------------------------------------------------------------------
+
+
+def stored(storage, conn, done) -> pd.DataFrame:
+    return read_dataset(storage, projects.get_dataset(conn, done.result["dataset_id"]))
+
+
+def exported(storage, conn, done) -> bytes:
+    return b"".join(
+        ingest.export_csv(storage, projects.get_dataset(conn, done.result["dataset_id"]))
+    )
+
+
+def test_payload_without_the_key_still_runs(
+    conn, run_job, owner, project, record, dataset, storage, settings
+):
+    phase1 = {"model_id": record.id, "dataset_id": dataset.id, "include_columns": None}
+    old = run_job(store.enqueue(conn, "batch_predict", project.id, owner.id, phase1))
+    assert old.status is JobStatus.DONE, old.message
+    off = run_job(submit(conn, owner, project, record, dataset, include_contributions=False))
+    assert off.status is JobStatus.DONE, off.message
+    # the default output is Phase 1's, byte for byte: the same CSV, no contribution columns
+    assert exported(storage, conn, old) == exported(storage, conn, off)
+    header = exported(storage, conn, off).decode().splitlines()[0]
+    assert header == '"predict","p_悪","p_普通","p_良","x","幅","color"'
+    model = models.load_trained(storage, record, load_secret(settings))
+    pd.testing.assert_frame_equal(
+        stored(storage, conn, off), batch_predict(model, read_dataset(storage, dataset))
+    )
+
+
+@pytest.mark.parametrize("kind", ["multiclass", "regression"])
+def test_contributions_are_stored_and_add_up(
+    kind, conn, run_job, owner, project, storage, settings, frame, monkeypatch
+):
+    model = classifier() if kind == "multiclass" else regressor()
+    record = add_model(conn, storage, settings, project, model)
+    # a renamed input empty in the first chunk still takes its source's type
+    monkeypatch.setattr(batch, "CONTRIBUTION_CHUNK_ROWS", 8)
+    gappy = frame.astype({"x": object}).assign(contrib_x=[None] * 8 + [True, False] * 16)
+    gappy.loc[[1, 5], "x"] = None
+    source = add_dataset(conn, storage, project, gappy, "gappy")
+    fallbacks = []
+    real = ingest.ingest_batches
+    monkeypatch.setattr(
+        ingest,
+        "ingest_batches",
+        lambda *a, **k: fallbacks.append(k["fallback_types"]) or real(*a, **k),
+    )
+    done = run_job(submit(conn, owner, project, record, source, include_contributions=True))
+    assert done.status is JobStatus.DONE, done.message
+    out = stored(storage, conn, done)
+    contrib = batch.contribution_columns(model)
+    assert list(fallbacks[0]) == ["x", "幅", "color", "input_contrib_x"]
+    predictions = ["predict"] + ([] if kind == "regression" else ["p_悪", "p_普通", "p_良"])
+    assert list(out.columns) == [*predictions, *contrib, "x", "幅", "color", "input_contrib_x"]
+    total = out[contrib].sum(axis=1).to_numpy()
+    if kind == "regression":
+        explained = out["predict"].to_numpy()
+    else:
+        explained = np.array([out.at[i, f"p_{label}"] for i, label in enumerate(out["predict"])])
+    np.testing.assert_allclose(total, explained, atol=1e-5)
+    assert dict(projects.get_dataset(conn, done.result["dataset_id"]).schema)[
+        "input_contrib_x"
+    ] == ("bool")
+    assert out["input_contrib_x"].tolist()[8:] == [True, False] * 16
+
+
+def test_contributions_report_progress_per_smaller_chunk(
+    conn, run_job, owner, project, record, dataset, monkeypatch
+):
+    monkeypatch.setattr(batch, "CONTRIBUTION_CHUNK_ROWS", 15)
+    done = run_job(submit(conn, owner, project, record, dataset, include_contributions=True))
+    assert done.status is JobStatus.DONE, done.message
+    notices = [e for _, e in store.events_since(conn, done.id) if e.type == "notice"]
+    assert [e.data["rows_done"] for e in notices] == [15, 30, 40]
+
+
+def test_cancelling_between_contribution_chunks_leaves_nothing(
+    conn, run_job, owner, project, record, dataset, storage, monkeypatch
+):
+    monkeypatch.setattr(batch, "CONTRIBUTION_CHUNK_ROWS", 8)
+    job = submit(conn, owner, project, record, dataset, include_contributions=True)
+    real = batch_predict_handler.predict_chunks
+
+    def cancel_after_first(*args, **kwargs):
+        for number, chunk in enumerate(real(*args, **kwargs)):
+            yield chunk
+            if number == 0:
+                store.request_cancel(conn, job.id)
+                time.sleep(worker.STOP_CHECK_SECS + 0.2)
+
+    monkeypatch.setattr(batch_predict_handler, "predict_chunks", cancel_after_first)
+    done = run_job(job)
+    assert done.status is JobStatus.CANCELLED
+    notices = [e for _, e in store.events_since(conn, job.id) if e.type == "notice"]
+    assert len(notices) == 2
+    assert predict_datasets(conn, project) == []
+    assert len(dataset_objects(storage, project)) == 1
+
+
+def test_only_a_contributions_run_caps_the_threads(
+    conn, run_job, owner, project, record, dataset, monkeypatch
+):
+    capped = []
+    real = explain.cap_threads
+    monkeypatch.setattr(explain, "cap_threads", lambda model: capped.append(model) or real(model))
+    assert run_job(submit(conn, owner, project, record, dataset)).status is JobStatus.DONE
+    assert capped == []
+    done = run_job(submit(conn, owner, project, record, dataset, include_contributions=True))
+    assert done.status is JobStatus.DONE, done.message
+    assert len(capped) == 1
+
+
+def test_more_than_100k_rows_is_refused_at_submit(
+    conn, owner, project, record, dataset, monkeypatch
+):
+    assert dataset.n_rows == 40
+    monkeypatch.setattr(batch, "MAX_CONTRIBUTION_ROWS", 39)
+    with pytest.raises(PredictInputError) as e:
+        submit(conn, owner, project, record, dataset, include_contributions=True)
+    assert str(e.value) == "contributions are limited to 39 rows"
+    assert job_count(conn) == 0
+    assert submit(conn, owner, project, record, dataset).kind == "batch_predict"
+    monkeypatch.setattr(batch, "MAX_CONTRIBUTION_ROWS", 40)
+    assert submit(conn, owner, project, record, dataset, include_contributions=True)
+
+
+def test_the_job_checks_the_row_cap_again_before_reading(
+    conn, run_job, owner, project, record, dataset, monkeypatch
+):
+    job = submit(conn, owner, project, record, dataset, include_contributions=True)
+    monkeypatch.setattr(batch, "MAX_CONTRIBUTION_ROWS", 39)
+    reads = []
+    monkeypatch.setattr(ingest, "read_dataset", lambda *a, **k: reads.append(a))
+    done = run_job(job)
+    assert done.status is JobStatus.FAILED
+    assert done.message == "contributions are limited to 39 rows"
+    assert reads == [] and predict_datasets(conn, project) == []
+
+
+def test_a_model_too_wide_to_explain_fails_the_job_plainly(
+    conn, run_job, owner, project, record, dataset, monkeypatch
+):
+    monkeypatch.setattr(explain, "CELLS", 1)
+    done = run_job(submit(conn, owner, project, record, dataset, include_contributions=True))
+    assert done.status is JobStatus.FAILED
+    assert "too wide" in done.message
+    assert predict_datasets(conn, project) == []

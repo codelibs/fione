@@ -76,7 +76,8 @@ def submit_automl(body: AutomlIn, ctx: Writer, conn: Conn, request: Request) -> 
 
 @router.post("/projects/{project_id}/jobs/batch-predict", status_code=201)
 def submit_batch_predict(body: BatchPredictIn, ctx: Writer, conn: Conn) -> dict:
-    """Queue a prediction of a dataset (any type) by a model of the same project."""
+    """Queue a prediction of a dataset (any type) by a model of the same project; with
+    ``include_contributions``, each row's contributions too (at most 100,000 rows)."""
     with service_errors():
         job = models.submit_batch_predict(
             conn,
@@ -86,6 +87,7 @@ def submit_batch_predict(body: BatchPredictIn, ctx: Writer, conn: Conn) -> dict:
             body.dataset_id,
             include_columns=body.include_columns,
             name=body.name,
+            include_contributions=body.include_contributions,
         )
     return job_out(job, admin=_admin(ctx.user))
 

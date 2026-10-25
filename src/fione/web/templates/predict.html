@@ -74,6 +74,13 @@
       </ul>
       <p class="text-muted text-sm">{{ t('predict.columns_explain') }}</p>
     </fieldset>
+    <div class="card card-padded check-field">
+      <input class="checkbox" type="checkbox" id="contributions" name="contributions" value="true" aria-describedby="contributions-hint">
+      <div>
+        <label class="field__label" for="contributions">{{ t('predict.contributions') }}</label>
+        <p class="field__hint" id="contributions-hint">{{ t('predict.contributions_hint') }}</p>
+      </div>
+    </div>
     <div class="form-actions">
       <a class="btn btn-ghost" href="{{ base }}/predict">{{ icon("back") }}{{ t('predict.other_file') }}</a>
       <button type="submit" class="btn btn-primary btn-lg"><span class="spinner" aria-hidden="true"></span>{{ icon("play") }}{{ t('predict.run') }}</button>

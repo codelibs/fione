@@ -24,6 +24,7 @@ from fione.engine.config import TrainConfig
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import service as models
+from fione.predict import batch
 from fione.projects import service as projects
 from fione.tools import builtin
 from fione.web import easyml, uploads
@@ -329,6 +330,29 @@ def test_extra_columns_of_a_prediction_file_are_noted(make_client):
     page = world.client.get(url).text
     assert "1 columns are not used by the model" in page
     assert 'value="note" checked' in page and "Not used by the model" in page
+
+
+def test_the_predict_form_checkbox_sets_the_payload(make_client, monkeypatch):
+    world = make_world(make_client())
+    csrf = world.login("ed")
+    page = world.client.get(world.path("/projects/{p}/models/{model}/predict?dataset={test}")).text
+    assert '<input class="checkbox" type="checkbox" id="contributions" name="contributions"' in page
+    assert "Explain each prediction" in page and "Up to 100,000 rows" in page
+    assert 'name="contributions" value="true" checked' not in page  # off unless asked for
+    url = world.path("/projects/{p}/models/{model}/predict/run")
+    form = {"csrf_token": csrf, "dataset_id": world.path("{test}"), "include": [INPUTS[0]]}
+    payloads = []
+    for extra in ({}, {"contributions": "true"}):
+        r = world.client.post(url, data={**form, **extra}, follow_redirects=False)
+        job_id = int(location(r).rsplit("/", 1)[1])
+        with closing(connect(world.client)) as conn:
+            payloads.append(store.get_job(conn, job_id).payload)
+    assert [p["include_contributions"] for p in payloads] == [False, True]
+    monkeypatch.setattr(batch, "MAX_CONTRIBUTION_ROWS", 1)
+    before = job_count(world.client)
+    r = world.client.post(url, data={**form, "contributions": "true"})
+    assert r.status_code == 422 and "contributions are limited to 1 rows" in r.text
+    assert job_count(world.client) == before
 
 
 @pytest.mark.parametrize(

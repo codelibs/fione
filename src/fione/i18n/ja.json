@@ -374,6 +374,8 @@
   "predict.always": "常に含む",
   "predict.not_used": "モデルでは未使用",
   "predict.columns_explain": "「predict」が予測値です。カテゴリの場合、「p_」で始まる列はそのカテゴリである確率です。",
+  "predict.contributions": "各予測の内訳を含める",
+  "predict.contributions_hint": "時間がかかります。モデルの入力ごとに、その行の予測をどれだけ動かしたかを示す「contrib_」列を追加します。平均的な予測である「contrib_bias」と合わせると予測値に、カテゴリの場合は予測したカテゴリの確率(2 カテゴリの場合は最後の「p_」列)になります。最大 100,000 行です。",
   "predict.other_file": "別のファイルを使う",
   "predict.run": "予測を実行",
   "result.title": "予測結果",

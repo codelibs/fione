@@ -31,14 +31,23 @@ def training_frame(n: int = 300, seed: int = 0) -> pd.DataFrame:
     )
 
 
-def _fit(target: str, drop: str) -> TrainedModel:
+def _fit(target: str, drop: str, frame: pd.DataFrame | None = None) -> TrainedModel:
     config = TrainConfig(target=target, max_runtime_secs=10, max_models=2, nfolds=3)
-    return AutoML(config, lambda event: None).fit(training_frame().drop(columns=[drop]))
+    frame = training_frame() if frame is None else frame
+    return AutoML(config, lambda event: None).fit(frame.drop(columns=[drop]))
 
 
 @cache
 def classifier() -> TrainedModel:
     return _fit("判定", "value")
+
+
+@cache
+def binary() -> TrainedModel:
+    """``判定`` as ``yes`` (``良``) or ``no``."""
+    frame = training_frame()
+    frame["判定"] = np.where(frame["判定"] == LABELS[0], "yes", "no")
+    return _fit("判定", "value", frame)
 
 
 @cache

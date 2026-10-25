@@ -101,6 +101,7 @@ class BatchPredictIn(Body):
     dataset_id: DbId
     include_columns: list[str] | None = None
     name: Name | None = None
+    include_contributions: Annotated[bool, Field(strict=True)] = False  # true or false only
 
 
 class ModuleJobIn(Body):

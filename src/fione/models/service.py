@@ -15,7 +15,7 @@ from fione.engine.model import TrainedModel
 from fione.engine.prep import infer_task, validate_target
 from fione.jobs import store
 from fione.jobs.store import Job
-from fione.predict.batch import check_include_columns
+from fione.predict import batch
 from fione.projects import service as projects
 from fione.projects.ingest import read_dataset
 from fione.projects.service import DatasetNotFound, DatasetType
@@ -316,8 +316,11 @@ def submit_batch_predict(
     dataset_id: int,
     include_columns: list[str] | None = None,
     name: str | None = None,
+    include_contributions: bool = False,
 ) -> Job:
-    """Queue a ``batch_predict`` job: ``dataset_id`` (of any type) through ``model_id``."""
+    """Queue a ``batch_predict`` job: ``dataset_id`` (of any type) through ``model_id``, with
+    each row's contributions when ``include_contributions`` (``PredictInputError`` over
+    ``MAX_CONTRIBUTION_ROWS`` rows)."""
     projects.require_project(conn, project_id)
     if not can_access_project(conn, user, project_id, "write"):
         raise PermissionError("write access to the project is required")
@@ -326,11 +329,14 @@ def submit_batch_predict(
     dataset = projects.get_dataset(conn, dataset_id)
     if dataset.project_id != project_id:
         raise DatasetNotFound(dataset_id)
-    check_include_columns([column for column, _ in dataset.schema], include_columns)
+    batch.check_include_columns([column for column, _ in dataset.schema], include_columns)
+    if include_contributions:
+        batch.check_contribution_rows(dataset.n_rows)
     payload = {
         "model_id": model_id,
         "dataset_id": dataset_id,
         "include_columns": include_columns,
         "name": name,
+        "include_contributions": include_contributions,
     }
     return store.enqueue(conn, "batch_predict", project_id, user.id, payload)

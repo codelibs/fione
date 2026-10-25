@@ -374,6 +374,8 @@
   "predict.always": "Always included",
   "predict.not_used": "Not used by the model",
   "predict.columns_explain": "“predict” is the prediction. For categories, each “p_” column is the probability of that category.",
+  "predict.contributions": "Explain each prediction",
+  "predict.contributions_hint": "Slower. Adds a “contrib_” column per model input: how much it moved the row’s prediction. With “contrib_bias”, the average prediction, they add up to the predicted value, or for categories to the probability of the predicted category (with two categories, of the last “p_” column). Up to 100,000 rows.",
   "predict.other_file": "Use another file",
   "predict.run": "Predict",
   "result.title": "Predictions",
