@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api_helpers import PW, add_user, connect, login
+from fione import i18n
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
 from fione.jobs import store
@@ -257,11 +258,25 @@ def test_the_system_page_says_how_the_server_is(client):
     assert stat("Failed in the last 24 hours") == "1"
     assert stat("Worker processes") == "0"
     assert "Stopped" in stat("Job runner")
-    assert re.fullmatch(r"0 d 0 h \d+ min", stat("Up for"))
+    assert re.fullmatch(r"\d+ min", stat("Up for"))
     assert "2.0.0" in stat("Version") and stat("Storage") == "Local disk"
     assert "Not configured" in page and "Ollama" in page
     assert 'hx-trigger="every 10s"' in page and 'aria-live="polite"' in page
     assert "/static/js/system.js" in page
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [
+        (59, "0 min"),
+        (3 * 60, "3 min"),
+        (2 * 3600 + 5 * 60, "2 h 5 min"),
+        (3 * 86400 + 7200, "3 d 2 h"),
+    ],
+)
+def test_the_uptime_is_said_in_its_two_largest_units(seconds, text):
+    key, values = admin_ui._uptime(seconds)
+    assert i18n.t(key, "en", **values) == text
 
 
 def test_the_system_page_in_japanese(client):

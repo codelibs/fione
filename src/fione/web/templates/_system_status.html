@@ -11,7 +11,7 @@
     <div class="stat"><dt>{{ t('system.running') }}</dt><dd>{{ s.jobs.running }}</dd></div>
     <div class="stat"><dt>{{ t('system.failed_day') }}</dt><dd>{{ failed_day }}</dd></div>
     <div class="stat"><dt>{{ t('system.workers') }}</dt><dd>{{ workers }}</dd></div>
-    <div class="stat"><dt>{{ t('system.uptime') }}</dt><dd>{{ t('system.uptime_value', d=uptime.d, h=uptime.h, m=uptime.m) }}</dd></div>
+    <div class="stat"><dt>{{ t('system.uptime') }}</dt><dd>{{ t(uptime[0], **uptime[1]) }}</dd></div>
   </dl>
   <dl class="facts facts-stacked card card-padded">
     <div><dt>{{ t('system.version') }}</dt><dd>{{ s.version }}</dd></div>

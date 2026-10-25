@@ -818,7 +818,6 @@
   "system.failed_day": "過去 24 時間に失敗",
   "system.workers": "ワーカープロセス",
   "system.uptime": "稼働時間",
-  "system.uptime_value": "{d} 日 {h} 時間 {m} 分",
   "system.version": "バージョン",
   "system.image_tag": "イメージタグ",
   "system.storage": "ストレージ",
@@ -860,5 +859,8 @@
   "nav.section.members": "共有",
   "error.admin_only_hint": "必要な場合は管理者に相談してください。",
   "design.secret": "一度だけ表示する秘密の値",
-  "design.secret_title": "新しいトークン「example」"
+  "design.secret_title": "新しいトークン「example」",
+  "system.uptime_days": "{d} 日 {h} 時間",
+  "system.uptime_hours": "{h} 時間 {m} 分",
+  "system.uptime_minutes": "{m} 分"
 }

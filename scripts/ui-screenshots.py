@@ -104,10 +104,10 @@ class Shooter:
                     yield lang, scheme, viewport
 
 
-def sign_in(page: Page, base: str, username: str = ADMIN) -> None:
+def sign_in(page: Page, base: str, username: str = ADMIN, password: str = PASSWORD) -> None:
     page.goto(f"{base}/login")
     page.fill("#login-username", username)
-    page.fill("#login-password", PASSWORD)
+    page.fill("#login-password", password)
     page.click("form[data-json-form] button[type=submit]")
     page.wait_for_url(f"{base}/")
 
@@ -233,6 +233,7 @@ def run(base: str, out: Path, errors: list[str]) -> None:
         s.mode = "detailed"  # the AutoML screens are the detailed view's
         automl(s, base, project)
         model_screens(s, base, project)
+        account_and_admin(s, base, project)
         browser.close()
 
 
@@ -628,6 +629,99 @@ def model_screens(s: "Shooter", base: str, project: str) -> None:
     page.goto(base + project + "/models")
     page.locator("details.confirm-inline > summary").first.click()
     s.shot(page, "models-delete-panel-en-dark-desktop", full_page=False)
+    page.context.close()
+
+
+def account_and_admin(s: "Shooter", base: str, project: str) -> None:
+    """The account page (a new token shown once, a password change), the users, sharing and
+    system status screens. The admin's own password and role are never changed: every other
+    step signs in with them."""
+    page = s.page("light", "desktop")
+    sign_in(page, base)
+    page.goto(base + "/admin/users")
+    for username, role in (("editor1", "editor"), ("viewer1", "viewer")):
+        page.click("details.card > summary")
+        page.fill("#new-username", username)
+        page.fill("#new-password", PASSWORD)
+        page.select_option("#new-role", role)
+        page.click("form[action='/admin/users'] button[type=submit]")
+        page.wait_for_url(re.compile(r"/admin/users\?done=created"))
+    s.shot(page, "users-created-en-light-desktop", full_page=False)
+    # One's own account cannot be deleted: the reason is shown.
+    me = page.locator("tr", has=page.locator("th", has_text="admin")).first
+    if me.locator("summary").count():
+        s.errors.append("users: the admin's own row offers changes")
+    other = page.locator("tr", has=page.locator("th", has_text="editor1")).first
+    other.locator("details.confirm-inline > summary", has_text="Delete").click()
+    s.shot(page, "users-delete-panel-en-light-desktop", full_page=False)
+    page.context.close()
+    shoot_all(s, base, "/admin/users", "users", ("en", "ja"))
+    shoot_all(s, base, "/admin/system", "system", ("en", "ja"))
+    shoot_all(s, base, "/account", "account", ("en", "ja"))
+
+    # A new token: its secret is shown once, and gone after a reload.
+    for lang, scheme, viewport in (("en", "light", "desktop"), ("ja", "dark", "phone")):
+        page = s.page(scheme, viewport, lang)
+        sign_in(page, base)
+        page.goto(base + "/account")
+        page.fill("#token-name", "nightly report")
+        page.click("form[action='/account/tokens'] button[type=submit]")
+        page.wait_for_selector(".secret-panel")
+        if not re.search(r"fione_[A-Za-z0-9_-]{20,}", page.inner_text(".secret-panel")):
+            s.errors.append("account: the new token's secret is not shown")
+        s.shot(page, f"account-token-{lang}-{scheme}-{viewport}", full_page=False)
+        page.reload()
+        if page.locator(".secret-panel").count():
+            s.errors.append("account: the secret is shown again after a reload")
+        page.context.close()
+
+    # Wrong current password (inline), then a real change by editor1 (not the admin).
+    page = s.page("dark", "desktop")
+    sign_in(page, base, "editor1")
+    page.goto(base + "/account")
+    page.fill("#current-password", "not-my-password")
+    page.fill("#new-password", "another-password-1")
+    page.fill("#confirm-password", "another-password-1")
+    page.click("form[action='/account/password'] button[type=submit]")
+    page.wait_for_selector("#current-password-error")
+    s.shot(page, "account-password-error-en-dark-desktop", full_page=False)
+    page.fill("#current-password", PASSWORD)
+    page.fill("#new-password", "another-password-1")
+    page.fill("#confirm-password", "another-password-1")
+    page.click("form[action='/account/password'] button[type=submit]")
+    page.wait_for_url(base + "/account?done=password")
+    s.shot(page, "account-password-changed-en-dark-desktop", full_page=False)
+    # Not an administrator: the friendly 403 page.
+    page.goto(base + "/admin/system")
+    s.shot(page, "system-forbidden-en-dark-desktop", full_page=False)
+    page.context.close()
+
+    # Sharing: an unknown name is explained, then viewer1 is added.
+    page = s.page("light", "desktop")
+    sign_in(page, base)
+    page.goto(base + project + "/members")
+    page.fill("#member-username", "nobody")
+    page.click(f"form[action='{project}/members'] button[type=submit]")
+    page.wait_for_selector("#members-error")
+    s.shot(page, "members-error-en-light-desktop", full_page=False)
+    page.fill("#member-username", "viewer1")
+    page.check("#access-viewer")
+    page.click(f"form[action='{project}/members'] button[type=submit]")
+    page.wait_for_url(re.compile(r"/members\?done=saved"))
+    # The status card keeps polling without errors.
+    page.goto(base + "/admin/system")
+    page.wait_for_timeout(10_500)
+    wait_settled(page)
+    if not page.locator("#system-status[hx-trigger]").count():
+        s.errors.append("system: the status card stopped polling")
+    page.context.close()
+    shoot_all(s, base, project + "/members", "members", ("en", "ja"))
+
+    page = s.page("light", "phone")
+    sign_in(page, base)
+    page.click(".nav-toggle")
+    page.click(".menu > summary")
+    s.shot(page, "menu-admin-en-light-phone", full_page=False)
     page.context.close()
 
 

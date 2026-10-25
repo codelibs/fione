@@ -192,9 +192,13 @@ def delete_user(request: Request, conn: Conn, uid: str, form: SmallForm) -> Resp
 # --- system status ------------------------------------------------------------------------
 
 
-def _uptime(seconds: float) -> dict:
+def _uptime(seconds: float) -> tuple[str, dict]:
+    """The uptime's message key and values: its two largest units."""
     minutes = int(seconds // 60)
-    return {"d": minutes // 1440, "h": minutes // 60 % 24, "m": minutes % 60}
+    d, h, m = minutes // 1440, minutes // 60 % 24, minutes % 60
+    if d:
+        return "system.uptime_days", {"d": d, "h": h}
+    return ("system.uptime_hours", {"h": h, "m": m}) if h else ("system.uptime_minutes", {"m": m})
 
 
 def _system_context(request: Request, conn) -> dict:
