@@ -1,5 +1,6 @@
 """The ``automl`` job: train on a dataset, save the model artifact, record it in ``models``."""
 
+import dataclasses
 import logging
 import time
 import uuid
@@ -29,6 +30,9 @@ def automl(ctx: JobContext) -> None:
     read at the end can only differ if a cancel lands in the microseconds between the two. A
     SIGKILL during ``save_model`` can leave unreferenced objects under the project prefix;
     ``delete_project`` removes them.
+
+    The diagnostics go to the row only: the artifact is saved without them, so the serving
+    bundle (the artifact as stored) carries none of the class labels or target values in them.
     """
     payload = ctx.job.payload
     project_id = ctx.job.project_id
@@ -53,7 +57,11 @@ def automl(ctx: JobContext) -> None:
     prefix = f"projects/{project_id}/models/{uuid.uuid4().hex}/"
     try:
         save_model(
-            model, ctx.storage, prefix, load_secret(ctx.settings), image_tag=ctx.settings.image_tag
+            dataclasses.replace(model, diagnostics=None),
+            ctx.storage,
+            prefix,
+            load_secret(ctx.settings),
+            image_tag=ctx.settings.image_tag,
         )
         record = models_service.add_model(
             ctx.conn,

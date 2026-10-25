@@ -19,7 +19,8 @@ the signature check ANDed, so an export of an unverified model never comes back 
 and a record cannot vouch for a file whose signature fails. The record's key set is exact, so
 exports made before ``trusted`` was added are refused (v2 was unreleased), except for the
 optional ``diagnostics``: written only when the model has them, required to be a version-1
-object of the manifest's task when present.
+object of the manifest's task when present. They travel in ``record.json`` and not in the
+pickle, which the ``automl`` job saves without them.
 
 Everything written for a failed import (objects and row) is deleted again.
 """
