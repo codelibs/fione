@@ -1,5 +1,6 @@
 """Datasets over HTTP: upload, limits, download, preview, profiles, cross-project ids."""
 
+import dataclasses
 import io
 import json
 
@@ -10,6 +11,7 @@ import pytest
 from api_helpers import CSV, add_user, bearer, connect, upload
 from fione.api import routes_datasets
 from fione.auth.roles import Role
+from fione.data.profile import profile_dataset
 
 
 @pytest.fixture
@@ -260,6 +262,48 @@ def test_profile_says_which_leak_suspects_are_exact(client, owner, project):
         "predicts the target on its own",
         "score",
     )
+
+
+def test_the_profile_leak_check_runs_once_per_dataset_and_target(
+    client, owner, project, monkeypatch
+):
+    """The leak check (up to 3 s) is cached like the UI's; the answer is what an uncached
+    profile gives, and a check cut short by its time budget is not kept."""
+    rng = np.random.default_rng(1)
+    label = rng.choice(["yes", "no"], 300)
+    frame = pd.DataFrame({"copy": label, "x": rng.normal(size=300), "label": label})
+    dataset = upload(client, project, frame.to_csv(index=False).encode(), headers=owner).json()
+    url = f"{base(project)}/{dataset['id']}/profile"
+    calls = []
+    real = routes_datasets.leak_check
+
+    def spy(*args, partial=False, **kwargs):
+        calls.append(args[2])
+        found = real(*args, **kwargs)
+        return dataclasses.replace(found, partial=True) if partial else found
+
+    monkeypatch.setattr(routes_datasets, "leak_check", spy)
+    first = client.get(f"{url}?target=label", headers=owner)
+    assert first.status_code == 200
+    assert client.get(f"{url}?target=label", headers=owner).json() == first.json()
+    client.get(f"{url}?target=x", headers=owner)
+    client.get(f"{url}?target=label", headers=owner)
+    assert client.get(url, headers=owner).json()["leak_suspects"] == []  # no target, no check
+    assert calls == ["label", "x"]
+    uncached = profile_dataset(frame.astype({"label": object, "copy": object}), "label")
+    assert (
+        [(s["column"], s["reason"], s["kind"]) for s in first.json()["leak_suspects"]]
+        == [(s.column, s.reason, "exact") for s in uncached.leak_suspects]
+        == [("copy", "identical to target", "exact")]
+    )
+    assert first.json()["leak_partial"] is False
+    assert client.get(f"{url}?target=nope", headers=owner).status_code == 422
+
+    calls.clear()
+    monkeypatch.setattr(routes_datasets, "leak_check", lambda *a, **k: spy(*a, partial=True, **k))
+    for _ in range(2):
+        assert client.get(f"{url}?target=copy", headers=owner).json()["leak_partial"] is True
+    assert calls == ["copy", "copy"]  # a partial check is computed again
 
 
 def test_column_profile(client, owner, project):
