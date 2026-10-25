@@ -11,7 +11,7 @@ from the npm tarballs below; each tarball was checked against the registry's `di
 | ZRender (bundled in `echarts.min.js`) | 6.1.0 | BSD-3-Clause | https://registry.npmjs.org/zrender/-/zrender-6.1.0.tgz (`LICENSE`, saved as `echarts/LICENSE-zrender`) |
 
 `echarts.min.js` also embeds parts of d3.js (BSD-3-Clause, `echarts/LICENSE-d3`) and tslib
-helpers (0BSD). All of these are allowed by the licence policy (design spec 4.6).
+helpers (0BSD). All of these are allowed by the licence policy (see the README).
 
 ## sha256
 

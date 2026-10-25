@@ -53,7 +53,7 @@ services:
 
   seaweedfs:
     image: chrislusf/seaweedfs:4.48
-    # Master, volume, filer and S3 gateway on one data dir (the command verified in Task 3;
+    # Master, volume, filer and S3 gateway on one data dir (the command of compose.s3-test.yaml;
     # -ip.bind=0.0.0.0 is needed, or the S3 port answers on the container's loopback only).
     # The S3 identity is written from the environment at each start, readable by SeaweedFS
     # only, in the container's own filesystem: never in the repository or the image. Values

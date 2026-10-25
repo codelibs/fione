@@ -1,4 +1,4 @@
-# The end-to-end test stack (Task 20's Playwright run, scripts/docker-smoke.sh): an override
+# The end-to-end test stack (tests/e2e, scripts/docker-smoke.sh): an override
 # of compose.yaml with its own project name, host ports 18080/18081 and the test-only values
 # of docker/e2e.env, which are public in this repository. Never use them for a real
 # deployment.
