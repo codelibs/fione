@@ -720,6 +720,9 @@ def metrics_panel(page: str) -> str:
     return page[page.index('id="panel-metrics"') :]
 
 
+COLUMN_HEAD = r'<th scope="col" class="cell-name" title="[^"]*">([^<]+)</th>'
+
+
 def confusion_table(page: str) -> str:
     table = page[page.index('class="table table-compact confusion"') :]
     return table[: table.index("</table>")]
@@ -730,7 +733,7 @@ def test_binary_diagnostics_render(world):
     page = diagnostics_page(world, diagnostics=found)
     panel = metrics_panel(page)
     table = confusion_table(page)
-    assert re.findall(r'<th scope="col" class="cell-name">([^<]+)</th>', table) == ["no", "yes"]
+    assert re.findall(COLUMN_HEAD, table) == ["no", "yes"]
     assert re.findall(r'<th scope="row" class="cell-name">([^<]+)</th>', table) == ["no", "yes"]
     counts = [int(n) for n in re.findall(r'<span class="cm-count">(\d+)</span>', table)]
     assert counts == [n for row in found["confusion"]["matrix"] for n in row]
@@ -759,7 +762,7 @@ def test_multiclass_has_no_roc_and_shows_other_beyond_30(world):
     found = diagnostics("classification", y, pred, [f"c{i}" for i in range(k)])
     page = diagnostics_page(world, diagnostics=found)
     table = confusion_table(page)
-    heads = re.findall(r'<th scope="col" class="cell-name">([^<]+)</th>', table)
+    heads = re.findall(COLUMN_HEAD, table)
     assert len(heads) == 31 and heads[-1] == "Other classes"
     assert table.count('<th scope="row" class="cell-name">') == 31
     specs = chart_specs(page)
@@ -889,3 +892,94 @@ def test_undefined_figures_and_japanese(world):
     assert rows and "—" in rows[-1]  # c's precision: never predicted
     ja = world.client.get(url, headers={"Accept-Language": "ja"}).text
     assert "混同行列" in ja and "クラス別の値" in ja
+
+
+# --- fix round 1: hostile numbers, shares, the scatter's text alternative ------------------
+
+
+def test_numbers_beyond_the_float_range_do_not_break_the_pages(world):
+    """Rows written before the import refused them (or by hand) may hold integers no float
+    can hold: every page still renders, leaving those values out."""
+    huge = 10**400
+    found = binary_diagnostics()
+    found["auc"] = huge
+    found["pr"]["recall"][1] = huge
+    world.login("vi")
+    mid = record_like(
+        world,
+        world.p,
+        metrics={"accuracy": huge, "logloss": -huge},
+        importance={"x": huge, "y": 0.5},
+        leaderboard=[{"model": "LightGBM_0", "family": "LightGBM", "cv_score": huge}],
+        diagnostics=found,
+    )
+    base = world.path("/projects/{p}/models/") + str(mid)
+    for url in (
+        base,
+        base + "/summary",
+        world.path("/projects/{p}/models"),
+        world.path("/projects/{p}"),
+    ):
+        assert world.client.get(url).status_code == 200, url
+    page = world.client.get(base + "?tab=metrics").text
+    specs = chart_specs(page)
+    assert "pr-chart" not in specs and "roc-chart" in specs
+    assert "could not be read" in page and "Area under the curve: —." in page
+
+
+def test_an_unexpected_error_in_a_part_only_drops_that_part(world, monkeypatch):
+    def broken(*args):
+        raise TypeError("unexpected")
+
+    monkeypatch.setattr(models_ui, "_calibration", broken)
+    page = diagnostics_page(world, diagnostics=binary_diagnostics())
+    specs = chart_specs(page)
+    assert "calibration-chart" not in specs and "roc-chart" in specs
+    assert "could not be read" in page
+
+
+def test_a_rate_out_of_range_drops_its_curve(world):
+    found = binary_diagnostics()
+    found["roc"] = {"fpr": [0.0, 0.5, 1.0], "tpr": [0.0, 1.5, 1.0], "threshold": [1, 0.5, 0]}
+    specs = chart_specs(diagnostics_page(world, diagnostics=found))
+    assert "roc-chart" not in specs and "pr-chart" in specs
+
+
+def test_confusion_shares_are_of_the_actual_class_row(world):
+    found = binary_diagnostics(("a", "b"))
+    found["confusion"] = {"classes": [0, 1], "matrix": [[1, 299], [50, 50]]}
+    table = confusion_table(diagnostics_page(world, diagnostics=found))
+    cells = re.findall(
+        r'<td class="num cm-(\d)"><span class="cm-count">([\d,]+)</span>'
+        r'<span class="cm-share">([^<]+)</span>',
+        table,
+    )
+    assert cells == [
+        ("1", "1", "&lt;1%"),
+        ("5", "299", "&gt;99%"),
+        ("3", "50", "50%"),
+        ("3", "50", "50%"),
+    ]
+
+
+def test_long_class_labels_keep_their_full_text_in_a_title(world):
+    long = "a very long class label " * 4
+    page = diagnostics_page(world, diagnostics=binary_diagnostics(("short", long)))
+    table = confusion_table(page)
+    assert f'<th scope="col" class="cell-name" title="{long}">{long}</th>' in table
+
+
+def test_the_scatter_text_alternative_is_the_decile_summary(world):
+    rng = np.random.default_rng(4)
+    y = 1_000_000 + rng.normal(0, 50, 3000)
+    found = diagnostics("regression", y, y + rng.normal(0, 5, 3000), None)
+    page = diagnostics_page(world, task="regression", diagnostics=found)
+    scatter = chart_specs(page)["scatter-chart"]
+    deciles = found["by_decile"]
+    assert scatter["labels"] == [str(row["predicted_mean"]) for row in deciles]
+    assert scatter["values"] == [row["residual_mean"] for row in deciles]
+    assert len(set(scatter["labels"])) == 10  # not all "1e+06"
+    assert len(scatter["series"][0]["points"]) == 2000  # the chart still draws every point
+    figure = page[page.index('id="scatter-chart"') :]
+    figure = figure[: figure.index("</figure>")]
+    assert "Mean residual" in figure and figure.count("<tr>") == 11

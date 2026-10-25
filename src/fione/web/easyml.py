@@ -524,9 +524,21 @@ def _clock(seconds: float | None) -> str | None:
     return f"{hours}:{rest // 60:02d}:{rest % 60:02d}" if hours else f"{rest // 60}:{rest % 60:02d}"
 
 
+def _share(value) -> float:
+    """A stored importance share as a float: 0.0 when missing, not finite, or beyond the float
+    range (a hand-made record)."""
+    try:
+        return float(value) if value is not None and math.isfinite(value) else 0.0
+    except (OverflowError, TypeError):
+        return 0.0
+
+
 def _number(value) -> str:
     """A metric for people: three significant digits, thousands separated."""
-    if value is None or not math.isfinite(value):
+    try:
+        if value is None or not math.isfinite(value):
+            return "—"
+    except OverflowError:  # an int beyond the float range (a hand-made record)
         return "—"
     return f"{value:,.0f}" if abs(value) >= 1000 else f"{value:.3g}"
 
@@ -718,8 +730,8 @@ def summary(request: Request, conn: Conn, pid: str, mid: str) -> Response:
             elapsed = result.get("elapsed")
         except KeyError:  # the job was deleted
             pass
-    ranked = sorted(record.importance.items(), key=lambda kv: (-(kv[1] or 0.0), kv[0]))
-    top = [(name, value or 0.0) for name, value in ranked[:TOP_INPUTS]]
+    shares = ((name, _share(value)) for name, value in record.importance.items())
+    top = sorted(shares, key=lambda kv: (-kv[1], kv[0]))[:TOP_INPUTS]
     try:
         bundle = serving_bundle_of(request, record)
     except (BundleError, ModelNotFound):  # an unsafe image name, or the manifest is gone

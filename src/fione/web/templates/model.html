@@ -164,13 +164,13 @@
             <caption class="visually-hidden">{{ t('model.diag.confusion_caption') }}</caption>
             <thead><tr>
               <td>{{ t('model.diag.corner') }}</td>
-              {% for label in d.confusion.labels %}<th scope="col" class="cell-name">{{ label }}</th>{% endfor %}
+              {% for label in d.confusion.labels %}<th scope="col" class="cell-name" title="{{ label }}">{{ label }}</th>{% endfor %}
             </tr></thead>
             <tbody>
               {% for row in d.confusion.rows %}
               <tr>
                 <th scope="row" class="cell-name">{{ d.confusion.labels[loop.index0] }}</th>
-                {% for cell in row %}<td class="num cm-{{ cell.level }}"><span class="cm-count">{{ "{:,}".format(cell.count) }}</span><span class="cm-share">{{ "%.0f%%"|format(cell.share * 100) }}</span></td>{% endfor %}
+                {% for cell in row %}<td class="num cm-{{ cell.level }}"><span class="cm-count">{{ "{:,}".format(cell.count) }}</span><span class="cm-share">{{ cell.share_text }}</span></td>{% endfor %}
               </tr>
               {% endfor %}
             </tbody>

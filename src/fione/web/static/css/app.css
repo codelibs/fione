@@ -2567,6 +2567,11 @@ select.input {
 .confusion thead th.cell-name {
   text-transform: none; /* class labels as they are: "a" and "A" may both be classes */
   letter-spacing: normal;
+  /* long labels on one line, cut (the full label is in its title and in the row header) */
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .confusion .cm-count,

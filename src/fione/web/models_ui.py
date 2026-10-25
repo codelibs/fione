@@ -78,7 +78,10 @@ def _view(request: Request, template: str, ctx: Ctx, **context) -> Response:
 def _number(value) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    return float(value) if math.isfinite(value) else None
+    try:
+        return float(value) if math.isfinite(value) else None
+    except OverflowError:  # an int beyond the float range (a hand-made record)
+        return None
 
 
 # --- the project's models -----------------------------------------------------------------
@@ -371,7 +374,15 @@ class _Unreadable(Exception):
 
 
 # What a malformed part can raise while it is read (beyond the explicit checks).
-_PART_ERRORS = (_Unreadable, TypeError, ValueError, KeyError, IndexError, AttributeError)
+_PART_ERRORS = (
+    _Unreadable,
+    TypeError,
+    ValueError,
+    KeyError,
+    IndexError,
+    AttributeError,
+    ArithmeticError,
+)
 
 
 def _count(value) -> int:
@@ -431,6 +442,16 @@ def _level(share: float) -> int:
     return 1 + sum(share > edge for edge in SHARE_LEVELS)
 
 
+def _percent(share: float) -> str:
+    """A share as a whole percentage, never rounded to 0% or 100% when it is neither."""
+    text = f"{share * 100:.0f}%"
+    if text == "0%" and share > 0:
+        return "<1%"
+    if text == "100%" and share < 1:
+        return ">99%"
+    return text
+
+
 def _confusion(part, labels: list[str] | None, lang: str) -> dict:
     if labels is None or not isinstance(part, dict):
         raise _Unreadable
@@ -454,7 +475,7 @@ def _confusion(part, labels: list[str] | None, lang: str) -> dict:
         shares = [n / total if total else 0.0 for n in counts]
         rows.append(
             [
-                {"count": n, "share": share, "level": _level(share)}
+                {"count": n, "share": share, "share_text": _percent(share), "level": _level(share)}
                 for n, share in zip(counts, shares, strict=True)
             ]
         )
@@ -539,10 +560,37 @@ def _residuals(part, lang: str) -> dict:
     )
 
 
-def _scatter(part, lang: str) -> dict:
+def _deciles(part) -> list[tuple[float, float]]:
+    """The stored ``by_decile`` summary as ``(mean predicted, mean residual)`` rows."""
+    if not isinstance(part, list) or not part:
+        raise _Unreadable
+    rows = []
+    for row in part[: diagnostics.DECILES]:
+        if not isinstance(row, dict):
+            raise _Unreadable
+        rows.append((_finite(row.get("predicted_mean")), _finite(row.get("residual_mean"))))
+    return rows
+
+
+def _scatter(part, deciles: list[tuple[float, float]] | None, lang: str) -> dict:
+    """The sampled points, drawn whole; their text alternative is the decile summary when it
+    is stored (10 rows over every row, rather than 2,000), else the points. Values are shown
+    as stored (the engine rounded them to their spread), never re-rounded."""
     points = _pairs(part, ("actual", "predicted"), diagnostics.MAX_POINTS, _finite, least=1)
     low = min(min(point) for point in points)
     high = max(max(point) for point in points)
+    if deciles:
+        labels = [str(predicted) for predicted, _ in deciles]
+        values = [residual for _, residual in deciles]
+        table = {
+            "caption": i18n.t("model.diag.deciles", lang),
+            "x_name": i18n.t("model.diag.decile_predicted", lang),
+            "y_name": i18n.t("model.diag.decile_residual", lang),
+        }
+    else:
+        labels = [str(actual) for actual, _ in points]
+        values = [predicted for _, predicted in points]
+        table = None
     return {
         "type": "scatter",
         "series": [{"name": i18n.t("model.diag.sample", lang), "points": points}],
@@ -551,11 +599,12 @@ def _scatter(part, lang: str) -> dict:
             "points": [[low, low], [high, high]],
             "step": False,
         },
-        "labels": [_fmt(actual) for actual, _ in points],
-        "values": [predicted for _, predicted in points],
+        "labels": labels,
+        "values": values,
         "label": i18n.t("model.diag.scatter_chart", lang, n=f"{len(points):,}"),
         "x_name": i18n.t("model.diag.actual", lang),
         "y_name": i18n.t("model.diag.predicted", lang),
+        "table": table,
     }
 
 
@@ -622,7 +671,13 @@ def _diagnostics_view(record: ModelRecord, lang: str) -> dict | None:
             add("calibration_chart", "calibration", lambda part: _calibration(part, positive, lang))
     elif record.task == "regression":
         add("residual_chart", "residuals", lambda part: _residuals(part, lang))
-        add("scatter_chart", "points", lambda part: _scatter(part, lang))
+        deciles = None
+        if "by_decile" in found:
+            try:
+                deciles = _deciles(found["by_decile"])
+            except _PART_ERRORS:
+                partial = True
+        add("scatter_chart", "points", lambda part: _scatter(part, deciles, lang))
     if not view.keys() & DIAGNOSTIC_PARTS:
         return None
     rows = found.get("n_rows")

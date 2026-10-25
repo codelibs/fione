@@ -211,14 +211,16 @@
 
 {% macro chart(t, id, spec, cls="") %}
 {# An ECharts chart drawn by charts.js from a JSON block (|tojson escapes <, > and &, so no
-   value can end the script element). The table below is its text alternative. #}
+   value can end the script element). The table below is its text alternative: the spec's
+   labels and values, under its own caption and column names when it has a ``table``. #}
+{% set table = spec.table or {} %}
 <figure class="chart-figure {{ cls }}">
   <div class="chart" id="{{ id }}" data-chart="{{ id }}-data" role="img" aria-label="{{ spec.label }}"></div>
   <script type="application/json" id="{{ id }}-data">{{ spec|tojson }}</script>
   <figcaption class="visually-hidden">
     <table>
-      <caption>{{ spec.label }}</caption>
-      <thead><tr><th scope="col">{{ spec.x_name or t('chart.label') }}</th><th scope="col">{{ spec.y_name or t('chart.value') }}</th></tr></thead>
+      <caption>{{ table.caption or spec.label }}</caption>
+      <thead><tr><th scope="col">{{ table.x_name or spec.x_name or t('chart.label') }}</th><th scope="col">{{ table.y_name or spec.y_name or t('chart.value') }}</th></tr></thead>
       <tbody>{% for label in spec.labels %}<tr><th scope="row">{{ label }}</th><td>{{ spec["values"][loop.index0] }}</td></tr>{% endfor %}</tbody>
     </table>
   </figcaption>
