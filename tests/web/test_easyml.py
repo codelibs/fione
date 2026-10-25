@@ -1291,3 +1291,29 @@ def test_the_result_keeps_contribution_columns_apart(make_client):
     assert f"and {len(names) + 1 - easyml.RESULT_CONTRIB_COLUMNS} more" in details
     plain = world.client.get(world.path("/projects/{p}/jobs/{predict_job}/result")).text
     assert '<details class="details' not in plain
+
+
+def test_the_summary_uses_contribution_shares_once_explained(make_client):
+    from fione.models import explanations
+
+    world = make_world(make_client())
+    world.login("vi")
+    url = world.path("/projects/{p}/models/{model}/summary")
+    assert "relied on most, as a share of all it used" in world.client.get(url).text
+    importance = [
+        {"column": "sepal length (cm)", "mean_abs": 0.01, "share": 0.1},
+        {"column": "petal width (cm)", "mean_abs": 0.09, "share": 0.9},
+        {"column": 7, "share": 0.5},  # unreadable entries are left out
+    ]
+    payload = {"version": 1, "importance": importance, "partial_dependence": []}
+    with closing(connect(world.client)) as conn:
+        explanations.save_explanation(conn, world.ids[world.p]["model"], None, None, payload)
+    page = world.client.get(url).text
+    assert "moved the predictions most" in page
+    names = re.findall(r'<span class="importance__name">([^<]+)</span>', page)
+    values = re.findall(r'<span class="importance__value">([^<]+)</span>', page)
+    assert names == ["petal width (cm)", "sepal length (cm)"] and values == ["90%", "10%"]
+    with closing(connect(world.client)) as conn:
+        bad = {"version": 1, "importance": "x", "partial_dependence": []}
+        explanations.save_explanation(conn, world.ids[world.p]["model"], None, None, bad)
+    assert "relied on most, as a share of all it used" in world.client.get(url).text

@@ -56,6 +56,7 @@ from fione.web.easyml import (
     _clock,
     _ratings,
     _score_sentence,
+    contribution_shares,
     model_columns,
     refusals,
 )
@@ -781,19 +782,7 @@ def _stored(payload: dict, columns: list[str]) -> tuple[list, dict, bool]:
     """``(importance, curves, partial)`` of a stored payload: the ``(column, share)`` entries
     by share, the readable curves of the model's own columns by column, and whether anything
     stored was left out."""
-    partial = False
-    importance = []
-    entries = payload.get("importance")
-    if isinstance(entries, list):
-        for entry in entries:
-            share = _number(entry.get("share")) if isinstance(entry, dict) else None
-            if share is None or share < 0 or not isinstance(entry.get("column"), str):
-                partial = True
-                continue
-            importance.append((entry["column"], share))
-    elif entries is not None:
-        partial = True
-    importance.sort(key=lambda kv: -kv[1])
+    importance, partial = contribution_shares(payload)
     curves = {}
     found = payload.get("partial_dependence")
     known = set(columns)

@@ -1011,5 +1011,6 @@
   "result.contributions": "各行の寄与（{n} 列）",
   "result.contributions_explain": "「contrib_」で始まる列は、その入力が行の予測をどれだけ動かしたかです。予測の平均である「contrib_bias」と合わせると、予測値または確率になります。",
   "result.contributions_more": "…ほか {n} 列はダウンロードに含まれます。",
-  "why.input": "値 {value}"
+  "why.input": "値 {value}",
+  "summary.top_inputs_hint_contrib": "予測を最も動かした列と、全列の効果に対するその割合です。"
 }

@@ -49,7 +49,7 @@
 
     <section class="card card-padded stack" aria-labelledby="inputs-title">
       <h2 class="section-header__title" id="inputs-title">{{ t('summary.top_inputs') }}</h2>
-      <p class="text-muted text-sm">{{ t('summary.top_inputs_hint') }}</p>
+      <p class="text-muted text-sm">{{ t(top_hint) }}</p>
       {% if top %}
       <ol class="importance" role="list">
         {% for name, value in top %}

@@ -1011,5 +1011,6 @@
   "result.contributions": "Each row's contributions ({n} columns)",
   "result.contributions_explain": "Each “contrib_” column is how much that input moved the row's prediction; with “contrib_bias”, the average prediction, they add up to the predicted value or probability.",
   "result.contributions_more": "…and {n} more in the download.",
-  "why.input": "value {value}"
+  "why.input": "value {value}",
+  "summary.top_inputs_hint_contrib": "The columns that moved the predictions most, as a share of all the columns' effect."
 }

@@ -47,6 +47,7 @@ from fione.engine.config import TargetError, TrainConfig
 from fione.engine.prep import validate_target
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
+from fione.models import explanations
 from fione.models import service as models
 from fione.models.bundle import BundleError
 from fione.models.live import Busy, TooLarge, Untrusted
@@ -543,6 +544,34 @@ def _share(value) -> float:
         return 0.0
 
 
+def contribution_shares(payload: dict) -> tuple[list[tuple[str, float]], bool]:
+    """A stored explanation's importance as ``(column, share)`` by share, and whether an
+    entry could not be read (and was left out). The payload is untrusted and may have been
+    trimmed: the shares need not add up to 1."""
+    entries = payload.get("importance")
+    if not isinstance(entries, list):
+        return [], entries is not None
+    shares, partial = [], False
+    for entry in entries:
+        share = _finite(entry.get("share")) if isinstance(entry, dict) else None
+        if share is None or share < 0 or not isinstance(entry.get("column"), str):
+            partial = True
+            continue
+        shares.append((entry["column"], share))
+    shares.sort(key=lambda kv: -kv[1])
+    return shares, partial
+
+
+def _finite(value) -> float | None:
+    """A stored number as a float; None when it is not a finite number within float range."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    try:
+        return float(value) if math.isfinite(value) else None
+    except OverflowError:  # an int beyond the float range
+        return None
+
+
 def _number(value) -> str:
     """A metric for people: three significant digits, thousands separated."""
     try:
@@ -754,8 +783,13 @@ def summary(request: Request, conn: Conn, pid: str, mid: str) -> Response:
             elapsed = result.get("elapsed")
         except KeyError:  # the job was deleted
             pass
-    shares = ((name, _share(value)) for name, value in record.importance.items())
-    top = sorted(shares, key=lambda kv: (-kv[1], kv[0]))[:TOP_INPUTS]
+    # The contribution shares once the model is explained, else the gain importance.
+    stored = explanations.get_explanation(conn, record.id)
+    top = contribution_shares(stored.payload)[0][:TOP_INPUTS] if stored is not None else []
+    hint = "summary.top_inputs_hint_contrib" if top else "summary.top_inputs_hint"
+    if not top:
+        shares = ((name, _share(value)) for name, value in record.importance.items())
+        top = sorted(shares, key=lambda kv: (-kv[1], kv[0]))[:TOP_INPUTS]
     try:
         bundle = serving_bundle_of(request, record)
     except (BundleError, ModelNotFound):  # an unsafe image name, or the manifest is gone
@@ -770,6 +804,7 @@ def summary(request: Request, conn: Conn, pid: str, mid: str) -> Response:
         elapsed=_clock(elapsed) if isinstance(elapsed, int | float) else None,
         n_trials=len(record.trials),
         top=top,
+        top_hint=hint,
         top_max=max([v for _, v in top] + [1e-12]),
         bundle=bundle,
         members=sum(1 for row in record.leaderboard if (row.get("weight") or 0) > 0),
