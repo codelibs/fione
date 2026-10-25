@@ -931,5 +931,14 @@
   "project.delete": "プロジェクトを削除",
   "project.delete_question": "「{name}」と中身をすべて削除しますか？",
   "project.delete_effect": "実行中・待機中のジョブを先に止めます。データセット、モデル、ジョブ、予測結果は完全に削除され、共有していた人もアクセスできなくなります。",
-  "project.delete_yes": "削除する"
+  "project.delete_yes": "削除する",
+  "job.title.explain": "モデルを説明中",
+  "job.lead.explain": "Fione が、モデルにとってどの入力が大事か、入力によって予測がどう変わるかを調べています。このページは自動で更新されます。",
+  "job.stage.importance": "どの入力が大事かを調べています…",
+  "job.stage.explaining": "予測の変わり方を描いています：{total} 列中 {done} 列…",
+  "job.done.explain": "説明ができました。",
+  "job.see_result.explain": "説明を見る",
+  "job.back.explain": "モデルに戻る",
+  "job.cancel.explain": "説明を中止",
+  "job.cancel_effect.explain": "説明を止めます。以前の説明があれば、そのまま残ります。"
 }

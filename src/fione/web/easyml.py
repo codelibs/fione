@@ -147,7 +147,8 @@ def dashboard(request: Request, conn: Conn, pid: str) -> Response:
     records = models.list_models(conn, pid)
     ratings = _ratings(request, conn, records)
     ranked = sorted(records, key=lambda r: (-ratings[r.id].stars, -r.created_at, -r.id))
-    jobs = store.list_jobs(conn, pid, limit=RECENT_JOBS)
+    # Each training queues an explain job: listed with the jobs, not among the recent runs.
+    jobs = store.list_jobs(conn, pid, limit=RECENT_JOBS, exclude_kinds=("explain",))
     training = next((j for j in jobs if j.kind == "automl" and j.status not in TERMINAL), None)
     train_sets = [d for d in datasets if d.type == DatasetType.TRAIN]
     members = projects.list_members(conn, pid) if ctx.access == ProjectAccess.OWNER else None
@@ -561,6 +562,15 @@ def _stage(job: Job, events: list) -> tuple[str, dict]:
         if isinstance(done, int) and isinstance(total, int):
             return "job.stage.predicting", {"done": f"{done:,}", "total": f"{total:,}"}
         return "job.stage.reading", {}
+    if job.kind == "explain":
+        if last is None:
+            return "job.stage.reading", {}
+        if last.type == "finished":
+            return "job.stage.saving", {}
+        done, total = last.data.get("columns_done"), last.data.get("columns_total")
+        if type(done) is int and type(total) is int and 0 <= done <= total:
+            return "job.stage.explaining", {"done": f"{done:,}", "total": f"{total:,}"}
+        return "job.stage.importance", {}
     if last is None or last.type == "started":
         return "job.stage.preparing", {}
     if last.type in ("ensemble", "stopped") and "family" not in last.data:
@@ -607,6 +617,11 @@ def _job_view(request: Request, conn, ctx: Ctx, job: Job) -> dict:
             next_url = f"/projects/{pid}/jobs/{job.id}/result"
         if job.payload.get("model_id"):
             back_url = f"/projects/{pid}/models/{job.payload['model_id']}/predict"
+    elif job.kind == "explain" and isinstance(job.payload.get("model_id"), int):
+        # Both ways lead to the model's Explain tab (it says what a failure left there).
+        back_url = f"/projects/{pid}/models/{job.payload['model_id']}?tab=explain"
+        if job.status == JobStatus.DONE:
+            next_url = back_url
     elif job.kind == "export_models" and job.status == JobStatus.DONE:
         next_url = f"/projects/{pid}/models#export"  # the download is offered there
     elif job.kind == "module" and job.status == JobStatus.DONE:

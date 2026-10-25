@@ -87,13 +87,18 @@ def list_jobs(
     *,
     status: JobStatus | None = None,
     limit: int | None = None,
+    exclude_kinds: tuple[str, ...] = (),
 ) -> list[Job]:
-    """The project's jobs, newest first; at most ``limit`` of them if given."""
+    """The project's jobs, newest first, none of ``exclude_kinds``; at most ``limit`` of them
+    if given."""
     sql = "SELECT * FROM jobs WHERE project_id IS ?"
     args: list = [project_id]
     if status is not None:
         sql += " AND status = ?"
         args.append(status)
+    if exclude_kinds:
+        sql += f" AND kind NOT IN ({', '.join('?' * len(exclude_kinds))})"
+        args.extend(exclude_kinds)
     sql += " ORDER BY created_at DESC, id DESC"
     if limit is not None:
         sql += " LIMIT ?"

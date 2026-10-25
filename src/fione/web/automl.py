@@ -62,7 +62,7 @@ DATA_MAX_COLUMNS = 50  # and columns per page
 TOP_PAIRS = 20  # correlations: what the profile keeps
 JOBS_PER_PAGE = 50
 POLL_ACTIVE, POLL_IDLE = "5s", "30s"  # job-list refresh
-JOB_KINDS = ("automl", "batch_predict", "module", "export_models")
+JOB_KINDS = ("automl", "batch_predict", "module", "export_models", "explain")
 TASKS = ("auto", "classification", "regression")
 MAX_RUNTIME_DIGITS = 6  # minutes, as in the wizard
 SEED_MAX = 2**32 - 1  # numpy's RandomState (the folds) takes 0..2**32-1
@@ -619,6 +619,10 @@ def _job_row(ctx: Ctx, job: Job, now: float) -> dict:
         link = f"/projects/{pid}/models/{result['model_id']}"  # the model page
     elif job.status == JobStatus.DONE and job.kind == "batch_predict":
         link = f"/projects/{pid}/jobs/{job.id}/result"
+    elif job.status == JobStatus.DONE and job.kind == "explain":
+        model_id = job.payload.get("model_id")
+        if isinstance(model_id, int):
+            link = f"/projects/{pid}/models/{model_id}?tab=explain"
     info = job_out(job, admin=ctx.admin)  # the message as the API shows it to this user
     return {
         "job": job,

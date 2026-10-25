@@ -602,6 +602,21 @@ def test_the_job_list_with_filters(world):
     assert world.path("/projects/{p}/jobs/{predict_job}/result") in kind
 
 
+def test_explain_jobs_are_named_filtered_and_linked(world):
+    world.login("vi")
+    with closing(connect(world.client)) as conn:
+        user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        payload = {"model_id": world.ids[world.p]["model"], "dataset_id": None}
+        job = store.enqueue(conn, "explain", world.p, user, payload)
+        store.claim_job(conn, job.id, "t")
+        store.finish_job(conn, job.id, JobStatus.DONE)
+    page = world.client.get(world.path("/projects/{p}/jobs") + "?kind=explain").text
+    assert '<option value="explain" selected>Explanation</option>' in page
+    model_tab = world.path("/projects/{p}/models/{model}") + "?tab=explain"
+    assert f'<a href="{model_tab}">Explanation #{job.id}</a>' in page
+    assert f"#{world.ids[world.p]['predict_job']}<" not in page
+
+
 def test_the_list_polls_fast_while_a_job_is_active_and_slowly_otherwise(world):
     csrf = world.login("ed")
     hx = {"HX-Request": "true"}

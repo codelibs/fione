@@ -1054,3 +1054,62 @@ def test_training_on_a_dataset_whose_data_is_gone_is_404(make_client):
     r = world.client.post(world.path("/projects/{p}/datasets/{train}/run"), data=run_form(csrf))
     assert r.status_code == 404 and "text/html" in r.headers["content-type"]
     assert job_count(world.client) == 4
+
+
+# --- explain jobs -------------------------------------------------------------------------
+
+
+def explain_job(world, status=None, *, message=None, events=()) -> int:
+    """An explain job of project p's model: queued, or claimed with ``events`` and finished
+    with ``status``."""
+    with closing(connect(world.client)) as conn:
+        owner = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        payload = {"model_id": world.ids[world.p]["model"], "dataset_id": None}
+        job = store.enqueue(conn, "explain", world.p, owner, payload)
+        if status is not None or events:
+            store.claim_job(conn, job.id, "token")
+        for event in events:
+            store.append_event(conn, job.id, event)
+        if status is not None and status != JobStatus.RUNNING:
+            store.finish_job(conn, job.id, status, message=message)
+        return job.id
+
+
+def test_an_explain_job_has_its_own_page_texts(make_client):
+    from fione.engine.events import Event
+
+    world = make_world(make_client())
+    world.login("co")
+    model_tab = world.path("/projects/{p}/models/{model}") + "?tab=explain"
+    notice = Event("notice", data={"message": "m", "columns_done": 2, "columns_total": 5})
+    running = explain_job(world, JobStatus.RUNNING, events=[Event("started"), notice])
+    page = world.client.get(world.path("/projects/{p}/jobs/") + str(running)).text
+    assert '<h1 class="page-header__title">Explaining the model</h1>' in page
+    assert "Stop explaining" in page and "2 of 5 columns" in page
+    assert ">explain<" not in page
+    done = explain_job(world, JobStatus.DONE)
+    r = world.client.get(
+        world.path("/projects/{p}/jobs/") + f"{done}/status", headers={"HX-Request": "true"}
+    )
+    assert r.headers["HX-Redirect"] == model_tab
+    assert "The explanation is ready." in r.text
+    failed = explain_job(world, JobStatus.FAILED, message="the dataset no longer exists")
+    page = world.client.get(world.path("/projects/{p}/jobs/") + str(failed)).text
+    assert "the dataset no longer exists" in page
+    assert f'href="{model_tab}"' in page and "Back to the model" in page
+    world.client.cookies.set("fione_lang", "ja")
+    page = world.client.get(world.path("/projects/{p}/jobs/") + str(running)).text
+    assert "モデルを説明中" in page and "5 列中 2 列" in page
+
+
+def test_the_dashboard_lists_no_explain_jobs(make_client):
+    """Every training queues an explain job: the recent list and the running-training
+    lookup must not fill up with them."""
+    world = make_world(make_client())
+    world.login("ed")
+    explains = [explain_job(world) for _ in range(easyml.RECENT_JOBS + 2)]
+    page = world.client.get(world.path("/projects/{p}")).text
+    ids = world.ids[world.p]
+    assert f"#{ids['job']}<" in page and f"#{ids['predict_job']}<" in page
+    assert not any(f"#{job}<" in page for job in explains)
+    assert world.path('href="/projects/{p}/jobs/{job}"') in page  # the training in progress

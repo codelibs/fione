@@ -931,5 +931,14 @@
   "project.delete": "Delete project",
   "project.delete_question": "Delete “{name}” and everything in it?",
   "project.delete_effect": "Running and queued jobs are stopped first. Its datasets, models, jobs and predictions are deleted for good, and the people it is shared with lose access.",
-  "project.delete_yes": "Yes, delete the project"
+  "project.delete_yes": "Yes, delete the project",
+  "job.title.explain": "Explaining the model",
+  "job.lead.explain": "Fione is working out which inputs matter most to the model and how its predictions change with them. This page updates by itself.",
+  "job.stage.importance": "Working out which inputs matter most…",
+  "job.stage.explaining": "Drawing how the predictions change: {done} of {total} columns…",
+  "job.done.explain": "The explanation is ready.",
+  "job.see_result.explain": "See the explanation",
+  "job.back.explain": "Back to the model",
+  "job.cancel.explain": "Stop explaining",
+  "job.cancel_effect.explain": "Explaining stops. The model keeps its earlier explanation, if it has one."
 }
