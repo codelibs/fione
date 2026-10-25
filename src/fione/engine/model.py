@@ -1,7 +1,8 @@
 """The trained model ``AutoML.fit`` returns.
 
 Everything in it is a top-level class, a library estimator or plain data, so it pickles; it
-holds no training data (see ``fione.engine.automl`` for what it keeps on request).
+holds no training rows (see ``fione.engine.automl`` for what it keeps on request), except that
+``diagnostics`` holds the class labels and, for regression, up to 2,000 sampled target values.
 """
 
 from dataclasses import dataclass
