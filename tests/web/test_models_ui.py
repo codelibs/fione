@@ -1103,6 +1103,7 @@ def test_explain_tab_states(world, spy, state, persona):
         assert pd_spec["type"] == "lines" and first["column"] in pd_spec["label"]
     form = 'action="' + world.path("/projects/{p}/models/{model}") + '/explain"'
     assert (form in panel) is (persona == "co")
+    assert ('id="recompute-title"' in panel) is (persona == "co")
     assert spy.calls == 0  # a page view never loads the model
 
 
@@ -1140,7 +1141,7 @@ def test_other_column_pd_is_computed(world, spy):
     assert "virginica" in spec["y_name"]
     assert sum(1 for s in spec["series"] if s.get("faint")) == 50  # the requested class's rows
     assert "Computed just now from 150 rows of iris" in html
-    assert "can differ from the stored" in html
+    assert "can differ slightly from the stored" in html
     assert spy.calls == 1
 
 
@@ -1316,3 +1317,106 @@ def test_the_training_data_is_offered_first(world):
     select = re.search(r'<select[^>]*name="dataset_id".*?</select>', page.text, re.S).group(0)
     first = re.search(r'<option value="([^"]*)"[^>]*>([^<]*)<', select)
     assert first.group(1) == "" and "iris_test (training data)" in first.group(2)
+
+
+def strict(text: str):
+    """JSON as browsers parse it: NaN and Infinity are not JSON."""
+
+    def refuse(name):
+        raise ValueError(f"not JSON: {name}")
+
+    return json.loads(text, parse_constant=refuse)
+
+
+def all_specs(html: str) -> list:
+    """Every chart spec of a page, parsed as a browser would."""
+    blocks = re.findall(r'<script type="application/json" id="[^"]+">(.*?)</script>', html, re.S)
+    inline = re.findall(r"data-chart-spec='([^']*)'", html)
+    return [strict(b) for b in blocks] + [strict(unescape(t)) for t in inline]
+
+
+def test_values_too_large_to_show_never_break_the_charts(world):
+    """A share of 1e308 or a probability of 1e307 would be Infinity in percent: left out."""
+    payload = json.loads(json.dumps(iris_explanation()))
+    payload["importance"][0]["share"] = 1e308
+    first = payload["partial_dependence"][0]
+    first["average"][0][0] = 1e307
+    crafted = record_like(world, world.p, importance={c: 1e308 for c in IRIS_COLUMNS})
+    store_explanation(world, crafted, payload)
+    world.login("vi")
+    base = world.path("/projects/{p}/models/") + str(crafted)
+    page = world.client.get(base + "?tab=explain").text
+    assert all_specs(page)  # the importance tab's, the explain tab's: all strict JSON
+    assert "could not be read" in explain_panel(page)
+    assert len(chart_specs(page)["contrib-chart"]["values"]) == len(payload["importance"]) - 1
+    dropped = pd_fragment(world, crafted, column=first["column"])
+    assert "pd-chart" not in dropped and "training data is no longer available" in dropped
+    gain_only = record_like(world, world.p, importance={c: 1e308 for c in IRIS_COLUMNS})
+    for mid in (crafted, gain_only):  # contribution shares, then the gain importance
+        summary = world.client.get(world.path("/projects/{p}/models/") + f"{mid}/summary").text
+        assert "inf%" not in summary and "nan%" not in summary
+
+
+# Malformed curves for a column the model does use: each is left out (with the note), and the
+# fragment computes that column instead (here: no training data, so a message).
+CURVE_BREAKS = {
+    "ice_output_out_of_range": lambda c: c.update(ice_output=len(c["outputs"])),
+    "ice_output_negative": lambda c: c.update(ice_output=-1),
+    "average_too_narrow": lambda c: c.update(average=[row[:-1] for row in c["average"]]),
+    "average_too_short": lambda c: c.update(average=c["average"][:-1]),
+    "numeric_grid_with_text": lambda c: c["grid"].__setitem__(0, "x"),
+    "ice_row_too_short": lambda c: c["ice"].__setitem__(0, c["ice"][0][:-1]),
+    "probability_above_one": lambda c: c["average"][0].__setitem__(0, 1.5),
+    "no_outputs": lambda c: c.update(outputs=[]),
+}
+
+
+@pytest.mark.parametrize("name", sorted(CURVE_BREAKS))
+def test_malformed_curves_of_a_used_column(world, spy, name):
+    payload = json.loads(json.dumps(iris_explanation()))
+    first = payload["partial_dependence"][0]
+    assert first["kind"] == "numeric" and first["column"] in IRIS_COLUMNS
+    CURVE_BREAKS[name](first)
+    model = world.ids[world.p]["model"]
+    store_explanation(world, model, payload)
+    world.login("vi")
+    r = world.client.get(world.path("/projects/{p}/models/{model}") + "?tab=explain")
+    assert r.status_code == 200
+    panel = explain_panel(r.text)
+    assert "could not be read" in panel
+    assert f'<option value="{first["column"]}"' in panel  # offered, not as ready
+    assert f"{escape(first['column'])} (ready)" not in panel
+    html = pd_fragment(world, model, column=first["column"])
+    assert "training data is no longer available" in html  # not drawn from the stored one
+    second = payload["partial_dependence"][1]["column"]
+    assert "pd-chart" in pd_fragment(world, model, column=second)  # the others still show
+    assert spy.calls == 0
+
+
+def test_an_unexpected_error_is_a_message_never_a_500(world, monkeypatch):
+    trained_on = record_like(world, world.p, dataset_id=world.ids[world.p]["train"])
+    world.login("vi")
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(models_ui.engine_explain, "partial_dependence", broken)
+    html = pd_fragment(world, trained_on, column=IRIS_COLUMNS[0])
+    assert "This could not be computed." in html and "boom" not in html
+    assert 'id="pd-status" hx-swap-oob="innerHTML"' in html
+    monkeypatch.setattr(models_ui, "_explain_view", broken)
+    r = world.client.get(world.path("/projects/{p}/models/") + f"{trained_on}?tab=explain")
+    assert r.status_code == 200 and "cannot be shown right now" in r.text
+    assert "no explanation yet" not in r.text
+
+
+def test_the_swapped_curve_is_announced(world):
+    model = world.ids[world.p]["model"]
+    store_explanation(world, model)
+    world.login("vi")
+    page = world.client.get(world.path("/projects/{p}/models/{model}") + "?tab=explain").text
+    assert '<p class="visually-hidden" role="status" id="pd-status"></p>' in page
+    assert "hx-swap-oob" not in explain_panel(page)  # only swapped fragments announce
+    column = iris_explanation()["partial_dependence"][1]["column"]
+    html = pd_fragment(world, model, column=column)
+    assert f"Showing how the prediction changes with {column}." in html

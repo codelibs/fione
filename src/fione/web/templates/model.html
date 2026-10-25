@@ -130,7 +130,9 @@
       {% if explain_error %}
       <div class="alert alert-danger" role="alert">{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('explain.recompute.error') }}</strong></p><p class="alert__detail">{{ explain_error }}</p></div></div>
       {% endif %}
-      {% if x.state in ("queued", "running") %}
+      {% if x.unavailable %}
+      <p class="empty-line text-muted">{{ t('explain.unavailable') }}</p>
+      {% elif x.state in ("queued", "running") %}
       <div class="alert alert-info" role="note">{{ icon("clock") }}<span>{{ t('explain.state.' ~ x.state) }} <a href="/projects/{{ pid }}/jobs/{{ x.job.id }}">{{ t('explain.state.follow') }}</a></span></div>
       {% elif x.state == "failed" %}
       <div class="alert alert-warning" role="note">{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('explain.state.failed') }}</strong></p>{% if x.message %}<p class="alert__detail">{{ x.message }}</p>{% endif %}<p><a href="/projects/{{ pid }}/jobs/{{ x.job.id }}">{{ t('explain.state.job', id=x.job.id) }}</a></p></div></div>
@@ -146,7 +148,7 @@
         <p class="text-muted text-sm">{{ t('explain.importance_hint') }}</p>
         {% if x.chart %}{{ chart(t, "contrib-chart", x.chart, "chart-tall") }}{% else %}<p class="empty-line text-muted">{{ t('explain.importance_none') }}</p>{% endif %}
       </section>
-      {% elif x.state not in ("queued", "running", "failed") %}
+      {% elif x.state not in ("queued", "running", "failed") and not x.unavailable %}
       <p class="empty-line text-muted">{{ t('explain.state.none') }}</p>
       {% endif %}
       {% if x.picker %}
@@ -163,6 +165,7 @@
           </div>
           <button type="submit" class="btn btn-secondary">{{ t('explain.pd.show') }}</button>
         </form>
+        <p class="visually-hidden" role="status" id="pd-status"></p>
         {% with pd = x.pd %}{% include "_pd.html" %}{% endwith %}
       </section>
       {% endif %}

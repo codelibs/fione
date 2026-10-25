@@ -1,6 +1,8 @@
 {% from "_macros.html" import icon %}
 {# Each of the first rows' reasons, swapped in by the result page (loaded once, never polled).
-   The effects are text with their sign; the meter only shows their size. #}
+   The effects are text with their sign; the meter only shows their size. The page's status
+   region says what came. #}
+<span id="why-status" hx-swap-oob="innerHTML">{{ t(why.message) if why.message else t('why.status', n=why.rows|length) }}</span>
 <section class="stack-tight" id="why" aria-labelledby="why-title">
   <h2 class="section-header__title" id="why-title">{{ t('why.title') }}</h2>
   {% if why.message %}
@@ -44,6 +46,6 @@
     </section>
     {% endfor %}
   </div>
-  <p class="text-muted text-sm">{{ t('why.approximate') }}</p>
+  <p class="text-muted text-sm">{{ t('why.approximate_ensemble' if why.ensemble else 'why.approximate') }}</p>
   {% endif %}
 </section>

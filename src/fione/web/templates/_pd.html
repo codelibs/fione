@@ -1,6 +1,8 @@
 {% from "_macros.html" import chart %}
 {# The partial dependence of one column: on the model page, or swapped in by the column
-   picker. Its chart carries its data in an attribute (HTMX drops script elements). #}
+   picker. Its chart carries its data in an attribute (HTMX drops script elements). A swapped
+   one (``announce``) also says what it shows in the page's status region. #}
+{% if announce %}<span id="pd-status" hx-swap-oob="innerHTML">{{ t(pd.message) if pd.message else t('explain.pd.status', column=pd.column) }}</span>{% endif %}
 <div class="stack-tight" id="pd-panel">
   {% if pd.message %}
   <p class="empty-line text-muted">{{ t(pd.message) }}</p>

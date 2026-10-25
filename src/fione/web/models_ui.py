@@ -9,6 +9,7 @@ model record, capped; nothing is recomputed or unpickled per request.
 """
 
 import json
+import logging
 import math
 import re
 
@@ -41,6 +42,7 @@ from fione.jobs.store import JobStatus
 from fione.models import explanations
 from fione.models import service as models
 from fione.models.bundle import BundleError
+from fione.models.explanations import model_columns
 from fione.models.service import ModelNotFound, ModelRecord
 from fione.models.transfer import ModelImportError
 from fione.modules.registry import redact
@@ -56,13 +58,15 @@ from fione.web.easyml import (
     _clock,
     _ratings,
     _score_sentence,
+    _share,
     contribution_shares,
-    model_columns,
+    finite,
     refusals,
 )
 from fione.web.uploads import UploadFormError, UploadProblem, read_form
 from fione.web.views import UiError, language, render
 
+log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
 
 MODELS_PER_PAGE = 50
@@ -89,13 +93,8 @@ def _view(request: Request, template: str, ctx: Ctx, **context) -> Response:
     )
 
 
-def _number(value) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    try:
-        return float(value) if math.isfinite(value) else None
-    except OverflowError:  # an int beyond the float range (a hand-made record)
-        return None
+# A stored number as a float, None when it is not finite or beyond the float range.
+_number = finite
 
 
 # --- the project's models -----------------------------------------------------------------
@@ -737,10 +736,12 @@ def _rows_of(value, width: int, check) -> list[list]:
     return rows
 
 
-def _stored_curve(entry) -> dict:
+def _stored_curve(entry, probabilities: bool) -> dict:
     """One stored partial dependence curve, checked: ``column``, ``kind``, ``grid`` (1 to 20
     points), ``outputs`` (the kept classes), ``average[point][output]``, ``ice_output`` and
-    ``ice[row][point]`` (single rows, for ``outputs[ice_output]``) and ``n_rows``."""
+    ``ice[row][point]`` (single rows, for ``outputs[ice_output]``) and ``n_rows``. A
+    classifier's values are probabilities, in [0, 1] (they are shown in percent)."""
+    value = _unit if probabilities else _finite
     if not isinstance(entry, dict) or not isinstance(entry.get("column"), str):
         raise _Unreadable
     kind, grid, outputs = entry.get("kind"), entry.get("grid"), entry.get("outputs")
@@ -761,10 +762,10 @@ def _stored_curve(entry) -> dict:
     ice_output = entry.get("ice_output")
     if type(ice_output) is not int or not 0 <= ice_output < len(outputs):
         raise _Unreadable
-    average = _rows_of(entry.get("average"), len(outputs), _finite)
+    average = _rows_of(entry.get("average"), len(outputs), value)
     if len(average) != len(grid):
         raise _Unreadable
-    ice = _rows_of(entry.get("ice", []), len(grid), _finite)[: engine_explain.ICE_ROWS]
+    ice = _rows_of(entry.get("ice", []), len(grid), value)[: engine_explain.ICE_ROWS]
     rows = entry.get("n_rows")
     return {
         "column": entry["column"],
@@ -778,17 +779,19 @@ def _stored_curve(entry) -> dict:
     }
 
 
-def _stored(payload: dict, columns: list[str]) -> tuple[list, dict, bool]:
+def _stored(record: ModelRecord, payload: dict) -> tuple[list, dict, bool]:
     """``(importance, curves, partial)`` of a stored payload: the ``(column, share)`` entries
     by share, the readable curves of the model's own columns by column, and whether anything
     stored was left out."""
+    columns = model_columns(record)
+    probabilities = record.task == "classification"
     importance, partial = contribution_shares(payload)
     curves = {}
     found = payload.get("partial_dependence")
     known = set(columns)
     for entry in found if isinstance(found, list) else []:
         try:
-            curve = _stored_curve(entry)
+            curve = _stored_curve(entry, probabilities)
         except _PART_ERRORS:
             partial = True
             continue
@@ -974,7 +977,7 @@ def _explain_view(request: Request, conn, ctx: Ctx, record: ModelRecord, lang: s
     columns = model_columns(record)
     importance, curves, partial = [], {}, False
     if stored is not None:
-        importance, curves, partial = _stored(stored.payload, columns)
+        importance, curves, partial = _stored(record, stored.payload)
     chart = None
     if importance:
         shown = importance[:EXPLAIN_IMPORTANCE]
@@ -1021,18 +1024,31 @@ def _explain_view(request: Request, conn, ctx: Ctx, record: ModelRecord, lang: s
     }
 
 
+def _explain_tab(request: Request, conn, ctx: Ctx, record: ModelRecord, lang: str) -> dict:
+    """``_explain_view``, or a note when it fails: the rest of the model page never does."""
+    try:
+        return _explain_view(request, conn, ctx, record, lang)
+    except Exception:
+        log.exception("the explain tab of model %s could not be shown", record.id)
+        return {"unavailable": True, "picker": [], "datasets": []}
+
+
 @router.get("/projects/{pid}/models/{mid}/explain/pd")
 def explain_pd(request: Request, conn: Conn, pid: str, mid: str) -> Response:
     """The partial dependence fragment for ``column`` (and ``class``, an output index)."""
     ctx = page(request, conn, pid)
     record = model_in(conn, ctx, mid)
     lang = language(request)
-    stored = explanations.get_explanation(conn, record.id)
-    curves = {} if stored is None else _stored(stored.payload, model_columns(record))[1]
     column = request.query_params.get("column", "")
-    output = _output_param(request.query_params.get("class"))
-    pd_view = _pd_view(request, conn, record, curves, column, output, lang)
-    return render(request, "_pd.html", ctx.auth, ctx=ctx, pd=pd_view)
+    try:
+        stored = explanations.get_explanation(conn, record.id)
+        curves = {} if stored is None else _stored(record, stored.payload)[1]
+        output = _output_param(request.query_params.get("class"))
+        pd_view = _pd_view(request, conn, record, curves, column, output, lang)
+    except Exception:  # a message HTMX swaps in, never an error it leaves unswapped
+        log.exception("the partial dependence of model %s could not be shown", record.id)
+        pd_view = {"url": request.url.path, "column": column, "message": "explain.failed"}
+    return render(request, "_pd.html", ctx.auth, ctx=ctx, pd=pd_view, announce=True)
 
 
 @router.post("/projects/{pid}/models/{mid}/explain")
@@ -1090,7 +1106,7 @@ def _model_view(
             pass
     importance = record.importance if isinstance(record.importance, dict) else {}
     ranked = sorted(
-        ((str(k), _number(v) or 0.0) for k, v in importance.items()),
+        ((str(k), _share(v)) for k, v in importance.items()),  # shown in percent
         key=lambda kv: (-kv[1], kv[0]),
     )[:IMPORTANCE_ROWS]
     importance_chart = None
@@ -1131,7 +1147,7 @@ def _model_view(
         metric_rows=metric_rows,
         diagnostics=_diagnostics_view(record, lang),
         diagnostics_stored=record.diagnostics is not None,
-        explain=_explain_view(request, conn, ctx, record, lang),
+        explain=_explain_tab(request, conn, ctx, record, lang),
         explain_error=explain_error,
         bundle=bundle,
         status=status,

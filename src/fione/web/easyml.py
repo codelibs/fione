@@ -29,7 +29,7 @@ from fione.api.deps import Conn
 from fione.api.routes_datasets import cell
 from fione.api.routes_jobs import cancel
 from fione.api.routes_models import serving_bundle_of
-from fione.api.schemas import event_out, job_out
+from fione.api.schemas import MAX_ID, event_out, job_out
 from fione.auth.roles import ProjectAccess, Role
 from fione.data.profile import (
     CORRELATED,
@@ -42,7 +42,7 @@ from fione.data.profile import (
     LeakCheck,
 )
 from fione.engine import explain
-from fione.engine.artifact import UntrustedArtifactError, read_manifest
+from fione.engine.artifact import MODEL_FILE, UntrustedArtifactError, read_manifest
 from fione.engine.config import TargetError, TrainConfig
 from fione.engine.prep import validate_target
 from fione.jobs import store
@@ -50,6 +50,7 @@ from fione.jobs.store import TERMINAL, Job, JobStatus
 from fione.models import explanations
 from fione.models import service as models
 from fione.models.bundle import BundleError
+from fione.models.explanations import model_columns
 from fione.models.live import Busy, TooLarge, Untrusted
 from fione.models.rating import Baseline, Rating, star_rating, target_baseline
 from fione.models.service import ModelNotFound, ModelRecord
@@ -85,6 +86,9 @@ RESULT_PREVIEW_ROWS = 20
 RESULT_CONTRIB_COLUMNS = 20  # contribution columns previewed (all are in the download)
 WHY_ROWS = 5  # rows of the prediction result explained
 WHY_TOP = 5  # columns shown per row; the rest are summed as "other columns"
+# The reasons load only when asked for (a button) for a model whose 5 rows would take more
+# than a tenth of the explanation cell cap: costly to compute while the page opens.
+WHY_HEAVY = 10
 RECENT_JOBS = 10
 TOP_INPUTS = 5
 EVENT_DETAILS = 20
@@ -536,33 +540,33 @@ def _clock(seconds: float | None) -> str | None:
 
 
 def _share(value) -> float:
-    """A stored importance share as a float: 0.0 when missing, not finite, or beyond the float
-    range (a hand-made record)."""
-    try:
-        return float(value) if value is not None and math.isfinite(value) else 0.0
-    except (OverflowError, TypeError):
-        return 0.0
+    """A stored importance share as a float: 0.0 when missing, not a finite number, or too
+    large to show in percent (a hand-made record)."""
+    number = finite(value)
+    return number if number is not None and math.isfinite(number * 100) else 0.0
 
 
 def contribution_shares(payload: dict) -> tuple[list[tuple[str, float]], bool]:
     """A stored explanation's importance as ``(column, share)`` by share, and whether an
     entry could not be read (and was left out). The payload is untrusted and may have been
-    trimmed: the shares need not add up to 1."""
+    trimmed: the shares need not add up to 1. A column listed again is left out."""
     entries = payload.get("importance")
     if not isinstance(entries, list):
         return [], entries is not None
-    shares, partial = [], False
+    shares, seen, partial = [], set(), False
     for entry in entries:
-        share = _finite(entry.get("share")) if isinstance(entry, dict) else None
-        if share is None or share < 0 or not isinstance(entry.get("column"), str):
+        share = finite(entry.get("share")) if isinstance(entry, dict) else None
+        if share is None or not 0 <= share <= 1 or not isinstance(entry.get("column"), str):
             partial = True
             continue
-        shares.append((entry["column"], share))
+        if entry["column"] not in seen:
+            seen.add(entry["column"])
+            shares.append((entry["column"], share))
     shares.sort(key=lambda kv: -kv[1])
     return shares, partial
 
 
-def _finite(value) -> float | None:
+def finite(value) -> float | None:
     """A stored number as a float; None when it is not a finite number within float range."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
@@ -946,16 +950,11 @@ def prediction_result(request: Request, conn: Conn, pid: str, jid: str) -> Respo
         preview=_preview(request, dataset, RESULT_PREVIEW_ROWS, names),
         contributions=contributions,
         model_id=job.payload.get("model_id"),
+        why_gate=_why_gate(request, conn, job),
     )
 
 
 # --- why: each row's reasons ----------------------------------------------------------------
-
-
-def model_columns(record: ModelRecord) -> list[str]:
-    """The model's input columns as stored (its importance has one entry per column)."""
-    found = record.importance if isinstance(record.importance, dict) else {}
-    return [name for name in found if isinstance(name, str)]
 
 
 class Refused(Exception):
@@ -998,8 +997,11 @@ def _why_row(columns, values, bias: float, prediction: float, inputs, percent: b
     columns. Classification in percent and percentage points, regression in target units,
     all with one number of decimals per row; ``meter`` is the effect's size out of 1,000."""
     scale = 100.0 if percent else 1.0
-    values = np.asarray(values, dtype=float) * scale
+    with np.errstate(over="ignore", invalid="ignore"):  # checked just below
+        values = np.asarray(values, dtype=float) * scale
     bias, prediction = bias * scale, prediction * scale
+    if not (np.isfinite(values).all() and math.isfinite(bias) and math.isfinite(prediction)):
+        raise ValueError("the contributions are not finite numbers")
     if percent:
         decimals = 1
     else:
@@ -1043,16 +1045,15 @@ def _why_view(request: Request, conn, job: Job, lang: str) -> dict:
     ``message`` saying why there are none."""
     url = f"/projects/{job.project_id}/jobs/{job.id}/result/why"
     view: dict = {"url": url}
-    try:
-        record = models.get_model(conn, job.payload.get("model_id"))
-    except (ModelNotFound, TypeError, ValueError):
-        record = None
-    if record is None or record.project_id != job.project_id:
+    record = _job_model(conn, job)
+    if record is None:
         return view | {"message": "why.no_model"}
-    try:
-        dataset = projects.get_dataset(conn, job.payload.get("dataset_id"))
-    except (DatasetNotFound, TypeError, ValueError):
-        dataset = None
+    dataset = None
+    if (dataset_id := _payload_id(job.payload.get("dataset_id"))) is not None:
+        try:
+            dataset = projects.get_dataset(conn, dataset_id)
+        except DatasetNotFound:
+            pass
     live = request.app.state.live_models
     try:
         with refusals():
@@ -1081,27 +1082,82 @@ def _why_view(request: Request, conn, job: Job, lang: str) -> dict:
     out = []
     for i, slot in enumerate(c.slots().tolist()):
         inputs = [cell(frame[n].iloc[i]) if n in frame.columns else None for n in c.columns]
-        row = _why_row(
-            c.columns,
-            c.values[i, slot],
-            float(c.bias[i, slot]),
-            float(c.prediction[i, slot]),
-            inputs,
-            percent,
-        )
+        try:
+            row = _why_row(
+                c.columns,
+                c.values[i, slot],
+                float(c.bias[i, slot]),
+                float(c.prediction[i, slot]),
+                inputs,
+                percent,
+            )
+        except ValueError as e:
+            return view | {"message": "explain.failed", "detail": str(e), "retry": True}
         row["label"] = str(c.outputs[slot])
         out.append(row)
     kind = "positive" if binary else ("class" if percent else "value")
-    return view | {"rows": out, "kind": kind, "target": record.target}
+    return view | {
+        "rows": out,
+        "kind": kind,
+        "target": record.target,
+        "ensemble": record.best_model == "Ensemble",
+    }
+
+
+def _payload_id(value) -> int | None:
+    """An id as a job payload holds it: a positive int, else None."""
+    return value if type(value) is int and 1 <= value <= MAX_ID else None
+
+
+def _job_model(conn, job: Job) -> ModelRecord | None:
+    """The model a job names in its payload, when it still exists in the job's project."""
+    model_id = _payload_id(job.payload.get("model_id"))
+    if model_id is None:
+        return None
+    try:
+        record = models.get_model(conn, model_id)
+    except ModelNotFound:
+        return None
+    return record if record.project_id == job.project_id else None
+
+
+def _why_gate(request: Request, conn, job: Job) -> str | None:
+    """Whether the result page loads the reasons by itself (None), shows why it cannot
+    instead (an i18n key: the request would only be refused), or waits for a click
+    (``"click"``: a model costly to explain here). Read from the record and the manifest;
+    nothing is loaded. The fragment still makes its own checks."""
+    record = _job_model(conn, job)
+    if record is None:
+        return None
+    if not record.trusted:
+        return "explain.untrusted"
+    live = request.app.state.live_models
+    try:
+        if _storage(request).size(record.storage_prefix + MODEL_FILE) > live.max_bytes:
+            return "explain.too_large"
+        manifest = read_manifest(_storage(request), record.storage_prefix)
+    except (KeyError, UntrustedArtifactError):  # gone or broken: the fragment says so
+        return None
+    classes = len(manifest.classes or [])
+    width = (classes if classes > 2 else 1) * max(1, len(manifest.columns))
+    if width > explain.CELLS:
+        return "why.too_wide"
+    return "click" if width * WHY_ROWS * WHY_HEAVY > explain.CELLS else None
 
 
 @router.get("/projects/{pid}/jobs/{jid}/result/why")
 def prediction_why(request: Request, conn: Conn, pid: str, jid: str) -> Response:
     """The fragment of the result page explaining its first rows (computed when asked for:
-    the result page loads it once, never polling)."""
+    the result page loads it once, never polling). Whatever goes wrong is a message with a
+    retry button, at status 200, so HTMX swaps it in."""
     ctx = _page(request, conn, pid)
     job = _job(conn, ctx, jid)
     if job.kind != "batch_predict":
         raise UiError(404, "error.not_found")
-    view = _why_view(request, conn, job, language(request))
+    try:
+        view = _why_view(request, conn, job, language(request))
+    except Exception:
+        log.exception("the reasons of job %s could not be shown", job.id)
+        url = f"/projects/{job.project_id}/jobs/{job.id}/result/why"
+        view = {"url": url, "message": "explain.failed", "retry": True}
     return render(request, "_why.html", ctx.auth, ctx=ctx, why=view)

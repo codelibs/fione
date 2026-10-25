@@ -975,7 +975,7 @@
   "explain.pd.y_class": "Chance of {label} (%)",
   "explain.pd.y_value": "Predicted {target}",
   "explain.pd.stored": "From the stored explanation, averaged over {n} rows.",
-  "explain.pd.live": "Computed just now from {n} rows of {dataset}. That is a smaller sample than the stored explanation uses, so these points can differ from the stored curves.",
+  "explain.pd.live": "Computed just now from {n} rows of {dataset}. Its points come from this smaller sample, so they can differ slightly from the stored curves.",
   "explain.pd.no_ice": "Single-row lines are stored for {label} only.",
   "explain.busy": "Another explanation is being computed right now. Try again in a moment.",
   "explain.untrusted": "This model was imported without this server's signature, so it is not opened here. Only an explanation job, which needs edit access, can explain it.",
@@ -1003,7 +1003,7 @@
   "why.col.effect": "Effect",
   "why.average": "Average prediction",
   "why.other": "Other columns ({n})",
-  "why.approximate": "These reasons are approximate: the model combines several models, and their reasons are combined too. They always add up to the prediction.",
+  "why.approximate": "These reasons are approximate. Before rounding, they add up to the prediction.",
   "why.retry": "Try again",
   "why.no_model": "The model of these predictions no longer exists.",
   "why.no_dataset": "The data these predictions were made from is no longer available.",
@@ -1012,5 +1012,11 @@
   "result.contributions_explain": "Each “contrib_” column is how much that input moved the row's prediction; with “contrib_bias”, the average prediction, they add up to the predicted value or probability.",
   "result.contributions_more": "…and {n} more in the download.",
   "why.input": "value {value}",
-  "summary.top_inputs_hint_contrib": "The columns that moved the predictions most, as a share of all the columns' effect."
+  "summary.top_inputs_hint_contrib": "The columns that moved the predictions most, as a share of all the columns' effect.",
+  "explain.unavailable": "The explanation cannot be shown right now.",
+  "explain.pd.status": "Showing how the prediction changes with {column}.",
+  "why.status": "The reasons for {n} rows are shown.",
+  "why.show": "Show why",
+  "why.click_hint": "This model takes a while to explain here, so the reasons are worked out when you ask.",
+  "why.approximate_ensemble": "These reasons are approximate: the model combines several models, and their reasons are combined too. Before rounding, they add up to the prediction."
 }

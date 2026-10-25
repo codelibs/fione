@@ -95,8 +95,10 @@ def latest_explain_job(conn: sqlite3.Connection, model_id: int) -> Job | None:
 
 def model_columns(record: ModelRecord) -> list[str]:
     """The model's input columns: its importance has one entry per column, so no artifact
-    needs loading. Only a full record has them (``list_models_brief`` leaves them out)."""
-    return list(record.importance)
+    needs loading. Only a full record has them (``list_models_brief`` leaves them out). An
+    imported record is untrusted: anything but a dict of names gives no columns."""
+    found = record.importance if isinstance(record.importance, dict) else {}
+    return [name for name in found if isinstance(name, str)]
 
 
 def submit_explain(

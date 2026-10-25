@@ -1317,3 +1317,101 @@ def test_the_summary_uses_contribution_shares_once_explained(make_client):
         bad = {"version": 1, "importance": "x", "partial_dependence": []}
         explanations.save_explanation(conn, world.ids[world.p]["model"], None, None, bad)
     assert "relied on most, as a share of all it used" in world.client.get(url).text
+
+
+def predict_job(world, payload: dict) -> int:
+    """A finished prediction job of project p with ``payload`` (its result: p's test set)."""
+    with closing(connect(world.client)) as conn:
+        owner = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        job = store.enqueue(conn, "batch_predict", world.p, owner, payload)
+        store.claim_job(conn, job.id, "t")
+        result = {"dataset_id": world.ids[world.p]["test"]}
+        store.finish_job(conn, job.id, JobStatus.DONE, result=result)
+        return job.id
+
+
+def test_why_never_uses_objects_of_another_project(make_client):
+    world = make_world(make_client())
+    world.login("ed")  # owns both projects
+    p, q = world.ids[world.p], world.ids[world.q]
+    cases = (
+        ({"model_id": q["model"], "dataset_id": p["test"]}, "no longer exists"),
+        ({"model_id": p["model"], "dataset_id": q["test"]}, "is no longer available"),
+        ({"model_id": p["model"], "dataset_id": str(p["test"])}, "is no longer available"),
+        ({"model_id": True, "dataset_id": p["test"]}, "no longer exists"),
+    )
+    for payload, text in cases:
+        assert text in why_fragment(world, predict_job(world, payload)), payload
+
+
+def test_an_unexpected_error_in_why_is_a_message_with_a_retry(make_client, monkeypatch):
+    world = make_world(make_client())
+    world.login("vi")
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(easyml.explain, "contributions", broken)
+    html = why_fragment(world)
+    assert "This could not be computed." in html and "boom" not in html
+    assert "Try again" in html and 'hx-get="' in html
+    assert '<span id="why-status" hx-swap-oob="innerHTML">This could not be computed.' in html
+
+
+def test_non_finite_contributions_are_refused():
+    with pytest.raises(ValueError):
+        easyml._why_row(["a"], np.array([np.inf]), 0.5, 0.5, [1], True)
+    with pytest.raises(ValueError):
+        easyml._why_row(["a"], np.array([1e307]), 0.5, 0.5, [1], True)  # x100 overflows
+
+
+def test_the_reasons_wait_or_say_why_instead_of_loading(make_client, monkeypatch):
+    world = make_world(make_client())
+    world.login("vi")
+    url = world.path("/projects/{p}/jobs/{predict_job}/result")
+    why = world.path("/projects/{p}/jobs/{predict_job}/result/why")
+    page = world.client.get(url).text
+    assert f'hx-get="{why}" hx-trigger="load"' in page
+    assert '<p class="visually-hidden" role="status" id="why-status"></p>' in page
+    # iris: 3 classes x 4 columns = 12 cells a row; 5 rows x 10 = 600
+    monkeypatch.setattr(easyml.explain, "CELLS", 599)
+    page = world.client.get(url).text
+    assert 'hx-trigger="load"' not in page and f'hx-get="{why}"' in page
+    assert "Show why" in page
+    monkeypatch.setattr(easyml.explain, "CELLS", 11)
+    page = world.client.get(url).text
+    assert f'hx-get="{why}"' not in page and "too many columns and classes" in page
+    monkeypatch.undo()
+    world.client.app.state.live_models.max_bytes = 1
+    page = world.client.get(url).text
+    assert f'hx-get="{why}"' not in page and "too large to explain here" in page
+    with closing(connect(world.client)) as conn:
+        conn.execute("UPDATE models SET trusted = 0 WHERE id = ?", (world.ids[world.p]["model"],))
+    page = world.client.get(url).text
+    assert f'hx-get="{why}"' not in page and "without this server&#39;s signature" in page
+
+
+def test_the_reasons_say_what_they_add_up_to(make_client):
+    world = make_world(make_client())
+    world.login("vi")
+    with closing(connect(world.client)) as conn:
+        ensemble = models.get_model(conn, world.ids[world.p]["model"]).best_model == "Ensemble"
+    html = why_fragment(world)
+    assert "Before rounding, they add up to the prediction." in html
+    assert ("combines several models" in html) is ensemble
+    assert "The reasons for 5 rows are shown." in html
+
+
+def test_contribution_shares_keep_one_entry_per_column():
+    shares, partial = easyml.contribution_shares(
+        {
+            "importance": [
+                {"column": "a", "share": 0.6},
+                {"column": "b", "share": 0.3},
+                {"column": "a", "share": 0.1},
+                {"column": "c", "share": 1.5},  # not a share
+                {"column": "d", "share": True},
+            ]
+        }
+    )
+    assert shares == [("a", 0.6), ("b", 0.3)] and partial

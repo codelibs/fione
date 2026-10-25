@@ -34,10 +34,25 @@
     {% endif %}
   </section>
   {% if model_id %}
-  <section class="stack-tight" id="why" aria-labelledby="why-title" hx-get="/projects/{{ pid }}/jobs/{{ job.id }}/result/why" hx-trigger="load" hx-swap="outerHTML">
+  {% set why_url = "/projects/" ~ pid ~ "/jobs/" ~ job.id ~ "/result/why" %}
+  <p class="visually-hidden" role="status" id="why-status"></p>
+  {% if why_gate and why_gate != "click" %}
+  <section class="stack-tight" id="why" aria-labelledby="why-title">
+    <h2 class="section-header__title" id="why-title">{{ t('why.title') }}</h2>
+    <p class="text-muted">{{ t(why_gate) }}</p>
+  </section>
+  {% elif why_gate == "click" %}
+  <section class="stack-tight" id="why" aria-labelledby="why-title">
+    <h2 class="section-header__title" id="why-title">{{ t('why.title') }}</h2>
+    <p class="text-muted">{{ t('why.click_hint') }}</p>
+    <p><button type="button" class="btn btn-secondary" hx-get="{{ why_url }}" hx-target="#why" hx-swap="outerHTML">{{ t('why.show') }}</button></p>
+  </section>
+  {% else %}
+  <section class="stack-tight" id="why" aria-labelledby="why-title" hx-get="{{ why_url }}" hx-trigger="load" hx-swap="outerHTML">
     <h2 class="section-header__title" id="why-title">{{ t('why.title') }}</h2>
     <p class="text-muted">{{ t('why.loading') }}</p>
   </section>
+  {% endif %}
   {% endif %}
 </div>
 {% endblock %}
