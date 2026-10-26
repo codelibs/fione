@@ -248,8 +248,10 @@ def create_token(
     """Create an API token: its record and its plaintext; only the sha256 is stored.
 
     ``expires_at`` is UTC ``YYYY-MM-DD HH:MM:SS`` (``expiry_after``); None never expires."""
-    if expires_at is not None and not _EXPIRY.fullmatch(expires_at):
-        raise ValueError("expires_at must be UTC text like 2026-01-31 12:00:00")
+    if expires_at is not None:
+        if not _EXPIRY.fullmatch(expires_at):
+            raise ValueError("expires_at must be UTC text like 2026-01-31 12:00:00")
+        datetime.strptime(expires_at, _EXPIRY_FORMAT)  # a real date and time: ValueError if not
     token = new_token()
     cur = conn.execute(
         "INSERT INTO api_tokens (user_id, name, token_sha256, scope, expires_at)"

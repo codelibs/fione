@@ -5,12 +5,17 @@ notebook container. It acts as its user capped at editor, and only on the routes
 Every API route must be in exactly one of ALLOWED, DENIED and PUBLIC.
 """
 
+import re
+
 import pytest
 
 from api_helpers import PW, add_user, bearer, connect, iris_csv, login
+from fione.api.deps import NOTEBOOK_SCOPE_ROUTES
 from fione.auth import service
 from fione.auth.roles import Role
 from fione.auth.tokens import TokenScope
+from fione.jobs import store
+from fione.jobs.store import JobStatus
 
 API = "/api/v1"
 
@@ -100,6 +105,9 @@ def test_every_api_route_is_classified_for_notebook_tokens(client):
     }
     assert ALLOWED.isdisjoint(DENIED) and ALLOWED.isdisjoint(PUBLIC) and DENIED.isdisjoint(PUBLIC)
     assert routes == ALLOWED | DENIED | PUBLIC
+    # The source of truth in deps is the same set (it keeps the path converters).
+    registered = {(m, re.sub(r":\w+}", "}", p)) for m, p in NOTEBOOK_SCOPE_ROUTES}
+    assert registered == ALLOWED
     assert (len(PUBLIC), len(ALLOWED), len(DENIED)) == (4, 36, 15)
 
 
@@ -178,11 +186,33 @@ def test_admin_notebook_token_has_editor_power(client):
     alices = bearer(client, alice.id)
     mine = client.post(f"{API}/projects", json={"name": "mine"}, headers=full).json()["id"]
     theirs = client.post(f"{API}/projects", json={"name": "theirs"}, headers=alices).json()["id"]
-    assert {p["id"] for p in client.get(f"{API}/projects", headers=full).json()} == {mine, theirs}
+    shared = client.post(f"{API}/projects", json={"name": "shared"}, headers=alices).json()["id"]
+    r = client.post(
+        f"{API}/projects/{shared}/share", json={"username": "root", "access": "editor"},
+        headers=alices,
+    )  # fmt: skip
+    assert r.status_code in (200, 201, 204), r.text
+    everything = {p["id"] for p in client.get(f"{API}/projects", headers=full).json()}
+    assert everything == {mine, theirs, shared}
+    conn = connect(client)
+    try:
+        failed = store.enqueue(conn, "automl", mine, admin.id, {})
+        store.claim_job(conn, failed.id, "t")
+        store.finish_job(conn, failed.id, JobStatus.FAILED, message="boom\nTraceback: /srv/x.py")
+        orphan = store.enqueue(conn, "automl", None, admin.id, {}).id
+    finally:
+        conn.close()
+    assert client.get(f"{API}/jobs/{failed.id}", headers=full).json()["message"].count("\n") == 1
+    assert client.get(f"{API}/jobs/{orphan}", headers=full).status_code == 200
     headers = notebook_token(client, admin)
     listed = client.get(f"{API}/projects", headers=headers)
-    assert [p["id"] for p in listed.json()] == [mine]
+    assert {p["id"] for p in listed.json()} == {mine, shared}
     assert client.get(f"{API}/projects/{theirs}", headers=headers).status_code == 404
+    # job_out and the project-less jobs see an editor, not an admin
+    job = client.get(f"{API}/jobs/{failed.id}", headers=headers).json()
+    assert job["message"] == "boom"
+    assert client.get(f"{API}/jobs/{orphan}", headers=headers).status_code == 404
+    assert orphan not in {j["id"] for j in client.get(f"{API}/jobs", headers=headers).json()}
     imported = client.post(
         f"{API}/projects/{mine}/models/import",
         files={"file": ("m.zip", b"x", "application/zip")},
@@ -194,8 +224,8 @@ def test_admin_notebook_token_has_editor_power(client):
 def expire_at(client, user, expires_at: str) -> dict:
     conn = connect(client)
     try:
-        _, token = service.create_token(conn, user.id, "x")
-        conn.execute("UPDATE api_tokens SET expires_at = ? WHERE name = 'x'", (expires_at,))
+        record, token = service.create_token(conn, user.id, "x")
+        conn.execute("UPDATE api_tokens SET expires_at = ? WHERE id = ?", (expires_at, record.id))
         return {"Authorization": f"Bearer {token}"}
     finally:
         conn.close()
@@ -208,6 +238,7 @@ def test_expired_token_is_401(client):
     assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
     ahead = expire_at(client, user, service.expiry_after(60))
     assert client.get(f"{API}/projects", headers=ahead).status_code == 200
+    assert client.get(f"{API}/projects", headers=past).status_code == 401  # still expired
 
 
 def test_bearer_created_token_inherits_scope_and_expiry(client):

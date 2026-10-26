@@ -235,6 +235,12 @@ def test_create_token_rejects_iso_t_format(conn):
         service.create_token(conn, user.id, "t", expires_at="2026-01-01T00:00:00")
 
 
+def test_create_token_rejects_an_impossible_date(conn):
+    user = service.create_user(conn, "alice", PW, Role.EDITOR)
+    with pytest.raises(ValueError):
+        service.create_token(conn, user.id, "t", expires_at="2026-19-99 99:99:99")
+
+
 def test_token_identity_carries_scope_and_expiry(conn):
     user = service.create_user(conn, "alice", PW, Role.EDITOR)
     expires = service.expiry_after(60)
