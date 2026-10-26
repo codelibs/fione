@@ -47,7 +47,7 @@ packages = ["src/fione", "src/fione_serving"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "scripts"]
+pythonpath = ["src", "sdk/src", "scripts"]
 markers = [
     "s3: needs an S3-compatible server (set FIONE_TEST_S3_ENDPOINT, _BUCKET, _ACCESS_KEY, _SECRET_KEY)",
     "timing: wall-clock time budget checks (select with -m timing)",

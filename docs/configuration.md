@@ -66,6 +66,16 @@ The serving image reads these (see [Fione Serving](serving.md)):
 | `FIONE_SERVING_MAX_CONTRIBUTION_REQUESTS` | `2` | How many requests for contributions run at once; another one gets 503 at once. Plain predictions wait while one runs, as they share the model. |
 | `PORT` | `8080` | The port inside the container. |
 
+## fione-sdk
+
+The Python client `fione-sdk` (in `sdk/`, install it with `pip install ./sdk`) reads these
+when you create a `Client` without arguments:
+
+| Variable | What it does |
+|---|---|
+| `FIONE_URL` | The address of the Fione server, for example `http://localhost:8080`. |
+| `FIONE_TOKEN` | An API token (see the Account page). Sent as `Authorization: Bearer`. |
+
 ## Internal variables
 
 `FIONE_JOB_DB` and `FIONE_JOB_HANDLER_MODULES` are set by Fione for its own job worker

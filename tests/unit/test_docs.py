@@ -52,6 +52,7 @@ def test_docs_name_no_setting_that_does_not_exist():
     for source in [
         *(ROOT / "src" / "fione_serving").glob("*.py"),
         *(ROOT / "src" / "fione" / "jobs").glob("*.py"),
+        *(ROOT / "sdk" / "src" / "fione_sdk").glob("*.py"),
     ]:
         known |= _names_in(source, r"\"(FIONE_[A-Z0-9_]+)\"")
     for page in PAGES:
