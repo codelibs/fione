@@ -6,7 +6,7 @@ import pytest
 
 from fione import db
 from fione.auth import passwords, roles, service
-from fione.auth.roles import Role, User
+from fione.auth.roles import NotebookPermission, Role, User
 from fione.auth.tokens import TokenScope
 
 PW = "correct horse"
@@ -525,3 +525,46 @@ def test_create_first_admin_validates(conn):
     with pytest.raises(ValueError, match="exists"):
         service.create_first_admin(conn, "root", PW)
     assert service.needs_first_admin(conn)
+
+
+# --- notebook permission -----------------------------------------------------
+
+
+def test_notebook_permission_defaults_to_none_for_editors_and_viewers(conn):
+    editor = service.create_user(conn, "ed", PW, Role.EDITOR)
+    viewer = service.create_user(conn, "vi", PW, Role.VIEWER)
+    for user in (editor, viewer):
+        assert service.get_notebook_permission(conn, user.id) == NotebookPermission.NONE
+        assert service.can_use_notebook(conn, user) is False
+    assert service.notebook_permissions(conn) == {
+        editor.id: NotebookPermission.NONE,
+        viewer.id: NotebookPermission.NONE,
+    }
+
+
+def test_setting_the_notebook_permission_is_read_fresh(conn):
+    editor = service.create_user(conn, "ed", PW, Role.EDITOR)
+    service.set_notebook_permission(conn, editor.id, NotebookPermission.RUN)
+    assert service.get_notebook_permission(conn, editor.id) == NotebookPermission.RUN
+    assert service.can_use_notebook(conn, editor) is True
+    service.set_notebook_permission(conn, editor.id, NotebookPermission.NONE)
+    assert service.can_use_notebook(conn, editor) is False  # the same User object
+
+
+def test_admins_can_always_use_notebooks(conn):
+    admin = service.create_user(conn, "root", PW, Role.ADMIN)
+    assert service.get_notebook_permission(conn, admin.id) == NotebookPermission.NONE
+    assert service.can_use_notebook(conn, admin) is True
+
+
+def test_notebook_permission_of_an_unknown_user(conn):
+    with pytest.raises(service.UserNotFound):
+        service.get_notebook_permission(conn, 999)
+    with pytest.raises(service.UserNotFound):
+        service.set_notebook_permission(conn, 999, NotebookPermission.RUN)
+
+
+def test_notebook_permission_column_refuses_other_values(conn):
+    user = service.create_user(conn, "ed", PW, Role.EDITOR)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE users SET notebook = 'admin' WHERE id = ?", (user.id,))

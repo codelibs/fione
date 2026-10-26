@@ -225,6 +225,7 @@ ADMIN_ROUTES = {
     ("POST", "/admin/users"): (401, 403, 403, 303),
     ("POST", "/admin/users/{uid}/role"): (401, 403, 403, 303),
     ("POST", "/admin/users/{uid}/password"): (401, 403, 403, 303),
+    ("POST", "/admin/users/{uid}/notebook"): (401, 403, 403, 303),
     ("POST", "/admin/users/{uid}/delete"): (401, 403, 403, 303),
     ("GET", "/admin/system"): (303, 403, 403, 200),
 }
@@ -234,6 +235,7 @@ GLOBAL_FORMS = {
     "/account/tokens": {"name": "script"},
     "/admin/users": {"username": "newbie", "password": PW, "role": "viewer"},
     "/role": {"role": "viewer"},
+    "/notebook": {"notebook": "run"},
     "/password": {"password": "a-new-password-1"},
 }
 # Project sharing x the AutoML personas: the owner's (and admins') only, 403 for the

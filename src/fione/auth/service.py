@@ -6,7 +6,7 @@ from functools import cache
 
 from fione import db
 from fione.auth.passwords import hash_password, verify_password
-from fione.auth.roles import Role, User
+from fione.auth.roles import NotebookPermission, Role, User
 from fione.auth.tokens import TokenScope, hash_token, new_token
 
 _USERNAME_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
@@ -191,6 +191,36 @@ def set_role(
     user = get_user(conn, user_id)
     assert user is not None
     return user
+
+
+def get_notebook_permission(conn: sqlite3.Connection, user_id: int) -> NotebookPermission:
+    row = conn.execute("SELECT notebook FROM users WHERE id = ?", (user_id,)).fetchone()
+    if row is None:
+        raise UserNotFound(user_id)
+    return NotebookPermission(row["notebook"])
+
+
+def set_notebook_permission(
+    conn: sqlite3.Connection, user_id: int, perm: NotebookPermission
+) -> None:
+    cur = conn.execute(
+        "UPDATE users SET notebook = ? WHERE id = ?", (NotebookPermission(perm).value, user_id)
+    )
+    if cur.rowcount == 0:
+        raise UserNotFound(user_id)
+
+
+def notebook_permissions(conn: sqlite3.Connection) -> dict[int, NotebookPermission]:
+    """The stored permission of every user, by id."""
+    rows = conn.execute("SELECT id, notebook FROM users")
+    return {r["id"]: NotebookPermission(r["notebook"]) for r in rows}
+
+
+def can_use_notebook(conn: sqlite3.Connection, user: User) -> bool:
+    """Admins always may; others need the stored ``run``, read fresh on every call."""
+    if user.role == Role.ADMIN:
+        return True
+    return get_notebook_permission(conn, user.id) == NotebookPermission.RUN
 
 
 def delete_user(conn: sqlite3.Connection, user_id: int, *, actor_id: int | None = None) -> None:

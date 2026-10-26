@@ -7,29 +7,30 @@ from fione.api.errors import ApiError, not_found, service_errors
 from fione.api.schemas import IdPath, TokenIn, UserIn, UserPatch, token_out, user_out
 from fione.api.security import password_work
 from fione.auth import service as auth_service
-from fione.auth.roles import Role
+from fione.auth.roles import NotebookPermission, Role
 
 router = APIRouter(tags=["users"])
 
 
 @router.get("/users")
 def list_users(admin: AdminUser, conn: Conn) -> list[dict]:
-    return [user_out(u) for u in auth_service.list_users(conn)]
+    permissions = auth_service.notebook_permissions(conn)
+    return [user_out(u, notebook=permissions[u.id]) for u in auth_service.list_users(conn)]
 
 
 @router.post("/users", status_code=201)
 def create_user(body: UserIn, admin: AdminUser, conn: Conn) -> dict:
     with password_work(), service_errors():
         user = auth_service.create_user(conn, body.username, body.password, body.role)
-    return user_out(user)
+    return user_out(user, notebook=auth_service.get_notebook_permission(conn, user.id))
 
 
 @router.patch("/users/{user_id}")
 def update_user(user_id: IdPath, body: UserPatch, admin: AdminUser, conn: Conn) -> dict:
-    """Change the role and/or reset the password (which ends the user's sessions); one's own
-    admin role cannot be given up (409)."""
-    if body.role is None and body.password is None:
-        raise ApiError(422, "invalid", "nothing to change: give role and/or password")
+    """Change the role, the notebook permission and/or reset the password (which ends the
+    user's sessions); one's own admin role cannot be given up (409)."""
+    if body.role is None and body.password is None and body.notebook is None:
+        raise ApiError(422, "invalid", "nothing to change: give role, password and/or notebook")
     if auth_service.get_user(conn, user_id) is None:
         raise not_found("user not found")
     if body.role is not None:
@@ -37,10 +38,12 @@ def update_user(user_id: IdPath, body: UserPatch, admin: AdminUser, conn: Conn) 
     if body.password is not None:
         with password_work(), service_errors():
             auth_service.set_password(conn, user_id, body.password)
+    if body.notebook is not None:
+        auth_service.set_notebook_permission(conn, user_id, NotebookPermission(body.notebook))
     user = auth_service.get_user(conn, user_id)
     if user is None:
         raise not_found("user not found")
-    return user_out(user)
+    return user_out(user, notebook=auth_service.get_notebook_permission(conn, user_id))
 
 
 @router.delete("/users/{user_id}", status_code=204)

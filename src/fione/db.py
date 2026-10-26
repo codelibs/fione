@@ -143,6 +143,10 @@ MIGRATIONS: list[str] = [
     ALTER TABLE api_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'full'
         CHECK (scope IN ('full', 'notebook'));
     """,
+    """
+    ALTER TABLE users ADD COLUMN notebook TEXT NOT NULL DEFAULT 'none'
+        CHECK (notebook IN ('none', 'run'));
+    """,
 ]
 
 

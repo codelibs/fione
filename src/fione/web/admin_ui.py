@@ -21,7 +21,7 @@ from fione.api.schemas import MAX_PASSWORD_LENGTH
 from fione.api.security import password_work
 from fione.auth import service as auth_service
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
-from fione.auth.roles import Role
+from fione.auth.roles import NotebookPermission, Role
 from fione.auth.service import UserConflict, UsernameError, UserNotFound
 from fione.web.access import SmallForm, admin_only, field, form_auth, parse_id, signed_in
 from fione.web.easyml import STOP_POLLING
@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 USERS_PER_PAGE = 50
 MAX_USERNAME = 64  # as the API's username
-DONE = ("created", "role", "password", "deleted")
+DONE = ("created", "role", "notebook", "password", "deleted")
 POLL_SECS = 10
 DAY_SECS = 24 * 3600
 
@@ -74,6 +74,7 @@ def _users_view(
         status=status,
         nav="users",
         rows=rows,
+        notebooks=auth_service.notebook_permissions(conn),
         total=total,
         page_number=number,
         pages=pages,
@@ -156,6 +157,20 @@ def change_role(request: Request, conn: Conn, uid: str, form: SmallForm) -> Resp
     except UserConflict as e:
         return _refused(request, conn, auth, form, user, f"users.refused.{e.code}", n=e.count)
     return _back(form, "role")
+
+
+@router.post("/admin/users/{uid}/notebook")
+def change_notebook(request: Request, conn: Conn, uid: str, form: SmallForm) -> Response:
+    auth = _post_admin(request, conn, form)
+    user = _target(conn, uid)
+    permission = field(form, "notebook")
+    if permission not in {p.value for p in NotebookPermission}:
+        return _refused(request, conn, auth, form, user, "users.error.notebook", 422)
+    try:
+        auth_service.set_notebook_permission(conn, user.id, NotebookPermission(permission))
+    except UserNotFound:
+        raise UiError(404, "error.not_found") from None
+    return _back(form, "notebook")
 
 
 @router.post("/admin/users/{uid}/password")

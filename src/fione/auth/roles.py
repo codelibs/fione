@@ -10,6 +10,11 @@ class Role(StrEnum):
     VIEWER = "viewer"
 
 
+class NotebookPermission(StrEnum):
+    NONE = "none"
+    RUN = "run"
+
+
 class ProjectAccess(StrEnum):
     OWNER = "owner"
     EDITOR = "editor"
