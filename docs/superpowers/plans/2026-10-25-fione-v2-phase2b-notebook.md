@@ -40,9 +40,9 @@ Plan decisions (made by this plan, not by the rulings; the reason follows each):
 - **Nothing user-writable is served or loaded by Jupyter.** Every user's Jupyter shares the notebook origin, and a path is not a browser security boundary. Any unsandboxed HTML a user could get served under `/user/<uid>/`, for example through the unauthenticated lab-extension static handler, which searches the user data dir, would run on that shared origin. From there it could take over another signed-in user's JupyterLab, and with it their `FIONE_TOKEN`. So the image sets `JUPYTER_CONFIG_DIR` and `JUPYTER_DATA_DIR` to root-owned directories in the image, and `JUPYTER_PATH` stays unset. The residual risk, and per-user notebook subdomains as the real fix, is an open decision for the maintainer (see Self-Review Notes).
 
 Conventions (Phase 1, apply to every task):
-- Work on branch `v2-phase2`. Commit messages are public-safe implementation summaries with no attribution lines, written to a file and committed with `git commit -F <file>`.
+- Work on branch `v2-phase2b`. Commit messages are public-safe implementation summaries with no attribution lines, written to a file and committed with `git commit -F <file>`.
 - No local paths, usernames or private URLs in any committed file.
-- Migrations are appended to `fione.db.MIGRATIONS`; earlier ones are never edited. Phase 2a also appends migrations, so take the last position at merge time and never rely on a migration's index in tests.
+- Migrations are appended to `fione.db.MIGRATIONS`; earlier ones are never edited. Phase 2a's migrations are already in the base; never rely on a migration's index in tests (find it by content, as `tests/unit/test_db.py` does).
 - Authorization changes get matrix tests (`tests/api/test_permissions.py` style).
   - UI form posts check `Origin` and the session CSRF token (`web/access.py` `form_auth` / `action_auth`).
   - API cookie requests need `X-CSRF-Token`.
@@ -50,6 +50,7 @@ Conventions (Phase 1, apply to every task):
   - No inline scripts or styles (the strict CSP).
 - Every i18n key exists in `en.json` and `ja.json`. UI changes update `scripts/ui-screenshots.py` and are reviewed in light/dark, en/ja, phone/desktop.
 - Every new `FIONE_*` setting or compose variable gets its `docs/configuration.md` row **in the same commit**: `tests/unit/test_docs.py` requires set equality and rejects unknown names on any page.
+- Test file basenames must be unique across `tests/` (there are no `__init__.py` files, so a clash aborts collection). Test helpers live in `tests/api_helpers.py` (`add_user`, `bearer`, `iris_frame`, `FAST_CONFIG`, `make_settings`).
 - Pytest markers: `docker` (needs a Docker daemon) and `notebook` (needs the `notebook` dependency group) are deselected by default like `e2e`. CI runs them explicitly (Tasks 5, 9, 10).
 - Keep machine load low: run only the named test files while iterating, and build images only in the tasks that need them.
 
@@ -116,11 +117,11 @@ docs/{notebook.md,notebook.ja.md,configuration.md,known-limitations.md}, README.
   - `service.token_identity(conn, token: str) -> tuple[User, ApiToken] | None`: none if revoked or expired (`expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP`). `user_from_token` stays as a wrapper.
 - Produces:
   - `Auth` gains `scope: TokenScope = TokenScope.FULL` and `token: ApiToken | None = None`.
-  - In `get_auth`, a notebook-scope bearer request whose route is not in `NOTEBOOK_SCOPE_ROUTES` gets `ApiError(403, "token_scope", "this token cannot be used here")`. The set is a `frozenset[tuple[str, str]]` of (method, route path template incl. `/api/v1`) in `deps.py`. The route comes from `request.scope["route"].path`.
+  - In `get_auth`, a notebook-scope bearer request whose route is not in `NOTEBOOK_SCOPE_ROUTES` gets `ApiError(403, "token_scope", "this token cannot be used here")`. The set is a `frozenset[tuple[str, str]]` of (method, route path template **without** the `/api/v1` prefix, as `request.scope["route"].path` holds it) in `deps.py`. A request with no `scope["route"]` is denied.
   - When the token's user is an admin, `Auth.user` is `User(id, username, Role.EDITOR)`. This single place caps `require_admin`, `effective_access` and `job_out`.
 - Produces: `token_out` adds `scope` and `expires_at`.
 
-`NOTEBOOK_SCOPE_ROUTES` covers every current `/api/v1` route **except** the ones below. The SDK uses `DELETE .../datasets/{id}` for its temporary predict input, which is why deletes stay allowed.
+`NOTEBOOK_SCOPE_ROUTES` covers every current `/api/v1` route (55 operations: 4 public, 36 allowed, 15 denied) **except** the ones below. The SDK uses `DELETE .../datasets/{id}` for its temporary predict input, which is why deletes stay allowed.
 
 | Not allowed for notebook tokens | Why |
 |---|---|
@@ -129,9 +130,10 @@ docs/{notebook.md,notebook.ja.md,configuration.md,known-limitations.md}, README.
 | `/api/v1/users`, `/api/v1/users/{user_id}` (all methods) | account administration |
 | `POST /api/v1/modules`, `DELETE /api/v1/modules/{module_id}` | code that runs unsandboxed on the Fione host |
 | `POST /api/v1/projects/{project_id}/models/import` | untrusted pickles load on the Fione host |
+| `POST /api/v1/projects/{project_id}/share`, `DELETE /api/v1/projects/{project_id}/share/{username}` | sharing changes permissions that outlive the 12 h token; the SDK does not use them (ruling) |
 
-- [ ] **Step 1: Write the failing tests** in `tests/api/test_token_scope.py`. It is a separate file; the existing matrix keeps its arity. Seed tokens with `create_token(..., scope=TokenScope.NOTEBOOK, expires_at=expiry_after(3600))`.
-  - `test_every_api_route_is_classified_for_notebook_tokens`: the set of `(method, route.path)` over `app.routes` under `/api/v1` equals `ALLOWED | DENIED | PUBLIC`, three disjoint tables in the test file. `PUBLIC` holds the routes that never call `get_auth`, where a bearer header is ignored: `POST /auth/login`, `POST /auth/first-admin`, `GET /auth/status`, `GET /health`. Check the real list.
+- [ ] **Step 1: Write the failing tests** in `tests/api/test_token_scope.py`. It is a separate file; the existing matrix keeps its arity. `api_helpers.bearer` makes full tokens, so seed notebook tokens with `service.create_token`. Seed tokens with `create_token(..., scope=TokenScope.NOTEBOOK, expires_at=expiry_after(3600))`.
+  - `test_every_api_route_is_classified_for_notebook_tokens`: the set of `(method, path)` from `app.openapi()["paths"]` (as `tests/api/test_permissions.py::test_matrix_covers_every_route` does; `app.routes` is not flat) equals `ALLOWED | DENIED | PUBLIC`, three disjoint tables in the test file. `PUBLIC` holds the routes that never call `get_auth`, where a bearer header is ignored: `POST /auth/login`, `POST /auth/first-admin`, `GET /auth/status`, `GET /health`. Check the real list.
   - `test_public_routes_grant_a_notebook_token_nothing`: on each `PUBLIC` route, the response with a notebook token equals the anonymous one (status and body), and no cookie is set on `/auth/login` for wrong credentials.
   - `test_notebook_token_is_refused_on_denied_routes`: parametrized over `DENIED` → 403 with `code == "token_scope"`, and nothing changes (token count, user count, modules).
   - `test_notebook_token_works_on_allowed_routes`: a sample `GET /projects`, `POST /projects`, dataset upload, `POST .../jobs/automl` → not 403.
@@ -144,7 +146,7 @@ docs/{notebook.md,notebook.ja.md,configuration.md,known-limitations.md}, README.
 - [ ] **Step 4:** Add unit tests to `tests/unit/test_auth.py`:
   - `test_migration_keeps_existing_tokens_full_and_unexpiring`: a DB migrated to the previous version with one token, migrated again → `scope == "full"`, `expires_at is None`.
   - `test_create_token_rejects_iso_t_format`: `expires_at="2026-01-01T00:00:00"` → `ValueError`.
-- [ ] **Step 5:** Account page: the tokens table shows a scope badge (`account.token_scope_notebook`) and the expiry (`account.token_expires`) through the existing `utc` filter. Add the keys to both `en.json` and `ja.json`. In `docs/known-limitations.md`, replace "API tokens never expire" with: tokens you create never expire, and notebook tokens expire with their container. Update the Japanese summary line too. Update the account screenshot in `scripts/ui-screenshots.py`.
+- [ ] **Step 5:** Account page: the tokens table shows an "expired" state next to revoked/active, a scope badge (`account.token_scope_notebook`) and the expiry (`account.token_expires`) through the existing `utc` filter. Add the keys to both `en.json` and `ja.json`. In `docs/known-limitations.md`, replace "API tokens never expire" with: tokens you create never expire, and notebook tokens expire with their container. Update the Japanese summary line too. Update the account screenshot in `scripts/ui-screenshots.py`.
 - [ ] **Step 6:** Run `uv run pytest tests/api tests/unit/test_auth.py tests/unit/test_i18n.py tests/unit/test_docs.py tests/web/test_account_ui.py -q`. Expected: all pass. Then `uv run ruff check . && uv run ruff format --check .` must be clean.
 - [ ] **Step 7:** Commit "Add API token scope and expiry; cap notebook tokens".
 
@@ -190,7 +192,7 @@ docs/{notebook.md,notebook.ja.md,configuration.md,known-limitations.md}, README.
 **Files:**
 - Create: `sdk/src/fione_sdk/jobs.py`
 - Modify: `sdk/src/fione_sdk/{__init__,client,errors}.py`, `sdk/README.md`
-- Test: `tests/sdk/test_jobs.py`
+- Test: `tests/sdk/test_sdk_jobs.py`
 
 **Interfaces:**
 - Consumes: Task 2 `Client`. Routes: `POST /projects/{pid}/jobs/automl` (`{"dataset_id", "config", "name"}`), `jobs/batch-predict` (`{"model_id", "dataset_id", "include_columns", "name"}`) and `jobs/module` (`{"module_id", "dataset_id", "params", "name"}`); `GET /jobs/{id}`; `GET /jobs/{id}/events?after=&limit=` (returns `events`, `last_id`, `status`); `POST /jobs/{id}/cancel`; `GET /projects/{pid}/models`; `GET /models/{id}`; `GET /modules`. Terminal statuses: `done|failed|cancelled`. Results: training `{"model_id", ...}`; batch-predict and module `{"dataset_id", ...}` (module jobs may add `module_model_id`).
@@ -215,10 +217,10 @@ docs/{notebook.md,notebook.ja.md,configuration.md,known-limitations.md}, README.
   - `test_events_follow_ends_at_a_terminal_status`: `list(job.events(follow=True))` is non-empty, its last event has type `finished` or `stopped`, and it ends without hanging (`timeout` guard).
   - `test_predict_returns_rows_in_order_and_removes_its_input`: 5 rows → 5 rows with a `predict` column, in input order. Afterwards `datasets(pid)` has no `sdk_predict_*` entry.
   - `test_cancel_raises_job_failed_cancelled`: train with `max_runtime_secs=60`, `cancel()`, then `wait()` → `JobFailed` with `code == "cancelled"`.
-  - `test_failed_job_raises_with_message`: `train(..., target="missing")` → `FioneError` 422 at submission. A module job that fails at run time → `JobFailed` with `code == "failed"`.
+  - `test_failed_job_raises_with_message`: `train(..., target="missing")` → `FioneError` 422 at submission. A module job that fails at run time (built-in `sort` with a column that is not in the data; the submission only validates the parameter schema) → `JobFailed` with `code == "failed"`.
   - `test_run_module_returns_a_dataset`: built-in `sort` on iris → `read(pid, job.result["dataset_id"])` is sorted.
   - `test_wait_timeout`: `wait(timeout=0.01)` on a queued job (runner off) → `TimeoutError`.
-- [ ] **Step 2:** Run `uv run pytest tests/sdk/test_jobs.py -q`. Expected: FAIL (`AttributeError: train`).
+- [ ] **Step 2:** Run `uv run pytest tests/sdk/test_sdk_jobs.py -q`. Expected: FAIL (`AttributeError: train`).
 - [ ] **Step 3:** Implement. In the README, document train, wait, events, predict and run_module, and that modules run on the server.
 - [ ] **Step 4:** Run `uv run pytest tests/sdk -q`. Expected: pass. Ruff clean.
 - [ ] **Step 5:** Commit "fione-sdk: jobs, leaderboard, predict and modules".
@@ -227,7 +229,7 @@ docs/{notebook.md,notebook.ja.md,configuration.md,known-limitations.md}, README.
 
 **Files:**
 - Modify: `src/fione/db.py` (append a migration), `src/fione/auth/{roles,service}.py`, `src/fione/api/{routes_users,schemas}.py`, `src/fione/web/admin_ui.py`, `src/fione/web/templates/admin_users.html`, `src/fione/i18n/{en,ja}.json`, `scripts/ui-screenshots.py`
-- Test: `tests/unit/test_auth.py`, `tests/api/test_projects_users_api.py`, `tests/web/test_admin_ui.py`
+- Test: `tests/unit/test_auth.py`, `tests/api/test_projects_users_api.py` (the exact-shape assertion for `POST /users` gains `notebook`), `tests/web/test_admin_ui.py`, `tests/web/test_routes.py` (`ADMIN_ROUTES` gains `("POST", "/admin/users/{uid}/notebook")` and the form table its fields)
 
 **Interfaces:**
 - Consumes: `auth.service` (`UserNotFound`, `get_user`, `set_role`), `routes_users` and the `UserPatch` schema, `web/access.py` (`form_auth`, `admin_only`), and Task 1's `TokenScope` (for the scope test).
@@ -240,7 +242,7 @@ docs/{notebook.md,notebook.ja.md,configuration.md,known-limitations.md}, README.
   - `service.notebook_permissions(conn) -> dict[int, NotebookPermission]`
   - `service.can_use_notebook(conn, user: User) -> bool`: True for admins; otherwise the stored value is `RUN`. It is read fresh every time.
 - Produces:
-  - `UserPatch.notebook: Literal["none","run"] | None`. An empty patch is still a 422.
+  - `UserPatch.notebook: Literal["none","run"] | None`. An empty patch (no role, password or notebook) is still a 422; `update_user`'s guard must consider `notebook`.
   - `user_out(user, *, notebook: NotebookPermission | None = None)` adds `"notebook"` when given. `GET /users`, `POST /users` and `PATCH /users/{id}` always give it.
   - UI: `POST /admin/users/{uid}/notebook` (form `notebook`, `csrf_token`; `form_auth`; admin only).
 
@@ -249,9 +251,9 @@ docs/{notebook.md,notebook.ja.md,configuration.md,known-limitations.md}, README.
   - `test_admins_can_always_use_notebooks`: an admin with stored `none` → `can_use_notebook` is True.
   - `test_patch_sets_notebook_permission`: admin `PATCH {"notebook": "run"}` → 200 with `"notebook": "run"`. An editor → 403. A notebook token (Task 1) → 403 `token_scope`.
   - `test_admin_ui_toggles_permission`: posting with a CSRF token → 303 and stored. Without CSRF → 403. A foreign `Origin` → 403. An editor posting → 403.
-  - `test_users_page_shows_the_notebook_column`: every user row shows `admin.notebook_run` or `admin.notebook_none`. Admin rows show `admin.notebook_admin` and no control.
+  - `test_users_page_shows_the_notebook_column`: every user row shows `users.notebook_run` or `users.notebook_none`. Admin rows show `users.notebook_admin` and no control.
 - [ ] **Step 2:** Run `uv run pytest tests/unit/test_auth.py tests/api/test_projects_users_api.py tests/web/test_admin_ui.py -q`. Expected: FAIL.
-- [ ] **Step 3:** Implement. Add the i18n keys `admin.notebook_*` in both languages, and the users-page screenshot.
+- [ ] **Step 3:** Implement. Add the i18n keys `users.notebook_*` in both languages, and the users-page screenshot.
 - [ ] **Step 4:** Run the same files plus `tests/unit/test_i18n.py tests/api/test_permissions.py -q`. Expected: pass. Ruff clean.
 - [ ] **Step 5:** Commit "Add the per-user notebook permission".
 
@@ -259,7 +261,7 @@ docs/{notebook.md,notebook.ja.md,configuration.md,known-limitations.md}, README.
 
 **Files:**
 - Create: `src/fione_notebook/{__init__,auth,config}.py`
-- Test: `tests/notebook/{conftest,test_launch_token,test_server}.py`
+- Test: `tests/notebook/{conftest,test_launch_token,test_jupyter_server}.py` (`conftest.py` skips the directory with `collect_ignore_glob` when `jupyter_server` is not installed, since `-m` deselection happens after collection)
 - Modify: `pyproject.toml`: the dependency group `notebook` is `jupyter_server==2.21.1`, `jupyterlab==4.6.4`, `ipykernel==7.4.0`, `tornado>=6.5,<6.6`, `pandas`, `pyarrow`, `httpx>=0.28.1`, `scikit-learn`, `matplotlib`. Plotting and scikit-learn are in because without egress the image is the whole library set. Also add the `notebook` and `docker` markers and extend `addopts` with `and not docker and not notebook`.
 - Modify: `uv.lock` (`uv lock`), `.github/workflows/ci.yml` (`uv sync --frozen --group notebook` replaces `uv sync --frozen` in the `test` job, and a step `uv run pytest -m notebook -q` follows the default test step)
 
@@ -294,7 +296,7 @@ A viewer who was granted notebooks runs code too: their boundary is their read-o
   - `test_rejects`, parametrized: expired by 1 s, one flipped signature byte, `sub` of another user, no `jti`, `v2.` prefix, three dots, non-JSON payload → None.
   - `test_configure_sets_the_security_traits`: on a `traitlets.config.Config`, check `allow_unauthenticated_access is False`, the CSP string exactly, `extra_log_scrub_param_keys == ["launch"]`, the culling values, and `base_url == "/user/7/"`.
   - `test_configure_refuses_malformed_env`: a non-digit owner, a 63-hex key, an origin with a path → `SystemExit`.
-- [ ] **Step 2: Write the failing server tests** in `tests/notebook/test_server.py`. A module-scoped fixture runs `python -m jupyterlab` (`jupyter lab --no-browser`) on a free 127.0.0.1 port, with a temp `HOME`, a writable temp `JUPYTER_RUNTIME_DIR`, and temp `JUPYTER_CONFIG_DIR`/`JUPYTER_DATA_DIR` made mode 0555 after the config file is written, with owner 7, random key and cookie secret, and `FIONE_NB_ORIGIN=http://127.0.0.1:18080`. A config file in the temp config dir calls `configure(c, os.environ)`, and `root_dir` is overridden to a temp dir after `configure`. The server's stderr is captured to a file. Kernel and terminal WebSockets use `tornado.websocket.websocket_connect`.
+- [ ] **Step 2: Write the failing server tests** in `tests/notebook/test_jupyter_server.py`. A module-scoped fixture runs `python -m jupyterlab` (`jupyter lab --no-browser`) on a free 127.0.0.1 port, with a temp `HOME`, a writable temp `JUPYTER_RUNTIME_DIR`, and temp `JUPYTER_CONFIG_DIR`/`JUPYTER_DATA_DIR` made mode 0555 after the config file is written, with owner 7, random key and cookie secret, and `FIONE_NB_ORIGIN=http://127.0.0.1:18080`. A config file in the temp config dir calls `configure(c, os.environ)`, and `root_dir` is overridden to a temp dir after `configure`. The server's stderr is captured to a file. Kernel and terminal WebSockets use `tornado.websocket.websocket_connect`.
   - `test_anonymous_lab_redirects_to_login`: 302 to a `Location` starting `/user/7/login`.
   - `test_anonymous_api_and_status_are_403`.
   - `test_login_refuses_bad_tokens`: missing, expired, tampered, reused, other-owner → 403 each.
@@ -336,10 +338,10 @@ A viewer who was granted notebooks runs code too: their boundary is their read-o
   - `HEALTHCHECK`: Python `urlopen` of `http://127.0.0.1:8888/user/${FIONE_NB_OWNER}/login`. Any HTTP status, 403 included, counts as up; a connection error counts as down.
   - No package install at start.
 - Produces in `check_licenses`:
-  - `EXCEPTIONS` gains `certifi` ("MPL-2.0 CA bundle, unmodified, via httpx") and `fqdn` ("MPL-2.0, unmodified, via jupyter_events").
+  - `EXCEPTIONS` gains `certifi` ("MPL-2.0 CA bundle, unmodified, via httpx") and `fqdn` ("MPL-2.0, unmodified, via jupyter_events"); this only turns their `review` label into a recorded exception.
   - `BUNDLE_REVIEWED: dict[str, str]` holds `elkjs` and `@fortawesome/fontawesome-free` with their licences and the reason "bundled by JupyterLab in the opt-in notebook image, not vendored; confirmed by the maintainer".
   - `bundle_licenses(path: Path) -> list[tuple[str, str, Verdict]]` reads JupyterLab's `static/third-party-licenses.json`; check the file's real keys before writing the parser.
-  - `main()` also checks the bundle when the `jupyterlab` distribution is installed. A bundled package that is neither `allowed` nor in `BUNDLE_REVIEWED` fails.
+  - `main()` also checks the bundle when the `jupyterlab` distribution is installed (the existing `main()` tests stub it, so they do not depend on the environment). A bundled package that is neither `allowed` nor in `BUNDLE_REVIEWED` fails.
 
 - [ ] **Step 1: Write the failing tests.**
   - `test_certifi_and_fqdn_are_exceptions`.
@@ -361,7 +363,7 @@ A viewer who was granted notebooks runs code too: their boundary is their read-o
 
 **Files:**
 - Create: `src/fione_launcher/{__init__,__main__,config,docker,spec,server}.py`, `docker/Dockerfile.launcher`
-- Test: `tests/launcher/{test_spec,test_server,test_reconcile}.py`, `tests/docker/test_launcher_docker.py` (`docker`)
+- Test: `tests/launcher/{test_spec,test_launcher_server,test_reconcile}.py`, `tests/docker/test_launcher_docker.py` (`docker`)
 - Modify: `docs/configuration.md` (new section "Notebook launcher"), `tests/unit/test_docs.py` (that section's table equals the `"FIONE_*"` names in `src/fione_launcher/*.py`, which also become known names)
 
 **Interfaces:**
@@ -427,7 +429,7 @@ A viewer who was granted notebooks runs code too: their boundary is their read-o
 
 **Files:**
 - Create: `src/fione/notebooks/{__init__,launch,launcher,service}.py`, `src/fione/web/notebook_ui.py`, `src/fione/web/templates/{notebook,_notebook_status}.html`, `src/fione/web/static/css/` (frame styles in the existing stylesheet)
-- Modify: `src/fione/config.py`, `src/fione/db.py` (append a migration), `src/fione/api/app.py`, `src/fione/web/{views,headers,admin_ui}.py`, `src/fione/api/routes_users.py`, `src/fione/web/templates/base.html`, `src/fione/i18n/{en,ja}.json`, `docs/configuration.md`, `scripts/ui-screenshots.py`
+- Modify: `src/fione/config.py`, `src/fione/db.py` (append a migration), `src/fione/api/app.py`, `src/fione/web/{views,headers,admin_ui}.py`, `src/fione/api/routes_users.py`, `src/fione/web/templates/base.html`, `tests/web/test_routes.py` (a `NOTEBOOK_ROUTES` table for `notebook_ui.router`: 404 disabled, 403 without permission), `src/fione/i18n/{en,ja}.json`, `docs/configuration.md`, `scripts/ui-screenshots.py`
 - Test: `tests/unit/test_notebook_service.py`, `tests/unit/test_db.py` (where the `Settings` tests live), `tests/web/test_notebook_ui.py`, `tests/notebook/test_launch_contract.py` (`notebook`)
 
 **Interfaces:**
@@ -467,9 +469,9 @@ A viewer who was granted notebooks runs code too: their boundary is their read-o
 | `GET /notebook/status` | the partial; when running it answers with `HX-Refresh: true` |
 | `POST /notebook/start`, `POST /notebook/stop` | `form_auth` (Origin + CSRF), then permission; 303 to `/notebook`. `limit` → the page with `notebook.limit` |
 
-- Produces the CSP hook: a view sets `request.state.csp_frame_src = <notebook origin>`, and `UIHeaders` appends `; frame-src <origin>` to `CONTENT_SECURITY_POLICY` for that response only. `frame-ancestors 'none'` stays.
+- Produces the CSP hook: a view sets `request.state.csp_frame_src = <notebook origin>`, and `UIHeaders` appends `; frame-src <origin>` to `CONTENT_SECURITY_POLICY` for that response only (in `UIHeaders` itself; `ui_headers()` is also used for the 500 page and stays unchanged). `frame-ancestors 'none'` stays.
 - Produces navigation and revocation:
-  - Main nav gets a "Notebook" link when enabled and `can_use_notebook`.
+  - Main nav gets a "Notebook" link (`nav="notebook"` for `aria-current`) when enabled and `can_use_notebook`. `render()` has no connection: only when notebooks are enabled, it opens a short-lived one through `request.app.state.db_path` (as `_signed_in` does), so a disabled install pays nothing.
   - `stop_unless_allowed` runs after the API's `PATCH /users/{id}` and the admin UI's notebook/role changes.
   - `stop` runs before `delete_user` in both.
   - Launcher errors there are logged and do not fail the user change; the token is still revoked.
@@ -506,10 +508,10 @@ A viewer who was granted notebooks runs code too: their boundary is their read-o
 
 | Service | Networks | Notes |
 |---|---|---|
-| `fione` | `backend`, `gateway`, `launcher` | env `FIONE_PUBLIC_URL: ${FIONE_PUBLIC_URL:-}`, `FIONE_NOTEBOOK_URL: ${FIONE_NOTEBOOK_URL:-}`, `FIONE_NOTEBOOK_LAUNCHER_URL: http://notebook-launcher:8000`, `FIONE_NOTEBOOK_LAUNCHER_SECRET: ${FIONE_NOTEBOOK_LAUNCHER_SECRET:-}` (`:-`, never `:?`: Compose interpolates profile-only services too) |
+| `fione` | `backend`, `gateway`, `launcher` | env `FIONE_PUBLIC_URL: ${FIONE_PUBLIC_URL:-}`, `FIONE_NOTEBOOK_URL: ${FIONE_NOTEBOOK_URL:-}`, `FIONE_NOTEBOOK_LAUNCHER_URL: http://notebook-launcher:8000`, `FIONE_NOTEBOOK_LAUNCHER_SECRET: ${FIONE_NOTEBOOK_LAUNCHER_SECRET:-}`, `FIONE_NOTEBOOK_MAX_LIFETIME_SECS: ${FIONE_NOTEBOOK_MAX_LIFETIME_SECS:-43200}` (`:-`, never `:?`: Compose interpolates profile-only services too) |
 | `notebook-gateway` | `gateway`, `notebooks` | pinned `nginxinc/nginx-unprivileged:<x.y.z>-alpine` (newest tag at least two weeks old, recorded in the file); `ports: ["127.0.0.1:${FIONE_NOTEBOOK_PORT:-8888}:8080"]`; config mounted read-only; `cap_drop: [ALL]`, `read_only: true`, tmpfs `/tmp` |
 | `notebook-launcher` | `launcher` | built from `docker/Dockerfile.launcher`; `/var/run/docker.sock` mounted (the only socket mount); no ports; `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, `read_only: true`; env `FIONE_LAUNCHER_SECRET: ${FIONE_NOTEBOOK_LAUNCHER_SECRET:-}`, `FIONE_NOTEBOOK_IMAGE: ghcr.io/codelibs/fione-notebook:${FIONE_IMAGE_TAG:-dev}`; healthcheck `/health` |
-| `notebook-image` | none (`network_mode: none`) | builds `docker/Dockerfile.notebook` with `image:` = the launcher's image name; `entrypoint: ["true"]`, `restart: "no"`; it exists so `--profile notebook build` builds the image |
+| `notebook-image` | none (`network_mode: none`) | builds `docker/Dockerfile.notebook` with `image:` = the launcher's image name; `scale: 0` so `up --wait` never starts it (check this in the smoke run; if Compose still creates it, use `entrypoint: ["true"]` and name services explicitly in `up`); it exists so `--profile notebook build` builds the image |
 
   - Networks: `notebooks` and `launcher` are `internal: true`. `gateway` is not, because a published port needs a non-internal network.
 - Produces `notebook-gateway.conf`:
@@ -561,7 +563,7 @@ A viewer who was granted notebooks runs code too: their boundary is their read-o
 
 **Files:**
 - Create: `tests/e2e/test_notebook.py`
-- Modify: `tests/e2e/conftest.py`, `.github/workflows/ci.yml` (the e2e job's build already has `--profile notebook` from Task 9)
+- Modify: `tests/e2e/conftest.py`, `.github/workflows/ci.yml` (the e2e job's build already has `--profile notebook` from Task 9; that job runs on pushes to `v2`/`master` only, so say so in the PR: the `docker` and `e2e` notebook tests do not run on pull requests)
 
 **Interfaces:**
 - Consumes: the whole stack. `Stack` gains `notebook_port`. The env adds `FIONE_NOTEBOOK_PORT` (a free port), `FIONE_NOTEBOOK_URL=http://127.0.0.1:<port>` and `FIONE_PUBLIC_URL=http://127.0.0.1:<fione port>` (the same host name for both: `localhost` vs `127.0.0.1` is cross-site). Build, `up` and `down` pass `--profile serving --profile notebook`.
@@ -594,7 +596,7 @@ A viewer who was granted notebooks runs code too: their boundary is their read-o
 
 **Files:**
 - Create: `docs/notebook.md`, `docs/notebook.ja.md`
-- Modify: `README.md`, `README.ja.md`, `docs/known-limitations.md`, `docs/configuration.md`, `docs/quickstart.md`, `docs/quickstart.ja.md` (a link only), `tests/unit/test_docs.py` (known names also from `src/fione_notebook/*.py`, if a page names `FIONE_NB_*`)
+- Modify: `README.md`, `README.ja.md`, `docs/known-limitations.md`, `docs/configuration.md`, `docs/quickstart.md`, `docs/quickstart.ja.md` (a link only), `docs/migrating-from-v1.md`, `docs/migrating-from-v1.ja.md` (the "planned" Notebook rows become shipped; grep all docs for "Notebook" and "planned"). Docs pages may not contain `/home/<name>` (`test_docs_hold_nothing_private`): write "the notebook's work directory", not `/home/nb/work`, `tests/unit/test_docs.py` (known names also from `src/fione_notebook/*.py`, if a page names `FIONE_NB_*`)
 
 **Interfaces:**
 - Consumes: every task's settings, behaviours and measured numbers (the image size from Task 6).
@@ -640,6 +642,7 @@ A viewer who was granted notebooks runs code too: their boundary is their read-o
   - The launcher image is published too: every image Compose names exists for a tag.
   - matplotlib and scikit-learn are in the notebook image.
   - `FIONE_NOTEBOOK_MAX_RUNNING` defaults to 4.
+- **Checked against the Phase 2a code before Task 1:** route keys are prefix-less, route enumeration uses the OpenAPI paths, test basenames are unique, `test_routes.py` tables gain the new routes, the navigation link opens its own short connection, i18n keys use the `users.` prefix, and project share/unshare join the denied routes for notebook tokens. `docker-smoke.sh` also needs the notebook variable names in its allow-list, and `tests/e2e/conftest.py` must pass the notebook port and URLs explicitly.
 - **Risks verified in their tasks:**
   - Compose interpolation of profile-only services: `:-` only (Task 9).
   - The `extra_log_scrub_param_keys` trait name (Task 5 log test).
