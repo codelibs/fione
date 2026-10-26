@@ -5,6 +5,10 @@ request is a bearer-token request and nothing else is considered; otherwise (no 
 another scheme, which is ignored) the session cookie is used. Both reload the user from the
 database, so role changes and deletions apply at once. Cookie-authenticated unsafe requests
 must echo the session's CSRF token in ``X-CSRF-Token``.
+
+A token has a scope. A ``notebook`` token (minted for the notebook container) acts as its user
+capped at editor, and only on the routes of ``NOTEBOOK_SCOPE_ROUTES``: it cannot touch
+accounts, credentials, modules or imported models, and it expires.
 """
 
 import sqlite3
@@ -20,11 +24,59 @@ from fione.api.security import SESSION_COOKIE, Session, origin_matches, tokens_e
 from fione.auth import service as auth_service
 from fione.auth.roles import ProjectAccess, Role, User
 from fione.auth.roles import project_access as membership
+from fione.auth.service import ApiToken
+from fione.auth.tokens import TokenScope
 from fione.projects.service import Project, ProjectNotFound, require_project
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # Multipart framing around an uploaded file: the file itself is checked against its own limit.
 UPLOAD_SLACK_BYTES = 1 << 20
+
+# (method, route template) a notebook token may use: the template is what the router matched
+# (``request.scope["route"].path``), so it has no /api/v1 prefix. Everything else needs a full
+# token: the auth, token, user and module-upload routes, model import (it loads pickles on
+# the host) and sharing (it changes permissions that outlive the token). The SDK deletes
+# datasets (its temporary predict input), so deletes stay allowed.
+NOTEBOOK_SCOPE_ROUTES = frozenset(
+    {
+        ("GET", "/jobs"),
+        ("DELETE", "/jobs"),
+        ("GET", "/jobs/{job_id}"),
+        ("DELETE", "/jobs/{job_id}"),
+        ("POST", "/jobs/{job_id}/cancel"),
+        ("GET", "/jobs/{job_id}/events"),
+        ("GET", "/models/{model_id}"),
+        ("DELETE", "/models/{model_id}"),
+        ("POST", "/models/{model_id}/contributions"),
+        ("GET", "/models/{model_id}/diagnostics"),
+        ("GET", "/models/{model_id}/explanations"),
+        ("GET", "/models/{model_id}/export"),
+        ("POST", "/models/{model_id}/partial-dependence"),
+        ("GET", "/models/{model_id}/serving"),
+        ("GET", "/models/{model_id}/serving/info"),
+        ("GET", "/modules"),
+        ("GET", "/projects"),
+        ("POST", "/projects"),
+        ("GET", "/projects/{project_id}"),
+        ("DELETE", "/projects/{project_id}"),
+        ("GET", "/projects/{project_id}/datasets"),
+        ("POST", "/projects/{project_id}/datasets"),
+        ("GET", "/projects/{project_id}/datasets/{dataset_id}"),
+        ("DELETE", "/projects/{project_id}/datasets/{dataset_id}"),
+        ("GET", "/projects/{project_id}/datasets/{dataset_id}/columns/{column}"),
+        ("GET", "/projects/{project_id}/datasets/{dataset_id}/download"),
+        ("GET", "/projects/{project_id}/datasets/{dataset_id}/preview"),
+        ("GET", "/projects/{project_id}/datasets/{dataset_id}/profile"),
+        ("GET", "/projects/{project_id}/exports/{job_id}"),
+        ("POST", "/projects/{project_id}/jobs/automl"),
+        ("POST", "/projects/{project_id}/jobs/batch-predict"),
+        ("POST", "/projects/{project_id}/jobs/explain"),
+        ("POST", "/projects/{project_id}/jobs/export"),
+        ("POST", "/projects/{project_id}/jobs/module"),
+        ("GET", "/projects/{project_id}/models"),
+        ("GET", "/system/status"),
+    }
+)
 
 
 def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
@@ -45,6 +97,8 @@ class Auth:
     user: User
     via: Literal["cookie", "bearer"]
     session: Session | None
+    scope: TokenScope = TokenScope.FULL
+    token: ApiToken | None = None
 
 
 def _unauthorized(message: str) -> ApiError:
@@ -68,10 +122,17 @@ def cookie_auth(request: Request, conn: sqlite3.Connection) -> Auth | None:
 def get_auth(request: Request, conn: Conn) -> Auth:
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() == "bearer":
-        user = auth_service.user_from_token(conn, token.strip()) if token.strip() else None
-        if user is None:
-            raise _unauthorized("invalid or revoked API token")
-        return Auth(user, "bearer", None)
+        found = auth_service.token_identity(conn, token.strip()) if token.strip() else None
+        if found is None:
+            raise _unauthorized("invalid, revoked or expired API token")
+        user, record = found
+        if record.scope == TokenScope.NOTEBOOK:
+            route = request.scope.get("route")
+            if route is None or (request.method, route.path) not in NOTEBOOK_SCOPE_ROUTES:
+                raise ApiError(403, "token_scope", "this token cannot be used here")
+            if user.role == Role.ADMIN:  # the one place that caps require_admin and access
+                user = User(user.id, user.username, Role.EDITOR)
+        return Auth(user, "bearer", None, record.scope, record)
     if not request.cookies.get(SESSION_COOKIE):
         raise _unauthorized("authentication required")
     auth = cookie_auth(request, conn)

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Query
 
-from fione.api.deps import AdminUser, Conn, CurrentUser
+from fione.api.deps import AdminUser, AuthDep, Conn, CurrentUser
 from fione.api.errors import ApiError, not_found, service_errors
 from fione.api.schemas import IdPath, TokenIn, UserIn, UserPatch, token_out, user_out
 from fione.api.security import password_work
@@ -50,9 +50,11 @@ def delete_user(user_id: IdPath, admin: AdminUser, conn: Conn) -> None:
 
 
 @router.post("/tokens", status_code=201)
-def create_token(body: TokenIn, user: CurrentUser, conn: Conn) -> dict:
-    """A new API token for the caller; the plaintext ``token`` is shown only here."""
-    record, token = auth_service.create_token(conn, user.id, body.name)
+def create_token(body: TokenIn, auth: AuthDep, conn: Conn) -> dict:
+    """A new API token for the caller; the plaintext ``token`` is shown only here. One made
+    with a token has that token's scope and expiry, so a token cannot mint a longer-lived one."""
+    kept = {"scope": auth.scope, "expires_at": auth.token.expires_at} if auth.token else {}
+    record, token = auth_service.create_token(conn, auth.user.id, body.name, **kept)
     return {**token_out(record), "token": token}
 
 

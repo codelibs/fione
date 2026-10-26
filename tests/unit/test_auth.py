@@ -7,6 +7,7 @@ import pytest
 from fione import db
 from fione.auth import passwords, roles, service
 from fione.auth.roles import Role, User
+from fione.auth.tokens import TokenScope
 
 PW = "correct horse"
 
@@ -207,6 +208,43 @@ def test_deleting_user_removes_tokens(conn):
     conn.execute("DELETE FROM users WHERE id=?", (user.id,))
     assert service.user_from_token(conn, token) is None
     assert conn.execute("SELECT COUNT(*) FROM api_tokens").fetchone()[0] == 0
+
+
+def test_migration_keeps_existing_tokens_full_and_unexpiring(conn, tmp_path):
+    before = next(i for i, sql in enumerate(db.MIGRATIONS) if "api_tokens ADD COLUMN" in sql)
+    old = db.connect(tmp_path / "old.db")
+    try:
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:before])
+            db.migrate(old)
+        user = service.create_user(old, "alice", PW, Role.EDITOR)
+        old.execute(
+            "INSERT INTO api_tokens (user_id, name, token_sha256) VALUES (?, 'old', 'h')",
+            (user.id,),
+        )
+        assert db.migrate(old) == len(db.MIGRATIONS)
+        (record,) = service.list_tokens(old, user.id)
+        assert record.scope == "full" and record.expires_at is None
+    finally:
+        old.close()
+
+
+def test_create_token_rejects_iso_t_format(conn):
+    user = service.create_user(conn, "alice", PW, Role.EDITOR)
+    with pytest.raises(ValueError):
+        service.create_token(conn, user.id, "t", expires_at="2026-01-01T00:00:00")
+
+
+def test_token_identity_carries_scope_and_expiry(conn):
+    user = service.create_user(conn, "alice", PW, Role.EDITOR)
+    expires = service.expiry_after(60)
+    record, token = service.create_token(
+        conn, user.id, "nb", scope=TokenScope.NOTEBOOK, expires_at=expires
+    )
+    assert record.scope is TokenScope.NOTEBOOK and record.expires_at == expires
+    found, meta = service.token_identity(conn, token)
+    assert found == user and meta == record
+    assert service.user_from_token(conn, token) == user
 
 
 # --- roles -------------------------------------------------------------------

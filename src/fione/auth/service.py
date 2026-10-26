@@ -1,12 +1,13 @@
 import re
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from functools import cache
 
 from fione import db
 from fione.auth.passwords import hash_password, verify_password
 from fione.auth.roles import Role, User
-from fione.auth.tokens import hash_token, new_token
+from fione.auth.tokens import TokenScope, hash_token, new_token
 
 _USERNAME_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
@@ -46,6 +47,8 @@ class ApiToken:
     name: str
     created_at: str
     revoked: bool
+    scope: TokenScope = TokenScope.FULL
+    expires_at: str | None = None
 
 
 @cache
@@ -219,18 +222,39 @@ def _api_token(row: sqlite3.Row) -> ApiToken:
         name=row["name"],
         created_at=row["created_at"],
         revoked=row["revoked_at"] is not None,
+        scope=TokenScope(row["scope"]),
+        expires_at=row["expires_at"],
     )
 
 
-_TOKEN_COLUMNS = "id, user_id, name, created_at, revoked_at"
+_TOKEN_COLUMNS = "id, user_id, name, created_at, revoked_at, scope, expires_at"
+_EXPIRY_FORMAT = "%Y-%m-%d %H:%M:%S"  # that of CURRENT_TIMESTAMP, so SQL compares them as text
+_EXPIRY = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d")
 
 
-def create_token(conn: sqlite3.Connection, user_id: int, name: str) -> tuple[ApiToken, str]:
-    """Create an API token: its record and its plaintext; only the sha256 is stored."""
+def expiry_after(seconds: int) -> str:
+    """The UTC time ``seconds`` from now, as ``create_token`` takes it."""
+    return (datetime.now(UTC) + timedelta(seconds=seconds)).strftime(_EXPIRY_FORMAT)
+
+
+def create_token(
+    conn: sqlite3.Connection,
+    user_id: int,
+    name: str,
+    *,
+    scope: TokenScope = TokenScope.FULL,
+    expires_at: str | None = None,
+) -> tuple[ApiToken, str]:
+    """Create an API token: its record and its plaintext; only the sha256 is stored.
+
+    ``expires_at`` is UTC ``YYYY-MM-DD HH:MM:SS`` (``expiry_after``); None never expires."""
+    if expires_at is not None and not _EXPIRY.fullmatch(expires_at):
+        raise ValueError("expires_at must be UTC text like 2026-01-31 12:00:00")
     token = new_token()
     cur = conn.execute(
-        "INSERT INTO api_tokens (user_id, name, token_sha256) VALUES (?, ?, ?)",
-        (user_id, name, hash_token(token)),
+        "INSERT INTO api_tokens (user_id, name, token_sha256, scope, expires_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (user_id, name, hash_token(token), TokenScope(scope).value, expires_at),
     )
     record = get_token(conn, cur.lastrowid)
     assert record is not None
@@ -273,13 +297,24 @@ def count_tokens(conn: sqlite3.Connection, user_id: int) -> int:
     return row.fetchone()[0]
 
 
-def user_from_token(conn: sqlite3.Connection, token: str) -> User | None:
+def token_identity(conn: sqlite3.Connection, token: str) -> tuple[User, ApiToken] | None:
+    """The user and the record of a token that is neither revoked nor expired."""
     row = conn.execute(
-        "SELECT u.id, u.username, u.role FROM api_tokens t JOIN users u ON u.id = t.user_id"
-        " WHERE t.token_sha256 = ? AND t.revoked_at IS NULL",
+        "SELECT u.username, u.role, t.id, t.user_id, t.name, t.created_at, t.revoked_at,"
+        " t.scope, t.expires_at FROM api_tokens t JOIN users u ON u.id = t.user_id"
+        " WHERE t.token_sha256 = ? AND t.revoked_at IS NULL"
+        " AND (t.expires_at IS NULL OR t.expires_at > CURRENT_TIMESTAMP)",
         (hash_token(token),),
     ).fetchone()
-    return _user(row) if row else None
+    if row is None:
+        return None
+    user = User(id=row["user_id"], username=row["username"], role=Role(row["role"]))
+    return user, _api_token(row)
+
+
+def user_from_token(conn: sqlite3.Connection, token: str) -> User | None:
+    found = token_identity(conn, token)
+    return found[0] if found else None
 
 
 def revoke_token(conn: sqlite3.Connection, token_id: int) -> None:

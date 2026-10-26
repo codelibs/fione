@@ -170,6 +170,8 @@ def token_out(token: ApiToken) -> dict:
         "name": token.name,
         "created_at": token.created_at,
         "revoked": token.revoked,
+        "scope": token.scope.value,
+        "expires_at": token.expires_at,
     }
 
 

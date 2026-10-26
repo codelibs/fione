@@ -19,11 +19,16 @@ import sys
 import tempfile
 import time
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 
 import pandas as pd
 from playwright.sync_api import Page, expect, sync_playwright
 from sklearn.datasets import load_iris
+
+from fione import db
+from fione.auth import service as auth_service
+from fione.auth.tokens import TokenScope
 
 SETUP_TOKEN = "screenshot-setup-token-0123456789"
 ADMIN, PASSWORD = "admin", "screenshot-password"
@@ -112,7 +117,7 @@ def sign_in(page: Page, base: str, username: str = ADMIN, password: str = PASSWO
     page.wait_for_url(f"{base}/")
 
 
-def run(base: str, out: Path, errors: list[str]) -> None:
+def run(base: str, out: Path, errors: list[str], data_dir: Path) -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         s = Shooter(browser, base, out, errors)
@@ -233,7 +238,7 @@ def run(base: str, out: Path, errors: list[str]) -> None:
         s.mode = "detailed"  # the AutoML screens are the detailed view's
         automl(s, base, project)
         model_screens(s, base, project)
-        account_and_admin(s, base, project)
+        account_and_admin(s, base, project, data_dir)
         browser.close()
 
 
@@ -643,7 +648,23 @@ def model_screens(s: "Shooter", base: str, project: str) -> None:
     page.context.close()
 
 
-def account_and_admin(s: "Shooter", base: str, project: str) -> None:
+def seed_scoped_tokens(data_dir: Path) -> None:
+    """A notebook token and an expired one for the admin, so the account page shows both."""
+    with closing(db.connect(data_dir / "fione.db")) as conn:
+        (admin_id,) = conn.execute("SELECT id FROM users WHERE username = ?", (ADMIN,)).fetchone()
+        auth_service.create_token(
+            conn,
+            admin_id,
+            "notebook session",
+            scope=TokenScope.NOTEBOOK,
+            expires_at=auth_service.expiry_after(12 * 3600),
+        )
+        auth_service.create_token(
+            conn, admin_id, "last week's script", expires_at=auth_service.expiry_after(-3600)
+        )
+
+
+def account_and_admin(s: "Shooter", base: str, project: str, data_dir: Path) -> None:
     """The account page (a new token shown once, a password change), the users, sharing and
     system status screens. The admin's own password and role are never changed: every other
     step signs in with them."""
@@ -680,6 +701,7 @@ def account_and_admin(s: "Shooter", base: str, project: str) -> None:
         s.errors.append(f"users: the actions are out of view on a phone ({box})")
     page.context.close()
     shoot_all(s, base, "/admin/system", "system", ("en", "ja"))
+    seed_scoped_tokens(data_dir)
     shoot_all(s, base, "/account", "account", ("en", "ja"))
 
     # A new token: its secret is shown once, and gone after a reload.
@@ -787,7 +809,7 @@ def main() -> None:
         errors: list[str] = []
         try:
             wait_until_up(base, server)
-            run(base, out, errors)
+            run(base, out, errors, Path(data_dir))
         finally:
             server.terminate()
             server.wait(timeout=30)

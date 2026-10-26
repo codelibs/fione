@@ -138,6 +138,11 @@ MIGRATIONS: list[str] = [
         created_at REAL NOT NULL
     );
     """,
+    """
+    ALTER TABLE api_tokens ADD COLUMN expires_at TEXT;
+    ALTER TABLE api_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'full'
+        CHECK (scope IN ('full', 'notebook'));
+    """,
 ]
 
 

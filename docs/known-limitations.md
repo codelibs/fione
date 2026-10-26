@@ -26,8 +26,10 @@ What this release does not do, or does with a catch. Japanese summary at the end
   you set `FIONE_SETUP_TOKEN`).
 - **The S3 credentials are visible** in the containers' environment (`docker inspect`,
   `docker exec`) to anyone who can use Docker on the host.
-- **API tokens never expire**, and Fione does not record when one was last used. Revoke tokens
-  you no longer need on the Account page.
+- **API tokens you create never expire**, and Fione does not record when one was last used.
+  Revoke tokens you no longer need on the Account page. Notebook tokens (made for the notebook
+  container) expire with it, act at most as an editor, and cannot manage accounts, tokens,
+  modules, imports or sharing.
 - **Fione Serving has no authentication** and no rate or concurrency limit for predictions
   (only the request size limits). Requests for contributions are capped (2 at once by default,
   then 503), but each one holds the model while it runs, so plain predictions wait for it, and
@@ -188,7 +190,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 ## 日本語の要約
 
 - サーバー側でセッションを無効にできません（ログアウトはそのブラウザの Cookie を消すだけ。パスワード変更で全セッションが終了）。
-- 管理者がパスワードを再設定しても、そのユーザーの API トークンは残ります。管理者用のトークン管理画面はありません。
+- 管理者がパスワードを再設定しても、そのユーザーの API トークンは残ります。管理者用のトークン管理画面はありません。自分で作ったトークンは期限切れになりません（ノートブック用のトークンはノートブックと一緒に期限切れになり、編集者の権限までで、アカウント・トークン・モジュール・インポート・共有は操作できません）。
 - アップロードした Python モジュールはサンドボックスなしで、サーバーと同じ権限で動きます（アップロードは管理者のみ）。待機中のジョブは、実行時点のモジュールのソースで動きます。
 - 管理者以外に見せるエラーメッセージからファイルのパスは消えますが、URL やホスト名は残ります。
 - CSV のダウンロードは数式インジェクション対策をしていません。
