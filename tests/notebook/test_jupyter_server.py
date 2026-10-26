@@ -18,6 +18,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from email.utils import formatdate
 from pathlib import Path
 
 import httpx
@@ -71,6 +72,7 @@ class Server:
     home: Path
     data_dir: Path
     log: Path
+    expires: int  # FIONE_NB_EXPIRES
     tokens: list[str] = field(default_factory=list)
 
     def token(self, *, sub: str = OWNER, role: str = "editor", exp_in: int = 60) -> str:
@@ -85,8 +87,11 @@ class Server:
         self.tokens.append(token)
         return token
 
-    def client(self) -> httpx.Client:
-        return httpx.Client(base_url=self.url, follow_redirects=False, timeout=30)
+    def client(self, fetch_site: str | None = "same-site") -> httpx.Client:
+        """A client sending the Sec-Fetch-Site a browser sends when Fione's page, on a
+        sibling origin of the same site, opens the notebook."""
+        headers = {"Sec-Fetch-Site": fetch_site} if fetch_site else {}
+        return httpx.Client(base_url=self.url, follow_redirects=False, timeout=30, headers=headers)
 
     def login(self, role: str = "editor") -> httpx.Client:
         """A signed-in client that also holds the _xsrf cookie."""
@@ -124,8 +129,11 @@ def _jupyter_env(**changes: str | None) -> dict[str, str]:
 
 def _start(env: dict[str, str], port: int, cwd: Path, log: Path) -> subprocess.Popen:
     # The command line beats the config file: listen on loopback only, on this port only.
+    # -P keeps the (user-writable) working directory off the server's sys.path, as the image's
+    # `jupyter lab` console script does.
     command = [
         sys.executable,
+        "-P",
         "-m",
         "jupyterlab",
         "--no-browser",
@@ -192,17 +200,35 @@ def _stop(proc: subprocess.Popen) -> None:
                 pass
 
 
-def _wait_until_listening(proc: subprocess.Popen, url: str, log: Path) -> None:
+def _wait_until_listening(proc: subprocess.Popen, url: str, log: Path) -> bool:
+    """True once the server answers, False if it exited first."""
     deadline = time.monotonic() + START_TIMEOUT
     while time.monotonic() < deadline:
         if proc.poll() is not None:
-            pytest.fail(f"Jupyter exited with {proc.returncode}:\n{log.read_text()}")
+            return False
         try:
             httpx.get(url + "api/status", timeout=2)
-            return
+            return True
         except httpx.TransportError:
             time.sleep(0.25)
     pytest.fail(f"Jupyter did not start in {START_TIMEOUT} s:\n{log.read_text()}")
+
+
+def _launch(env: dict[str, str], cwd: Path, log: Path) -> tuple[subprocess.Popen, int]:
+    """A listening server and its port. A port can be taken between _free_port and the
+    server's bind; then it is tried once more on another port."""
+    for attempt in range(2):
+        port = _free_port()
+        proc = _start(env, port, cwd, log)
+        try:
+            if _wait_until_listening(proc, f"http://127.0.0.1:{port}{BASE}", log):
+                return proc, port
+        except BaseException:
+            _stop(proc)
+            raise
+        if attempt or "is not available" not in log.read_text():
+            break
+    pytest.fail(f"Jupyter exited with {proc.returncode}:\n{log.read_text()}")
 
 
 def _layout(root: Path) -> dict[str, Path]:
@@ -210,6 +236,7 @@ def _layout(root: Path) -> dict[str, Path]:
     for d in dirs.values():
         d.mkdir()
     (dirs["config"] / "jupyter_server_config.py").write_text(CONFIG_FILE)
+    (dirs["config"] / "jupyter_server_config.py").chmod(0o444)  # nothing writable in there
     return dirs
 
 
@@ -236,12 +263,11 @@ def server(tmp_path_factory):
     for name in ("config", "data"):
         dirs[name].chmod(0o555)
     key = os.urandom(32)
-    port = _free_port()
     log = root / "server.log"
-    proc = _start(_server_env(dirs, key), port, dirs["work"], log)
+    env = _server_env(dirs, key)
+    proc, port = _launch(env, dirs["work"], log)
     try:
         url = f"http://127.0.0.1:{port}{BASE}"
-        _wait_until_listening(proc, url, log)
         yield Server(
             origin=f"http://127.0.0.1:{port}",
             url=url,
@@ -251,6 +277,7 @@ def server(tmp_path_factory):
             home=dirs["home"],
             data_dir=dirs["data"],
             log=log,
+            expires=int(env["FIONE_NB_EXPIRES"]),
         )
     finally:
         _stop(proc)
@@ -390,9 +417,34 @@ def test_login_sets_an_httponly_lax_cookie_on_the_base_url(server):
     assert "HttpOnly" in cookie
     assert "SameSite=Lax" in cookie
     assert f"Path={BASE}" in cookie
+    # It ends with the container, not some time after the sign-in.
+    assert f"expires={formatdate(server.expires, usegmt=True)}".lower() in cookie.lower()
     assert token not in r.text
     assert c.get("lab").status_code == 200
     assert c.get("api/contents").status_code == 200
+
+
+@pytest.mark.parametrize("fetch_site", ["cross-site", "none", None, "same-site, cross-site"])
+def test_login_needs_a_same_site_navigation(server, fetch_site):
+    # Otherwise any site could sign a victim's browser into the attacker's own container,
+    # whose trusted notebook output would then run on the shared notebook origin.
+    token = server.token()
+    r = server.client(fetch_site).get("login", params={"launch": token})
+    assert r.status_code == 403
+    assert not [h for h in r.headers.get_list("set-cookie") if h.startswith("username-")]
+    # Refused before redemption: the same token still signs in from Fione's page.
+    assert server.client().get("login", params={"launch": token}).status_code == 302
+
+
+def test_login_accepts_a_same_origin_navigation(server):
+    r = server.client("same-origin").get("login", params={"launch": server.token()})
+    assert r.status_code == 302
+
+
+def test_login_refuses_a_percent_encoded_launch_key(server):
+    token = server.token()
+    assert server.client().get(f"login?%6Caunch={token}").status_code == 403
+    assert server.client().get("login", params={"launch": token}).status_code == 302
 
 
 def test_login_without_next_goes_to_lab(server):
@@ -452,7 +504,8 @@ def test_kernel_runs_code(kernel):
     c, url = kernel
     request = _ws_request(url, cookies=_cookie_header(c))
     assert asyncio.run(_execute(request, "print(6*7)")) == "42\n"
-    # Kernels do not inherit the container's launch key or cookie secret.
+    # Kernels do not inherit the launch key or cookie secret: hygiene, not a boundary, as
+    # /proc/<ppid>/environ (same uid) still holds them.
     code = "import os; print(sorted(n for n in os.environ if n.startswith('FIONE_NB_')))"
     visible = "['FIONE_NB_EXPIRES', 'FIONE_NB_ORIGIN', 'FIONE_NB_OWNER']\n"
     assert asyncio.run(_execute(request, code)) == visible
@@ -600,7 +653,7 @@ def test_user_written_html_is_never_served(server, kernel):
 
 
 def test_launch_token_never_reaches_the_log(server):
-    scrubbed = "/login?launch=[secret]"
+    scrubbed = "/login?[hidden]"
     before = server.log.read_text().count(scrubbed)
     # Refused sign-ins are where tornado would name the request URI, token included.
     anon = server.client()
@@ -610,12 +663,15 @@ def test_launch_token_never_reaches_the_log(server):
         assert anon.get("login", params={"launch": token}).status_code == 403
     assert anon.get("login", params={"launch": accepted}).status_code == 302
     assert server.client().get("login", params={"launch": accepted}).status_code == 403
-    # The access log line is written after the response: wait until all five are there.
+    # Also a key the access log's scrubbing would not recognise.
+    encoded = server.token()
+    assert anon.get(f"login?%6Caunch={encoded}").status_code == 403
+    # The access log line is written after the response: wait until all six are there.
     deadline = time.monotonic() + 5
-    while server.log.read_text().count(scrubbed) < before + 5 and time.monotonic() < deadline:
+    while server.log.read_text().count(scrubbed) < before + 6 and time.monotonic() < deadline:
         time.sleep(0.1)
     log = server.log.read_text()
-    assert log.count(scrubbed) >= before + 5, log
+    assert log.count(scrubbed) >= before + 6, log
     # No token of this module, nor either half of one, appears anywhere.
     for token in [*server.tokens, *refused]:
         _, payload, signature = token.split(".")
@@ -640,7 +696,7 @@ def test_server_refuses_to_start_without_owner_or_key(tmp_path, case):
     if case == "writable-data-dir":
         dirs["data"].chmod(0o755)
     log = tmp_path / "server.log"
-    port = _free_port()
+    port = _free_port()  # a clash would fail the "fione_notebook: " check below, not pass
     proc = _start(_server_env(dirs, os.urandom(32), **changes), port, dirs["work"], log)
     try:
         code = proc.wait(EXIT_TIMEOUT)
@@ -654,3 +710,31 @@ def test_server_refuses_to_start_without_owner_or_key(tmp_path, case):
     assert "fione_notebook: " in log.read_text()  # refused by the extension, not by accident
     with pytest.raises(httpx.TransportError):
         httpx.get(f"http://127.0.0.1:{port}{BASE}api/status", timeout=2)
+
+
+def test_anonymous_api_root_and_metrics(server):
+    anon = server.client()
+    r = anon.get("api")
+    assert r.status_code == 200
+    assert set(r.json()) == {"version"}
+    assert anon.get("metrics").status_code == 403
+
+
+def test_lab_settings_and_workspaces_are_not_writable(server):
+    # JupyterLab's settings, workspaces, extensions, build, plugins, news and update handlers
+    # are @web.authenticated only: the authorizer does not see them, so every role reaches
+    # them. Their writes fail here because the config and data dirs are read-only (the image
+    # also keeps its environment root-owned) and the gateway refuses settings and workspace
+    # writes.
+    c = server.login("viewer")
+    settings = c.put(
+        "lab/api/settings/@jupyterlab/apputils-extension:themes",
+        json={"raw": '{"theme": "JupyterLab Dark"}'},
+        headers=_xsrf(c),
+    )
+    workspace = c.put(
+        "lab/api/workspaces/x", json={"data": {}, "metadata": {"id": "x"}}, headers=_xsrf(c)
+    )
+    # Observed: the read-only dirs make both writes fail with a server error.
+    assert (settings.status_code, workspace.status_code) == (500, 500)
+    assert not any(server.data_dir.rglob("*"))

@@ -8,6 +8,8 @@ import json
 import os
 import site
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -69,6 +71,7 @@ def test_accepts_a_fresh_token_for_the_owner():
     [
         pytest.param(sign(KEY, claims(exp=int(NOW) - 1)), id="expired-by-1s"),
         pytest.param(sign(KEY, claims(exp=int(NOW))), id="expires-now"),
+        pytest.param(sign(KEY, claims(exp=int(NOW) + 301)), id="lives-over-300s"),
         pytest.param(_flip_signature_byte(sign(KEY, claims())), id="flipped-signature-byte"),
         pytest.param(sign(bytes(32), claims()), id="other-key"),
         pytest.param(sign(KEY, claims(sub="8")), id="other-user"),
@@ -93,6 +96,11 @@ def test_rejects(token):
     assert verify_launch_token(KEY, token, owner="7", now=NOW) is None
 
 
+def test_accepts_a_token_living_300s():
+    token = sign(KEY, claims(exp=int(NOW) + 300))
+    assert verify_launch_token(KEY, token, owner="7", now=NOW) is not None
+
+
 def test_signature_padding_variants_are_rejected():
     token = sign(KEY, claims())
     assert verify_launch_token(KEY, token + "=", owner="7", now=NOW) is None
@@ -101,8 +109,10 @@ def test_signature_padding_variants_are_rejected():
 # --- identity provider and authorizer --------------------------------------------------------
 
 
-def _provider(owner: str = "7") -> FioneIdentityProvider:
-    return FioneIdentityProvider(owner=owner, key=KEY)
+def _provider(owner: str = "7", expires: int | None = None) -> FioneIdentityProvider:
+    if expires is None:
+        expires = int(time.time()) + 3600
+    return FioneIdentityProvider(owner=owner, key=KEY, expires=expires)
 
 
 def test_cookie_round_trip_keeps_name_and_role():
@@ -129,6 +139,12 @@ def test_cookie_round_trip_keeps_name_and_role():
 )
 def test_user_from_cookie_refuses_anything_but_the_owner(cookie):
     assert _provider().user_from_cookie(cookie) is None
+
+
+def test_user_from_cookie_refuses_a_cookie_after_the_container_expiry():
+    cookie = json.dumps({"username": "7", "name": "alice", "role": "editor"})
+    assert _provider(expires=int(time.time()) - 1).user_from_cookie(cookie) is None
+    assert _provider().user_from_cookie(cookie) is not None
 
 
 def test_identity_provider_never_token_authenticates():
@@ -220,6 +236,9 @@ def jupyter_dirs(tmp_path):
     yield config_dir, data_dir
     for d in (config_dir, data_dir):
         d.chmod(0o755)
+        for sub in d.iterdir():
+            if sub.is_dir() and not sub.is_symlink():
+                sub.chmod(0o755)
 
 
 @pytest.fixture
@@ -264,20 +283,40 @@ def test_configure_sets_the_security_traits(env):
     assert len(c.NotebookNotary.secret) == 32
     assert c.FioneIdentityProvider.owner == "7"
     assert c.FioneIdentityProvider.key == bytes.fromhex("ab" * 32)
-    cookie, kwargs = c.IdentityProvider.cookie_options, c.IdentityProvider.get_secure_cookie_kwargs
-    assert cookie["samesite"] == "Lax"
-    assert cookie["expires_days"] == pytest.approx(0.5, abs=0.001)
-    assert kwargs == {"max_age_days": cookie["expires_days"]}
+    expires = int(env["FIONE_NB_EXPIRES"])
+    assert c.FioneIdentityProvider.expires == expires
+    # The browser cookie ends with the container, wherever in its life the sign-in happens.
+    assert c.IdentityProvider.cookie_options == {
+        "samesite": "Lax",
+        "expires": datetime.fromtimestamp(expires, UTC),
+    }
+    max_age = c.IdentityProvider.get_secure_cookie_kwargs["max_age_days"]
+    assert max_age == pytest.approx(0.5, abs=0.001)
+    assert "secure_cookie" not in c.IdentityProvider  # http: tornado's per-request default
 
 
-def test_configure_clamps_a_past_expiry_to_zero(env):
+def test_configure_marks_the_cookie_secure_behind_https(env):
     c = Config()
-    configure(c, {**env, "FIONE_NB_EXPIRES": "1000"})
-    assert c.IdentityProvider.cookie_options["expires_days"] == 0
-    assert c.IdentityProvider.get_secure_cookie_kwargs == {"max_age_days": 0}
+    configure(c, {**env, "FIONE_NB_ORIGIN": "https://fione.example"})
+    assert c.IdentityProvider.secure_cookie is True
 
 
-def test_configure_hides_the_secrets_from_kernels(env, monkeypatch):
+@pytest.mark.parametrize(
+    ("offset", "accepted"),
+    [(-1, False), (0, False), (1, True), (604800, True), (604801, False), (10**30, False)],
+)
+def test_configure_bounds_the_container_expiry(env, offset, accepted):
+    env["FIONE_NB_EXPIRES"] = str(int(time.time()) + offset)
+    if accepted:
+        configure(Config(), env)
+    else:
+        with pytest.raises(SystemExit):
+            configure(Config(), env)
+
+
+def test_configure_unsets_the_secrets_as_hygiene_not_a_boundary(env, monkeypatch):
+    # Kernels then do not inherit them, so `!env` output saved in a notebook does not hold
+    # them; /proc/<server pid>/environ (same uid) still does.
     monkeypatch.setenv("FIONE_NB_KEY", env["FIONE_NB_KEY"])
     monkeypatch.setenv("FIONE_NB_COOKIE_SECRET", env["FIONE_NB_COOKIE_SECRET"])
     configure(Config(), dict(os.environ) | env)
@@ -291,6 +330,9 @@ def test_configure_hides_the_secrets_from_kernels(env, monkeypatch):
         pytest.param({"FIONE_NB_OWNER": "7a"}, id="non-digit-owner"),
         pytest.param({"FIONE_NB_OWNER": "٧"}, id="non-ascii-digit-owner"),
         pytest.param({"FIONE_NB_OWNER": "7\n"}, id="owner-with-newline"),
+        pytest.param({"FIONE_NB_OWNER": "007"}, id="owner-with-leading-zeros"),
+        pytest.param({"FIONE_NB_OWNER": "0"}, id="owner-zero"),
+        pytest.param({"FIONE_NB_OWNER": "1" * 19}, id="owner-too-long"),
         pytest.param({"FIONE_NB_OWNER": None}, id="no-owner"),
         pytest.param({"FIONE_NB_KEY": "a" * 63}, id="63-hex-key"),
         pytest.param({"FIONE_NB_KEY": "g" * 64}, id="non-hex-key"),
@@ -324,6 +366,43 @@ def test_configure_refuses_a_writable_jupyter_dir(env, which):
     os.chmod(env[which], 0o755)
     with pytest.raises(SystemExit):
         configure(Config(), env)
+
+
+@pytest.mark.parametrize("which", ["JUPYTER_CONFIG_DIR", "JUPYTER_DATA_DIR"])
+@pytest.mark.parametrize("what", ["writable-subdir", "symlink", "writable-file"])
+def test_configure_refuses_anything_writable_inside_a_jupyter_dir(env, which, what, tmp_path):
+    top = Path(env[which])
+    top.chmod(0o755)
+    sub = top / "labextensions"
+    sub.mkdir()
+    if what == "writable-subdir":
+        (sub / "evil").mkdir()  # writable, under a read-only parent
+    elif what == "symlink":
+        (sub / "evil").symlink_to(tmp_path)
+    else:
+        (sub / "page_config.json").write_text("{}")
+    sub.chmod(0o555)
+    top.chmod(0o555)
+    with pytest.raises(SystemExit):
+        configure(Config(), env)
+    sub.chmod(0o755)
+    for child in sub.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            child.chmod(0o755)
+
+
+def test_configure_accepts_a_read_only_tree(env):
+    top = Path(env["JUPYTER_DATA_DIR"])
+    top.chmod(0o755)
+    sub = top / "labextensions" / "ok" / "static"
+    sub.mkdir(parents=True)
+    (sub / "x.js").write_text("")
+    (sub / "x.js").chmod(0o444)
+    for d in (sub, sub.parent, sub.parent.parent, top):
+        d.chmod(0o555)
+    configure(Config(), env)
+    for d in (top, sub.parent.parent, sub.parent, sub):
+        d.chmod(0o755)
 
 
 def test_configure_refuses_the_python_user_site(env, monkeypatch):
