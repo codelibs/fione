@@ -411,3 +411,9 @@ def test_a_notebook_token_cannot_grant_the_notebook_permission(client, people):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 403 and r.json()["code"] == "token_scope"
+
+
+def test_listing_users_survives_a_user_created_meanwhile(client, people, monkeypatch):
+    monkeypatch.setattr(auth, "notebook_permissions", lambda conn: {})
+    listing = client.get("/api/v1/users", headers=h(people, "root")).json()
+    assert {u["notebook"] for u in listing} == {"none"}

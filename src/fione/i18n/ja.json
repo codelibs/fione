@@ -836,7 +836,7 @@
   "users.done.role": "ロールを変更しました。次の操作から反映されます。",
   "users.done.password": "新しいパスワードを設定しました。そのユーザーはもう一度サインインが必要です。",
   "users.done.deleted": "ユーザーを削除しました。",
-  "users.done.notebook": "ノートブックの権限を変更しました。次にノートブックを起動するときから反映されます。",
+  "users.done.notebook": "ノートブックの権限を変更しました。すぐに反映されます。",
   "users.refused": "{username} には何も変更していません。",
   "users.create": "ユーザーを追加",
   "users.username": "ユーザー名",

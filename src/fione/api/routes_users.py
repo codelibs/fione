@@ -15,7 +15,11 @@ router = APIRouter(tags=["users"])
 @router.get("/users")
 def list_users(admin: AdminUser, conn: Conn) -> list[dict]:
     permissions = auth_service.notebook_permissions(conn)
-    return [user_out(u, notebook=permissions[u.id]) for u in auth_service.list_users(conn)]
+    # a user created since the permissions were read is shown with the default
+    return [
+        user_out(u, notebook=permissions.get(u.id, NotebookPermission.NONE))
+        for u in auth_service.list_users(conn)
+    ]
 
 
 @router.post("/users", status_code=201)

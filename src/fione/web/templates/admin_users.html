@@ -72,7 +72,7 @@
               {% if person.role.value == 'admin' %}
               <span class="badge badge-info">{{ t('users.notebook_admin') }}</span>
               {% else %}
-              {% set allowed = notebooks[person.id].value == 'run' %}
+              {% set allowed = notebooks.get(person.id) == 'run' %}
               <div class="cluster-tight">
                 <span class="badge badge-{{ 'success' if allowed else 'neutral' }}">{{ t('users.notebook_run' if allowed else 'users.notebook_none') }}</span>
                 <form method="post" action="/admin/users/{{ person.id }}/notebook" data-busy-form>

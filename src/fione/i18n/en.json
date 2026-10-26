@@ -836,7 +836,7 @@
   "users.done.role": "The role was changed. It applies from their next request.",
   "users.done.password": "The new password was set. The user has to sign in again.",
   "users.done.deleted": "The user was deleted.",
-  "users.done.notebook": "The notebook permission was changed. It applies from their next start of a notebook.",
+  "users.done.notebook": "The notebook permission was changed. It applies right away.",
   "users.refused": "Nothing was changed for {username}.",
   "users.create": "Add a user",
   "users.username": "Username",

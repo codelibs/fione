@@ -74,7 +74,9 @@ def _users_view(
         status=status,
         nav="users",
         rows=rows,
-        notebooks=auth_service.notebook_permissions(conn),
+        notebooks={
+            uid: perm.value for uid, perm in auth_service.notebook_permissions(conn).items()
+        },
         total=total,
         page_number=number,
         pages=pages,

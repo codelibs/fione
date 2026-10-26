@@ -60,6 +60,20 @@ def test_failed_migration_rolls_back(conn, monkeypatch):
     assert conn.execute("SELECT name FROM sqlite_master WHERE name='t'").fetchone() is None
 
 
+def test_migration_gives_existing_users_no_notebook_permission(conn, monkeypatch):
+    before = next(i for i, sql in enumerate(db.MIGRATIONS) if "ADD COLUMN notebook" in sql)
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:before])
+        db.migrate(conn)
+    for name, role in (("a", "admin"), ("e", "editor"), ("v", "viewer")):
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role) VALUES (?, 'x', ?)", (name, role)
+        )
+    assert db.migrate(conn) == len(db.MIGRATIONS)
+    rows = conn.execute("SELECT username, notebook FROM users ORDER BY id").fetchall()
+    assert [tuple(r) for r in rows] == [("a", "none"), ("e", "none"), ("v", "none")]
+
+
 def test_migration_keeps_existing_models(conn, monkeypatch):
     before = next(i for i, sql in enumerate(db.MIGRATIONS) if "diagnostics_json" in sql)
     with monkeypatch.context() as m:

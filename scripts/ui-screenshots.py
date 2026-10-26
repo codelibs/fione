@@ -680,6 +680,11 @@ def account_and_admin(s: "Shooter", base: str, project: str, data_dir: Path) -> 
         page.click("form[action='/admin/users'] button[type=submit]")
         page.wait_for_url(re.compile(r"/admin/users\?done=created"))
     s.shot(page, "users-created-en-light-desktop", full_page=False)
+    # One user may run notebooks, so both states of the column are shown.
+    page.locator("tr", has=page.locator("th", has_text="editor1")).get_by_role(
+        "button", name="Allow"
+    ).click()
+    page.wait_for_url(re.compile(r"/admin/users\?done=notebook"))
     # One's own account cannot be deleted: the reason is shown.
     me = page.locator("tr", has=page.locator("th", has_text="admin")).first
     if me.locator("summary").count():

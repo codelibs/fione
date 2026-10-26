@@ -442,3 +442,10 @@ def test_the_notebook_column_is_said_in_japanese(client):
     client.cookies.set("fione_lang", "ja")
     page = client.get("/admin/users").text
     assert i18n.t("users.notebook_none", "ja") in page
+
+
+def test_the_users_page_survives_a_user_created_meanwhile(client, monkeypatch):
+    monkeypatch.setattr(auth_service, "notebook_permissions", lambda conn: {})
+    login(client, "admin")
+    r = client.get("/admin/users")
+    assert r.status_code == 200 and i18n.t("users.notebook_none", "en") in row_of(r.text, "ed")
