@@ -1,5 +1,7 @@
+import contextlib
 import io
 import os
+import secrets
 from collections.abc import Iterator
 from typing import Any, Literal
 from urllib.parse import quote
@@ -8,6 +10,7 @@ import httpx
 import pandas as pd
 
 from fione_sdk.errors import FioneError
+from fione_sdk.jobs import TERMINAL, Job
 
 API = "/api/v1"
 
@@ -153,3 +156,98 @@ class Client:
 
     def delete_dataset(self, project_id: str, dataset_id: int) -> None:
         self._request("DELETE", f"/projects/{project_id}/datasets/{dataset_id}")
+
+    def train(
+        self, project_id: str, dataset_id: int, target: str, *, name: str | None = None, **config
+    ) -> Job:
+        """Queue AutoML training on a ``train`` dataset; ``config`` holds the other training
+        options (``max_runtime_secs``, ``max_models``, ``nfolds``...). Returns the job:
+        ``job.wait()`` blocks until it is done, then ``job.result["model_id"]`` is the model."""
+        body: dict[str, Any] = {"dataset_id": dataset_id, "config": {"target": target, **config}}
+        if name is not None:
+            body["name"] = name
+        return Job(self, self._json("POST", f"/projects/{project_id}/jobs/automl", json=body))
+
+    def job(self, job_id: int) -> Job:
+        return Job(self, self._json("GET", f"/jobs/{job_id}"))
+
+    def models(self, project_id: str) -> pd.DataFrame:
+        """The project's models, one row each."""
+        return pd.DataFrame(self._json("GET", f"/projects/{project_id}/models"))
+
+    def model(self, model_id: int) -> dict:
+        return self._json("GET", f"/models/{model_id}")
+
+    def leaderboard(self, model_id: int) -> pd.DataFrame:
+        """The models AutoML tried for this model, best first."""
+        return pd.DataFrame(self.model(model_id).get("leaderboard") or [])
+
+    def predict(
+        self,
+        project_id: str,
+        model_id: int,
+        df: pd.DataFrame,
+        *,
+        include_columns: list[str] | None = None,
+        timeout: float | None = None,
+    ) -> pd.DataFrame:
+        """Predict the rows of ``df`` with the model on the server and return them, in order,
+        with a ``predict`` column. ``df`` is uploaded as a temporary ``predict`` dataset that
+        is removed afterwards; the result dataset stays in the project. ``include_columns``
+        names the input columns to copy to the result. After ``timeout`` seconds the job is
+        cancelled and ``TimeoutError`` raised."""
+        uploaded = self.upload(project_id, df, f"sdk_predict_{secrets.token_hex(4)}", "predict")
+        job = None
+        try:
+            job = Job(
+                self,
+                self._json(
+                    "POST",
+                    f"/projects/{project_id}/jobs/batch-predict",
+                    json={
+                        "model_id": model_id,
+                        "dataset_id": uploaded["id"],
+                        "include_columns": include_columns,
+                    },
+                ),
+            )
+            job.wait(timeout=timeout)
+            dataset_id = (job.result or {}).get("dataset_id")
+            if not isinstance(dataset_id, int):
+                raise FioneError(200, "http", "unexpected response: the job has no result dataset")
+            result = self.read(project_id, dataset_id)
+        except BaseException:
+            # Do not let a failed clean-up hide why the prediction failed.
+            with contextlib.suppress(FioneError, httpx.HTTPError):
+                if job is not None and job.status not in TERMINAL:
+                    job.cancel()
+            with contextlib.suppress(FioneError, httpx.HTTPError):
+                self.delete_dataset(project_id, uploaded["id"])
+            raise
+        self.delete_dataset(project_id, uploaded["id"])
+        return result
+
+    def modules(self) -> list[dict]:
+        """The modules the server can run: built-in operations such as ``sort`` and ``filter``
+        and the ones an administrator uploaded, each with its parameter schema."""
+        return self._json("GET", "/modules")
+
+    def run_module(
+        self,
+        project_id: str,
+        module_id: str,
+        dataset_id: int,
+        params: dict | None = None,
+        *,
+        name: str | None = None,
+    ) -> Job:
+        """Queue a module over a dataset. It runs on the server, not in this process. When
+        the job is done, ``job.result["dataset_id"]`` is the dataset it made."""
+        body: dict[str, Any] = {
+            "module_id": module_id,
+            "dataset_id": dataset_id,
+            "params": params or {},
+        }
+        if name is not None:
+            body["name"] = name
+        return Job(self, self._json("POST", f"/projects/{project_id}/jobs/module", json=body))
