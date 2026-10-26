@@ -316,3 +316,19 @@ def test_predict_without_a_result_dataset_is_an_error_and_still_cleans_up(clock)
     with pytest.raises(FioneError, match="no result dataset"):
         client.predict("p", 5, FRAME)
     assert routes(seen)[-1] == ("DELETE", "/projects/p/datasets/7")
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        {"events": [{"id": 1}], "last_id": 0, "status": "running"},  # does not advance
+        {"events": [{"id": 5}], "last_id": 5, "status": "running"},  # after=5 below
+        {"events": [], "last_id": 5, "status": None},
+        {"events": [], "last_id": 5},
+    ],
+)
+def test_events_fail_fast_on_a_page_that_cannot_make_progress(page):
+    client, seen = scripted(lambda request: httpx.Response(200, json=page))
+    with pytest.raises(FioneError, match="unexpected response"):
+        list(Job(client, job_json()).events(after=5, follow=True))
+    assert len(seen) == 1

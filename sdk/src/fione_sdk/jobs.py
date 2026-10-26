@@ -108,12 +108,14 @@ class Job:
                 not isinstance(page, dict)
                 or not isinstance(page.get("events"), list)
                 or not isinstance(page.get("last_id"), int)
+                or not isinstance(page.get("status"), str)
+                or (page["events"] and page["last_id"] <= after)  # it would never advance
             ):
                 raise _unexpected()
             yield from page["events"]
             after = page["last_id"]
             if page["events"]:
                 continue
-            if not follow or page.get("status") in TERMINAL:
+            if not follow or page["status"] in TERMINAL:
                 return
             _sleep(EVENT_POLL)

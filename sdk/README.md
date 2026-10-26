@@ -58,15 +58,18 @@ predictions = fione.predict(project["id"], model_id, new_rows)  # a "predict" co
   options as keyword arguments. The dataset must be a `train` dataset.
 - `wait(timeout=None, poll=1.0, max_poll=10.0)` polls, doubling the interval up to
   `max_poll`. It raises `fione_sdk.JobFailed` (a `FioneError`) when the job failed or was
-  cancelled: `code` is `"failed"` or `"cancelled"`, `message` the job's message and `job` the
-  job. It raises `TimeoutError` after `timeout` seconds and leaves the job running.
+  cancelled: `code` is `"failed"` or `"cancelled"`, `message` the job's message, `job` the
+  job and `status` 0 (no HTTP response is involved). It raises `TimeoutError` after `timeout` seconds and leaves the job running.
   Interrupting a wait (Ctrl-C in a notebook) cancels the job.
 - `job.events(after=0, follow=False)` yields the job's events; with `follow=True` it waits
   for new ones until the job has ended. `job.refresh()` and `job.cancel()` update `job.data`;
   `job.status` and `job.result` read from it. `fione.job(job_id)` gets a job again later.
-- `predict` uploads the frame as a temporary dataset, predicts on the server, reads the
-  result back in the order of the rows and deletes the temporary dataset (also when the
-  prediction fails or times out). The result dataset stays in the project.
+- `predict(project_id, model_id, df, *, include_columns=None, timeout=None)` uploads the
+  frame as a temporary dataset, predicts on the server, reads the result back in the order
+  of the rows and deletes the temporary dataset. It always deletes the upload, also when the
+  prediction fails or times out. After `timeout` seconds (or on failure) it cancels its
+  batch-predict job and raises `TimeoutError` (or `JobFailed`). The result dataset stays in
+  the project; `include_columns` copies those input columns into it.
 
 ## Modules
 

@@ -1,14 +1,45 @@
 """Training, prediction and module jobs through the SDK, against a running in-process server."""
 
-from concurrent.futures import ThreadPoolExecutor
+import threading
+import time
 
+import httpx
 import pytest
-from fione_sdk import Client, FioneError, JobFailed
+from fione_sdk import Client, FioneError, Job, JobFailed
+from fione_sdk import jobs as jobs_module
 
 from api_helpers import FAST_CONFIG, add_user, bearer, iris_frame
 
 CONFIG = {k: v for k, v in FAST_CONFIG.items() if k != "target"}
 SEPAL = "sepal length (cm)"
+
+
+def within(seconds, call):
+    """``call()``'s value, or an AssertionError if it has not returned after ``seconds``.
+    The call runs in a daemon thread, which a hang leaves behind instead of blocking the run."""
+    box: list = []
+    worker = threading.Thread(target=lambda: box.append(call()), daemon=True)
+    worker.start()
+    worker.join(seconds)
+    assert not worker.is_alive(), f"still running after {seconds}s"
+    return box[0]
+
+
+def test_the_guard_fails_a_call_that_never_ends(monkeypatch):
+    stop = threading.Event()
+
+    def handler(request):  # an empty page, the job forever running, until the test lets go
+        status = "done" if stop.is_set() else "running"
+        return httpx.Response(200, json={"events": [], "last_id": 0, "status": status})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://fione.test")
+    job = Job(Client(token="t", http=http), {"id": 1, "status": "running"})
+    monkeypatch.setattr(jobs_module, "_sleep", lambda seconds: time.sleep(0.01))
+    try:
+        with pytest.raises(AssertionError, match="still running"):
+            within(0.3, lambda: list(job.events(follow=True)))
+    finally:
+        stop.set()
 
 
 @pytest.fixture
@@ -47,8 +78,7 @@ def test_events_follow_ends_at_a_terminal_status(sdk):
     pid = sdk.create_project("p")["id"]
     dataset = sdk.upload(pid, iris_frame(), "iris")
     job = sdk.train(pid, dataset["id"], "species", **CONFIG)
-    with ThreadPoolExecutor(1) as pool:  # a guard: following must end on its own
-        events = pool.submit(lambda: list(job.events(follow=True))).result(timeout=120)
+    events = within(120, lambda: list(job.events(follow=True)))  # it must end on its own
     assert events and events[-1]["type"] in {"finished", "stopped"}
     assert job.refresh().status == "done"
     assert list(job.events(after=events[-1]["id"])) == []
