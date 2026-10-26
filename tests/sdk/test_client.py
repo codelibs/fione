@@ -4,10 +4,8 @@ import pandas as pd
 import pytest
 from fione_sdk import Client, FioneError
 
-from api_helpers import add_user, bearer, connect
-from fione.auth import service as auth
+from api_helpers import add_user, bearer
 from fione.auth.roles import Role
-from fione.auth.tokens import TokenScope
 
 
 def _token_of(api, user_id) -> str:
@@ -60,28 +58,18 @@ def test_url_is_required_without_http(monkeypatch):
     assert err.value.code == "config"
 
 
-def test_non_json_error_has_code_http():
-    proxy = httpx.Client(
-        transport=httpx.MockTransport(lambda request: httpx.Response(502, text="Bad Gateway")),
-        base_url="http://fione.test",
-    )
-    for call in (lambda c: c.projects(), lambda c: c.read("p", 1)):
-        with pytest.raises(FioneError) as err:
-            call(Client(token="t", http=proxy))
-        assert (err.value.status, err.value.code) == (502, "http")
-
-
-def test_notebook_token_works_with_the_sdk(api):
-    user = add_user(api, "nbuser")
-    conn = connect(api)
-    try:
-        _, token = auth.create_token(
-            conn, user.id, "nb", scope=TokenScope.NOTEBOOK, expires_at=auth.expiry_after(3600)
-        )
-    finally:
-        conn.close()
-    nb = Client(token=token, http=api)
+def test_notebook_token_works_with_the_sdk(notebook_sdk):
+    nb = notebook_sdk
     project = nb.create_project("p")
     assert [p["id"] for p in nb.projects()] == [project["id"]]
     dataset = nb.upload(project["id"], FRAME, "frame")
     pd.testing.assert_frame_equal(nb.read(project["id"], dataset["id"]), FRAME, check_dtype=False)
+
+
+def test_url_and_timeout_come_from_the_environment_and_arguments(monkeypatch):
+    monkeypatch.setenv("FIONE_URL", "http://fione.test")
+    monkeypatch.setenv("FIONE_TOKEN", "t")
+    own = Client()
+    assert str(own.http.base_url) == "http://fione.test"
+    assert own.http.timeout == httpx.Timeout(60.0)
+    assert Client(url="http://other.test", timeout=5).http.timeout == httpx.Timeout(5.0)

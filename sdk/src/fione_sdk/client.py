@@ -24,8 +24,9 @@ class _Body(io.RawIOBase):
 
     def readinto(self, buffer) -> int:
         while not self._rest:
-            self._rest = next(self._chunks, b"")
-            if not self._rest:
+            try:
+                self._rest = next(self._chunks)
+            except StopIteration:
                 return 0
         n = min(len(buffer), len(self._rest))
         buffer[:n] = self._rest[:n]
@@ -34,6 +35,11 @@ class _Body(io.RawIOBase):
 
 
 def _error(response: httpx.Response) -> FioneError:
+    if response.is_redirect:
+        where = response.headers.get("location", "somewhere else")
+        return FioneError(
+            response.status_code, "http", f"redirected to {where}; check that FIONE_URL is right"
+        )
     try:
         body = response.json()
         return FioneError(response.status_code, str(body["code"]), str(body["error"]))
@@ -43,10 +49,20 @@ def _error(response: httpx.Response) -> FioneError:
         )
 
 
+def _segment(name: str) -> str:
+    """``name`` as one URL path segment (``quote`` leaves dots, which a URL normalizes away)."""
+    return name.replace(".", "%2E") if name in {".", ".."} else quote(name, safe="")
+
+
 class Client:
     """A client of the Fione API. ``url`` and ``token`` default to the environment variables
-    ``FIONE_URL`` and ``FIONE_TOKEN``. ``http`` is an ``httpx.Client`` to send through
-    instead of one of its own (``url`` is then not needed)."""
+    ``FIONE_URL`` and ``FIONE_TOKEN``.
+
+    ``http`` is an ``httpx.Client`` to send through instead of one of its own. With it,
+    ``url`` and ``timeout`` are ignored (it has its own base URL and timeout) and the token
+    goes to wherever that client points. Redirects are never followed. Any response that is
+    not a 2xx, or whose body is not what the call needs, raises ``FioneError``; transport
+    errors (``httpx.ConnectError``, timeouts) propagate as they are."""
 
     def __init__(
         self,
@@ -68,13 +84,19 @@ class Client:
         self._headers = {"Authorization": f"Bearer {token}"}
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        response = self.http.request(method, API + path, headers=self._headers, **kwargs)
-        if response.is_error:
+        response = self.http.request(
+            method, API + path, headers=self._headers, follow_redirects=False, **kwargs
+        )
+        if not response.is_success:
             raise _error(response)
         return response
 
     def _json(self, method: str, path: str, **kwargs: Any) -> Any:
-        return self._request(method, path, **kwargs).json()
+        response = self._request(method, path, **kwargs)
+        try:
+            return response.json()
+        except ValueError:
+            raise FioneError(response.status_code, "http", "response is not JSON") from None
 
     def projects(self) -> list[dict]:
         return self._json("GET", "/projects")
@@ -107,8 +129,10 @@ class Client:
 
     def read(self, project_id: str, dataset_id: int) -> pd.DataFrame:
         path = f"{API}/projects/{project_id}/datasets/{dataset_id}/download"
-        with self.http.stream("GET", path, headers=self._headers) as response:
-            if response.is_error:
+        with self.http.stream(
+            "GET", path, headers=self._headers, follow_redirects=False
+        ) as response:
+            if not response.is_success:
                 response.read()
                 raise _error(response)
             return pd.read_csv(io.BufferedReader(_Body(response.iter_bytes())))
@@ -124,7 +148,7 @@ class Client:
     def column_profile(self, project_id: str, dataset_id: int, column: str) -> dict:
         return self._json(
             "GET",
-            f"/projects/{project_id}/datasets/{dataset_id}/columns/{quote(column, safe='')}",
+            f"/projects/{project_id}/datasets/{dataset_id}/columns/{_segment(column)}",
         )
 
     def delete_dataset(self, project_id: str, dataset_id: int) -> None:

@@ -45,6 +45,13 @@ def test_docs_list_every_compose_and_serving_variable():
     assert _table_names(_section(text, "Fione Serving")) == serving
 
 
+def test_docs_list_every_sdk_variable():
+    sdk = set()
+    for source in (ROOT / "sdk" / "src" / "fione_sdk").glob("*.py"):
+        sdk |= _names_in(source, r"\"(FIONE_[A-Z0-9_]+)\"")
+    assert _table_names(_section(CONFIG_DOC.read_text(), "fione-sdk")) == sdk
+
+
 def test_docs_name_no_setting_that_does_not_exist():
     known = {f"FIONE_{name.upper()}" for name in Settings.model_fields}
     known |= _names_in(ROOT / "docker" / "compose.yaml", r"\$\{(FIONE_[A-Z0-9_]+)")

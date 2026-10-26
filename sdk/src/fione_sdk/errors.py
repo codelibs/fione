@@ -7,3 +7,6 @@ class FioneError(Exception):
         self.status = status
         self.code = code
         self.message = message
+
+    def __reduce__(self):
+        return (type(self), (self.status, self.code, self.message))
