@@ -27,6 +27,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 from sklearn.datasets import load_iris
 
 from fione import db
+from fione.api.app import DB_FILE
 from fione.auth import service as auth_service
 from fione.auth.tokens import TokenScope
 
@@ -650,7 +651,7 @@ def model_screens(s: "Shooter", base: str, project: str) -> None:
 
 def seed_scoped_tokens(data_dir: Path) -> None:
     """A notebook token and an expired one for the admin, so the account page shows both."""
-    with closing(db.connect(data_dir / "fione.db")) as conn:
+    with closing(db.connect(data_dir / DB_FILE)) as conn:
         (admin_id,) = conn.execute("SELECT id FROM users WHERE username = ?", (ADMIN,)).fetchone()
         auth_service.create_token(
             conn,

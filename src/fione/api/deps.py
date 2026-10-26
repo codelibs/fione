@@ -36,7 +36,8 @@ UPLOAD_SLACK_BYTES = 1 << 20
 # (``request.scope["route"].path``), so it has no /api/v1 prefix. Everything else needs a full
 # token: the auth, token, user and module-upload routes, model import (it loads pickles on
 # the host) and sharing (it changes permissions that outlive the token). The SDK deletes
-# datasets (its temporary predict input), so deletes stay allowed.
+# datasets (its temporary predict input), so deletes stay allowed. Path converters stay in
+# the key (``{column:path}``), as the router holds them; OpenAPI drops them.
 NOTEBOOK_SCOPE_ROUTES = frozenset(
     {
         ("GET", "/jobs"),
@@ -63,7 +64,7 @@ NOTEBOOK_SCOPE_ROUTES = frozenset(
         ("POST", "/projects/{project_id}/datasets"),
         ("GET", "/projects/{project_id}/datasets/{dataset_id}"),
         ("DELETE", "/projects/{project_id}/datasets/{dataset_id}"),
-        ("GET", "/projects/{project_id}/datasets/{dataset_id}/columns/{column}"),
+        ("GET", "/projects/{project_id}/datasets/{dataset_id}/columns/{column:path}"),
         ("GET", "/projects/{project_id}/datasets/{dataset_id}/download"),
         ("GET", "/projects/{project_id}/datasets/{dataset_id}/preview"),
         ("GET", "/projects/{project_id}/datasets/{dataset_id}/profile"),

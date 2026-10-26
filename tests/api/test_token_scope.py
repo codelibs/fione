@@ -247,3 +247,16 @@ def test_token_list_shows_scope_and_expiry(client):
     by_name = {t["name"]: t for t in listed}
     assert by_name["nb"]["scope"] == "notebook" and by_name["nb"]["expires_at"]
     assert by_name["test"]["scope"] == "full" and by_name["test"]["expires_at"] is None
+
+
+@pytest.mark.parametrize(("method", "route"), sorted(ALLOWED))
+def test_notebook_token_passes_the_scope_check_on_every_allowed_route(client, method, route):
+    """The keys of NOTEBOOK_SCOPE_ROUTES are the routes as registered (converters included),
+    which OpenAPI spells differently: a key that never matches only shows up as a 403 here."""
+    user = add_user(client, "alice")
+    headers = notebook_token(client, user)
+    path = API + route.format(
+        project_id="p", dataset_id=1, column="a", job_id=1, model_id=1, module_id="sort"
+    )
+    r = client.request(method, path, headers=headers, json={})
+    assert not (r.status_code == 403 and r.json().get("code") == "token_scope"), (method, route)
