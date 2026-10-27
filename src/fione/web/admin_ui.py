@@ -3,9 +3,10 @@ else, as the API's admin dependency), with the API's services and rules.
 
 Users: create, change the role, set a new password (which ends that user's sessions) and
 delete; the service refuses the last admin and one's own role or account, and the reason is
-shown on the page. A user who may no longer use notebooks, or is deleted, has their notebook
-stopped. System: what ``/api/v1/system/status`` reports plus failed jobs of the
-last day, the workers and the uptime; never a secret, a path, a URL or the environment.
+shown on the page. A user who may no longer use notebooks, or gets a new password, has their
+notebook stopped; a deleted user's notebook files are removed too. System: what
+``/api/v1/system/status`` reports plus failed jobs of the last day, the workers and the
+uptime; never a secret, a path, a URL or the environment.
 """
 
 import logging
@@ -142,7 +143,8 @@ def _refused(request, conn, auth, form, user, key: str, status=409, **params) ->
 
 
 def _stop_notebook(request: Request, conn, user_id: int, action) -> None:
-    """``action`` (a ``fione.notebooks.service`` stop) for a changed user; never fails."""
+    """``action`` (a ``fione.notebooks.service`` stop or purge) for a changed user; never
+    fails."""
     notebooks.quietly(action, conn, request.app.state.notebook_launcher, user_id)
 
 
@@ -203,6 +205,7 @@ def reset_password(request: Request, conn: Conn, uid: str, form: SmallForm) -> R
             auth_service.set_password(conn, user.id, password)
     except UserNotFound:
         raise UiError(404, "error.not_found") from None
+    _stop_notebook(request, conn, user.id, notebooks.stop)
     return _back(form, "password")
 
 
@@ -210,13 +213,13 @@ def reset_password(request: Request, conn: Conn, uid: str, form: SmallForm) -> R
 def delete_user(request: Request, conn: Conn, uid: str, form: SmallForm) -> Response:
     auth = _post_admin(request, conn, form)
     user = _target(conn, uid)
-    _stop_notebook(request, conn, user.id, notebooks.stop)
     try:
         auth_service.delete_user(conn, user.id, actor_id=auth.user.id)
     except UserNotFound:
         raise UiError(404, "error.not_found") from None
     except UserConflict as e:
         return _refused(request, conn, auth, form, user, f"users.refused.{e.code}", n=e.count)
+    _stop_notebook(request, conn, user.id, notebooks.purge)
     return _back(form, "deleted")
 
 

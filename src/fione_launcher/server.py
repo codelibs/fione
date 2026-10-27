@@ -31,6 +31,9 @@ SECRET_HEADER = "X-Fione-Launcher-Secret"
 _MAX_BODY = 4096
 _REAP_INTERVAL = 60.0
 _PREFIX = "/notebooks/"
+_PURGE = "purge=1"  # the one query there is: DELETE /notebooks/{uid}?purge=1
+_PURGE_TRIES = 10
+_PURGE_WAIT = 0.5
 _DIGITS = re.compile(r"[0-9]{1,12}")  # ASCII: str.isdigit() takes other digits too
 
 
@@ -151,6 +154,26 @@ class Launcher:
         if info is not None:
             self.docker.remove(info["Id"])  # the volume stays
 
+    def purge(self, uid: str) -> None:
+        """Remove the container and then the user's volume (their notebooks), for a user Fione
+        has deleted: a later user with the same id must start empty. A volume without both of
+        our labels is left alone. A volume still in use (a container being removed) is tried
+        again for a few seconds."""
+        with self._lock:  # no start of this uid can recreate them in between
+            self.stop(uid)
+            name = volume_name(self.project, uid)
+            labels = (self.docker.inspect_volume(name) or {}).get("Labels") or {}
+            if labels.get("fione.project") != self.project or labels.get("fione.uid") != uid:
+                return
+            for attempt in range(_PURGE_TRIES):
+                try:
+                    self.docker.remove_volume(name)
+                    return
+                except DockerError as e:
+                    if e.status != 409 or attempt == _PURGE_TRIES - 1:
+                        raise
+                time.sleep(_PURGE_WAIT)
+
     def _remove(self, container_id: str) -> None:
         """Remove one container; a failure is logged and does not stop the caller."""
         try:
@@ -236,16 +259,22 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(404, {"error": "not_found"})
         if method not in ("GET", "PUT", "DELETE"):
             return self._send(405, {"error": "method_not_allowed"})
-        uid = self.path[len(_PREFIX) :]
+        uid, has_query, query = self.path[len(_PREFIX) :].partition("?")
         try:
             if not valid_uid(uid):
                 raise InvalidRequest("uid")
+            purge = has_query and method == "DELETE" and query == _PURGE
+            if has_query and not purge:
+                raise InvalidRequest("query")
             if method == "PUT":
                 req = StartRequest.parse(self._body(), now=time.time())
                 return self._send(200, {"state": self.launcher.ensure(uid, req)})
             if method == "GET":
                 return self._send(200, {"state": self.launcher.state(uid)})
-            self.launcher.stop(uid)
+            if purge:
+                self.launcher.purge(uid)
+            else:
+                self.launcher.stop(uid)
             return self._send(204, None)
         except InvalidRequest:
             return self._send(422, {"error": "invalid"})

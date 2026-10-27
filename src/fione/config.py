@@ -12,7 +12,10 @@ MIN_LAUNCHER_SECRET_LENGTH = 32  # as the launcher requires
 _LAUNCHER_SECRET = re.compile(r"[\x21-\x7e]+")  # visible ASCII: it travels in an HTTP header
 # scheme://host[:port] with dot-separated labels: what the launcher accepts as Fione's origin.
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
-_ORIGIN = re.compile(rf"https?://{_LABEL}(?:\.{_LABEL})*(?::[0-9]{{1,5}})?")
+_ORIGIN = re.compile(
+    rf"(?P<scheme>https?)://(?P<host>{_LABEL}(?:\.{_LABEL})*)(?::(?P<port>[0-9]{{1,5}}))?"
+)
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 _NOTEBOOK_FIELDS = (
     "public_url",
     "notebook_url",
@@ -80,7 +83,7 @@ class Settings(BaseSettings):
 
     def _check_notebooks(self) -> None:
         """Empty values are unset; with ``notebook_url`` set, every notebook value is required,
-        both origins are bare and they differ."""
+        both origins are bare (kept in their normal form) and they differ."""
         for name in _NOTEBOOK_FIELDS:
             if not getattr(self, name):
                 setattr(self, name, None)
@@ -90,9 +93,8 @@ class Settings(BaseSettings):
             if getattr(self, name) is None:
                 raise ValueError(f"FIONE_{name.upper()} is required with FIONE_NOTEBOOK_URL")
         for name in ("public_url", "notebook_url"):
-            if not _ORIGIN.fullmatch(getattr(self, name)):
-                raise ValueError(f"FIONE_{name.upper()} must be scheme://host[:port], no path")
-        if self.public_url.lower() == self.notebook_url.lower():
+            setattr(self, name, _normal_origin(name, getattr(self, name)))
+        if self.public_url == self.notebook_url:
             raise ValueError("FIONE_NOTEBOOK_URL must not be Fione's own origin")
         if not self.notebook_launcher_url.startswith(("http://", "https://")):
             raise ValueError("FIONE_NOTEBOOK_LAUNCHER_URL must be an http(s) URL")
@@ -106,6 +108,16 @@ class Settings(BaseSettings):
     @property
     def notebooks_enabled(self) -> bool:
         return self.notebook_url is not None
+
+
+def _normal_origin(name: str, value: str) -> str:
+    """``value`` as browsers compare origins: the host in lower case, no default port."""
+    match = _ORIGIN.fullmatch(value)
+    if match is None or (match["port"] and int(match["port"]) > 65535):
+        raise ValueError(f"FIONE_{name.upper()} must be scheme://host[:port], no path")
+    scheme, host = match["scheme"], match["host"].lower()
+    port = int(match["port"]) if match["port"] else _DEFAULT_PORTS[scheme]
+    return f"{scheme}://{host}" + ("" if port == _DEFAULT_PORTS[scheme] else f":{port}")
 
 
 @lru_cache

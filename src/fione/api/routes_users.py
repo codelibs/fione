@@ -35,8 +35,8 @@ def update_user(
     user_id: IdPath, body: UserPatch, admin: AdminUser, conn: Conn, request: Request
 ) -> dict:
     """Change the role, the notebook permission and/or reset the password (which ends the
-    user's sessions); one's own admin role cannot be given up (409). A user who may no longer
-    use notebooks has theirs stopped."""
+    user's sessions); one's own admin role cannot be given up (409). The notebook of a user who
+    may no longer use notebooks, or has a new password, is stopped."""
     if body.role is None and body.password is None and body.notebook is None:
         raise ApiError(422, "invalid", "nothing to change: give role, password and/or notebook")
     if auth_service.get_user(conn, user_id) is None:
@@ -48,8 +48,9 @@ def update_user(
             auth_service.set_password(conn, user_id, body.password)
     if body.notebook is not None:
         auth_service.set_notebook_permission(conn, user_id, NotebookPermission(body.notebook))
-    launcher = request.app.state.notebook_launcher
-    notebooks.quietly(notebooks.stop_unless_allowed, conn, launcher, user_id)
+    # A new password ends the notebook too (its sign-in and token), as it ends sessions.
+    action = notebooks.stop if body.password is not None else notebooks.stop_unless_allowed
+    notebooks.quietly(action, conn, request.app.state.notebook_launcher, user_id)
     user = auth_service.get_user(conn, user_id)
     if user is None:
         raise not_found("user not found")
@@ -58,10 +59,10 @@ def update_user(
 
 @router.delete("/users/{user_id}", status_code=204)
 def delete_user(user_id: IdPath, admin: AdminUser, conn: Conn, request: Request) -> None:
-    """Refused (409) for the last admin, oneself and owners of projects or jobs. The user's
-    notebook is stopped first."""
-    notebooks.quietly(notebooks.stop, conn, request.app.state.notebook_launcher, user_id)
+    """Refused (409) for the last admin, oneself and owners of projects or jobs. Once deleted,
+    the user's notebook and its files are removed (the token went with the user)."""
     auth_service.delete_user(conn, user_id, actor_id=admin.id)
+    notebooks.quietly(notebooks.purge, conn, request.app.state.notebook_launcher, user_id)
 
 
 @router.post("/tokens", status_code=201)

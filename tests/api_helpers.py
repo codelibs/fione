@@ -158,6 +158,10 @@ class FakeLauncher:
         self._call("stop", user_id)
         self.states.pop(user_id, None)
 
+    def purge(self, user_id):
+        self._call("purge", user_id)
+        self.states.pop(user_id, None)
+
     def bodies(self) -> list[dict]:
         return [c[2] for c in self.calls if c[0] == "ensure"]
 

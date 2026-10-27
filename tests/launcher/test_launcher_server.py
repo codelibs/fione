@@ -277,6 +277,64 @@ def test_delete_is_idempotent_and_keeps_the_volume(api, docker):
     assert api.call("GET", f"/notebooks/{UID}") == (200, {"state": "absent"})
 
 
+VOLUME = f"{PROJECT}-nb-home-{UID}"
+
+
+def test_purge_removes_the_container_and_the_volume(api, docker):
+    assert api.call("PUT", f"/notebooks/{UID}", start_request())[0] == 200
+    assert api.call("DELETE", f"/notebooks/{UID}?purge=1") == (204, None)
+    assert NAME not in docker.containers and VOLUME not in docker.volumes
+    removed = [c[0] for c in docker.calls if c[0] in ("remove", "remove_volume")]
+    assert removed == ["remove", "remove_volume"]  # the container first
+    assert api.call("DELETE", f"/notebooks/{UID}?purge=1") == (204, None)  # idempotent
+
+
+def test_purge_leaves_a_volume_that_is_not_ours(api, docker):
+    docker.volumes[VOLUME] = {"fione.project": PROJECT, "fione.uid": "8"}
+    docker.volumes[f"{PROJECT}-nb-home-9"] = {"fione.project": "other", "fione.uid": "9"}
+    assert api.call("DELETE", f"/notebooks/{UID}?purge=1") == (204, None)
+    assert api.call("DELETE", "/notebooks/9?purge=1") == (204, None)
+    assert VOLUME in docker.volumes and f"{PROJECT}-nb-home-9" in docker.volumes
+    assert not [c for c in docker.calls if c[0] == "remove_volume"]
+
+
+def test_purge_retries_a_volume_in_use(api, launcher, docker, monkeypatch):
+    monkeypatch.setattr("fione_launcher.server._PURGE_WAIT", 0)
+    docker.volumes[VOLUME] = {"fione.project": PROJECT, "fione.uid": UID}
+    remove = docker.remove_volume
+    answers = [DockerError(409, "DELETE /volumes: 409"), None]
+
+    def busy_once(name):
+        answer = answers.pop(0)
+        if answer is not None:
+            docker.calls.append(("remove_volume", name))
+            raise answer
+        remove(name)
+
+    docker.remove_volume = busy_once
+    assert api.call("DELETE", f"/notebooks/{UID}?purge=1") == (204, None)
+    assert VOLUME not in docker.volumes
+
+
+@pytest.mark.parametrize(
+    "method,query",
+    [
+        ("DELETE", "purge=0"),
+        ("DELETE", "purge=1&x=1"),
+        ("DELETE", "purge"),
+        ("DELETE", ""),
+        ("DELETE", "PURGE=1"),
+        ("GET", "purge=1"),
+        ("PUT", "purge=1"),
+    ],
+)
+def test_any_other_query_is_422(api, docker, method, query):
+    docker.volumes[VOLUME] = {"fione.project": PROJECT, "fione.uid": UID}
+    body = start_request() if method == "PUT" else None
+    assert api.call(method, f"/notebooks/{UID}?{query}", body) == (422, {"error": "invalid"})
+    assert docker.calls == [] and VOLUME in docker.volumes
+
+
 def test_closed_launcher_refuses_to_start(api, launcher, docker):
     launcher.close()
     assert api.call("PUT", f"/notebooks/{UID}", start_request()) == (503, {"error": "closing"})

@@ -281,7 +281,18 @@ def test_settings_validation(tmp_path):
         settings(notebook_url="http://127.0.0.1:8080")
     with pytest.raises(ValueError, match="own origin"):
         settings(public_url="http://fione.example:80", notebook_url="http://FIONE.example:80")
+    # One origin to a browser, though the strings differ: the default port is implied.
+    with pytest.raises(ValueError, match="own origin"):
+        settings(
+            public_url="https://fione.example.com", notebook_url="https://fione.example.com:443"
+        )
+    with pytest.raises(ValueError, match="own origin"):
+        settings(public_url="http://H:80", notebook_url="http://h")
+    normal = settings(public_url="https://Fione.Example.com:443", notebook_url="http://NB.x:080")
+    assert (normal.public_url, normal.notebook_url) == ("https://fione.example.com", "http://nb.x")
+    assert settings(notebook_url="https://nb.x:8443").notebook_url == "https://nb.x:8443"
     bad = ("http://h:8888/path", "http://h:8888/", "ftp://h", "http://h?x", "h:8888", "http://u@h")
+    bad += ("http://h:65536",)
     for url in bad:
         with pytest.raises(ValueError, match="FIONE_NOTEBOOK_URL must be"):
             settings(notebook_url=url)

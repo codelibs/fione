@@ -31,7 +31,7 @@ Read by the `fione` container at start. Booleans accept `true` / `false`.
 | `FIONE_TRUST_PROXY` | `false` | Takes the client address and host from `X-Forwarded-For` / `X-Forwarded-Host` (the last value, the one your proxy added). | Set `true` only behind a reverse proxy that sets these headers. |
 | `FIONE_MAX_UPLOAD_BYTES` | `1073741824` (1 GiB) | The largest CSV upload. | To allow bigger or smaller uploads (mind the temp space). |
 | `FIONE_SETUP_TOKEN` | unset | The token that creates the first administrator, at least 16 characters. When unset, Fione generates one and writes it to the log at every start until an administrator exists. | To choose it yourself (`docker/.env`). |
-| `FIONE_NOTEBOOK_URL` | unset | The notebook gateway's origin as browsers reach it (`scheme://host[:port]`, no path), for example `http://localhost:8888`. Setting it turns on the notebook page; the four settings below are then required. It must differ from Fione's origin but be on the same site (the same host name with another port, or a sibling subdomain). | To use notebooks. |
+| `FIONE_NOTEBOOK_URL` | unset | The notebook gateway's origin as browsers reach it (`scheme://host[:port]`, no path), for example `http://localhost:8888`. Setting it turns on the notebook page; `FIONE_PUBLIC_URL`, `FIONE_NOTEBOOK_LAUNCHER_URL` and `FIONE_NOTEBOOK_LAUNCHER_SECRET` are then required. It must differ from Fione's origin (a default port such as `:443` counts as the same origin) but be on the same site (the same host name with another port, or a sibling subdomain). | To use notebooks. |
 | `FIONE_PUBLIC_URL` | unset | Fione's own origin as browsers reach it (`scheme://host[:port]`, no path), for example `https://fione.example.com`. Notebooks accept only this origin. | With notebooks. Behind a TLS proxy, give the `https` origin: Fione cannot tell it. |
 | `FIONE_NOTEBOOK_LAUNCHER_URL` | unset | The notebook launcher's URL. Compose: `http://notebook-launcher:8000`. | With notebooks, outside Compose. |
 | `FIONE_NOTEBOOK_LAUNCHER_SECRET` | unset | The secret shared with the notebook launcher, at least 32 visible ASCII characters. | With notebooks: generate it, for example `openssl rand -hex 32`. |
@@ -95,8 +95,15 @@ start and exits when one is missing or malformed:
 | `FIONE_NOTEBOOK_MAX_RUNNING` | `4` | The most notebook containers at once. Each one may use 2 CPUs and 4 GiB of memory. |
 
 Each container gets a named volume `<project>-nb-home-<user id>` for its notebooks, labelled
-`fione.project=<project>`; stopping a notebook keeps it. The launcher removes its project's
-notebook containers when it starts and stops, and removes a container once its lifetime ends.
+`fione.project=<project>` and `fione.uid=<user id>`; stopping a notebook keeps it. The launcher
+removes its project's notebook containers when it starts and stops, and removes a container
+once its lifetime ends.
+
+When an administrator deletes a user, Fione asks the launcher to remove that user's container
+and volume. Fione reuses user ids: a user created later may get the deleted user's id, and with
+it the same volume name. If that removal fails (the launcher is down, say), Fione logs it and
+deletes the user anyway, and the volume stays. Remove it by hand
+(`docker volume rm <project>-nb-home-<user id>`) before creating more users.
 
 ## Internal variables
 
@@ -109,7 +116,8 @@ processes. Do not set them.
 
 Fione must run as **one** process with **one** uvicorn worker (the image does this). The
 sign-in throttle, the upload and password-hashing limits, the one-time display of new API
-tokens and the job runner all live in that process's memory. Several workers would each keep
+tokens, the lock that keeps one user's notebook starts and stops in turn, and the job runner
+all live in that process's memory. Several workers would each keep
 their own limits and would run the job queue twice. Do not scale the `fione` service.
 
 ### Behind a reverse proxy

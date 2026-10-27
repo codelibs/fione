@@ -1,6 +1,7 @@
 """The notebook launcher image (docker/Dockerfile.launcher) against a real Docker daemon: in a
 throwaway Compose project with an internal `notebooks` network, it starts containers with the
-fixed spec and no egress, stops them keeping the volume, and removes them all on SIGTERM.
+fixed spec and no egress, stops them keeping the volume, purges a container with its volume,
+and removes them all on SIGTERM.
 
 Everything this module creates carries its own project name and is removed by that name."""
 
@@ -228,6 +229,18 @@ def test_stop_removes_container_and_keeps_volume(api):
     assert api.get(f"/notebooks/{uid}").json() == {"state": "absent"}
     assert api.delete(f"/notebooks/{uid}").status_code == 204
     _docker("volume", "inspect", f"{PROJECT}-nb-home-{uid}")
+
+
+def test_purge_removes_the_container_and_the_volume(api):
+    uid = "12"
+    name, volume = f"{PROJECT}-nb-{uid}", f"{PROJECT}-nb-home-{uid}"
+    _start(api, uid)
+    _wait(lambda: api.get(f"/notebooks/{uid}").json()["state"] == "running", 60, "running")
+    assert api.delete(f"/notebooks/{uid}?purge=1").status_code == 204
+    assert _inspect(name) is None
+    assert _docker("volume", "inspect", volume, check=False).strip() in ("", "[]")
+    assert api.delete(f"/notebooks/{uid}?purge=1").status_code == 204
+    assert api.delete(f"/notebooks/{uid}?purge=2").status_code == 422
 
 
 def test_sigterm_removes_all(stack, api):

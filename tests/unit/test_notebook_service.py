@@ -164,6 +164,79 @@ def test_a_failed_start_ends_the_session(conn, settings, editor, code):
     assert not _valid(conn, launcher.bodies()[-1]["token"])
 
 
+def test_an_unreachable_start_frees_the_slot_it_may_have_taken(conn, settings, editor):
+    launcher = FakeLauncher()
+    ensure = launcher.ensure
+
+    def lost_answer(uid, body):
+        ensure(uid, body)  # the container started, but the answer timed out
+        raise LauncherError("unreachable")
+
+    launcher.ensure = lost_answer
+    with pytest.raises(LauncherError):
+        service.start(conn, launcher, settings, KEY_SECRET, editor)
+    assert launcher.calls[-1] == ("stop", editor.id) and editor.id not in launcher.states
+    launcher.stop = lambda uid: (_ for _ in ()).throw(LauncherError("unreachable"))
+    with pytest.raises(LauncherError) as raised:  # the start's error, not the stop's
+        service.start(conn, launcher, settings, KEY_SECRET, editor)
+    assert raised.value.code == "unreachable" and _session(conn, editor.id) is None
+
+
+def test_start_checks_the_permission_again(conn, settings, editor):
+    auth_service.set_notebook_permission(conn, editor.id, NotebookPermission.NONE)
+    launcher = FakeLauncher()
+    with pytest.raises(service.NotebookNotAllowed):
+        service.start(conn, launcher, settings, KEY_SECRET, editor)
+    assert launcher.bodies() == [] and _session(conn, editor.id) is None
+    assert auth_service.list_tokens(conn, editor.id) == []
+
+
+def test_a_stop_waits_for_a_start_in_progress(tmp_path, settings, editor):
+    """The start holds the user's lock until its launcher call returns; a stop sent meanwhile
+    runs after it, so it finds the session and ends it."""
+    entered, release = threading.Event(), threading.Event()
+    launcher = FakeLauncher()
+    ensure = launcher.ensure
+
+    def slow_ensure(uid, body):
+        entered.set()
+        assert release.wait(10)
+        return ensure(uid, body)
+
+    launcher.ensure = slow_ensure
+    path = tmp_path / "fione.db"
+
+    def run(action):
+        with closing(db.connect(path)) as c:
+            action(c)
+
+    starter = threading.Thread(
+        target=run, args=(lambda c: service.start(c, launcher, settings, KEY_SECRET, editor),)
+    )
+    stopper = threading.Thread(target=run, args=(lambda c: service.stop(c, launcher, editor.id),))
+    starter.start()
+    assert entered.wait(10)
+    stopper.start()
+    stopper.join(0.3)
+    assert stopper.is_alive()  # waiting on the lock
+    release.set()
+    starter.join(10)
+    stopper.join(10)
+    assert [c[0] for c in launcher.calls] == ["status", "ensure", "stop"]
+    with closing(db.connect(path)) as c:
+        assert _session(c, editor.id) is None
+        assert not _valid(c, launcher.bodies()[0]["token"])
+
+
+def test_purge_removes_the_notebook_and_ends_the_session(conn, settings, editor):
+    launcher = FakeLauncher()
+    service.start(conn, launcher, settings, KEY_SECRET, editor)
+    token = launcher.bodies()[0]["token"]
+    service.purge(conn, launcher, editor.id)
+    assert launcher.calls[-1] == ("purge", editor.id)
+    assert _session(conn, editor.id) is None and not _valid(conn, token)
+
+
 def test_state_ends_a_session_whose_container_is_gone(conn, settings, editor):
     launcher = FakeLauncher()
     service.start(conn, launcher, settings, KEY_SECRET, editor)
@@ -272,6 +345,9 @@ def test_the_launcher_accepts_the_start_body(conn, settings, editor, docker, lau
     assert client.status(editor.id) == "starting"
     client.stop(editor.id)
     assert client.status(editor.id) == "absent"
+    assert f"{PROJECT}-nb-home-{editor.id}" in docker.volumes
+    client.purge(editor.id)
+    assert f"{PROJECT}-nb-home-{editor.id}" not in docker.volumes
 
 
 def test_launcher_error_codes(docker, launcher_url):
@@ -367,6 +443,12 @@ def test_launcher_answers_map_to_codes_without_their_text(stub, answer, code):
         HttpLauncher(stub.url, SECRET).status(7)
     assert raised.value.code == code
     assert "SECRET-TEXT" not in str(raised.value) and raised.value.__cause__ is None
+
+
+def test_purge_asks_the_launcher_to_remove_the_files(stub):
+    stub.answer = (204, {}, b"")
+    assert HttpLauncher(stub.url, SECRET).purge(7) is None
+    assert stub.seen[0][:2] == ("DELETE", "/notebooks/7?purge=1")
 
 
 def test_launcher_requests_carry_the_secret_and_json(stub):

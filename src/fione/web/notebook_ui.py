@@ -127,6 +127,8 @@ def start(request: Request, conn: Conn, form: SmallForm) -> Response:
     app = request.app.state
     try:
         notebooks.start(conn, app.notebook_launcher, app.settings, app.secret, auth.user)
+    except notebooks.NotebookNotAllowed:  # revoked since the check above
+        raise UiError(403, "notebook.forbidden") from None
     except LauncherError as e:
         status = ERROR_STATUS.get(e.code, 503)
         return _page(request, auth, "absent", status=status, error=_failed(e))

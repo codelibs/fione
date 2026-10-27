@@ -106,6 +106,19 @@ class DockerAPI:
         """Create the named volume, or keep it as it is when it exists."""
         self._call("POST", "/volumes/create", {"Name": name, "Labels": labels}, ok=(200, 201))
 
+    def inspect_volume(self, name: str) -> dict | None:
+        """The volume ``name``, or None when there is none."""
+        status, data = self.request("GET", f"/volumes/{quote(name, safe='')}")
+        if status == 404:
+            return None
+        if status != 200:
+            raise DockerError(status, f"GET /volumes/{{name}}: {status}")
+        return data
+
+    def remove_volume(self, name: str) -> None:
+        """Remove the volume; gone already is fine. One still in use is a 409 ``DockerError``."""
+        self._call("DELETE", f"/volumes/{quote(name, safe='')}", ok=(204, 404))
+
     def create(self, name: str, body: dict) -> str:
         """The id of a new container (never pulls: a missing image is a 404 ``DockerError``)."""
         query = urlencode({"name": name})

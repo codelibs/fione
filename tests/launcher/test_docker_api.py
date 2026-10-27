@@ -132,3 +132,26 @@ def test_create_volume_keeps_an_existing_one():
         "/volumes/create",
         {"Name": "p-nb-home-7", "Labels": {"fione.project": "p"}},
     )
+
+
+def test_inspect_volume():
+    docker = CannedDocker((200, {"Name": "p-nb-home-7", "Labels": {}}), (404, None))
+    assert docker.inspect_volume("p-nb-home-7")["Name"] == "p-nb-home-7"
+    assert docker.inspect_volume("a/b") is None
+    assert [path for _, path, _ in docker.sent] == ["/volumes/p-nb-home-7", "/volumes/a%2Fb"]
+    with pytest.raises(DockerError):
+        CannedDocker((500, None)).inspect_volume("v")
+
+
+@pytest.mark.parametrize("status", [204, 404])
+def test_remove_volume_accepts_gone(status):
+    docker = CannedDocker((status, None))
+    docker.remove_volume("p-nb-home-7")
+    assert docker.sent == [("DELETE", "/volumes/p-nb-home-7", None)]
+
+
+@pytest.mark.parametrize("status", [409, 500])
+def test_remove_volume_raises_on_in_use_and_errors(status):
+    with pytest.raises(DockerError) as raised:
+        CannedDocker((status, {"message": "volume is in use"})).remove_volume("v")
+    assert raised.value.status == status

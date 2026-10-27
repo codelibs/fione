@@ -40,6 +40,10 @@ class Launcher(Protocol):
 
     def stop(self, user_id: int) -> None: ...
 
+    def purge(self, user_id: int) -> None:
+        """``stop``, and remove the user's notebook files: for a deleted user."""
+        ...
+
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -53,10 +57,12 @@ class HttpLauncher:
         self.timeout = timeout
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
-    def _call(self, method: str, user_id: int, body: dict | None = None) -> dict | None:
+    def _call(
+        self, method: str, user_id: int, body: dict | None = None, query: str = ""
+    ) -> dict | None:
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(
-            f"{self.url}/notebooks/{int(user_id)}", data=data, method=method
+            f"{self.url}/notebooks/{int(user_id)}{query}", data=data, method=method
         )
         request.add_header(SECRET_HEADER, self.secret)
         if data is not None:
@@ -95,6 +101,9 @@ class HttpLauncher:
 
     def stop(self, user_id: int) -> None:
         self._call("DELETE", user_id)
+
+    def purge(self, user_id: int) -> None:
+        self._call("DELETE", user_id, query="?purge=1")
 
 
 def _error_code(error: urllib.error.HTTPError) -> LauncherErrorCode:

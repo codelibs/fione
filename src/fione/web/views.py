@@ -177,7 +177,8 @@ def render(
             "static": _static,
             "version": __version__,
             "mode": ui_mode(request),
-            "notebook_link": _notebook_link(request, auth),
+            # Called by base.html only: fragments never open its connection.
+            "notebook_link": lambda: _notebook_link(request, auth),
             **context,  # may override ``here``: where the language switch returns to
         },
         status_code=status,

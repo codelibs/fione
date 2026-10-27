@@ -216,18 +216,56 @@ def test_revoking_permission_stops_the_container(nb):
     assert r.status_code == 200, r.text
     assert ("stop", admin2) in fake.calls and not _token_works(nb, tokens["admin2"])
     assert _token_works(nb, tokens["admin"])
-    # Deleting a user stops their notebook first, while the user still exists.
-    exists_at_stop = []
-    stop = fake.stop
 
-    def recording_stop(uid):
+
+def test_deleting_a_user_purges_their_notebook_afterwards(nb):
+    fake = nb.app.state.notebook_launcher
+    _start(nb, "admin")
+    token = fake.bodies()[0]["token"]
+    admin, ed = _uid(nb, "admin"), _uid(nb, "ed")
+    headers = {"X-CSRF-Token": login(nb, "admin")}
+    fake.calls.clear()
+    # A refused deletion (oneself) leaves the notebook alone.
+    assert nb.delete(f"/api/v1/users/{admin}", headers=headers).status_code == 409
+    assert fake.calls == [] and _token_works(nb, token)
+    exists_at_purge = []
+    purge = fake.purge
+
+    def recording_purge(uid):
         with closing(connect(nb)) as conn:
-            exists_at_stop.append(auth_service.get_user(conn, uid) is not None)
-        stop(uid)
+            exists_at_purge.append(auth_service.get_user(conn, uid) is not None)
+        purge(uid)
 
-    fake.stop = recording_stop
+    fake.purge = recording_purge
     assert nb.delete(f"/api/v1/users/{ed}", headers=headers).status_code == 204
-    assert exists_at_stop == [True]
+    assert exists_at_purge == [False] and fake.calls == [("purge", ed)]
+
+
+def test_a_new_password_stops_the_notebook(nb):
+    fake = nb.app.state.notebook_launcher
+    _start(nb, "ed")
+    _start(nb, "admin")
+    add_user(nb, "ed2", Role.EDITOR)
+    ed2 = _uid(nb, "ed2")
+    with closing(connect(nb)) as conn:
+        auth_service.set_notebook_permission(conn, ed2, NotebookPermission.RUN)
+    _start(nb, "ed2")
+    ed_token, _, ed2_token = (body["token"] for body in fake.bodies())
+    ed = _uid(nb, "ed")
+    nb.cookies.clear()
+    csrf = login(nb, "admin")
+    r = nb.patch(
+        f"/api/v1/users/{ed}", json={"password": "a-new-password-1"}, headers={"X-CSRF-Token": csrf}
+    )
+    assert r.status_code == 200 and ("stop", ed) in fake.calls
+    assert not _token_works(nb, ed_token)
+    r = nb.post(
+        f"/admin/users/{ed2}/password",
+        data={"csrf_token": csrf, "password": "a-new-password-1"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and ("stop", ed2) in fake.calls
+    assert not _token_works(nb, ed2_token)
 
 
 def test_admin_ui_changes_stop_the_container(nb):
@@ -251,9 +289,12 @@ def test_admin_ui_changes_stop_the_container(nb):
     assert r.status_code == 303 and ("stop", ed) in fake.calls
     assert not _token_works(nb, token)
     fake.calls.clear()
+    admin = _uid(nb, "admin")
+    r = nb.post(f"/admin/users/{admin}/delete", data={"csrf_token": csrf}, follow_redirects=False)
+    assert r.status_code == 409 and fake.calls == []  # refused: nothing stopped
     fake.fail = LauncherError("unreachable")  # logged; the deletion goes on
     r = nb.post(f"/admin/users/{ed}/delete", data={"csrf_token": csrf}, follow_redirects=False)
-    assert r.status_code == 303 and fake.calls == [("stop", ed)]
+    assert r.status_code == 303 and fake.calls == [("purge", ed)]
     with closing(connect(nb)) as conn:
         assert auth_service.get_user(conn, ed) is None
 
@@ -298,6 +339,27 @@ def test_launcher_errors_are_not_rendered_verbatim(nb, code, status, key):
     assert 'action="/notebook/start"' in r.text
 
 
+def test_a_permission_revoked_during_the_start_is_403(nb):
+    """The admin's revocation lands while the start waits on the launcher (I1)."""
+    fake = nb.app.state.notebook_launcher
+    status = fake.status
+    ed = _uid(nb, "ed")
+
+    def revoking_status(uid):
+        with closing(connect(nb)) as conn:
+            auth_service.set_notebook_permission(conn, ed, NotebookPermission.NONE)
+        return status(uid)
+
+    fake.status = revoking_status
+    csrf = login(nb, "ed")
+    r = nb.post("/notebook/start", data={"csrf_token": csrf}, follow_redirects=False)
+    assert r.status_code == 403 and "You may not use notebooks" in r.text
+    assert fake.bodies() == []
+    with closing(connect(nb)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM notebook_sessions").fetchone()[0] == 0
+        assert not [t for t in auth_service.list_tokens(conn, ed) if t.scope == "notebook"]
+
+
 def test_launcher_down_is_a_503_page(nb):
     login(nb, "ed")
     nb.app.state.notebook_launcher.fail = LauncherError("unreachable", "<b>launcher</b>")
@@ -328,8 +390,28 @@ def test_no_token_in_fione_logs(nb, caplog):
     launch = re.search(r"launch=([^&]+)", src).group(1)
     notebook_token = fake.bodies()[0]["token"]
     assert caplog.records  # the failure above was logged
-    for secret in (launch, notebook_token, fake.bodies()[0]["launch_key"]):
+    body = fake.bodies()[0]
+    for secret in (launch, notebook_token, body["launch_key"], body["cookie_secret"]):
         assert secret not in caplog.text
+
+
+def test_no_secret_in_any_page(nb):
+    """Only the launch token reaches a page, and only the running page's frame."""
+    csrf = _start(nb)
+    uid = _uid(nb, "ed")
+    fake = nb.app.state.notebook_launcher
+    pages = [nb.get("/notebook"), nb.get("/notebook/status", headers={"HX-Request": "true"})]
+    fake.states[uid] = "running"
+    pages += [nb.get("/notebook"), nb.get("/notebook/status", headers={"HX-Request": "true"})]
+    pages += [nb.get("/"), nb.get("/account")]
+    fake.fail = LauncherError("unreachable")
+    pages += [nb.get("/notebook"), nb.get("/notebook/status")]
+    pages.append(nb.post("/notebook/stop", data={"csrf_token": csrf}, follow_redirects=False))
+    body = fake.bodies()[0]
+    secrets_ = [body["token"], body["launch_key"], body["cookie_secret"]]
+    for page in pages:
+        assert not any(secret in page.text for secret in secrets_), page.url
+    assert sum("launch=v1." in page.text for page in pages) == 1
 
 
 def test_the_app_talks_to_the_configured_launcher(make_client, tmp_path):

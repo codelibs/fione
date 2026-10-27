@@ -4,12 +4,14 @@ A start makes a nonce (the container's key is derived from it), a ``notebook`` t
 SDK inside the container and a ``notebook_sessions`` row, then asks the launcher for the
 container. The session ends (its token revoked, its row deleted) when the user stops it, when
 the launcher reports the container gone (culled or expired), when a start fails, and when the
-user loses the permission or is deleted.
+user loses the permission, has their password reset or is deleted (then their notebook files
+are removed too).
 
 A user's starts, state checks and stops take turns (one process serves Fione), so a status
 check cannot end a session that a start has just made.
 """
 
+import contextlib
 import logging
 import secrets
 import sqlite3
@@ -36,6 +38,10 @@ _locks_guard = threading.Lock()
 
 class NotebookNotRunning(Exception):
     """The user has no live notebook session to sign in to."""
+
+
+class NotebookNotAllowed(Exception):
+    """The user may not use notebooks (any more)."""
 
 
 def _user_lock(user_id: int) -> threading.Lock:
@@ -82,7 +88,11 @@ def start(
 ) -> NotebookState:
     """Start the user's notebook unless it is starting or running with a live session. A
     container left without one (an earlier failed start) is replaced. On any failure the new
-    session ends before the error is raised."""
+    session ends before the error is raised.
+
+    The permission is checked again with the session's write (``NotebookNotAllowed``): a
+    revocation committed before it is seen here, and one committed after it finds the session
+    and ends it."""
     with _user_lock(user.id):
         current = launcher.status(user.id)
         if current != "absent" and _live_session(conn, user.id) is not None:
@@ -90,6 +100,9 @@ def start(
         expires = int(time.time()) + settings.notebook_max_lifetime_secs
         nonce = secrets.token_urlsafe(16)
         with db.immediate(conn):
+            current_user = auth_service.get_user(conn, user.id)
+            if current_user is None or not auth_service.can_use_notebook(conn, current_user):
+                raise NotebookNotAllowed(user.id)
             _end_locked(conn, user.id)
             record, token = auth_service.create_token(
                 conn,
@@ -118,8 +131,12 @@ def start(
                     raise
             launcher.stop(user.id)  # a container without a session: replace it, once
             return launcher.ensure(user.id, body)
-        except BaseException:
+        except BaseException as e:
             _end(conn, user.id)
+            if isinstance(e, LauncherError) and e.code == "unreachable":
+                # It may have started the container before the answer was lost: free the slot.
+                with contextlib.suppress(LauncherError):
+                    launcher.stop(user.id)
             raise
 
 
@@ -129,6 +146,16 @@ def stop(conn: sqlite3.Connection, launcher: Launcher, user_id: int) -> None:
     with _user_lock(user_id):
         try:
             launcher.stop(user_id)
+        finally:
+            _end(conn, user_id)
+
+
+def purge(conn: sqlite3.Connection, launcher: Launcher, user_id: int) -> None:
+    """``stop``, and the user's notebook files are removed: after the user is deleted, so a
+    later user given the same id starts empty."""
+    with _user_lock(user_id):
+        try:
+            launcher.purge(user_id)
         finally:
             _end(conn, user_id)
 
@@ -146,9 +173,9 @@ def quietly(
     launcher: Launcher | None,
     user_id: int,
 ) -> None:
-    """``stop`` or ``stop_unless_allowed`` for a change to a user's account (nothing when
-    notebooks are off). A launcher error is logged by its code and never fails the change; the
-    token is revoked either way."""
+    """``stop``, ``stop_unless_allowed`` or ``purge`` for a change to a user's account (nothing
+    when notebooks are off). A launcher error is logged by its code and never fails the change;
+    the token is revoked either way."""
     if launcher is None:
         return
     try:

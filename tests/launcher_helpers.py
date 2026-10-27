@@ -93,6 +93,15 @@ class FakeDocker:
         self.calls.append(("create_volume", name, labels))
         self.volumes.setdefault(name, labels)
 
+    def inspect_volume(self, name):
+        self.calls.append(("inspect_volume", name))
+        labels = self.volumes.get(name)
+        return None if labels is None else {"Name": name, "Labels": labels}
+
+    def remove_volume(self, name):
+        self.calls.append(("remove_volume", name))
+        self.volumes.pop(name, None)
+
     def create(self, name, body):
         self.calls.append(("create", name, body))
         if body["Image"] not in self.images:
