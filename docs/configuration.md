@@ -36,6 +36,13 @@ Read by the `fione` container at start. Booleans accept `true` / `false`.
 | `FIONE_NOTEBOOK_LAUNCHER_URL` | unset | The notebook launcher's URL. Compose: `http://notebook-launcher:8000`. | With notebooks, outside Compose. |
 | `FIONE_NOTEBOOK_LAUNCHER_SECRET` | unset | The secret shared with the notebook launcher, at least 32 visible ASCII characters. | With notebooks: generate it, for example `openssl rand -hex 32`. |
 | `FIONE_NOTEBOOK_MAX_LIFETIME_SECS` | `43200` (12 h) | How long a notebook runs at most: its container, its sign-in and its API token. From 600 to 604800 (7 days). | To end notebooks sooner or let them run longer. |
+| `FIONE_LLM_BASE_URL` | unset | The LLM server for the assistant: `http(s)://host[:port][/path]`, with no credentials, query or fragment, for example `https://api.openai.com/v1` or `http://localhost:11434/v1`. Fione calls `<base URL>/chat/completions`. Unset: the assistant is off and nothing else changes. | To turn the assistant on. |
+| `FIONE_LLM_PROVIDER` | `openai` | `openai` for any OpenAI-compatible server (OpenAI, vLLM, llama.cpp), or `ollama`. With `ollama` the base URL must end in `/v1`, and thinking output is turned off unless `FIONE_LLM_EXTRA_BODY` says otherwise. | With Ollama. |
+| `FIONE_LLM_API_KEY` | unset | The key sent as `Authorization: Bearer <key>`, visible ASCII characters. It is never logged or shown. | With a server that needs one. |
+| `FIONE_LLM_MODEL` | `gemma4:12b` | The model name sent with each request, 1 to 200 visible ASCII characters. | To use another model. |
+| `FIONE_LLM_EXTRA_BODY` | unset | A JSON object merged into every request, for example `{"reasoning_effort": "none"}`. The keys `model`, `messages`, `tools`, `stream`, `stream_options` and `max_tokens` are refused. Unset: `{"reasoning_effort": "none"}` for `ollama`, `{}` for `openai`. | To turn thinking off or set sampling options on a server that supports them. |
+| `FIONE_LLM_MAX_TOKENS` | `1024` | The most tokens one completion may have. From 64 to 8192. | For longer answers, or to cap slow models. |
+| `FIONE_LLM_CONTEXT_TOKENS` | `16384` | The token budget of one request: the longest prompt Fione sends. From 2048 to 262144. Set it no higher than the model's context window. | To match the model's context window. |
 
 Fixed limits that are not settings: a model import file can be up to 512 MiB, an uploaded
 Python module up to 256 KiB.

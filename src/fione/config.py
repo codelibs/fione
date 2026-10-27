@@ -1,11 +1,13 @@
+import json
 import os
 import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 MIN_SETUP_TOKEN_LENGTH = 16
 MIN_LAUNCHER_SECRET_LENGTH = 32  # as the launcher requires
@@ -16,6 +18,14 @@ _ORIGIN = re.compile(
     rf"(?P<scheme>https?)://(?P<host>{_LABEL}(?:\.{_LABEL})*)(?::(?P<port>[0-9]{{1,5}}))?"
 )
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+# scheme://host[:port] and an optional path, no credentials, query or fragment.
+_LLM_URL = re.compile(
+    rf"(?P<origin>https?://{_LABEL}(?:\.{_LABEL})*(?::(?P<port>[0-9]{{1,5}}))?)"
+    r"(?P<path>(?:/[A-Za-z0-9._~%!$&'()*+,;=:@-]*)*)"
+)
+_LLM_MODEL = re.compile(r"[\x21-\x7e]{1,200}")
+# The request body is Fione's; the extra body only adds to it.
+LLM_RESERVED_KEYS = ("model", "messages", "tools", "stream", "stream_options", "max_tokens")
 _NOTEBOOK_FIELDS = (
     "public_url",
     "notebook_url",
@@ -25,7 +35,8 @@ _NOTEBOOK_FIELDS = (
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="FIONE_")
+    # A validation error would otherwise quote the input, secrets included.
+    model_config = SettingsConfigDict(env_prefix="FIONE_", hide_input_in_errors=True)
 
     data_dir: Path = Path("/data")
     # Defaults below are derived from data_dir when left unset.
@@ -65,6 +76,27 @@ class Settings(BaseSettings):
     notebook_launcher_url: str | None = None
     notebook_launcher_secret: str | None = None
     notebook_max_lifetime_secs: int = Field(43200, ge=600, le=604800)  # the launcher's bound
+    # LLM assistant (off unless llm_base_url is set): an OpenAI-compatible server, or Ollama.
+    llm_base_url: str | None = None
+    llm_provider: Literal["openai", "ollama"] = "openai"
+    llm_api_key: SecretStr | None = None
+    llm_model: str = "gemma4:12b"
+    # Merged into every request; unset: no thinking output for ollama, nothing for openai.
+    llm_extra_body: Annotated[dict | None, NoDecode] = None
+    llm_max_tokens: int = Field(1024, ge=64, le=8192)  # per completion
+    llm_context_tokens: int = Field(16384, ge=2048, le=262144)  # the budget of one request
+
+    @field_validator("llm_extra_body", mode="before")
+    @classmethod
+    def _parse_extra_body(cls, value):
+        if not isinstance(value, str):
+            return value
+        if not value.strip():
+            return None
+        try:
+            return json.loads(value)
+        except ValueError:
+            raise ValueError("FIONE_LLM_EXTRA_BODY must be a JSON object") from None
 
     @model_validator(mode="after")
     def _derive_defaults(self) -> "Settings":
@@ -79,6 +111,7 @@ class Settings(BaseSettings):
         if self.secret_key_path is None:
             self.secret_key_path = self.data_dir / "secret.key"
         self._check_notebooks()
+        self._check_llm()
         return self
 
     def _check_notebooks(self) -> None:
@@ -104,6 +137,37 @@ class Settings(BaseSettings):
                 f"FIONE_NOTEBOOK_LAUNCHER_SECRET must be at least {MIN_LAUNCHER_SECRET_LENGTH}"
                 " visible ASCII characters"
             )
+
+    def _check_llm(self) -> None:
+        """Empty values are unset; the base URL is kept without a trailing slash, and the
+        extra body defaults to what turns thinking off."""
+        if self.llm_api_key is not None and not self.llm_api_key.get_secret_value():
+            self.llm_api_key = None
+        if self.llm_api_key is not None and not _LAUNCHER_SECRET.fullmatch(
+            self.llm_api_key.get_secret_value()
+        ):
+            raise ValueError("FIONE_LLM_API_KEY must be visible ASCII characters")
+        if not _LLM_MODEL.fullmatch(self.llm_model):
+            raise ValueError("FIONE_LLM_MODEL must be 1 to 200 visible ASCII characters")
+        if self.llm_extra_body is None:
+            self.llm_extra_body = (
+                {"reasoning_effort": "none"} if self.llm_provider == "ollama" else {}
+            )
+        reserved = sorted(set(self.llm_extra_body) & set(LLM_RESERVED_KEYS))
+        if reserved:
+            raise ValueError(f"FIONE_LLM_EXTRA_BODY must not set {', '.join(reserved)}")
+        if not self.llm_base_url:
+            self.llm_base_url = None
+            return
+        match = _LLM_URL.fullmatch(self.llm_base_url)
+        if match is None or (match["port"] and int(match["port"]) > 65535):
+            raise ValueError(
+                "FIONE_LLM_BASE_URL must be http(s)://host[:port][/path], no credentials,"
+                " query or fragment"
+            )
+        self.llm_base_url = (match["origin"] + match["path"]).rstrip("/")
+        if self.llm_provider == "ollama" and not match["path"].rstrip("/").endswith("/v1"):
+            raise ValueError("FIONE_LLM_BASE_URL must end in /v1 with FIONE_LLM_PROVIDER=ollama")
 
     @property
     def notebooks_enabled(self) -> bool:

@@ -9,6 +9,7 @@ dependencies = [
     "boto3>=1.43.118",
     "catboost>=1.2.10",
     "fastapi>=0.162.0",
+    "httpx>=0.28.1",
     "jinja2>=3.1.6",
     "joblib>=1.6.0",
     "lightgbm>=4.7.0",
@@ -32,7 +33,6 @@ dev = [
     "pytest-cov",
     "ruff",
     "playwright",
-    "httpx>=0.28.1",
 ]
 # What the notebook image installs (src/fione_notebook runs inside it); the notebook tests
 # need it too. Plotting and scikit-learn are here because without egress the image is the
@@ -69,5 +69,6 @@ markers = [
     "e2e: browser tests against the Docker Compose stack (select with -m e2e; needs Docker)",
     "docker: needs a Docker daemon (select with -m docker)",
     "notebook: needs the notebook dependency group (select with -m notebook)",
+    "llm: needs a real model server (set FIONE_TEST_LLM_BASE_URL and FIONE_TEST_LLM_MODEL; select with -m llm)",
 ]
-addopts = "-m 'not acceptance and not e2e and not timing and not docker and not notebook'"
+addopts = "-m 'not acceptance and not e2e and not timing and not docker and not notebook and not llm'"
