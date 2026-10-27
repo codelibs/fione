@@ -87,10 +87,15 @@ class Server:
         self.tokens.append(token)
         return token
 
-    def client(self, fetch_site: str | None = "same-site") -> httpx.Client:
-        """A client sending the Sec-Fetch-Site a browser sends when Fione's page, on a
-        sibling origin of the same site, opens the notebook."""
+    def client(
+        self, fetch_site: str | None = "same-site", referer: str | None = FIONE_ORIGIN + "/"
+    ) -> httpx.Client:
+        """A client sending the Sec-Fetch-Site and Referer a browser sends when Fione's page
+        (``Referrer-Policy: origin``), on a sibling origin of the same site, opens the
+        notebook."""
         headers = {"Sec-Fetch-Site": fetch_site} if fetch_site else {}
+        if referer is not None:
+            headers["Referer"] = referer
         return httpx.Client(base_url=self.url, follow_redirects=False, timeout=30, headers=headers)
 
     def login(self, role: str = "editor") -> httpx.Client:
@@ -434,6 +439,44 @@ def test_login_needs_a_same_site_navigation(server, fetch_site):
     assert not [h for h in r.headers.get_list("set-cookie") if h.startswith("username-")]
     # Refused before redemption: the same token still signs in from Fione's page.
     assert server.client().get("login", params={"launch": token}).status_code == 302
+
+
+@pytest.mark.parametrize(
+    "referer",
+    [
+        None,
+        "null",
+        "",
+        "http://127.0.0.1:18081/",  # another page of the same site
+        "http://127.0.0.1:18080.evil.example/",
+        "http://user@127.0.0.1:18080/",
+        "http://127.0.0.1:18080",  # no path: not what a browser sends
+        "http://[::1",  # malformed
+        "https://127.0.0.1:18080/",
+    ],
+)
+def test_login_needs_fiones_referer(server, referer):
+    # A same-site page that is not Fione could otherwise sign a victim into the attacker's
+    # container just as a cross-site one could (see the module docstring of the extension).
+    token = server.token()
+    r = server.client(referer=referer).get("login", params={"launch": token})
+    assert r.status_code == 403 and r.text == server.client().get("login").text
+    assert not [h for h in r.headers.get_list("set-cookie") if h.startswith("username-")]
+    assert server.client().get("login", params={"launch": token}).status_code == 302
+
+
+def test_login_refuses_a_second_referer(server):
+    token = server.token()
+    c = server.client(referer=None)
+    headers = [("Referer", f"{FIONE_ORIGIN}/"), ("Referer", "http://127.0.0.1:18081/")]
+    r = c.get("login", params={"launch": token}, headers=httpx.Headers(headers))
+    assert r.status_code == 403
+    assert server.client().get("login", params={"launch": token}).status_code == 302
+
+
+def test_login_accepts_a_full_referer_from_fione(server):
+    c = server.client(referer=f"{FIONE_ORIGIN}/notebook")
+    assert c.get("login", params={"launch": server.token()}).status_code == 302
 
 
 def test_login_accepts_a_same_origin_navigation(server):

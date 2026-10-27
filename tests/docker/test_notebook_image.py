@@ -251,7 +251,7 @@ def test_server_starts_with_the_launcher_settings_and_signs_in():
             base_url=url,
             timeout=30,
             follow_redirects=False,
-            headers={"Sec-Fetch-Site": "same-site"},
+            headers={"Sec-Fetch-Site": "same-site", "Referer": "http://127.0.0.1:18080/"},
         )
 
         assert c.get("lab").status_code == 302  # anonymous: to the login page

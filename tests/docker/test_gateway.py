@@ -276,13 +276,14 @@ def test_public_strips_fione_session(gateway, cookie, expected):
 
 
 def test_public_passes_the_browser_headers_unchanged(gateway):
-    # Jupyter's sign-in requires Sec-Fetch-Site (same-site from Fione's page) and compares
-    # Origin with Host.
+    # Jupyter's sign-in requires Sec-Fetch-Site (same-site from Fione's page) and Fione's
+    # Referer, and compares Origin with Host.
     probe = _probe()
     headers = {
         "Host": "127.0.0.1:18888",
         "Origin": "http://127.0.0.1:18080",
         "Sec-Fetch-Site": "same-site",
+        "Referer": "http://127.0.0.1:18080/",
         "X-Probe": probe,
     }
     status, _ = _public(gateway, "GET", "/user/7/login?launch=v1.x", headers)
@@ -293,6 +294,7 @@ def test_public_passes_the_browser_headers_unchanged(gateway):
     assert received["host"] == ["127.0.0.1:18888"]
     assert received["origin"] == ["http://127.0.0.1:18080"]
     assert received["sec-fetch-site"] == ["same-site"]
+    assert received["referer"] == ["http://127.0.0.1:18080/"]
 
 
 @pytest.mark.parametrize(

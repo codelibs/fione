@@ -149,6 +149,18 @@ def test_other_pages_have_no_frame_src(nb):
         assert "frame-src" not in r.headers["content-security-policy"], path
 
 
+def test_only_the_notebook_page_sends_its_origin_as_referer(nb):
+    # The gateway's sign-in requires Fione's origin as the Referer of the frame's navigation.
+    _start(nb, "admin")
+    assert nb.get("/notebook").headers["referrer-policy"] == "origin"  # starting
+    nb.app.state.notebook_launcher.states[_uid(nb, "admin")] = "running"
+    assert nb.get("/notebook").headers["referrer-policy"] == "origin"
+    for path in ("/", "/account", "/admin/users", "/notebook/status", "/no-such-page"):
+        r = nb.get(path, headers={"Accept": "text/html"})
+        assert r.headers["referrer-policy"] == "same-origin", path
+    assert nb.get("/static/css/app.css").headers["referrer-policy"] == "same-origin"
+
+
 def test_launch_token_is_fresh_per_render(nb):
     _start(nb)
     nb.app.state.notebook_launcher.states[_uid(nb, "ed")] = "running"

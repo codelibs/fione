@@ -5,7 +5,9 @@ never cached, since they carry per-user data and the CSRF token. Static files ma
 API responses (``/api/...``, including the OpenAPI docs page) are left as they are.
 
 A view that frames another origin (the notebook page) sets ``request.state.csp_frame_src``
-to it; that response alone gets ``frame-src <origin>``.
+to it; that response alone gets ``frame-src <origin>``. A view may also set
+``request.state.referrer_policy`` for its response alone (the notebook page sends its origin
+to the notebook gateway, whose sign-in checks it).
 """
 
 from starlette.datastructures import MutableHeaders
@@ -44,9 +46,12 @@ class UIHeaders:
                 headers = MutableHeaders(scope=message)
                 ui_headers(headers, page=page)
                 # Read now: the view has run (``request.state`` is ``scope["state"]``).
-                frame_src = (scope.get("state") or {}).get("csp_frame_src")
+                state = scope.get("state") or {}
+                frame_src = state.get("csp_frame_src")
                 if page and frame_src:
                     headers["Content-Security-Policy"] += f"; frame-src {frame_src}"
+                if page and state.get("referrer_policy"):
+                    headers["Referrer-Policy"] = state["referrer_policy"]
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

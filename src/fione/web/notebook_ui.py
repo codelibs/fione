@@ -76,6 +76,8 @@ def _page(
 @router.get("/notebook")
 def notebook(request: Request, conn: Conn) -> Response:
     auth = _page_auth(request, conn)
+    # The frame's sign-in requires Fione's origin as the Referer (same-origin sends none).
+    request.state.referrer_policy = "origin"
     app = request.app.state
     try:
         state = notebooks.state(conn, app.notebook_launcher, auth.user)

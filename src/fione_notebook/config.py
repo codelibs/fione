@@ -97,6 +97,7 @@ def configure(c, env: Mapping[str, str]) -> None:
     c.FioneIdentityProvider.owner = owner
     c.FioneIdentityProvider.key = bytes.fromhex(key)
     c.FioneIdentityProvider.expires = expires  # the server refuses cookies from then on
+    c.FioneIdentityProvider.fione_origin = origin
     c.ServerApp.ip = "0.0.0.0"
     c.ServerApp.port = 8888
     c.ServerApp.base_url = base_url

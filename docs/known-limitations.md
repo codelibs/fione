@@ -176,18 +176,27 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
   reachable at TCP level on the internal network `notebooks`; each JupyterLab refuses everyone
   but its owner.
 - **Notebook users share one browser origin.** Every user's JupyterLab is served from the
-  gateway's origin (`/user/<id>/`). Fione serves nothing a user can write without a sandbox
-  there (the config and data directories of the image are read-only to the server, and the
-  gateway refuses settings and workspace writes), but a future Jupyter handler that did would
-  let one notebook user act in another's JupyterLab. Until per-user subdomains are adopted
-  (`u<id>.nb.example.com`, which needs wildcard DNS and TLS; an open decision for the
-  maintainer), treat notebook users as trusting each other.
+  gateway's origin (`/user/<id>/`), and trusted notebook output (HTML and JavaScript that a
+  user's own cells produced) runs there unsandboxed: it is content a user can write, on the
+  origin all users share. Script there could reach the JupyterLab of another user whose
+  browser is signed in to it. The way to that is a sign-in of the victim's browser into the
+  attacker's notebook; JupyterLab accepts a sign-in only from a same-site navigation whose
+  `Referer` is Fione's origin, which closes it from other sites and from other pages on the
+  same site. Until per-user subdomains are adopted (`u<id>.nb.example.com`, which needs
+  wildcard DNS and TLS; an open decision for the maintainer), treat notebook users as trusting
+  each other.
+- **The site is the trust boundary.** Every origin on the gateway's registrable domain, and
+  every port on the same local host name, is same-site with it, and browsers send cookies to
+  the gateway from those pages' requests. Give the gateway a registrable domain used for
+  nothing but Fione (see [The same-site rule](notebook.md#the-same-site-rule)).
 - **Code in a notebook runs as the same operating-system user as the Jupyter server of that
   container.** A user can therefore in principle inspect that server's process (`ptrace`,
-  `/proc`), and with it the container's launch key and cookie secret. This stays inside the
-  user's own container and identity: what they can do to Fione is limited by their token, and
-  other containers have other keys. A seccomp profile that denies `ptrace` and
-  `process_vm_writev` would close it; that is an open decision too.
+  `/proc`), and with it the container's launch key and cookie secret. Reading the key needs
+  less: the owner can read their container's own launch key from the server's process
+  environment and mint launch tokens (with any role claim) for their own container. Both stay
+  inside the user's own container and identity: what they can do to Fione is limited by their
+  token, and other containers have other keys. A seccomp profile that denies `ptrace` and
+  `process_vm_writev` would close the first; that is an open decision too.
 - **Notebook trust signatures are kept in memory** (the data directory is read-only) and are
   lost when the container restarts: outputs of notebooks saved earlier show as untrusted until
   the cells are run again.
@@ -295,7 +304,7 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - 1 プロセス・1 ワーカーで動かしてください。イメージは約 1.65 GB / 1.7 GB で、まだ公開していません（リリースは amd64 のみ、タグは CI が通ったコミットにだけ付けてください）。ベースイメージはタグ固定で、ダイジェスト固定ではありません。
 - モデルはイメージのタグに結び付いています。古い版のモデルが新しい版で読み込める保証はありません。
 - ノートブックは任意の機能です（Compose のプロファイル `notebook`）。ランチャーは Docker ソケットを持ち、これはホストの root と同等です。ノートブックのコンテナには、所有者の API トークン（`FIONE_TOKEN`）と鍵が環境変数に入り、ホストで Docker を使える人には `docker inspect` で見えます。ノートブックを許可された閲覧者もコードを実行できます（トークンは読み取り専用）。コンテナの上限は CPU 2、メモリ 4 GiB、プロセス 512、ケーパビリティなし、外部通信なしで、同時に動くノートブックは既定で 4 つまで（`FIONE_NOTEBOOK_MAX_RUNNING`）です。
-- 他のユーザーのコンテナとは、内部ネットワーク上で TCP としては到達できます（各 JupyterLab は所有者以外を拒否します）。全ユーザーの JupyterLab は 1 つのオリジンを共有します。ユーザーごとのサブドメインを採用するまで（未決事項）、ノートブックのユーザー同士は信頼し合うものとして扱ってください。ノートブックのコードは、コンテナ内の Jupyter サーバーと同じ OS ユーザーで動くため、ユーザーは自分のコンテナのサーバーのプロセスを調べられます（対策は seccomp で `ptrace` と `process_vm_writev` を拒否すること。これも未決事項）。
+- 他のユーザーのコンテナとは、内部ネットワーク上で TCP としては到達できます（各 JupyterLab は所有者以外を拒否します）。全ユーザーの JupyterLab は 1 つのオリジンを共有し、信頼済みのノートブックの出力（ユーザーが書ける内容）はそこでサンドボックスなしに動きます。ログインは、同一サイトからで `Referer` が Fione のオリジンのものだけを受け付けるため、他のサイトや同じサイトの他のページから被害者のブラウザを攻撃者のノートブックにログインさせることはできません。ユーザーごとのサブドメインを採用するまで（未決事項）、ノートブックのユーザー同士は信頼し合うものとして扱ってください。同じ登録可能ドメインのすべてのオリジン（ローカルでは同じホスト名のすべてのポート）がゲートウェイと同一サイトになるため、ゲートウェイには Fione 専用の登録可能ドメインを使ってください。ノートブックのコードは、コンテナ内の Jupyter サーバーと同じ OS ユーザーで動くため、ユーザーは自分のコンテナのサーバーのプロセスを調べられます（対策は seccomp で `ptrace` と `process_vm_writev` を拒否すること。これも未決事項）。所有者は自分のコンテナの起動用の鍵をサーバーのプロセスの環境変数から読んで、自分のコンテナ用の起動トークンを作れます（他のコンテナには影響しません）。
 - ノートブックの信頼の署名はメモリにだけあり、再起動で失われます。JupyterLab の設定とレイアウトは保存されません。実行中のカーネルは、停止時、ランチャーの再起動時、`docker compose down` で失われます。30 分使われないカーネルは停止し、実行中のカーネルがなく 1 時間操作がないノートブックは終了し、`FIONE_NOTEBOOK_MAX_LIFETIME_SECS`（既定 12 時間）でも必ず終了します。
 - ゲートウェイの中継は、`.` や `..` の区間を含む生のパスを拒否するため、名前がちょうど `.` または `..` の列は、ノートブックから列ごとの概要（`column_profile`）を取得できません（データセット全体の読み込みはできます）。ゲートウェイは外へ出られるネットワークにも属するため、未知の `nb-<数字>` の名前の問い合わせがホストの DNS に渡ることがあり、入れ替えたノートブックに古いアドレスで最大 10 秒届くことがあります。HTTPS でも JupyterLab の `_xsrf` Cookie には `Secure` が付きません（認証情報ではありません）。
 - ユーザーを削除するとノートブックとそのファイルも削除されます。`docker compose down -v` でもボリュームは残り、初期化したインストールではユーザー ID が最初からになるため、その場合もユーザーを作る前にラベルを指定して削除してください。そのときランチャーに届かないとボリュームが残り、同じ ID の後のユーザーに見えてしまうので、[ノートブック](notebook.ja.md)の手順でラベルを指定して削除してください。Fione とランチャーは 1 プロセスで動かしてください。

@@ -57,15 +57,24 @@ Fione ──> launcher ──> Docker                   starts and removes the c
 ### The same-site rule
 
 Fione frames JupyterLab from its own page and signs the browser in with a one-time launch
-link. JupyterLab accepts that sign-in only from a page on the **same site**, so the two origins
-must differ but share a site:
+link. JupyterLab accepts that sign-in only from a page on the **same site** whose `Referer` is
+Fione's origin (`FIONE_PUBLIC_URL`; the Notebook page sends it), so the two origins must differ
+but share a site:
 
 - **Locally:** the same host name with another port, for example `http://127.0.0.1:8080` and
   `http://127.0.0.1:8888`. `localhost` and `127.0.0.1` are different sites: if you open Fione at
   `http://localhost:8080`, write `localhost` in both URLs, and use that address in the browser.
-- **In production, behind HTTPS:** sibling subdomains of one registered domain, for example
-  `https://fione.example.com` for Fione and `https://nb.fione.example.com` (or
-  `https://nb.example.com`) for the gateway. Use `https` for both.
+- **In production, behind HTTPS:** subdomains of one registrable domain, for example
+  `https://fione.example.com` for Fione and `https://nb.fione.example.com` for the gateway. Use
+  `https` for both. Prefer a registrable domain used for nothing but Fione and its gateway
+  (`fione-example.com` rather than your company's `example.com`).
+
+The site is the boundary: every origin on the same registrable domain (`blog.example.com`, a
+wiki, a preview deployment), and every port on the same local host name, is same-site with the
+gateway. The `Referer` check keeps such pages from signing a browser in to someone's notebook,
+but every user's JupyterLab is still served from the one gateway origin, and trusted notebook
+output is content its user wrote, running there unsandboxed (see
+[Known limitations](known-limitations.md#notebooks)).
 
 `FIONE_PUBLIC_URL` is Fione's own origin as browsers reach it. Behind a TLS proxy Fione cannot
 tell its scheme, so give the `https` origin. Notebooks accept framing only from this origin.

@@ -5,12 +5,13 @@ Fione opens ``<base_url>login?launch=<token>``. The launch token is
 Fione derives for this container only, and it is good for one sign-in within its short life.
 The login cookie then names the owner and their Fione role. Only the owner is ever authorized.
 
-The sign-in must come from a same-site page (``Sec-Fetch-Site``), that is from Fione. A launch
+The sign-in must come from Fione's page: a same-site navigation (``Sec-Fetch-Site``) whose
+``Referer`` is Fione's origin (its notebook page sends ``Referrer-Policy: origin``). A launch
 token is a bearer credential for its owner's container, and its owner can take one from their
-own notebook page without using it. Were a cross-site navigation accepted, an attacker could
-sign a victim's browser into the attacker's container, whose trusted notebook output would
-then run as script on the notebook origin that every user's JupyterLab shares, and reach the
-victim's own JupyterLab from there.
+own notebook page without using it. Were a navigation from any other page accepted (another
+site, or another page on the same site), an attacker could sign a victim's browser into the
+attacker's container, whose trusted notebook output would then run as script on the notebook
+origin that every user's JupyterLab shares, and reach the victim's own JupyterLab from there.
 """
 
 import base64
@@ -121,6 +122,8 @@ class FioneLoginHandler(JupyterHandler):
         # included. Both checks come before redemption, so a refused token is not used up.
         if self.request.headers.get("Sec-Fetch-Site") not in _SAME_SITE:
             raise web.HTTPError(403)  # see the module docstring; browsers always send it
+        if not self._from_fione():
+            raise web.HTTPError(403)  # another page of the same site, or no Referer at all
         if any("%" in part.partition("=")[0] for part in self.request.query.split("&")):
             raise web.HTTPError(403)  # Fione never encodes a key
         idp = self.identity_provider
@@ -130,6 +133,13 @@ class FioneLoginHandler(JupyterHandler):
         user = FioneUser(username=claims["sub"], name=claims["name"], role=claims["role"])
         idp.set_login_cookie(self, user)
         self.redirect(_safe_next(self.get_argument("next", ""), self.base_url))
+
+    def _from_fione(self) -> bool:
+        """Whether the one ``Referer`` is Fione's origin (a page of it). Compared as a prefix
+        of the raw value, never parsed: a malformed one is simply refused."""
+        referers = self.request.headers.get_list("Referer")
+        origin = self.identity_provider.fione_origin
+        return bool(origin) and len(referers) == 1 and referers[0].startswith(origin + "/")
 
     def log_exception(self, typ, value, tb) -> None:
         # Tornado's version names the request URI, which holds the launch token. The access
@@ -151,6 +161,7 @@ class FioneIdentityProvider(IdentityProvider):
     owner = Unicode(config=True, help="The Fione user id that owns this container.")
     key = Bytes(config=True, help="The per-container key launch tokens are signed with.")
     expires = Int(config=True, help="When the container ends (epoch seconds); cookies too.")
+    fione_origin = Unicode(config=True, help="Fione's origin: sign-ins come from its pages only.")
     _used_jti = Dict()  # jti -> exp of redeemed launch tokens
 
     @default("token")
