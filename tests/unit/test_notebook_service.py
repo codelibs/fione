@@ -247,10 +247,22 @@ def test_state_ends_a_session_whose_container_is_gone(conn, settings, editor):
     assert _session(conn, editor.id) is None and not _valid(conn, token)
 
 
-def test_a_container_without_a_session_is_absent(conn, editor):
+def test_a_container_without_a_session_is_stopped_and_absent(conn, editor):
+    # Nobody can sign in to it, and it may be one a revocation could not stop.
     launcher = FakeLauncher()
     launcher.states[editor.id] = "running"
     assert service.state(conn, launcher, editor) == "absent"
+    assert launcher.calls == [("status", editor.id), ("stop", editor.id)]
+    assert editor.id not in launcher.states and _pending(conn) == {}
+
+
+def test_a_failed_stop_of_a_container_without_a_session_is_pending(conn, editor):
+    launcher = FakeLauncher()
+    launcher.states[editor.id] = "running"
+    launcher.stop = _failing(launcher, "stop")
+    with pytest.raises(LauncherError):
+        service.state(conn, launcher, editor)
+    assert _pending(conn) == {editor.id: 0}
 
 
 def test_state_raises_launcher_errors(conn, editor):
@@ -268,6 +280,140 @@ def test_stop_revokes_the_token_even_when_the_launcher_fails(conn, settings, edi
     with pytest.raises(LauncherError):
         service.stop(conn, launcher, editor.id)
     assert _session(conn, editor.id) is None and not _valid(conn, token)
+    assert _pending(conn) == {editor.id: 0}
+
+
+# --- pending stops ------------------------------------------------------------------------
+
+
+def _pending(conn) -> dict[int, int]:
+    rows = conn.execute("SELECT user_id, purge FROM notebook_pending_stops").fetchall()
+    return {row["user_id"]: row["purge"] for row in rows}
+
+
+def _failing(launcher, method):
+    """``launcher.<method>`` that records the call, then fails."""
+
+    def fail(uid):
+        launcher.calls.append((method, uid))
+        raise LauncherError("unreachable")
+
+    return fail
+
+
+@pytest.mark.parametrize("action,purge", [(service.stop, 0), (service.purge, 1)])
+def test_a_failed_stop_or_purge_is_pending_and_retried(conn, settings, editor, action, purge):
+    launcher = FakeLauncher()
+    service.start(conn, launcher, settings, KEY_SECRET, editor)
+    launcher.fail = LauncherError("unreachable")
+    assert service.quietly(action, conn, launcher, editor.id) is False
+    assert _pending(conn) == {editor.id: purge}
+    service.retry_pending(conn, launcher)  # still failing: kept
+    assert _pending(conn) == {editor.id: purge}
+    launcher.fail = None
+    launcher.calls.clear()
+    service.retry_pending(conn, launcher)
+    assert launcher.calls == [("purge" if purge else "stop", editor.id)]
+    assert _pending(conn) == {} and editor.id not in launcher.states
+
+
+@pytest.mark.parametrize("first,second", [("stop", "purge"), ("purge", "stop")])
+def test_a_pending_purge_is_never_downgraded(conn, editor, first, second):
+    launcher = FakeLauncher()
+    launcher.fail = LauncherError("unreachable")
+    for name in (first, second):
+        assert not service.quietly(getattr(service, name), conn, launcher, editor.id)
+    assert _pending(conn) == {editor.id: 1}
+    launcher.fail = None
+    launcher.calls.clear()
+    service._remove_locked(conn, launcher, editor.id, purge=False)  # a stop does the purge
+    assert launcher.calls == [("purge", editor.id)] and _pending(conn) == {}
+
+
+def test_every_service_call_retries_pending_stops_first(conn, settings, editor):
+    other = auth_service.create_user(conn, "other", "password-123", Role.EDITOR)
+    down = FakeLauncher()
+    down.fail = LauncherError("unreachable")
+    launcher = FakeLauncher()
+    for call in (
+        lambda: service.state(conn, launcher, editor),
+        lambda: service.start(conn, launcher, settings, KEY_SECRET, editor),
+        lambda: service.stop(conn, launcher, editor.id),
+        lambda: service.purge(conn, launcher, editor.id),
+    ):
+        assert not service.quietly(service.purge, conn, down, other.id)
+        assert _pending(conn) == {other.id: 1}
+        launcher.calls.clear()
+        call()
+        assert launcher.calls[0] == ("purge", other.id) and _pending(conn) == {}
+
+
+def test_retrying_stops_at_the_first_failure(conn, editor, caplog):
+    other = auth_service.create_user(conn, "other", "password-123", Role.EDITOR)
+    launcher = FakeLauncher()
+    launcher.fail = LauncherError("unreachable", "the launcher answered 500")
+    for uid in (editor.id, other.id):
+        service.quietly(service.stop, conn, launcher, uid)
+    launcher.calls.clear()
+    with caplog.at_level(logging.WARNING, logger="fione.notebooks.service"):
+        service.retry_pending(conn, launcher)
+    assert len(launcher.calls) == 1 and _pending(conn) == {editor.id: 0, other.id: 0}
+    assert "unreachable" in caplog.text and "500" not in caplog.text
+
+
+def test_a_start_is_refused_while_a_stop_is_pending(conn, settings, editor):
+    # User ids are reused: a pending purge must not remove a new notebook's files later.
+    launcher = FakeLauncher()
+    launcher.fail = LauncherError("unreachable")
+    service.quietly(service.purge, conn, launcher, editor.id)
+    launcher.purge = _failing(launcher, "purge")
+    launcher.fail = None
+    with pytest.raises(LauncherError) as raised:
+        service.start(conn, launcher, settings, KEY_SECRET, editor)
+    assert raised.value.code == "unreachable" and launcher.bodies() == []
+    assert _session(conn, editor.id) is None and _pending(conn) == {editor.id: 1}
+
+
+def test_a_lost_start_answer_whose_stop_fails_leaves_the_stop_pending(conn, settings, editor):
+    launcher = FakeLauncher()
+    ensure = launcher.ensure
+
+    def lost_answer(uid, body):
+        ensure(uid, body)
+        raise LauncherError("unreachable")
+
+    launcher.ensure = lost_answer
+    launcher.stop = _failing(launcher, "stop")
+    with pytest.raises(LauncherError):
+        service.start(conn, launcher, settings, KEY_SECRET, editor)
+    assert _pending(conn) == {editor.id: 0}
+
+
+def test_the_retrier_retries_in_its_own_thread_until_stopped(tmp_path, conn, editor):
+    launcher = FakeLauncher()
+    launcher.fail = LauncherError("unreachable")
+    service.quietly(service.stop, conn, launcher, editor.id)
+    launcher.fail = None
+    retrier = service.PendingStopRetrier(tmp_path / "fione.db", launcher, interval=0.05)
+    retrier.start()
+    try:
+        deadline = time.monotonic() + 10
+        while _pending(conn):
+            assert time.monotonic() < deadline, "the pending stop was not retried"
+            time.sleep(0.02)
+    finally:
+        retrier.stop()
+    assert ("stop", editor.id) in launcher.calls
+    calls = len(launcher.calls)
+    service.quietly(service.stop, conn, _down(), editor.id)
+    time.sleep(0.2)
+    assert len(launcher.calls) == calls and _pending(conn) == {editor.id: 0}  # stopped
+
+
+def _down() -> FakeLauncher:
+    launcher = FakeLauncher()
+    launcher.fail = LauncherError("unreachable")
+    return launcher
 
 
 def test_stop_unless_allowed(conn, settings, editor):

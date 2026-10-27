@@ -156,6 +156,13 @@ MIGRATIONS: list[str] = [
         expires_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE notebook_pending_stops (
+        user_id INTEGER PRIMARY KEY,
+        purge INTEGER NOT NULL DEFAULT 0,
+        since TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 

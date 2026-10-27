@@ -11,6 +11,9 @@
   {% if done %}
   <div class="alert alert-success" role="status">{{ icon("check") }}<span>{{ t('users.done.' ~ done) }}</span></div>
   {% endif %}
+  {% if notebook_pending %}
+  <div class="alert alert-warning" role="status">{{ icon("alert") }}<span>{{ t('users.notebook_pending') }}</span></div>
+  {% endif %}
   {% if problem %}
   <div class="alert alert-danger" role="alert" id="users-problem" tabindex="-1" autofocus>{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('users.refused', username=problem.username) }}</strong></p><p>{{ t(problem.key, **problem.params) }}</p>{% if problem.key == "users.refused.self_password" %}<p><a href="/account">{{ t('users.your_account') }}</a></p>{% endif %}</div></div>
   {% endif %}

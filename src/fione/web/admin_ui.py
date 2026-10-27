@@ -3,8 +3,10 @@ else, as the API's admin dependency), with the API's services and rules.
 
 Users: create, change the role, set a new password (which ends that user's sessions) and
 delete; the service refuses the last admin and one's own role or account, and the reason is
-shown on the page. A user who may no longer use notebooks, or gets a new password, has their
-notebook stopped; a deleted user's notebook files are removed too. System: what
+shown on the page. A user who may no longer use notebooks, gets a new password or is no
+longer an admin has their notebook stopped; a deleted user's notebook files are removed too.
+When the launcher fails, the change is made anyway and the page says that the stop is pending
+(it is retried). System: what
 ``/api/v1/system/status`` reports plus failed jobs of the last day, the workers and the
 uptime; never a secret, a path, a URL or the environment.
 """
@@ -88,6 +90,7 @@ def _users_view(
         errors=errors or {},
         new=new or {"username": "", "role": Role.EDITOR.value},
         done=done if done in DONE and status == 200 else None,
+        notebook_pending=status == 200 and request.query_params.get("notebook") == "pending",
         min_password=MIN_PASSWORD_LENGTH,
         max_password=MAX_PASSWORD_LENGTH,
         here="/admin/users",
@@ -142,16 +145,17 @@ def _refused(request, conn, auth, form, user, key: str, status=409, **params) ->
     return _users_view(request, conn, auth, page=page, status=status, problem=problem)
 
 
-def _stop_notebook(request: Request, conn, user_id: int, action) -> None:
+def _stop_notebook(request: Request, conn, user_id: int, action) -> bool:
     """``action`` (a ``fione.notebooks.service`` stop or purge) for a changed user; never
-    fails."""
-    notebooks.quietly(action, conn, request.app.state.notebook_launcher, user_id)
+    fails. False when the stop is pending."""
+    return notebooks.quietly(action, conn, request.app.state.notebook_launcher, user_id)
 
 
-def _back(form, done: str) -> RedirectResponse:
+def _back(form, done: str, stopped: bool = True) -> RedirectResponse:
     page = field(form, "page")
     page = page if page.isascii() and page.isdigit() and len(page) <= 12 else "1"
-    return RedirectResponse(f"/admin/users?done={done}&page={page}", 303)
+    pending = "" if stopped else "&notebook=pending"
+    return RedirectResponse(f"/admin/users?done={done}&page={page}{pending}", 303)
 
 
 @router.post("/admin/users/{uid}/role")
@@ -167,8 +171,10 @@ def change_role(request: Request, conn: Conn, uid: str, form: SmallForm) -> Resp
         raise UiError(404, "error.not_found") from None
     except UserConflict as e:
         return _refused(request, conn, auth, form, user, f"users.refused.{e.code}", n=e.count)
-    _stop_notebook(request, conn, user.id, notebooks.stop_unless_allowed)
-    return _back(form, "role")
+    # An admin's notebook signed them in as an admin (terminals): a new role starts afresh.
+    demoted = user.role == Role.ADMIN and role != Role.ADMIN.value
+    action = notebooks.stop if demoted else notebooks.stop_unless_allowed
+    return _back(form, "role", _stop_notebook(request, conn, user.id, action))
 
 
 @router.post("/admin/users/{uid}/notebook")
@@ -182,8 +188,9 @@ def change_notebook(request: Request, conn: Conn, uid: str, form: SmallForm) -> 
         auth_service.set_notebook_permission(conn, user.id, NotebookPermission(permission))
     except UserNotFound:
         raise UiError(404, "error.not_found") from None
-    _stop_notebook(request, conn, user.id, notebooks.stop_unless_allowed)
-    return _back(form, "notebook")
+    return _back(
+        form, "notebook", _stop_notebook(request, conn, user.id, notebooks.stop_unless_allowed)
+    )
 
 
 @router.post("/admin/users/{uid}/password")
@@ -205,8 +212,7 @@ def reset_password(request: Request, conn: Conn, uid: str, form: SmallForm) -> R
             auth_service.set_password(conn, user.id, password)
     except UserNotFound:
         raise UiError(404, "error.not_found") from None
-    _stop_notebook(request, conn, user.id, notebooks.stop)
-    return _back(form, "password")
+    return _back(form, "password", _stop_notebook(request, conn, user.id, notebooks.stop))
 
 
 @router.post("/admin/users/{uid}/delete")
@@ -219,8 +225,7 @@ def delete_user(request: Request, conn: Conn, uid: str, form: SmallForm) -> Resp
         raise UiError(404, "error.not_found") from None
     except UserConflict as e:
         return _refused(request, conn, auth, form, user, f"users.refused.{e.code}", n=e.count)
-    _stop_notebook(request, conn, user.id, notebooks.purge)
-    return _back(form, "deleted")
+    return _back(form, "deleted", _stop_notebook(request, conn, user.id, notebooks.purge))
 
 
 # --- system status ------------------------------------------------------------------------

@@ -21,6 +21,7 @@ from fione.api.security import (
 )
 from fione.auth import service as auth_service
 from fione.auth.roles import User
+from fione.notebooks import service as notebooks
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 setup_log = logging.getLogger("fione.setup")
@@ -116,7 +117,9 @@ def first_admin(body: FirstAdminIn, request: Request, response: Response, conn: 
 def change_own_password(request: Request, conn, user: User, current: str, new: str) -> None:
     """Check ``current``, then set ``new``, under the login throttle: ``ApiError`` 429
     (throttled), 403 (wrong password) or 422 (the new one is refused). The web UI's
-    account page uses this too, so both paths share one throttle."""
+    account page uses this too, so both paths share one throttle. Like an admin's reset, it
+    stops the user's notebook (its sign-in and token); a launcher failure leaves that
+    pending and never fails the change."""
     key = _throttle_key(request, user.username)
     throttle = request.app.state.throttle
     _attempt(throttle, key)
@@ -126,6 +129,7 @@ def change_own_password(request: Request, conn, user: User, current: str, new: s
         with service_errors():
             auth_service.set_password(conn, user.id, new)
     throttle.success(key)
+    notebooks.quietly(notebooks.stop, conn, request.app.state.notebook_launcher, user.id)
 
 
 @router.post("/password")

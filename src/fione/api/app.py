@@ -35,6 +35,7 @@ from fione.config import Settings, get_settings, load_secret
 from fione.jobs.runner import JobRunner
 from fione.models.live import LiveModels
 from fione.notebooks.launcher import HttpLauncher
+from fione.notebooks.service import PendingStopRetrier
 from fione.storage import open_storage
 from fione.version import __version__
 from fione.web import views as web
@@ -149,9 +150,16 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
             runner.recover_orphans()
             runner.start()
         app.state.runner = runner
+        retrier = None
+        if settings.notebooks_enabled:  # notebook stops the launcher failed are retried
+            retrier = PendingStopRetrier(db_path, app.state.notebook_launcher)
+            retrier.start()
+        app.state.notebook_retrier = retrier
         try:
             yield
         finally:
+            if retrier is not None:
+                retrier.stop()
             if runner is not None:
                 runner.stop()
 
@@ -173,6 +181,7 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     # Models loaded for synchronous explanation requests (one at a time, at most two kept).
     app.state.live_models = LiveModels(app.state.storage, secret)
     app.state.runner = None
+    app.state.notebook_retrier = None
     app.state.started_at = time.monotonic()  # the system page's uptime
     app.state.signer = SessionSigner(secret, settings.session_max_age_secs)
     app.state.notebook_launcher = (

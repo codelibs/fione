@@ -12,7 +12,7 @@ from html import unescape
 
 import pytest
 
-from api_helpers import NOTEBOOK_SETTINGS, add_user, connect, login, notebook_client
+from api_helpers import NOTEBOOK_SETTINGS, PW, add_user, connect, login, notebook_client
 from fione.auth import service as auth_service
 from fione.auth.roles import NotebookPermission, Role
 from fione.notebooks.launch import launch_key
@@ -324,6 +324,137 @@ def test_admin_role_change_with_the_launcher_down_still_applies(nb):
     r = nb.patch(f"/api/v1/users/{admin2}", json={"role": "viewer"}, headers={"X-CSRF-Token": csrf})
     assert r.status_code == 200 and r.json()["role"] == "viewer"
     assert not _token_works(nb, token)
+
+
+def _pending(client) -> dict[int, int]:
+    with closing(connect(client)) as conn:
+        rows = conn.execute("SELECT user_id, purge FROM notebook_pending_stops").fetchall()
+    return {row["user_id"]: row["purge"] for row in rows}
+
+
+PENDING_EN = "The notebook could not be stopped yet; Fione retries automatically."
+
+
+@pytest.mark.parametrize(
+    "path,form,done,purge",
+    [
+        ("notebook", {"notebook": "none"}, "notebook", 0),
+        ("password", {"password": "a-new-password-1"}, "password", 0),
+        ("role", {"role": "viewer"}, "role", 0),  # an admin no longer
+        ("delete", {}, "deleted", 1),
+    ],
+)
+def test_the_users_page_says_when_a_stop_is_pending(nb, path, form, done, purge):
+    fake = nb.app.state.notebook_launcher
+    add_user(nb, "admin2", Role.ADMIN)
+    target = _uid(nb, "admin2" if path == "role" else "ed")
+    csrf = login(nb, "admin")
+    fake.fail = LauncherError("unreachable")
+    r = nb.post(
+        f"/admin/users/{target}/{path}", data={"csrf_token": csrf, **form}, follow_redirects=False
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/admin/users?done={done}&page=1&notebook=pending"
+    page = nb.get(r.headers["location"])
+    assert page.status_code == 200 and PENDING_EN in page.text
+    assert "alert-success" in page.text  # the change itself was made
+    assert _pending(nb) == {target: purge}
+    nb.cookies.set("fione_lang", "ja")
+    assert "Fione が自動で再試行します" in nb.get(r.headers["location"]).text
+    nb.cookies.delete("fione_lang")
+    fake.fail = None
+    # A confirmed stop says nothing, and the next notebook call retries the pending one.
+    r = nb.post(
+        f"/admin/users/{_uid(nb, 'vi')}/notebook",
+        data={"csrf_token": csrf, "notebook": "none"},
+        follow_redirects=False,
+    )
+    assert "notebook=pending" not in r.headers["location"]
+    assert PENDING_EN not in nb.get(r.headers["location"]).text
+    assert _pending(nb) == {}
+    assert ("purge" if purge else "stop", target) in fake.calls
+
+
+def test_the_api_says_when_a_stop_is_pending(nb):
+    fake = nb.app.state.notebook_launcher
+    ed, vi = _uid(nb, "ed"), _uid(nb, "vi")
+    headers = {"X-CSRF-Token": login(nb, "admin")}
+    r = nb.patch(f"/api/v1/users/{ed}", json={"notebook": "none"}, headers=headers)
+    assert r.status_code == 200 and "notice" not in r.json()
+    assert "x-fione-notice" not in r.headers
+    fake.fail = LauncherError("unreachable")
+    r = nb.patch(f"/api/v1/users/{ed}", json={"password": "a-new-password-1"}, headers=headers)
+    assert r.status_code == 200 and r.json()["notice"] == "notebook_stop_pending"
+    assert r.headers["x-fione-notice"] == "notebook_stop_pending"
+    r = nb.delete(f"/api/v1/users/{vi}", headers=headers)
+    assert r.status_code == 204 and r.headers["x-fione-notice"] == "notebook_stop_pending"
+    assert _pending(nb) == {ed: 0, vi: 1}
+
+
+@pytest.mark.parametrize("via", ["api", "account"])
+def test_changing_ones_own_password_stops_the_notebook(nb, via):
+    fake = nb.app.state.notebook_launcher
+    csrf = _start(nb, "ed")
+    token = fake.bodies()[0]["token"]
+    ed = _uid(nb, "ed")
+    new = "a-new-password-1"
+    if via == "api":
+        r = nb.post(
+            "/api/v1/auth/password",
+            json={"current_password": PW, "new_password": new},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert r.status_code == 200, r.text
+    else:
+        form = {"csrf_token": csrf, "current_password": PW}
+        form |= {"new_password": new, "confirm_password": new}
+        r = nb.post("/account/password", data=form, follow_redirects=False)
+        assert r.status_code == 303, r.text
+    assert ("stop", ed) in fake.calls and not _token_works(nb, token)
+
+
+def test_a_failed_stop_never_fails_ones_own_password_change(nb):
+    fake = nb.app.state.notebook_launcher
+    csrf = _start(nb, "ed")
+    fake.fail = LauncherError("unreachable")
+    new = "a-new-password-1"
+    form = {"csrf_token": csrf, "current_password": PW}
+    form |= {"new_password": new, "confirm_password": new}
+    r = nb.post("/account/password", data=form, follow_redirects=False)
+    assert r.status_code == 303 and _pending(nb) == {_uid(nb, "ed"): 0}
+
+
+@pytest.mark.parametrize("via", ["api", "ui"])
+def test_an_admin_who_loses_the_role_is_stopped_even_with_the_permission(nb, via):
+    # The notebook's sign-in holds the admin role (terminals): a new role starts afresh.
+    fake = nb.app.state.notebook_launcher
+    add_user(nb, "admin2", Role.ADMIN)
+    admin2 = _uid(nb, "admin2")
+    with closing(connect(nb)) as conn:
+        auth_service.set_notebook_permission(conn, admin2, NotebookPermission.RUN)
+    csrf = login(nb, "admin")
+
+    def set_role(role):
+        if via == "api":
+            r = nb.patch(
+                f"/api/v1/users/{admin2}", json={"role": role}, headers={"X-CSRF-Token": csrf}
+            )
+            assert r.status_code == 200, r.text
+        else:
+            r = nb.post(
+                f"/admin/users/{admin2}/role",
+                data={"csrf_token": csrf, "role": role},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303, r.text
+
+    set_role("admin")  # not a change of role: an allowed user keeps their notebook
+    assert ("stop", admin2) not in fake.calls
+    set_role("editor")
+    assert ("stop", admin2) in fake.calls
+    fake.calls.clear()
+    set_role("viewer")  # an editor with the permission keeps it
+    assert ("stop", admin2) not in fake.calls
 
 
 @pytest.mark.parametrize(

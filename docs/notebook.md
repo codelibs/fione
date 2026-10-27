@@ -92,9 +92,17 @@ An administrator can always use notebooks. Anyone else needs the permission:
 1. Sign in as an administrator and open the **Users** page.
 2. In the **Notebook** column, choose **Allow** for the user (**Revoke** takes it back).
 
-The change applies right away. Revoking it, resetting the user's password or changing their
-role so that they no longer qualify stops their notebook and ends its API token. Users
-without the permission have no **Notebook** link, and the page answers 403.
+The change applies right away. Revoking it, a new password (set by an administrator or by
+the users themselves), taking the administrator role away, or changing the role so that they
+no longer qualify stops the user's notebook and ends its API token. Users without the
+permission have no **Notebook** link, and the page answers 403.
+
+If the launcher cannot be reached at that moment, the change is made anyway and the token
+ends, but the container may still run: the **Users** page then says that the notebook could
+not be stopped yet (the API answers with `"notice": "notebook_stop_pending"` and the header
+`X-Fione-Notice`). Fione retries the stop every minute and before every notebook action, and
+the user cannot start a notebook until it succeeds. Until then, a browser that is already
+signed in to that JupyterLab keeps working.
 
 A **viewer** who is allowed notebooks runs code too, but their token only reads: the
 notebook has at most the access of the user's role.
@@ -123,7 +131,8 @@ for the full tour.
 If JupyterLab ignores the first Shift+Enter in a fresh notebook, run the cell again. Stock
 JupyterLab does this too.
 
-Administrators also get a Terminal in JupyterLab; other users do not.
+Administrators also see a Terminal in JupyterLab; other users do not. This is a convenience,
+not an access control: a terminal gives nothing a notebook's kernel does not.
 
 ### Using the SDK outside the UI
 
@@ -192,8 +201,9 @@ new user 2 would get the old user 2's files. After `down -v` (or any fresh `fion
 the notebook volumes with the commands above before creating users.
 
 Deleting a user in Fione also removes their notebook and its volume. If the launcher is
-unreachable at that moment, the volume remains: Fione reuses user ids, and a later user with the
-same id would see the files, so remove it with the commands above before creating more users.
+unreachable at that moment, Fione retries the removal (every minute and before every notebook
+action) and refuses to start a notebook for that user id until it succeeds, since Fione reuses
+user ids. To be sure, check with the commands above that the volume is gone.
 
 ## Stopping
 

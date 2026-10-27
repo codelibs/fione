@@ -837,6 +837,7 @@
   "users.done.password": "The new password was set. The user has to sign in again.",
   "users.done.deleted": "The user was deleted.",
   "users.done.notebook": "The notebook permission was changed. It applies right away.",
+  "users.notebook_pending": "The notebook could not be stopped yet; Fione retries automatically.",
   "users.refused": "Nothing was changed for {username}.",
   "users.create": "Add a user",
   "users.username": "Username",
