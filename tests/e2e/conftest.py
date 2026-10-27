@@ -4,9 +4,11 @@ public test values of docker/e2e.env) and a real browser (Playwright, Chromium).
     uv run pytest tests/e2e -m e2e
 
 One stack per session, under a unique project name on free host ports, always removed with
-its volumes at the end (also on failure or Ctrl-C). Set ``FIONE_IMAGE_TAG`` to use images
-built beforehand (``docker compose ... --profile serving build``); otherwise both images are
-built. ``FIONE_E2E=0`` skips the suite; so does a missing Docker. On failure the Compose
+its volumes and notebook containers at the end (also on failure or Ctrl-C). The stack runs
+the notebook profile, with Fione and the notebook gateway on the same host name (127.0.0.1;
+``localhost`` would be another site). Set ``FIONE_IMAGE_TAG`` to use images built beforehand
+(``docker compose ... --profile serving --profile notebook build``); otherwise all the images
+are built. ``FIONE_E2E=0`` skips the suite; so does a missing Docker. On failure the Compose
 logs are printed, and they, a Playwright trace and a screenshot of the failing page are
 saved under ``FIONE_E2E_ARTIFACTS`` (default ``test-results/e2e``).
 """
@@ -37,6 +39,8 @@ FAILED_LOAD = "Failed to load resource"
 # The developer's own FIONE_* settings must not reach the throwaway stack (compose prefers
 # the shell over docker/e2e.env): only these pass.
 PASSED_SETTINGS = ("FIONE_IMAGE_TAG",)
+# Both built and removed; only the notebook profile is started (fione-serving needs a model).
+PROFILES = ("--profile", "serving", "--profile", "notebook")
 
 
 def _env_value(name: str) -> str:
@@ -59,6 +63,7 @@ def _free_port() -> int:
 class Stack:
     project: str
     port: int
+    notebook_port: int
     image_tag: str
     env: dict
     artifacts: Path
@@ -67,6 +72,10 @@ class Stack:
     @property
     def base(self) -> str:
         return f"http://127.0.0.1:{self.port}"
+
+    @property
+    def notebook_base(self) -> str:
+        return f"http://127.0.0.1:{self.notebook_port}"
 
     @property
     def serving_image(self) -> str:
@@ -118,10 +127,24 @@ class Stack:
     def logs(self) -> str:
         return self.compose("logs", "--no-color", "--tail", "300", check=False).stdout
 
+    def labelled(self, kind: str) -> list[str]:
+        """The ids of this project's notebook containers (``kind`` "container", any state) or
+        notebook volumes ("volume"), which the launcher made outside Compose."""
+        listing = ["ps", "-a"] if kind == "container" else ["volume", "ls"]
+        command = ["docker", *listing, "-q", "--filter", f"label=fione.project={self.project}"]
+        out = subprocess.run(command, capture_output=True, text=True, timeout=60).stdout
+        return out.split()
+
     def down(self) -> None:
+        """Remove the notebook containers first (they hold the `notebooks` network), then the
+        stack with its volumes, then the notebook volumes."""
         if not self.down_done:
             self.down_done = True
-            self.compose("--profile", "serving", "down", "-v", "--remove-orphans", check=False)
+            if containers := self.labelled("container"):
+                subprocess.run(["docker", "rm", "-f", *containers], capture_output=True)
+            self.compose(*PROFILES, "down", "-v", "--remove-orphans", check=False)
+            if volumes := self.labelled("volume"):
+                subprocess.run(["docker", "volume", "rm", *volumes], capture_output=True)
 
 
 def _docker_ready() -> str | None:
@@ -145,13 +168,20 @@ def stack(request):
     prebuilt = os.environ.get("FIONE_IMAGE_TAG")
     artifacts = Path(os.environ.get("FIONE_E2E_ARTIFACTS", ROOT / "test-results" / "e2e"))
     artifacts.mkdir(parents=True, exist_ok=True)
-    port = _free_port()
+    port, notebook_port = _free_port(), _free_port()
     env = {
         k: v for k, v in os.environ.items() if not k.startswith("FIONE_") or k in PASSED_SETTINGS
-    } | {"FIONE_PORT": str(port), "FIONE_SERVING_PORT": str(_free_port())}
+    } | {
+        "FIONE_PORT": str(port),
+        "FIONE_SERVING_PORT": str(_free_port()),
+        "FIONE_NOTEBOOK_PORT": str(notebook_port),
+        "FIONE_PUBLIC_URL": f"http://127.0.0.1:{port}",
+        "FIONE_NOTEBOOK_URL": f"http://127.0.0.1:{notebook_port}",
+    }
     stack = Stack(
         project=f"fione-e2e-{secrets.token_hex(3)}",
         port=port,
+        notebook_port=notebook_port,
         image_tag=prebuilt or _env_value("FIONE_IMAGE_TAG"),
         env=env,
         artifacts=artifacts,
@@ -159,8 +189,8 @@ def stack(request):
     atexit.register(stack.down)  # also after Ctrl-C, when fixtures may not finalize
     try:
         if not prebuilt:
-            stack.compose("--profile", "serving", "build", timeout=UP_TIMEOUT_SECS)
-        up = ["up", "-d", "--wait", "--wait-timeout", "180"]
+            stack.compose(*PROFILES, "build", timeout=UP_TIMEOUT_SECS)
+        up = ["--profile", "notebook", "up", "-d", "--wait", "--wait-timeout", "180"]
         stack.compose(*up, *([] if not prebuilt else ["--no-build"]), timeout=UP_TIMEOUT_SECS)
         yield stack
     except subprocess.CalledProcessError as e:
@@ -198,18 +228,26 @@ class Console:
     def __init__(self):
         self.errors: list[str] = []
         self.expected: set[str] = set()
+        self.expected_prefixes: set[str] = set()
 
     def expect_error(self, url: str) -> None:
         """The test opens ``url`` expecting an error status: its failed load is no error."""
         self.expected.add(url)
 
+    def expect_error_prefix(self, prefix: str) -> None:
+        """Failed loads of URLs under ``prefix`` are expected: only for JupyterLab's writes to
+        its settings and workspaces APIs, which the notebook gateway refuses."""
+        self.expected_prefixes.add(prefix)
+
+    def _expected(self, url: str) -> bool:
+        return url in self.expected or url.startswith(tuple(self.expected_prefixes))
+
     def watch(self, page) -> None:
         def on_console(message):
             if message.type != "error":
                 return
-            if (
-                message.text.startswith(FAILED_LOAD)
-                and message.location.get("url") in self.expected
+            if message.text.startswith(FAILED_LOAD) and self._expected(
+                message.location.get("url") or ""
             ):
                 return
             self.errors.append(f"{page.url}: {message.text} ({message.location.get('url')})")
