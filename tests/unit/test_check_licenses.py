@@ -215,7 +215,15 @@ def test_bundle_reviewed_package_with_another_licence_fails(monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize(
-    "content", [None, "not json", "[]", '{"packages": []}', '{"packages": [{"licenseId": "MIT"}]}']
+    "content",
+    [
+        None,
+        "not json",
+        "[]",
+        '{"packages": []}',
+        '{"packages": [{"licenseId": "MIT"}]}',
+        '{"packages": [{"name": "khroma"}]}',
+    ],
 )
 def test_missing_or_malformed_bundle_fails(monkeypatch, capsys, tmp_path, content):
     bundle = tmp_path / "third-party-licenses.json"

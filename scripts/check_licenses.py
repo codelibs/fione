@@ -172,7 +172,7 @@ def bundle_licenses(path: Path) -> list[tuple[str, str, Verdict]]:
     result = []
     for package in packages:
         name = package.get("name") if isinstance(package, dict) else None
-        license_id = package.get("licenseId", "") if isinstance(package, dict) else None
+        license_id = package.get("licenseId") if isinstance(package, dict) else None
         if not isinstance(name, str) or not isinstance(license_id, str):
             raise ValueError("a package without a name or licence id")
         result.append((name, license_id, classify(license_id)))

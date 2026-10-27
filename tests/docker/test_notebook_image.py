@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 import subprocess
@@ -19,7 +20,7 @@ import pytest
 pytestmark = pytest.mark.docker
 
 ROOT = Path(__file__).resolve().parents[2]
-IMAGE = "fione-notebook:test-2b6"
+IMAGE = f"fione-notebook:test-{os.getpid()}"  # removed again at the end
 OWNER = "7"
 BASE = f"/user/{OWNER}/"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -27,20 +28,25 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 @pytest.fixture(scope="module", autouse=True)
 def image():
-    subprocess.run(
+    build = subprocess.run(
         ["docker", "build", "-f", "docker/Dockerfile.notebook", "-t", IMAGE, "."],
         cwd=ROOT,
-        check=True,
         capture_output=True,
+        text=True,
         timeout=3600,
     )
+    assert build.returncode == 0, build.stderr[-5000:]
+    yield
+    subprocess.run(["docker", "image", "rm", IMAGE], capture_output=True)
 
 
 def _name() -> str:
     return f"fione-nb-test-{uuid.uuid4().hex[:12]}"
 
 
-def run(*command: str, options: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
+def run(
+    *command: str, options: tuple[str, ...] = (), timeout: float = 300
+) -> subprocess.CompletedProcess:
     """Run a command in a new container of the image (as its own user unless options say)."""
     name = _name()
     try:
@@ -48,7 +54,7 @@ def run(*command: str, options: tuple[str, ...] = ()) -> subprocess.CompletedPro
             ["docker", "run", "--rm", "--name", name, *options, IMAGE, *command],
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=timeout,
         )
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
@@ -98,7 +104,7 @@ for dir in "$JUPYTER_CONFIG_DIR" "$JUPYTER_DATA_DIR" /app/.venv/share/jupyter \
     touch "$dir/x" 2>/dev/null && echo "writable: $dir"
 done
 touch /home/nb/work/x /tmp/x && echo "work and tmp: ok"
-find /app /etc/jupyter /etc/jupyter-fione /usr/local/share/jupyter-fione -writable
+find /app /etc /usr -writable 2>/dev/null
 find /etc/jupyter-fione /usr/local/share/jupyter-fione -type l
 """
     result = run("sh", "-c", script)
@@ -159,6 +165,61 @@ def _up(url: str) -> bool:
     return True
 
 
+# The container settings the launcher uses (see the plan's fixed container spec).
+LAUNCHER_SETTINGS = (
+    "--user",
+    "1000:1000",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges",
+    "--init",
+    "--cpus",
+    "2",
+    "--memory",
+    "4g",
+    "--memory-swap",
+    "4g",
+    "--pids-limit",
+    "512",
+)
+
+
+def _settings(key: bytes, **changes: str | None) -> list[str]:
+    """`-e` options with valid FIONE_NB_* values, plus changes (None drops a value)."""
+    env = {
+        "FIONE_NB_OWNER": OWNER,
+        "FIONE_NB_KEY": key.hex(),
+        "FIONE_NB_COOKIE_SECRET": secrets.token_hex(32),
+        "FIONE_NB_ORIGIN": "http://127.0.0.1:18080",
+        "FIONE_NB_EXPIRES": str(int(time.time()) + 3600),
+    }
+    env.update(changes)
+    options = []
+    for name, value in env.items():
+        if value is not None:
+            options += ["-e", f"{name}={value}"]
+    return options
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"FIONE_NB_OWNER": None}, "fione_notebook: FIONE_NB_OWNER is missing or malformed"),
+        ({"JUPYTER_PATH": "/tmp"}, "fione_notebook: JUPYTER_PATH must not be set"),
+        # int() raises ValueError, which traitlets would log and then start a stock server.
+        ({"FIONE_NB_EXPIRES": "9" * 5000}, "fione_notebook: configuration failed (ValueError)"),
+    ],
+    ids=["owner-missing", "jupyter-path-set", "other-error"],
+)
+def test_server_refuses_to_start(changes, message):
+    result = run(options=(*LAUNCHER_SETTINGS, *_settings(b"k" * 32, **changes)), timeout=90)
+    assert result.returncode != 0
+    out = result.stdout + result.stderr
+    assert message in out, out
+    assert "9" * 100 not in out  # the value is never echoed
+
+
 def test_server_starts_with_the_launcher_settings_and_signs_in():
     """The extension's start-up checks accept the image, with the container settings the
     launcher uses; a launch token signs the owner in; a notebook can be saved although the
@@ -166,47 +227,23 @@ def test_server_starts_with_the_launcher_settings_and_signs_in():
     health check reports the server as up."""
     name = _name()
     key = secrets.token_bytes(32)
-    expires = int(time.time()) + 3600
-    _docker(
-        "run",
-        "-d",
-        "--rm",
-        "--name",
-        name,
-        "--user",
-        "1000:1000",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--init",
-        "--cpus",
-        "2",
-        "--memory",
-        "4g",
-        "--memory-swap",
-        "4g",
-        "--pids-limit",
-        "512",
-        "--health-interval",
-        "1s",
-        "--health-start-period",
-        "60s",
-        "-p",
-        "127.0.0.1::8888",
-        "-e",
-        f"FIONE_NB_OWNER={OWNER}",
-        "-e",
-        f"FIONE_NB_KEY={key.hex()}",
-        "-e",
-        f"FIONE_NB_COOKIE_SECRET={secrets.token_hex(32)}",
-        "-e",
-        "FIONE_NB_ORIGIN=http://127.0.0.1:18080",
-        "-e",
-        f"FIONE_NB_EXPIRES={expires}",
-        IMAGE,
-    )
     try:
+        _docker(
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            name,
+            *LAUNCHER_SETTINGS,
+            "--health-interval",
+            "1s",
+            "--health-start-period",
+            "60s",
+            "-p",
+            "127.0.0.1::8888",
+            *_settings(key),
+            IMAGE,
+        )
         port = _docker("port", name, "8888/tcp").splitlines()[0].rsplit(":", 1)[1]
         url = f"http://127.0.0.1:{port}{BASE}"
         _wait(lambda: _up(f"{url}login"), 90, "the server")
