@@ -158,7 +158,7 @@ Each notebook container gets:
 | Memory | 4 GiB (no swap) |
 | Processes | 512 |
 | Capabilities | none; `no-new-privileges` |
-| Network | internal: no internet, no Fione but through the relay |
+| Network | internal: no internet, no Fione but through the relay; the Docker host's services on all interfaces stay reachable (see [Known limitations](known-limitations.md#notebooks)) |
 | Files | the user's own volume (no size limit) |
 
 - **Running notebooks** are capped at `FIONE_NOTEBOOK_MAX_RUNNING` (default 4) for all users
