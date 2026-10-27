@@ -159,7 +159,7 @@ def test_messages_round_trip(conn, conversation):
         {"id": "c1", "type": "function", "function": {"name": "list_projects", "arguments": "{}"}}
     ]
     user = store.add_message(conn, conversation.id, "user", "hello 日本語")
-    call = store.add_message(conn, conversation.id, "assistant", tool_calls=calls)
+    call = store.add_message(conn, conversation.id, "assistant", tool_calls=calls, state="running")
     tool = store.add_message(
         conn,
         conversation.id,
@@ -178,11 +178,11 @@ def test_messages_round_trip(conn, conversation):
     assert (tool.tool_call_id, tool.tool_name) == ("c1", "list_projects")
     assert store.messages(conn, conversation.id) == [user, call, tool]
     assert store.messages(conn, conversation.id, after_id=call.id) == [tool]
-    store.update_message(conn, user.id, content="changed", state="failed", error_code="boom")
-    store.update_message(conn, call.id, tool_calls=[])
-    [updated, again, _] = store.messages(conn, conversation.id)
-    assert (updated.content, updated.state, updated.error_code) == ("changed", "failed", "boom")
-    assert again.tool_calls == [] and again.content == ""
+    assert store.update_message(conn, call.id, content="partial", error_code="note") is True
+    assert store.update_message(conn, call.id, tool_calls=[]) is True
+    [unchanged, again, _] = store.messages(conn, conversation.id)
+    assert unchanged == user
+    assert (again.tool_calls, again.content, again.error_code) == ([], "partial", "note")
     with pytest.raises(ValueError):
         store.add_message(conn, conversation.id, "system", "x")
     with pytest.raises(ConversationNotFound):
@@ -200,7 +200,7 @@ def test_start_turn_is_one_at_a_time(conn, conversation):
     with pytest.raises(TurnBusy):
         store.start_turn(conn, conversation.id, "again")
     assert count(conn, "chat_messages") == 2  # nothing was left behind by the refusals
-    store.update_message(conn, placeholder.id, content="answer", state="done")
+    store.finish_message(conn, placeholder.id, "done", content="answer")
     assert store.active_message(conn, conversation.id) is None
     store.start_turn(conn, conversation.id, "next")
 
@@ -217,7 +217,7 @@ def test_start_turn_checks_the_text_and_the_limit(conn, conversation, monkeypatc
     monkeypatch.setattr(store, "MAX_USER_MESSAGES", 2)
     for text in ("x" * 4000, "second"):
         _, placeholder = store.start_turn(conn, conversation.id, text)
-        store.update_message(conn, placeholder.id, state="done")
+        store.finish_message(conn, placeholder.id, "done")
     with pytest.raises(LimitReached):
         store.start_turn(conn, conversation.id, "third")
     with pytest.raises(ConversationNotFound):
@@ -226,7 +226,7 @@ def test_start_turn_checks_the_text_and_the_limit(conn, conversation, monkeypatc
 
 def test_fail_interrupted(conn, conversation):
     _, queued = store.start_turn(conn, conversation.id, "one")
-    store.update_message(conn, queued.id, state="done")
+    store.finish_message(conn, queued.id, "done")
     _, running = store.start_turn(conn, conversation.id, "two")
     store.update_message(conn, running.id, state="running")
     assert store.fail_interrupted(conn) == 1
@@ -377,10 +377,22 @@ def test_finish_message_lets_the_first_terminal_write_win(conn, conversation):
         store.finish_message(conn, fresh.id, "done")
 
 
-def test_update_message_refuses_an_invalid_state(conn, conversation):
-    message = store.add_message(conn, conversation.id, "assistant", "x")
-    with pytest.raises(ValueError):
-        store.update_message(conn, message.id, state="nonsense")
+def test_update_message_only_sets_running_and_never_touches_a_finished_message(conn, conversation):
+    _, placeholder = store.start_turn(conn, conversation.id, "q")
+    for state in ("nonsense", "done", "failed", "cancelled", "queued"):
+        with pytest.raises(ValueError):
+            store.update_message(conn, placeholder.id, state=state)
+    assert store.update_message(conn, placeholder.id, state="running") is True
+    assert store.update_message(conn, 9999, content="x") is False
+
+    # the user cancels; the worker's later updates and its answer must not undo that
+    assert store.finish_message(conn, placeholder.id, "cancelled", content="part") is True
+    assert store.update_message(conn, placeholder.id, state="running") is False
+    assert store.update_message(conn, placeholder.id, content="more", tool_calls=[]) is False
+    assert store.finish_message(conn, placeholder.id, "done", content="late") is False
+    [_, message] = store.messages(conn, conversation.id)
+    assert (message.state, message.content, message.tool_calls) == ("cancelled", "part", None)
+    assert store.active_message(conn, conversation.id) is None
 
 
 def test_release_proposal_only_reopens_a_claimed_proposal_without_a_job(conn, owner, conversation):
@@ -437,8 +449,12 @@ def test_add_proposal_checks_its_message(conn, owner, project, conversation):
     with pytest.raises(ValueError):  # only an assistant message carries a proposal
         store.add_proposal(conn, asked.id, conversation.id, None, {}, {})
     store.add_proposal(conn, reply.id, conversation.id, None, {}, {})
-    with pytest.raises(ValueError):  # one proposal per message
+    with pytest.raises(ValueError, match="already"):  # one proposal per message
         store.add_proposal(conn, reply.id, conversation.id, None, {}, {})
+    other_reply = store.add_message(conn, conversation.id, "assistant", "y")
+    with pytest.raises(ValueError, match="dataset") as raised:
+        store.add_proposal(conn, other_reply.id, conversation.id, 9999, {}, {})
+    assert "already" not in str(raised.value)
     assert count(conn, "chat_proposals") == 1
 
 

@@ -245,9 +245,15 @@ def update_message(
     tool_calls: list[dict] | None = None,
     state: str | None = None,
     error_code: str | None = None,
-) -> None:
-    """Set the given fields (``None`` leaves a field as it is). For edits that do not end the
-    message; a turn ends with ``finish_message``, which cannot overwrite an earlier ending."""
+) -> bool:
+    """Edit a ``queued`` or ``running`` message (``None`` leaves a field as it is); false when
+    nothing was changed because the message has ended (or does not exist), so a worker whose
+    turn was cancelled, timed out or interrupted learns it and stops.
+
+    The only ``state`` it sets is ``running`` (a worker starting its turn). A turn ends only
+    with ``finish_message``, so an ending cannot be undone or overwritten from here."""
+    if state not in (None, "running"):
+        raise ValueError("update_message only sets the state 'running'; use finish_message")
     values = {
         "content": content,
         "tool_calls_json": None if tool_calls is None else _dumps(tool_calls),
@@ -255,15 +261,14 @@ def update_message(
         "error_code": error_code,
     }
     changes = {column: value for column, value in values.items() if value is not None}
-    if changes:
-        assignments = ", ".join(f"{column} = ?" for column in changes)
-        try:
-            conn.execute(
-                f"UPDATE chat_messages SET {assignments} WHERE id = ?",
-                (*changes.values(), message_id),
-            )
-        except sqlite3.IntegrityError:
-            raise ValueError("invalid message state") from None
+    if not changes:
+        return False
+    assignments = ", ".join(f"{column} = ?" for column in changes)
+    cur = conn.execute(
+        f"UPDATE chat_messages SET {assignments} WHERE id = ? AND state IN ('queued', 'running')",
+        (*changes.values(), message_id),
+    )
+    return cur.rowcount == 1
 
 
 def finish_message(
@@ -373,8 +378,15 @@ def add_proposal(
             " details_json) VALUES (?, ?, ?, ?, ?)",
             (message_id, conversation_id, dataset_id, _dumps(config), _dumps(details)),
         )
-    except sqlite3.IntegrityError:
-        raise ValueError("the message has a proposal already") from None
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE" in str(e):
+            raise ValueError("the message has a proposal already") from None
+        if (
+            dataset_id is not None
+            and not conn.execute("SELECT 1 FROM datasets WHERE id = ?", (dataset_id,)).fetchone()
+        ):
+            raise ValueError("no such dataset") from None
+        raise ValueError("the message no longer exists") from None
     return _proposal(
         conn.execute("SELECT * FROM chat_proposals WHERE id = ?", (cur.lastrowid,)).fetchone()
     )
