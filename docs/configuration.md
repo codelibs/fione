@@ -76,6 +76,23 @@ when you create a `Client` without arguments:
 | `FIONE_URL` | The address of the Fione server, for example `http://localhost:8080`. |
 | `FIONE_TOKEN` | An API token (see the Account page). Sent as `Authorization: Bearer`. |
 
+## Notebook launcher
+
+The `notebook-launcher` service of the Compose profile `notebook` starts one JupyterLab
+container per user for Fione. It is the only service with the Docker socket. It reads these at
+start and exits when one is missing or malformed:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `FIONE_LAUNCHER_SECRET` | none (required) | The secret Fione sends in `X-Fione-Launcher-Secret`. At least 32 characters. |
+| `FIONE_NOTEBOOK_IMAGE` | none (required) | The image of the notebook containers. It must be on the host already: the launcher never pulls. |
+| `FIONE_NOTEBOOK_API_URL` | `http://notebook-gateway:8081` | The address a notebook's fione-sdk uses (its `FIONE_URL`): the gateway's relay to Fione, as `scheme://host[:port]`. |
+| `FIONE_NOTEBOOK_MAX_RUNNING` | `4` | The most notebook containers at once. Each one may use 2 CPUs and 4 GiB of memory. |
+
+Each container gets a named volume `<project>-nb-home-<user id>` for its notebooks, labelled
+`fione.project=<project>`; stopping a notebook keeps it. The launcher removes its project's
+notebook containers when it starts and stops, and removes a container once its lifetime ends.
+
 ## Internal variables
 
 `FIONE_JOB_DB` and `FIONE_JOB_HANDLER_MODULES` are set by Fione for its own job worker

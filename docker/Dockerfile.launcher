@@ -1,0 +1,28 @@
+# Fione notebook launcher: the only service that holds the Docker socket (Compose profile
+# `notebook`). It starts one fixed-spec notebook container per user for Fione (src/fione_launcher).
+#
+#   docker build -f docker/Dockerfile.launcher --build-arg FIONE_IMAGE_TAG=<version> \
+#       -t ghcr.io/codelibs/fione-notebook-launcher:<version> .
+#
+# Python's standard library only. It runs as root so that it can open the root-owned Docker
+# socket on any host; Compose drops every capability and makes its filesystem read-only.
+
+FROM python:3.12.15-slim-trixie
+
+ARG FIONE_IMAGE_TAG=dev
+LABEL org.opencontainers.image.version=${FIONE_IMAGE_TAG}
+
+# Root-owned, and holding the package only: `python -m` puts the working dir on sys.path.
+WORKDIR /app
+COPY src/fione_launcher/ /app/fione_launcher/
+RUN python -m compileall -q /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+
+CMD ["python", "-m", "fione_launcher"]
