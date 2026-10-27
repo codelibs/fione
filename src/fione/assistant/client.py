@@ -173,10 +173,12 @@ class _Reply:
     def _begins_new_call(entry: dict, id_: str, name: str) -> bool:
         """Whether a delta for the ``index`` of ``entry`` starts another call. Servers that
         send each call whole may reuse an index. The ids differ then; without ids, a name
-        arriving after complete arguments is a new call (a name repeated in a fragment of the
-        same call comes with partial arguments)."""
+        arriving after complete arguments, or a different name, is a new call (a name repeated
+        in a fragment of the same call is the same name, with partial arguments)."""
         if id_ and entry["id"]:
             return id_ != entry["id"]
+        if name and entry["name"] and name != entry["name"]:
+            return True
         if name and entry["name"] and entry["arguments"]:
             try:
                 return isinstance(json.loads(entry["arguments"]), dict)
@@ -293,11 +295,17 @@ class ChatClient:
         """One completion, streamed. ``deadline`` is a ``time.monotonic()`` value; ``on_text``
         gets the visible text as it arrives. ``cancelled`` is asked for every block received.
 
-        Only ``LlmError`` comes out. The deadline is not a hard bound: it is checked when data
-        arrives, and a read that gets none ends at the read timeout, which is fixed when the
-        body starts. A server that stalls can therefore hold the call for up to the time that
-        was left then (at most 120 s) past the deadline, and ``cancelled`` is not asked
-        meanwhile. The caller owns the overall limit of a turn.
+        Only ``LlmError`` comes out. The deadline is not a hard bound:
+        - Once the body arrives it is checked for every block, and a trickle ends at the next
+          block. A body that stalls ends at the read timeout, which is fixed when the request
+          starts: up to the time that was left then (at most 120 s) past the deadline, and
+          ``cancelled`` is not asked meanwhile.
+        - Before the body, while the connection and the response headers are read, nothing
+          checks it. A server that sends the headers slowly, a byte at a time, or sends nothing,
+          is bounded only by httpx's own timeouts (5 s to connect, then each read), and the
+          trickle by nothing but the size of the headers.
+        So the caller must not rely on this call to return at the deadline: it owns the overall
+        limit of a turn and has to abandon the worker thread at that limit.
 
         The lone ``</think>`` of a template that opens the span in the prompt drops the
         reasoning before it from ``content``, but ``on_text`` has shown it by then."""
@@ -347,6 +355,8 @@ class ChatClient:
             raise LlmError("unreachable", "cannot reach the LLM server") from None
         except httpx.HTTPError:  # a body that cannot be decoded
             raise LlmError("protocol", "the LLM server sent an invalid response") from None
+        except httpx.InvalidURL:
+            raise LlmError("unreachable", "the LLM server's address is not valid") from None
         return reply.done()
 
     @staticmethod

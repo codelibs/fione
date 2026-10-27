@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import os
 import re
@@ -22,7 +23,7 @@ _DEFAULT_PORTS = {"http": 80, "https": 443}
 # name (Compose service names may have underscores), an IPv4 address or a bracketed IPv6 one.
 _LLM_LABEL = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?"
 _LLM_URL = re.compile(
-    rf"(?P<origin>https?://(?:{_LLM_LABEL}(?:\.{_LLM_LABEL})*|\[[0-9A-Fa-f:.]+\])"
+    rf"(?P<origin>https?://(?:{_LLM_LABEL}(?:\.{_LLM_LABEL})*|\[(?P<v6>[0-9A-Fa-f:.]+)\])"
     r"(?::(?P<port>[0-9]{1,5}))?)"
     r"(?P<path>(?:/[A-Za-z0-9._~%!$&'()*+,;=:@-]*)*)"
 )
@@ -162,8 +163,8 @@ class Settings(BaseSettings):
         if not self.llm_base_url:
             self.llm_base_url = None
             return
-        match = _LLM_URL.fullmatch(self.llm_base_url)
-        if match is None or (match["port"] and not 0 < int(match["port"]) <= 65535):
+        match = _match_llm_url(self.llm_base_url)
+        if match is None:
             raise ValueError(
                 "FIONE_LLM_BASE_URL must be http(s)://host[:port][/path], no credentials,"
                 " query or fragment"
@@ -175,6 +176,19 @@ class Settings(BaseSettings):
     @property
     def notebooks_enabled(self) -> bool:
         return self.notebook_url is not None
+
+
+def _match_llm_url(value: str) -> re.Match | None:
+    """``value`` matched as an LLM base URL, or None if it is not one."""
+    match = _LLM_URL.fullmatch(value)
+    if match is None or (match["port"] and not 0 < int(match["port"]) <= 65535):
+        return None
+    if match["v6"]:
+        try:
+            ipaddress.IPv6Address(match["v6"])
+        except ValueError:
+            return None
+    return match
 
 
 def _normal_origin(name: str, value: str) -> str:

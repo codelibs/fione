@@ -266,6 +266,9 @@ def test_settings_rules(tmp_path, monkeypatch):
         {"llm_base_url": "http://host:99999/v1"},
         {"llm_base_url": "http://host:0/v1"},
         {"llm_base_url": "http://[::1/v1"},
+        {"llm_base_url": "http://[:]/v1"},
+        {"llm_base_url": "http://[1.2.3.4]/v1"},
+        {"llm_base_url": "http://[....]/v1"},
         {"llm_base_url": "http://host/ v1"},
         {"llm_extra_body": {"model": "x"}},
         {"llm_extra_body": {"stream_options": {}}},
@@ -372,7 +375,13 @@ def test_a_line_that_never_ends_is_a_protocol_error(fake_llm, monkeypatch):
     long_line = {"status": 200, "body": "data: " + "x" * 5000, "content_type": "text/event-stream"}
     with pytest.raises(LlmError) as raised:
         _complete(ChatClient(fake_llm([long_line]).url, "m"))
-    assert raised.value.code == "protocol"
+    assert (raised.value.code, "too long" in str(raised.value)) == ("protocol", True)
+
+
+@pytest.mark.parametrize("base_url", ["http://[:]/v1", "http://[1.2.3.4]/v1"])
+def test_an_unusable_address_is_an_llm_error(base_url):
+    with pytest.raises(LlmError):  # not settings-valid, but a caller may build the client itself
+        _complete(ChatClient(base_url, "m"))
 
 
 def test_a_response_over_the_size_cap_is_refused(fake_llm, monkeypatch):
@@ -401,6 +410,17 @@ def test_calls_that_reuse_an_index_stay_apart(fake_llm):
 def _call(arguments, name=None, id_=None, index=0):
     function = {"arguments": arguments, **({"name": name} if name else {})}
     return {"tool_calls": [{"index": index, **({"id": id_} if id_ else {}), "function": function}]}
+
+
+def test_calls_without_ids_are_told_apart_by_name():
+    reply = _Reply(None)
+    for delta in (_call("", "list_projects"), _call("", "list_datasets"), _call('{"a"', "f")):
+        reply.add_delta(delta)
+    assert [(c.name, c.arguments) for c in reply.done().tool_calls] == [
+        ("list_projects", ""),
+        ("list_datasets", ""),
+        ("f", '{"a"'),
+    ]
 
 
 def test_calls_without_ids_are_told_apart_by_complete_arguments():
