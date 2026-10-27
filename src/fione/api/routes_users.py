@@ -1,6 +1,6 @@
 """User management (admin only) and API tokens (one's own; admins may manage anyone's)."""
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from fione.api.deps import AdminUser, AuthDep, Conn, CurrentUser
 from fione.api.errors import ApiError, not_found, service_errors
@@ -8,6 +8,7 @@ from fione.api.schemas import IdPath, TokenIn, UserIn, UserPatch, token_out, use
 from fione.api.security import password_work
 from fione.auth import service as auth_service
 from fione.auth.roles import NotebookPermission, Role
+from fione.notebooks import service as notebooks
 
 router = APIRouter(tags=["users"])
 
@@ -30,9 +31,12 @@ def create_user(body: UserIn, admin: AdminUser, conn: Conn) -> dict:
 
 
 @router.patch("/users/{user_id}")
-def update_user(user_id: IdPath, body: UserPatch, admin: AdminUser, conn: Conn) -> dict:
+def update_user(
+    user_id: IdPath, body: UserPatch, admin: AdminUser, conn: Conn, request: Request
+) -> dict:
     """Change the role, the notebook permission and/or reset the password (which ends the
-    user's sessions); one's own admin role cannot be given up (409)."""
+    user's sessions); one's own admin role cannot be given up (409). A user who may no longer
+    use notebooks has theirs stopped."""
     if body.role is None and body.password is None and body.notebook is None:
         raise ApiError(422, "invalid", "nothing to change: give role, password and/or notebook")
     if auth_service.get_user(conn, user_id) is None:
@@ -44,6 +48,8 @@ def update_user(user_id: IdPath, body: UserPatch, admin: AdminUser, conn: Conn) 
             auth_service.set_password(conn, user_id, body.password)
     if body.notebook is not None:
         auth_service.set_notebook_permission(conn, user_id, NotebookPermission(body.notebook))
+    launcher = request.app.state.notebook_launcher
+    notebooks.quietly(notebooks.stop_unless_allowed, conn, launcher, user_id)
     user = auth_service.get_user(conn, user_id)
     if user is None:
         raise not_found("user not found")
@@ -51,8 +57,10 @@ def update_user(user_id: IdPath, body: UserPatch, admin: AdminUser, conn: Conn) 
 
 
 @router.delete("/users/{user_id}", status_code=204)
-def delete_user(user_id: IdPath, admin: AdminUser, conn: Conn) -> None:
-    """Refused (409) for the last admin, oneself and owners of projects or jobs."""
+def delete_user(user_id: IdPath, admin: AdminUser, conn: Conn, request: Request) -> None:
+    """Refused (409) for the last admin, oneself and owners of projects or jobs. The user's
+    notebook is stopped first."""
+    notebooks.quietly(notebooks.stop, conn, request.app.state.notebook_launcher, user_id)
     auth_service.delete_user(conn, user_id, actor_id=admin.id)
 
 

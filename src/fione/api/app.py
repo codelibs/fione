@@ -34,6 +34,7 @@ from fione.auth import service as auth_service
 from fione.config import Settings, get_settings, load_secret
 from fione.jobs.runner import JobRunner
 from fione.models.live import LiveModels
+from fione.notebooks.launcher import HttpLauncher
 from fione.storage import open_storage
 from fione.version import __version__
 from fione.web import views as web
@@ -174,6 +175,11 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.runner = None
     app.state.started_at = time.monotonic()  # the system page's uptime
     app.state.signer = SessionSigner(secret, settings.session_max_age_secs)
+    app.state.notebook_launcher = (
+        HttpLauncher(settings.notebook_launcher_url, settings.notebook_launcher_secret)
+        if settings.notebooks_enabled
+        else None
+    )
     # Login and password change share one throttle; first-admin token guesses have their own.
     app.state.throttle = _throttle(settings)
     app.state.setup_throttle = _throttle(settings)

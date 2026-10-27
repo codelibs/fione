@@ -3,7 +3,8 @@ else, as the API's admin dependency), with the API's services and rules.
 
 Users: create, change the role, set a new password (which ends that user's sessions) and
 delete; the service refuses the last admin and one's own role or account, and the reason is
-shown on the page. System: what ``/api/v1/system/status`` reports plus failed jobs of the
+shown on the page. A user who may no longer use notebooks, or is deleted, has their notebook
+stopped. System: what ``/api/v1/system/status`` reports plus failed jobs of the
 last day, the workers and the uptime; never a secret, a path, a URL or the environment.
 """
 
@@ -23,6 +24,7 @@ from fione.auth import service as auth_service
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import NotebookPermission, Role
 from fione.auth.service import UserConflict, UsernameError, UserNotFound
+from fione.notebooks import service as notebooks
 from fione.web.access import SmallForm, admin_only, field, form_auth, parse_id, signed_in
 from fione.web.easyml import STOP_POLLING
 from fione.web.views import UiError, language, render
@@ -139,6 +141,11 @@ def _refused(request, conn, auth, form, user, key: str, status=409, **params) ->
     return _users_view(request, conn, auth, page=page, status=status, problem=problem)
 
 
+def _stop_notebook(request: Request, conn, user_id: int, action) -> None:
+    """``action`` (a ``fione.notebooks.service`` stop) for a changed user; never fails."""
+    notebooks.quietly(action, conn, request.app.state.notebook_launcher, user_id)
+
+
 def _back(form, done: str) -> RedirectResponse:
     page = field(form, "page")
     page = page if page.isascii() and page.isdigit() and len(page) <= 12 else "1"
@@ -158,6 +165,7 @@ def change_role(request: Request, conn: Conn, uid: str, form: SmallForm) -> Resp
         raise UiError(404, "error.not_found") from None
     except UserConflict as e:
         return _refused(request, conn, auth, form, user, f"users.refused.{e.code}", n=e.count)
+    _stop_notebook(request, conn, user.id, notebooks.stop_unless_allowed)
     return _back(form, "role")
 
 
@@ -172,6 +180,7 @@ def change_notebook(request: Request, conn: Conn, uid: str, form: SmallForm) -> 
         auth_service.set_notebook_permission(conn, user.id, NotebookPermission(permission))
     except UserNotFound:
         raise UiError(404, "error.not_found") from None
+    _stop_notebook(request, conn, user.id, notebooks.stop_unless_allowed)
     return _back(form, "notebook")
 
 
@@ -201,6 +210,7 @@ def reset_password(request: Request, conn: Conn, uid: str, form: SmallForm) -> R
 def delete_user(request: Request, conn: Conn, uid: str, form: SmallForm) -> Response:
     auth = _post_admin(request, conn, form)
     user = _target(conn, uid)
+    _stop_notebook(request, conn, user.id, notebooks.stop)
     try:
         auth_service.delete_user(conn, user.id, actor_id=auth.user.id)
     except UserNotFound:

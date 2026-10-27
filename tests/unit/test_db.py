@@ -259,3 +259,44 @@ def test_login_limits_must_be_positive(tmp_path, field):
     with pytest.raises(ValidationError, match=f"{field}[\\s\\S]*greater than or equal to 1"):
         Settings(data_dir=tmp_path, **{field: 0})
     assert getattr(Settings(data_dir=tmp_path, **{field: 1}), field) == 1
+
+
+NOTEBOOKS = {
+    "notebook_url": "http://127.0.0.1:8888",
+    "public_url": "http://127.0.0.1:8080",
+    "notebook_launcher_url": "http://launcher",
+    "notebook_launcher_secret": "x" * 32,
+}
+
+
+def test_settings_validation(tmp_path):
+    def settings(**changes):
+        return Settings(data_dir=tmp_path, **(NOTEBOOKS | changes))
+
+    assert settings().notebooks_enabled
+    for name in ("public_url", "notebook_launcher_url", "notebook_launcher_secret"):
+        with pytest.raises(ValueError, match=f"FIONE_{name.upper()} is required"):
+            settings(**{name: ""})
+    with pytest.raises(ValueError, match="own origin"):
+        settings(notebook_url="http://127.0.0.1:8080")
+    with pytest.raises(ValueError, match="own origin"):
+        settings(public_url="http://fione.example:80", notebook_url="http://FIONE.example:80")
+    bad = ("http://h:8888/path", "http://h:8888/", "ftp://h", "http://h?x", "h:8888", "http://u@h")
+    for url in bad:
+        with pytest.raises(ValueError, match="FIONE_NOTEBOOK_URL must be"):
+            settings(notebook_url=url)
+    with pytest.raises(ValueError, match="FIONE_PUBLIC_URL must be"):
+        settings(public_url="https://fione.example.com/app")
+    with pytest.raises(ValueError, match="FIONE_NOTEBOOK_LAUNCHER_SECRET"):
+        settings(notebook_launcher_secret="x" * 31)
+    with pytest.raises(ValueError, match="FIONE_NOTEBOOK_LAUNCHER_SECRET"):
+        settings(notebook_launcher_secret="x" * 31 + " ")
+    with pytest.raises(ValueError, match="FIONE_NOTEBOOK_LAUNCHER_URL"):
+        settings(notebook_launcher_url="file:///etc/passwd")
+    for seconds in (599, 604801):
+        with pytest.raises(ValueError, match="notebook_max_lifetime_secs"):
+            settings(notebook_max_lifetime_secs=seconds)
+    off = Settings(data_dir=tmp_path, **{name: "" for name in NOTEBOOKS})
+    assert not off.notebooks_enabled
+    assert all(getattr(off, name) is None for name in NOTEBOOKS)
+    assert not Settings(data_dir=tmp_path, public_url="http://h:1").notebooks_enabled

@@ -7,19 +7,23 @@ desktop and a phone viewport, plus a few Japanese ones.
 Starts Fione on a free port with a temporary data directory, creates the first admin, signs in
 and creates two projects through the UI, then walks the EasyML wizard with the iris data (a real
 training run of at most a minute, a prediction, a failed and a cancelled run) and writes PNGs to
-OUTPUT_DIR. Fails if a page logs a console error (a Content-Security-Policy violation, say),
-raises one, or scrolls sideways.
+OUTPUT_DIR. The notebook page is shown not running and starting, against a stub launcher this
+script runs (a running notebook needs the Docker stack: tests/e2e). Fails if a page logs a
+console error (a Content-Security-Policy violation, say), raises one, or scrolls sideways.
 """
 
+import json
 import os
 import re
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from contextlib import closing
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pandas as pd
@@ -33,6 +37,7 @@ from fione.auth.tokens import TokenScope
 
 SETUP_TOKEN = "screenshot-setup-token-0123456789"
 ADMIN, PASSWORD = "admin", "screenshot-password"
+LAUNCHER_SECRET = "screenshot-launcher-secret-0123456789"
 VIEWPORTS = {"desktop": (1280, 800), "phone": (390, 844)}
 SCHEMES = ("light", "dark")
 # After an HTMX swap: the request has finished and the new content has settled.
@@ -240,6 +245,7 @@ def run(base: str, out: Path, errors: list[str], data_dir: Path) -> None:
         automl(s, base, project)
         model_screens(s, base, project)
         account_and_admin(s, base, project, data_dir)
+        notebook_page(s, base)
         browser.close()
 
 
@@ -780,6 +786,50 @@ def account_and_admin(s: "Shooter", base: str, project: str, data_dir: Path) -> 
     page.context.close()
 
 
+class StubLauncher(BaseHTTPRequestHandler):
+    """The notebook launcher's API in memory: a started notebook stays ``starting``."""
+
+    states: dict[str, str] = {}
+
+    def _answer(self, status: int, data: dict | None = None) -> None:
+        payload = b"" if data is None else json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):  # noqa: N802
+        self._answer(200, {"state": self.states.get(self.path, "absent")})
+
+    def do_PUT(self):  # noqa: N802
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.states[self.path] = "starting"
+        self._answer(200, {"state": "starting"})
+
+    def do_DELETE(self):  # noqa: N802
+        self.states.pop(self.path, None)
+        self._answer(204)
+
+    def log_message(self, format, *args):  # noqa: A002
+        pass
+
+
+def notebook_page(s: "Shooter", base: str) -> None:
+    """The notebook page of an admin (always allowed): not running, then starting (polled)."""
+    shoot_all(s, base, "/notebook", "notebook-absent", ("en", "ja"))
+    page = s.page("light", "desktop")
+    sign_in(page, base)
+    page.click("nav a[href='/notebook']")
+    page.click("form[action='/notebook/start'] button[type=submit]")
+    page.wait_for_selector("#notebook-status[hx-trigger]")
+    page.wait_for_timeout(2500)  # one poll, still starting
+    wait_settled(page)
+    if not page.locator("#notebook-status[hx-trigger]").count():
+        s.errors.append("notebook: the status stopped polling")
+    page.context.close()
+    shoot_all(s, base, "/notebook", "notebook-starting", ("en", "ja"))
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
@@ -787,6 +837,8 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     port = free_port()
     base = f"http://127.0.0.1:{port}"
+    launcher = ThreadingHTTPServer(("127.0.0.1", 0), StubLauncher)
+    threading.Thread(target=launcher.serve_forever, daemon=True).start()
     with tempfile.TemporaryDirectory() as data_dir:
         env = {
             **os.environ,
@@ -795,6 +847,10 @@ def main() -> None:
             "FIONE_RUNNER_ENABLED": "true",
             # The script signs in with a wrong password once per variant on purpose.
             "FIONE_LOGIN_MAX_FAILURES": "1000",
+            "FIONE_PUBLIC_URL": base,
+            "FIONE_NOTEBOOK_URL": f"http://127.0.0.1:{free_port()}",  # never framed here
+            "FIONE_NOTEBOOK_LAUNCHER_URL": f"http://127.0.0.1:{launcher.server_address[1]}",
+            "FIONE_NOTEBOOK_LAUNCHER_SECRET": LAUNCHER_SECRET,
         }
         server = subprocess.Popen(
             [
@@ -819,6 +875,7 @@ def main() -> None:
         finally:
             server.terminate()
             server.wait(timeout=30)
+            launcher.shutdown()
             if errors:
                 print("\n".join(["Page errors:", *errors]), file=sys.stderr)
     if errors:

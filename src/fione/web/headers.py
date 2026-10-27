@@ -3,6 +3,9 @@
 Pages get a strict Content-Security-Policy (no inline scripts or styles, no framing) and are
 never cached, since they carry per-user data and the CSRF token. Static files may be cached.
 API responses (``/api/...``, including the OpenAPI docs page) are left as they are.
+
+A view that frames another origin (the notebook page) sets ``request.state.csp_frame_src``
+to it; that response alone gets ``frame-src <origin>``.
 """
 
 from starlette.datastructures import MutableHeaders
@@ -38,7 +41,12 @@ class UIHeaders:
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
-                ui_headers(MutableHeaders(scope=message), page=page)
+                headers = MutableHeaders(scope=message)
+                ui_headers(headers, page=page)
+                # Read now: the view has run (``request.state`` is ``scope["state"]``).
+                frame_src = (scope.get("state") or {}).get("csp_frame_src")
+                if page and frame_src:
+                    headers["Content-Security-Policy"] += f"; frame-src {frame_src}"
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

@@ -147,6 +147,15 @@ MIGRATIONS: list[str] = [
     ALTER TABLE users ADD COLUMN notebook TEXT NOT NULL DEFAULT 'none'
         CHECK (notebook IN ('none', 'run'));
     """,
+    """
+    CREATE TABLE notebook_sessions (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        nonce TEXT NOT NULL,
+        token_id INTEGER NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

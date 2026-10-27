@@ -31,6 +31,11 @@ Read by the `fione` container at start. Booleans accept `true` / `false`.
 | `FIONE_TRUST_PROXY` | `false` | Takes the client address and host from `X-Forwarded-For` / `X-Forwarded-Host` (the last value, the one your proxy added). | Set `true` only behind a reverse proxy that sets these headers. |
 | `FIONE_MAX_UPLOAD_BYTES` | `1073741824` (1 GiB) | The largest CSV upload. | To allow bigger or smaller uploads (mind the temp space). |
 | `FIONE_SETUP_TOKEN` | unset | The token that creates the first administrator, at least 16 characters. When unset, Fione generates one and writes it to the log at every start until an administrator exists. | To choose it yourself (`docker/.env`). |
+| `FIONE_NOTEBOOK_URL` | unset | The notebook gateway's origin as browsers reach it (`scheme://host[:port]`, no path), for example `http://localhost:8888`. Setting it turns on the notebook page; the four settings below are then required. It must differ from Fione's origin but be on the same site (the same host name with another port, or a sibling subdomain). | To use notebooks. |
+| `FIONE_PUBLIC_URL` | unset | Fione's own origin as browsers reach it (`scheme://host[:port]`, no path), for example `https://fione.example.com`. Notebooks accept only this origin. | With notebooks. Behind a TLS proxy, give the `https` origin: Fione cannot tell it. |
+| `FIONE_NOTEBOOK_LAUNCHER_URL` | unset | The notebook launcher's URL. Compose: `http://notebook-launcher:8000`. | With notebooks, outside Compose. |
+| `FIONE_NOTEBOOK_LAUNCHER_SECRET` | unset | The secret shared with the notebook launcher, at least 32 visible ASCII characters. | With notebooks: generate it, for example `openssl rand -hex 32`. |
+| `FIONE_NOTEBOOK_MAX_LIFETIME_SECS` | `43200` (12 h) | How long a notebook runs at most: its container, its sign-in and its API token. From 600 to 604800 (7 days). | To end notebooks sooner or let them run longer. |
 
 Fixed limits that are not settings: a model import file can be up to 512 MiB, an uploaded
 Python module up to 256 KiB.
