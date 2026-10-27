@@ -1,0 +1,14 @@
+# The build context of docker/Dockerfile.notebook: nothing but what the image needs.
+*
+!pyproject.toml
+!uv.lock
+!src/fione_notebook
+!sdk
+!docker/notebook
+
+# Never in the image, even inside the paths above.
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+sdk/dist
+sdk/**/*.egg-info

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   images:
-    # The only job that may write packages: it pushes the two images of the tag.
+    # The only job that may write packages: it pushes the images of the tag.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,4 +54,12 @@ jobs:
           file: docker/Dockerfile.serving
           build-args: FIONE_IMAGE_TAG=${{ steps.names.outputs.tag }}
           tags: ${{ steps.names.outputs.registry }}/fione-serving:${{ steps.names.outputs.tag }}
+          push: true
+      # The opt-in notebook image (Compose profile `notebook`).
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile.notebook
+          build-args: FIONE_IMAGE_TAG=${{ steps.names.outputs.tag }}
+          tags: ${{ steps.names.outputs.registry }}/fione-notebook:${{ steps.names.outputs.tag }}
           push: true
