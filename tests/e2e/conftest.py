@@ -19,6 +19,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -141,10 +142,19 @@ class Stack:
         if not self.down_done:
             self.down_done = True
             if containers := self.labelled("container"):
-                subprocess.run(["docker", "rm", "-f", *containers], capture_output=True)
+                _report_failure(["docker", "rm", "-f", *containers])
             self.compose(*PROFILES, "down", "-v", "--remove-orphans", check=False)
             if volumes := self.labelled("volume"):
-                subprocess.run(["docker", "volume", "rm", *volumes], capture_output=True)
+                _report_failure(["docker", "volume", "rm", *volumes])
+
+
+def _report_failure(command: list[str]) -> None:
+    """Run a clean-up command; if it fails, say so (a leak would go unnoticed otherwise)."""
+    done = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    if done.returncode:
+        # Past pytest's capture: teardown output is otherwise only shown for failed tests.
+        message = f"e2e clean-up failed: {' '.join(command[:3])}: {done.stderr.strip()}"
+        print(message, file=sys.__stderr__)
 
 
 def _docker_ready() -> str | None:

@@ -23,7 +23,7 @@ PASSWORD = "e2e-notebook-password-1"  # test-only
 START_TIMEOUT_MS = 120_000
 CELL_TIMEOUT_MS = 90_000
 END = "--end--"  # the last line every cell prints
-RUN_ATTEMPTS = 5
+RUN_ATTEMPTS = 3  # a run JupyterLab drops is retried, at most twice per cell
 QUEUED = re.compile(r"\[(\*|\d+)\]")  # a cell's prompt once its run is sent
 
 
@@ -71,26 +71,44 @@ def signed_in_frame(page):
     return frame
 
 
-def run_cell(frame, page, code: str) -> str:
+def edit_first_cell(notebook) -> None:
+    """Put the first cell in edit mode with the keyboard focus in its editor."""
+    notebook.locator(".jp-Cell").first.locator(".cm-content").click()
+    # JupyterLab's own selector for the cell being edited (edit mode is the notebook's class).
+    editing = notebook.locator(".jp-mod-editMode .jp-Cell.jp-mod-active")
+    expect(editing).to_have_count(1)
+    expect(editing).to_have_attribute("data-windowed-list-index", "0")
+    expect(editing.locator(".cm-content")).to_be_focused()
+
+
+def run_cell(frame, page, code: str, record_property) -> str:
     """Run ``code`` in a new notebook's first cell; the cell's output, which ends with
-    ``END``. Any error output (a traceback) or JupyterLab dialog fails the test."""
+    ``END``. Any error output (a traceback) or JupyterLab dialog fails the test. How many
+    runs it took is recorded (``cell_runs``)."""
     frame.locator(".jp-LauncherCard[data-category='Notebook']").first.click()
     notebook = frame.locator(".jp-NotebookPanel:not(.lm-mod-hidden)")
     notebook.locator(".jp-Notebook-ExecutionIndicator[data-status='idle']").wait_for(
         timeout=CELL_TIMEOUT_MS
     )
     cell = notebook.locator(".jp-Cell").first
-    cell.locator(".cm-content").click()
+    edit_first_cell(notebook)
     page.keyboard.insert_text(code)
     # In a just-created notebook JupyterLab sometimes drops a run without a message, even with
-    # the kernel shown idle (the prompt stays "[ ]"): run the cell again until it is sent.
-    for attempt in range(RUN_ATTEMPTS):
-        page.keyboard.press("Control+Enter")  # run, stay on the cell
+    # the kernel shown idle (the prompt stays "[ ]"): run the cell again, at most twice.
+    sent = False
+    for runs in range(1, RUN_ATTEMPTS + 1):
+        if runs > 1:
+            edit_first_cell(notebook)  # Shift+Enter moved on to a new cell
+        page.keyboard.press("Shift+Enter")
         try:
             expect(cell.locator(".jp-InputPrompt")).to_have_text(QUEUED, timeout=5_000)
-            break
         except AssertionError:
-            assert attempt < RUN_ATTEMPTS - 1, "JupyterLab did not run the cell"
+            continue
+        sent = True
+        break
+    record_property("cell_runs", runs)
+    print(f"cell runs: {runs}")
+    assert sent, f"JupyterLab dropped the cell's run {RUN_ATTEMPTS} times"
     outputs = cell.locator(".jp-OutputArea-output")
     outputs.get_by_text(re.compile(rf"{END}|Error")).first.wait_for(timeout=CELL_TIMEOUT_MS)
     text = "\n".join(outputs.all_inner_texts())
@@ -119,7 +137,9 @@ def stop(page) -> None:
     page.wait_for_selector("form[action='/notebook/start']")
 
 
-def test_a_permitted_user_runs_the_sdk_in_jupyterlab(stack, admin, users, new_page, console):
+def test_a_permitted_user_runs_the_sdk_in_jupyterlab(
+    stack, admin, users, new_page, console, record_property
+):
     page = new_page()
     sign_in(page, admin.username, admin.password)
     page.goto("/admin/users")
@@ -140,7 +160,7 @@ def test_a_permitted_user_runs_the_sdk_in_jupyterlab(stack, admin, users, new_pa
     frame = signed_in_frame(editor)
     try:
         code = 'import fione_sdk; print("projects", len(fione_sdk.Client().projects()))'
-        assert "projects 1" in run_cell(frame, editor, f'{code}; print("{END}")')
+        assert "projects 1" in run_cell(frame, editor, f'{code}; print("{END}")', record_property)
         editor.screenshot(path=str(stack.artifacts / "notebook-running.png"))
     finally:
         stop(editor)
@@ -197,7 +217,7 @@ print("END")
 """
 
 
-def test_cells_cannot_escape(stack, users, new_page, console):
+def test_cells_cannot_escape(stack, users, new_page, console, record_property):
     other = new_page()  # another user's notebook, running: Jupyter answers for it
     sign_in(other, "nb-other", PASSWORD)
     open_notebook(other, stack, console, users["nb-other"])
@@ -206,7 +226,7 @@ def test_cells_cannot_escape(stack, users, new_page, console):
     try:
         frame = open_notebook(page, stack, console, users["nb-runner"])
         code = ESCAPE.replace("OTHER", str(users["nb-other"])).replace('"END"', repr(END))
-        lines = run_cell(frame, page, as_one_line(code)).splitlines()
+        lines = run_cell(frame, page, as_one_line(code), record_property).splitlines()
         assert lines[:9] == [
             "pypi.org:443 fails",
             "1.1.1.1:443 fails",
@@ -219,8 +239,10 @@ def test_cells_cannot_escape(stack, users, new_page, console):
             "other contents 403",
         ]
     finally:
-        stop(page)
-        stop(other)
+        try:
+            stop(page)
+        finally:
+            stop(other)
 
 
 ADMIN_CAP = """
@@ -237,29 +259,34 @@ print("END")
 """
 
 
-def test_admin_notebook_is_capped(stack, admin, new_page, console):
+def test_admin_notebook_is_capped(stack, admin, new_page, console, record_property):
     page = new_page()
     sign_in(page, admin.username, admin.password)
     uid = page.request.get("/api/v1/auth/me").json()["user"]["id"]
     try:
         frame = open_notebook(page, stack, console, uid)
-        output = run_cell(frame, page, as_one_line(ADMIN_CAP.replace('"END"', repr(END))))
+        output = run_cell(
+            frame, page, as_one_line(ADMIN_CAP.replace('"END"', repr(END))), record_property
+        )
         assert output.splitlines()[:2] == ["modules True", "upload 403 token_scope"]
     finally:
         stop(page)
 
 
-def test_stop_removes_the_container_and_revokes_the_token(stack, users, new_page, console):
+def test_stop_removes_the_container_and_revokes_the_token(
+    stack, users, new_page, console, record_property
+):
     page = new_page()
     sign_in(page, "nb-runner", PASSWORD)
     frame = open_notebook(page, stack, console, users["nb-runner"])
     code = f'import os; print("token", os.environ["FIONE_TOKEN"]); print("{END}")'
-    token = run_cell(frame, page, code).splitlines()[0].removeprefix("token ")
+    token = run_cell(frame, page, code, record_property).splitlines()[0].removeprefix("token ")
     url = f"{stack.base}/api/v1/projects"
     headers = {"Authorization": f"Bearer {token}"}
     assert httpx.get(url, headers=headers).status_code == 200
     stop(page)
-    command = ["docker", "ps", "-a", "-q", "--filter", f"label=fione.project={stack.project}"]
+    labels = [f"label=fione.project={stack.project}", f"label=fione.uid={users['nb-runner']}"]
+    command = ["docker", "ps", "-a", "-q", "--filter", labels[0], "--filter", labels[1]]
     deadline = time.monotonic() + 30
     while subprocess.run(command, capture_output=True, text=True).stdout.strip():
         assert time.monotonic() < deadline, "the notebook container is still there"

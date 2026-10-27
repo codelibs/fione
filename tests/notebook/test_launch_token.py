@@ -239,6 +239,7 @@ def test_only_admins_are_shown_terminals(user, available):
     shown = hide_terminals_unless_admin(SimpleNamespace(current_user=user), page_config)
     assert shown == {"terminalsAvailable": available, "baseUrl": "/user/7/"}
     assert hide_terminals_unless_admin(object(), page_config)["terminalsAvailable"] is False
+    assert page_config == {"terminalsAvailable": True, "baseUrl": "/user/7/"}  # a copy changed
 
 
 # --- configure ----------------------------------------------------------------------------
