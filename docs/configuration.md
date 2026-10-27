@@ -49,13 +49,27 @@ Used by `docker/compose.yaml` (see `docker/.env.example`).
 | `FIONE_S3_ACCESS_KEY` | yes | The S3 identity shared by Fione and SeaweedFS. Generate it, for example `openssl rand -hex 16`. |
 | `FIONE_S3_SECRET_KEY` | yes | Its secret, for example `openssl rand -hex 32`. |
 | `FIONE_SETUP_TOKEN` | no | A fixed first-administrator token (see above). |
-| `FIONE_IMAGE_TAG` | no | The tag both images are built with (default `dev`). |
+| `FIONE_IMAGE_TAG` | no | The tag every image is built with (default `dev`). |
 | `FIONE_PORT` | no | The host port of the web UI (default `8080`, on 127.0.0.1). |
 | `FIONE_SERVING_PORT` | no | The host port of the optional `fione-serving` service (default `8081`). |
 | `FIONE_MODEL_DIR` | no | The model directory the `fione-serving` service mounts (default `./model`). |
+| `FIONE_PUBLIC_URL` | with notebooks | Fione's origin as browsers reach it, passed to Fione (see above). |
+| `FIONE_NOTEBOOK_URL` | with notebooks | The notebook gateway's origin as browsers reach it, passed to Fione (see above). Empty: notebooks are off. |
+| `FIONE_NOTEBOOK_LAUNCHER_SECRET` | with notebooks | The secret Fione and the `notebook-launcher` service share. Generate it, for example `openssl rand -hex 32`. |
+| `FIONE_NOTEBOOK_PORT` | no | The host port of the `notebook-gateway` service (default `8888`, on 127.0.0.1). |
+| `FIONE_NOTEBOOK_MAX_LIFETIME_SECS` | no | Passed to Fione (default `43200`, see above). |
 
 Compose refuses to start while `FIONE_S3_ACCESS_KEY` or `FIONE_S3_SECRET_KEY` is empty. The
 two S3 values may only use `A-Z a-z 0-9 / + = . _ -`; SeaweedFS refuses to start otherwise.
+
+The notebook services are in the Compose profile `notebook`: build and start them with
+`--profile notebook`. Compose sets `FIONE_NOTEBOOK_LAUNCHER_URL` itself. `FIONE_PUBLIC_URL`
+and `FIONE_NOTEBOOK_URL` must use the same host name (`localhost` and `127.0.0.1` are
+different sites, and the notebook frame then cannot sign in). The gateway
+(`docker/notebook-gateway.conf`) publishes JupyterLab on port 8888 and relays the notebooks'
+API calls to Fione on port 8081, inside Compose only; the relay refuses `/api/v1/auth`,
+`/api/v1/tokens` and `/api/v1/users`. Behind HTTPS, JupyterLab's `_xsrf` cookie is not marked
+`Secure`; it guards form posts and is not a credential.
 
 ## Fione Serving
 
