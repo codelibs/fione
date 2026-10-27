@@ -10,7 +10,8 @@ from pydantic import ValidationError
 
 from api_helpers import make_settings
 from fake_llm import FakeLlm
-from fione.assistant.client import ChatClient, Completion, LlmError, ToolCall
+from fione.assistant import client as client_module
+from fione.assistant.client import ChatClient, Completion, LlmError, ToolCall, _Reply
 
 KEY = "sk-test-0123456789"
 HELLO = [{"role": "user", "content": "hello"}]
@@ -263,6 +264,8 @@ def test_settings_rules(tmp_path, monkeypatch):
         {"llm_base_url": "http://host/v1#frag"},
         {"llm_base_url": "http://user:pw@host/v1"},
         {"llm_base_url": "http://host:99999/v1"},
+        {"llm_base_url": "http://host:0/v1"},
+        {"llm_base_url": "http://[::1/v1"},
         {"llm_base_url": "http://host/ v1"},
         {"llm_extra_body": {"model": "x"}},
         {"llm_extra_body": {"stream_options": {}}},
@@ -281,6 +284,8 @@ def test_settings_rules(tmp_path, monkeypatch):
     settings = check(llm_base_url="https://api.example.com/v1/", llm_provider="ollama")
     assert settings.llm_base_url == "https://api.example.com/v1"
     assert check(llm_base_url="http://h:1234").llm_base_url == "http://h:1234"
+    for url in ("http://[::1]:11434/v1", "http://my_ollama:11434/v1"):
+        assert check(llm_base_url=url, llm_provider="ollama").llm_base_url == url
     assert check().llm_base_url is None
     assert check().llm_extra_body == {}
     assert settings.llm_extra_body == {"reasoning_effort": "none"}
@@ -327,3 +332,183 @@ def test_fake_serves_the_ollama_endpoints(fake_llm):
     [running] = httpx.get(f"{root}/api/ps").json()["models"]
     assert (running["name"], running["context_length"]) == ("tiny:1b", 4096)
     assert httpx.get(f"{root}/_requests").json() == fake.requests
+
+
+def _raw_stream(*events, **item):
+    """A script item that replies with these SSE events, as sent by a server."""
+    body = "".join(f"data: {e if isinstance(e, str) else json.dumps(e)}\n\n" for e in events)
+    return {"status": 200, "body": body, "content_type": "text/event-stream", **item}
+
+
+def _delta(delta, **choice):
+    return {"choices": [{"index": 0, "delta": delta, **choice}]}
+
+
+def test_a_trickle_without_newlines_ends_at_the_deadline_or_the_cancel(fake_llm):
+    trickle = {
+        "status": 200,
+        "body": "x" * 60,
+        "content_type": "text/event-stream",
+        "chunks": 60,
+        "chunk_delay": 0.1,
+    }
+    client = ChatClient(fake_llm([trickle, trickle]).url, "m")
+    started = time.monotonic()
+    with pytest.raises(LlmError) as raised:
+        _complete(client, seconds=0.5)
+    assert raised.value.code == "timeout"
+    assert time.monotonic() - started < 1.5
+
+    cancel_at = time.monotonic() + 0.4
+    started = time.monotonic()
+    with pytest.raises(LlmError) as raised:
+        _complete(client, cancelled=lambda: time.monotonic() > cancel_at)
+    assert raised.value.code == "cancelled"
+    assert time.monotonic() - started < 1.5
+
+
+def test_a_line_that_never_ends_is_a_protocol_error(fake_llm, monkeypatch):
+    monkeypatch.setattr(client_module, "MAX_LINE_BYTES", 1000)
+    long_line = {"status": 200, "body": "data: " + "x" * 5000, "content_type": "text/event-stream"}
+    with pytest.raises(LlmError) as raised:
+        _complete(ChatClient(fake_llm([long_line]).url, "m"))
+    assert raised.value.code == "protocol"
+
+
+def test_a_response_over_the_size_cap_is_refused(fake_llm, monkeypatch):
+    monkeypatch.setattr(client_module, "MAX_RESPONSE_BYTES", 1000)
+    events = [_delta({"content": "x" * 100})] * 20
+    with pytest.raises(LlmError) as raised:
+        _complete(ChatClient(fake_llm([_raw_stream(*events)]).url, "m"))
+    assert (raised.value.code, "too large" in str(raised.value)) == ("protocol", True)
+
+
+def test_calls_that_reuse_an_index_stay_apart(fake_llm):
+    calls = [
+        {"name": "list_projects", "arguments": {}},
+        {"name": "describe_dataset", "arguments": {"dataset_id": 1}},
+    ]
+    completion = _complete(
+        ChatClient(fake_llm([{"tool_calls": calls, "whole_calls": True}]).url, "m")
+    )
+    assert [(c.name, c.arguments) for c in completion.tool_calls] == [
+        ("list_projects", "{}"),
+        ("describe_dataset", '{"dataset_id": 1}'),
+    ]
+    assert len({c.id for c in completion.tool_calls}) == 2
+
+
+def _call(arguments, name=None, id_=None, index=0):
+    function = {"arguments": arguments, **({"name": name} if name else {})}
+    return {"tool_calls": [{"index": index, **({"id": id_} if id_ else {}), "function": function}]}
+
+
+def test_calls_without_ids_are_told_apart_by_complete_arguments():
+    reply = _Reply(None)
+    for delta in (
+        _call("{}", "list_projects"),
+        _call('{"dataset_id"', "describe_dataset"),  # a new call: the first is complete
+        _call(": 1}", "describe_dataset"),  # the name repeated in a fragment of the same call
+    ):
+        reply.add_delta(delta)
+    assert [(c.name, c.arguments) for c in reply.done().tool_calls] == [
+        ("list_projects", "{}"),
+        ("describe_dataset", '{"dataset_id": 1}'),
+    ]
+
+    reply = _Reply(None)
+    for delta in (_call("{", "a", "id1"), _call("}", None, "id1"), _call("{}", "b", "id2")):
+        reply.add_delta(delta)
+    assert [(c.id, c.name, c.arguments) for c in reply.done().tool_calls] == [
+        ("id1", "a", "{}"),
+        ("id2", "b", "{}"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "script, code",
+    [
+        (_raw_stream("not json"), "protocol"),
+        (_raw_stream("[" * 200000), "protocol"),
+        (_raw_stream({"error": {"message": f"bad key {KEY}"}}), "protocol"),
+        (_raw_stream(_delta(_call("{}"), finish_reason="tool_calls"), "[DONE]"), "protocol"),
+        (
+            {
+                "status": 200,
+                "body": "not gzip",
+                "content_type": "application/json",
+                "headers": {"Content-Encoding": "gzip"},
+            },
+            "protocol",
+        ),
+        ({"status": 200, "body": "[1]", "content_type": "application/json"}, "protocol"),
+    ],
+    ids=["not-json", "deep-json", "error-frame", "nameless-call", "broken-gzip", "json-array"],
+)
+def test_bad_server_data_is_only_ever_an_llm_error(fake_llm, script, code):
+    client = ChatClient(fake_llm([script]).url, "m", api_key=KEY)
+    with pytest.raises(LlmError) as raised:
+        _complete(client)
+    assert raised.value.code == code
+    assert KEY not in str(raised.value)
+
+
+def test_an_error_frame_reports_its_message(fake_llm):
+    fake = fake_llm([_raw_stream({"error": {"message": "model crashed"}})])
+    with pytest.raises(LlmError, match="model crashed"):
+        _complete(ChatClient(fake.url, "m"))
+
+
+def test_a_redirect_is_an_error_and_is_not_followed(fake_llm):
+    fake = fake_llm()
+    fake.script = [{"status": 302, "headers": {"Location": f"{fake.url}/chat/completions"}}]
+    with pytest.raises(LlmError) as raised:
+        _complete(ChatClient(fake.url, "m", api_key=KEY))
+    assert (raised.value.code, raised.value.status) == ("http", 302)
+    assert len(fake.requests) == 1
+
+
+@pytest.mark.parametrize("field", ["reasoning_content", "reasoning", "thinking"])
+def test_every_reasoning_field_is_dropped(fake_llm, field):
+    script = [{"reasoning": "secret thoughts", "reasoning_field": field, "text": "Hi"}]
+    pieces = []
+    completion = _complete(ChatClient(fake_llm(script).url, "m"), on_text=pieces.append)
+    assert (completion.content, pieces) == ("Hi", ["Hi"])
+
+
+def test_only_the_first_choice_is_read(fake_llm):
+    events = [
+        {"choices": [{"index": 0, "delta": {"content": "A"}}]},
+        {"choices": [{"index": 1, "delta": {"content": "B"}}]},
+        {"choices": [{"index": 0, "delta": {"content": "A"}, "finish_reason": "stop"}]},
+        {"choices": [{"index": 1, "delta": {}, "finish_reason": "length"}]},
+        "[DONE]",
+    ]
+    completion = _complete(ChatClient(fake_llm([_raw_stream(*events)]).url, "m"))
+    assert (completion.content, completion.finish_reason) == ("AA", "stop")
+
+
+def test_a_closing_think_tag_alone_drops_the_reasoning_before_it(fake_llm):
+    fake = fake_llm(
+        [
+            {"text": "I should answer politely.</think>\n\nHello!", "chunks": 7},
+            {"text": "<think>a</think>One </think>two"},
+        ]
+    )
+    client = ChatClient(fake.url, "m")
+    assert _complete(client).content == "\n\nHello!"
+    # Once a span has been seen the tag is not read as the end of unseen reasoning.
+    assert _complete(client).content == "One </think>two"
+
+
+def test_the_client_it_made_is_closed_and_one_it_was_given_is_not(fake_llm):
+    fake = fake_llm()
+    with ChatClient(fake.url, "m") as client:
+        _complete(client)
+    assert client._http.is_closed
+
+    http = httpx.Client()
+    with ChatClient(fake.url, "m", http=http) as client:
+        _complete(client)
+    assert not http.is_closed
+    http.close()

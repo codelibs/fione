@@ -11,16 +11,19 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 MIN_SETUP_TOKEN_LENGTH = 16
 MIN_LAUNCHER_SECRET_LENGTH = 32  # as the launcher requires
-_LAUNCHER_SECRET = re.compile(r"[\x21-\x7e]+")  # visible ASCII: it travels in an HTTP header
+_VISIBLE_ASCII = re.compile(r"[\x21-\x7e]+")  # it travels in an HTTP header
 # scheme://host[:port] with dot-separated labels: what the launcher accepts as Fione's origin.
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
 _ORIGIN = re.compile(
     rf"(?P<scheme>https?)://(?P<host>{_LABEL}(?:\.{_LABEL})*)(?::(?P<port>[0-9]{{1,5}}))?"
 )
 _DEFAULT_PORTS = {"http": 80, "https": 443}
-# scheme://host[:port] and an optional path, no credentials, query or fragment.
+# scheme://host[:port] and an optional path, no credentials, query or fragment. The host is a
+# name (Compose service names may have underscores), an IPv4 address or a bracketed IPv6 one.
+_LLM_LABEL = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?"
 _LLM_URL = re.compile(
-    rf"(?P<origin>https?://{_LABEL}(?:\.{_LABEL})*(?::(?P<port>[0-9]{{1,5}}))?)"
+    rf"(?P<origin>https?://(?:{_LLM_LABEL}(?:\.{_LLM_LABEL})*|\[[0-9A-Fa-f:.]+\])"
+    r"(?::(?P<port>[0-9]{1,5}))?)"
     r"(?P<path>(?:/[A-Za-z0-9._~%!$&'()*+,;=:@-]*)*)"
 )
 _LLM_MODEL = re.compile(r"[\x21-\x7e]{1,200}")
@@ -132,7 +135,7 @@ class Settings(BaseSettings):
         if not self.notebook_launcher_url.startswith(("http://", "https://")):
             raise ValueError("FIONE_NOTEBOOK_LAUNCHER_URL must be an http(s) URL")
         secret = self.notebook_launcher_secret
-        if len(secret) < MIN_LAUNCHER_SECRET_LENGTH or not _LAUNCHER_SECRET.fullmatch(secret):
+        if len(secret) < MIN_LAUNCHER_SECRET_LENGTH or not _VISIBLE_ASCII.fullmatch(secret):
             raise ValueError(
                 f"FIONE_NOTEBOOK_LAUNCHER_SECRET must be at least {MIN_LAUNCHER_SECRET_LENGTH}"
                 " visible ASCII characters"
@@ -143,7 +146,7 @@ class Settings(BaseSettings):
         extra body defaults to what turns thinking off."""
         if self.llm_api_key is not None and not self.llm_api_key.get_secret_value():
             self.llm_api_key = None
-        if self.llm_api_key is not None and not _LAUNCHER_SECRET.fullmatch(
+        if self.llm_api_key is not None and not _VISIBLE_ASCII.fullmatch(
             self.llm_api_key.get_secret_value()
         ):
             raise ValueError("FIONE_LLM_API_KEY must be visible ASCII characters")
@@ -160,7 +163,7 @@ class Settings(BaseSettings):
             self.llm_base_url = None
             return
         match = _LLM_URL.fullmatch(self.llm_base_url)
-        if match is None or (match["port"] and int(match["port"]) > 65535):
+        if match is None or (match["port"] and not 0 < int(match["port"]) <= 65535):
             raise ValueError(
                 "FIONE_LLM_BASE_URL must be http(s)://host[:port][/path], no credentials,"
                 " query or fragment"

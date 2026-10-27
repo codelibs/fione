@@ -22,6 +22,7 @@ MAX_READ_TIMEOUT_SECS = 120.0
 MAX_MESSAGE_CHARS = 200
 MAX_ERROR_BODY_BYTES = 4096
 MAX_RESPONSE_BYTES = 16 * 2**20
+MAX_LINE_BYTES = 2**20  # of a line that has not ended yet
 
 ErrorCode = Literal["unreachable", "timeout", "http", "protocol", "cancelled"]
 
@@ -52,13 +53,19 @@ class Completion:
 
 class _ThinkFilter:
     """Drops ``<think>…</think>`` spans from streamed text, even when a tag is split across
-    pieces. The text of a span that never closes is dropped too."""
+    pieces. The text of a span that never closes is dropped too.
+
+    Some chat templates open the span in the prompt, so the text starts with the reasoning and
+    a lone ``</think>``. While no tag has been seen, that tag sets ``restart``: what came
+    before it was reasoning, and the caller drops what it kept (what it already showed stays)."""
 
     OPEN, CLOSE = "<think>", "</think>"
 
     def __init__(self) -> None:
         self._pending = ""
         self._inside = False
+        self._tagged = False  # a tag has been seen
+        self.restart = False
 
     def feed(self, piece: str) -> str:
         self._pending += piece
@@ -66,13 +73,23 @@ class _ThinkFilter:
         while True:
             tag = self.CLOSE if self._inside else self.OPEN
             at = self._pending.find(tag)
+            if not self._inside and not self._tagged:
+                lone = self._pending.find(self.CLOSE)
+                if lone >= 0 and (at < 0 or lone < at):
+                    self._pending = self._pending[lone + len(self.CLOSE) :]
+                    out.clear()
+                    self._tagged = self.restart = True
+                    continue
             if at >= 0:
                 if not self._inside:
                     out.append(self._pending[:at])
                 self._pending = self._pending[at + len(tag) :]
                 self._inside = not self._inside
+                self._tagged = True
                 continue
             keep = _partial_tag_length(self._pending, tag)
+            if not self._inside and not self._tagged:
+                keep = max(keep, _partial_tag_length(self._pending, self.CLOSE))
             if not self._inside:
                 out.append(self._pending[: len(self._pending) - keep])
             self._pending = self._pending[len(self._pending) - keep :]
@@ -98,7 +115,8 @@ class _Reply:
         self._on_text = on_text
         self._think = _ThinkFilter()
         self._text: list[str] = []
-        self._calls: dict[int, dict] = {}
+        self._calls: list[dict] = []  # in the order they began
+        self._filling: dict[int, dict] = {}  # the call each ``index`` is adding to
         self.finish_reason: str | None = None
         self.prompt_tokens: int | None = None
 
@@ -113,36 +131,58 @@ class _Reply:
         choices = chunk.get("choices") or []
         if not isinstance(choices, list) or not all(isinstance(c, dict) for c in choices):
             raise LlmError("protocol", "the server sent malformed choices")
-        if choices:
-            choice = choices[0]
+        # Only the first choice is read: with ``n`` above 1 the others are interleaved.
+        choice = next((c for c in choices if c.get("index", 0) == 0), None)
+        if choice is not None:
             self.add_delta(choice.get("delta") or choice.get("message") or {})
-            self.finish_reason = choice.get("finish_reason") or self.finish_reason
+            if isinstance(choice.get("finish_reason"), str):
+                self.finish_reason = choice["finish_reason"]
 
     def add_delta(self, delta) -> None:
         if not isinstance(delta, dict):
             raise LlmError("protocol", "the server sent a malformed message")
         if isinstance(delta.get("content"), str):
-            self._add_text(self._think.feed(delta["content"]))
+            visible = self._think.feed(delta["content"])
+            if self._think.restart:  # the reasoning before a lone </think> is not content
+                self._text.clear()
+                self._think.restart = False
+            self._add_text(visible)
         calls = delta.get("tool_calls") or []
         if not isinstance(calls, list):
             raise LlmError("protocol", "the server sent malformed tool calls")
         for position, call in enumerate(calls):
-            if not isinstance(call, dict):
-                raise LlmError("protocol", "the server sent a malformed tool call")
-            index = call.get("index") if isinstance(call.get("index"), int) else position
-            entry = self._calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
-            function = call.get("function") or {}
+            function = call.get("function") or {} if isinstance(call, dict) else None
             if not isinstance(function, dict):
                 raise LlmError("protocol", "the server sent a malformed tool call")
-            if isinstance(call.get("id"), str):
-                entry["id"] = entry["id"] or call["id"]
-            if isinstance(function.get("name"), str):
-                entry["name"] = entry["name"] or function["name"]
+            index = call.get("index") if isinstance(call.get("index"), int) else position
+            id_ = call["id"] if isinstance(call.get("id"), str) else ""
+            name = function["name"] if isinstance(function.get("name"), str) else ""
+            entry = self._filling.get(index)
+            if entry is None or self._begins_new_call(entry, id_, name):
+                entry = self._filling[index] = {"id": "", "name": "", "arguments": ""}
+                self._calls.append(entry)
+            entry["id"] = entry["id"] or id_
+            entry["name"] = entry["name"] or name
             arguments = function.get("arguments")
             if isinstance(arguments, dict):
                 arguments = json.dumps(arguments)
             if isinstance(arguments, str):
                 entry["arguments"] += arguments
+
+    @staticmethod
+    def _begins_new_call(entry: dict, id_: str, name: str) -> bool:
+        """Whether a delta for the ``index`` of ``entry`` starts another call. Servers that
+        send each call whole may reuse an index. The ids differ then; without ids, a name
+        arriving after complete arguments is a new call (a name repeated in a fragment of the
+        same call comes with partial arguments)."""
+        if id_ and entry["id"]:
+            return id_ != entry["id"]
+        if name and entry["name"] and entry["arguments"]:
+            try:
+                return isinstance(json.loads(entry["arguments"]), dict)
+            except (ValueError, RecursionError):
+                return False
+        return False
 
     def _add_text(self, text: str) -> None:
         if text:
@@ -153,12 +193,10 @@ class _Reply:
     def done(self) -> Completion:
         self._add_text(self._think.flush())
         calls = []
-        for index, entry in sorted(self._calls.items()):
+        for n, entry in enumerate(self._calls):
             if not entry["name"]:
                 raise LlmError("protocol", "the server sent a tool call without a name")
-            calls.append(
-                ToolCall(entry["id"] or f"call_{index}", entry["name"], entry["arguments"])
-            )
+            calls.append(ToolCall(entry["id"] or f"call_{n}", entry["name"], entry["arguments"]))
         return Completion("".join(self._text), calls, self.finish_reason, self.prompt_tokens)
 
 
@@ -170,23 +208,34 @@ def _error_text(value) -> str:
     return error if isinstance(error, str) else ""
 
 
-def _body(response: httpx.Response) -> Iterator[bytes]:
-    """The body of a response as it arrives, bounded in total size."""
+def _body(response: httpx.Response, check: Callable[[], None]) -> Iterator[bytes]:
+    """The body of a response as it arrives, bounded in total size; ``check`` runs for every
+    block received (it raises to stop)."""
     total = 0
     for data in response.iter_bytes():
+        check()
         total += len(data)
         if total > MAX_RESPONSE_BYTES:
             raise LlmError("protocol", "the response is too large")
         yield data
 
 
-def _lines(response: httpx.Response) -> Iterator[bytes]:
+def _lines(response: httpx.Response, check: Callable[[], None]) -> Iterator[bytes]:
     buffer = b""
-    for data in _body(response):
+    for data in _body(response, check):
         *lines, buffer = (buffer + data).split(b"\n")
+        if len(buffer) > MAX_LINE_BYTES:
+            raise LlmError("protocol", "the server sent a line that is too long")
         yield from lines
     if buffer:
         yield buffer
+
+
+def _loads(data: bytes):
+    try:
+        return json.loads(data)
+    except (ValueError, RecursionError):
+        raise LlmError("protocol", "the server sent data that is not JSON") from None
 
 
 class ChatClient:
@@ -206,6 +255,18 @@ class ChatClient:
         self._extra_body = dict(extra_body or {})
         self._max_tokens = max_tokens
         self._http = http or httpx.Client()
+        self._owns_http = http is None
+
+    def close(self) -> None:
+        """Close the HTTP client, if this one made it."""
+        if self._owns_http:
+            self._http.close()
+
+    def __enter__(self) -> "ChatClient":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "ChatClient | None":
@@ -230,7 +291,16 @@ class ChatClient:
         cancelled: Callable[[], bool] = lambda: False,
     ) -> Completion:
         """One completion, streamed. ``deadline`` is a ``time.monotonic()`` value; ``on_text``
-        gets the visible text as it arrives. ``cancelled`` is asked for every chunk."""
+        gets the visible text as it arrives. ``cancelled`` is asked for every block received.
+
+        Only ``LlmError`` comes out. The deadline is not a hard bound: it is checked when data
+        arrives, and a read that gets none ends at the read timeout, which is fixed when the
+        body starts. A server that stalls can therefore hold the call for up to the time that
+        was left then (at most 120 s) past the deadline, and ``cancelled`` is not asked
+        meanwhile. The caller owns the overall limit of a turn.
+
+        The lone ``</think>`` of a template that opens the span in the prompt drops the
+        reasoning before it from ``content``, but ``on_text`` has shown it by then."""
         body = {
             "model": self.model,
             "messages": messages,
@@ -247,6 +317,10 @@ class ChatClient:
         timeout = httpx.Timeout(
             min(remaining, MAX_READ_TIMEOUT_SECS), connect=min(remaining, CONNECT_TIMEOUT_SECS)
         )
+
+        def check() -> None:
+            self._check(deadline, cancelled)
+
         reply = _Reply(on_text)
         try:
             with self._http.stream(
@@ -257,12 +331,12 @@ class ChatClient:
                 timeout=timeout,
             ) as response:
                 if not response.is_success:
-                    raise self._http_error(response)
+                    raise self._http_error(response, check)
                 content_type = response.headers.get("content-type", "")
                 if "json" in content_type and "event-stream" not in content_type:
-                    self._read_json(response, reply, deadline, cancelled)
+                    self._read_json(response, reply, check)
                 else:
-                    self._read_stream(response, reply, deadline, cancelled)
+                    self._read_stream(response, reply, check)
         except httpx.ConnectTimeout:
             raise LlmError("unreachable", "cannot connect to the LLM server") from None
         except httpx.TimeoutException:
@@ -271,6 +345,8 @@ class ChatClient:
             raise LlmError("protocol", "the LLM server sent an invalid response") from None
         except httpx.TransportError:
             raise LlmError("unreachable", "cannot reach the LLM server") from None
+        except httpx.HTTPError:  # a body that cannot be decoded
+            raise LlmError("protocol", "the LLM server sent an invalid response") from None
         return reply.done()
 
     @staticmethod
@@ -280,30 +356,20 @@ class ChatClient:
         if time.monotonic() >= deadline:
             raise LlmError("timeout", "the LLM server did not answer in time")
 
-    def _read_stream(self, response, reply: _Reply, deadline, cancelled) -> None:
-        for line in _lines(response):
-            self._check(deadline, cancelled)
+    def _read_stream(self, response, reply: _Reply, check: Callable[[], None]) -> None:
+        for line in _lines(response, check):
+            check()
             if not line.startswith(b"data:"):
                 continue  # comments and other SSE fields
             data = line[5:].strip()
             if data == b"[DONE]":
                 return
-            try:
-                chunk = json.loads(data)
-            except ValueError:
-                raise LlmError("protocol", "the server sent a chunk that is not JSON") from None
-            self._guard(reply.add_chunk, chunk)
+            self._guard(reply.add_chunk, _loads(data))
         if reply.finish_reason is None:
             raise LlmError("protocol", "the stream ended before the reply was complete")
 
-    def _read_json(self, response, reply: _Reply, deadline, cancelled) -> None:
-        data = b"".join(_body(response))
-        self._check(deadline, cancelled)
-        try:
-            chunk = json.loads(data)
-        except ValueError:
-            raise LlmError("protocol", "the server sent a body that is not JSON") from None
-        self._guard(reply.add_chunk, chunk)
+    def _read_json(self, response, reply: _Reply, check: Callable[[], None]) -> None:
+        self._guard(reply.add_chunk, _loads(b"".join(_body(response, check))))
 
     def _guard(self, add, chunk) -> None:
         """``add(chunk)`` with the API key taken out of any error message."""
@@ -312,19 +378,19 @@ class ChatClient:
         except LlmError as e:
             raise self._error(e.code, str(e), e.status) from None
 
-    def _http_error(self, response: httpx.Response) -> LlmError:
+    def _http_error(self, response: httpx.Response, check: Callable[[], None]) -> LlmError:
         data = b""
         try:
-            for part in response.iter_bytes():
+            for part in _body(response, check):
                 data += part
                 if len(data) >= MAX_ERROR_BODY_BYTES:
                     break
-        except httpx.HTTPError:
+        except (httpx.HTTPError, LlmError):
             pass  # the status alone is what we report
         text = data[:MAX_ERROR_BODY_BYTES].decode("utf-8", "replace")
         try:
             text = _error_text(json.loads(text)) or text
-        except ValueError:
+        except (ValueError, RecursionError):
             pass
         return self._error("http", f"HTTP {response.status_code}: {text}", response.status_code)
 

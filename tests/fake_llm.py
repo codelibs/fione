@@ -2,18 +2,21 @@
 
 Each chat request takes the next item of the script (when it runs out, the reply is the text
 "ok"). The one exception is the gullible rule, which stands in for a model that obeys
-injected text: when a ``tool`` message holds ``FAKE_CALL:<name>:<json object>`` that no later
-assistant message has called, the reply is that tool call, and the script keeps its place.
+injected text: when a ``tool`` message holds ``FAKE_CALL:<name>:<json object>`` that no earlier
+assistant message acted on (none after that tool message made the call), the reply is that
+tool call, and the script keeps its place.
 
 Script items (the keys combine, except ``status``)::
 
     {"text": str, "chunks": int}             streamed text in about ``chunks`` pieces
     {"tool_calls": [{"name": str, "arguments": dict | str}]}
-    {"reasoning": str}                       sent as ``reasoning_content``
+    {"reasoning": str, "reasoning_field": str}   sent as ``reasoning_content`` unless named
     {"prompt_tokens": int}                   reported in the final usage chunk
     {"delay": float, "chunk_delay": float}   before the reply, between its chunks
     {"json": True}                           one JSON body instead of a stream
-    {"status": int, "body": str, "content_type": str}   a raw reply (for errors)
+    {"whole_calls": True}                    each call in one delta, all at ``index`` 0
+    {"status": int, "body": str, "content_type": str, "headers": dict, "chunks": int}
+                                             a raw reply, its body sent in ``chunks`` pieces
 
 Run it with ``python fake_llm.py --port N --policy e2e [--missing]``; the ``e2e`` policy is
 filled in with the end-to-end tests, until then it behaves as ``script``.
@@ -132,7 +135,8 @@ class FakeLlm:
         return f"http://127.0.0.1:{self.port}/v1"
 
     def join(self) -> None:
-        self._thread.join()
+        if self._thread is not None:
+            self._thread.join()
 
     # --- what the handler asks for
 
@@ -212,9 +216,13 @@ class _Handler(BaseHTTPRequestHandler):
             return {}
         return body if isinstance(body, dict) else {}
 
-    def _send(self, status: int, content_type: str, data: bytes | None = None) -> None:
+    def _send(
+        self, status: int, content_type: str, data: bytes | None = None, headers: dict | None = None
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         if data is not None:
             self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -250,8 +258,16 @@ class _Handler(BaseHTTPRequestHandler):
     def _chat(self, body: dict, item: dict) -> None:
         time.sleep(item.get("delay", 0))
         if "status" in item:
-            data = str(item.get("body", "")).encode()
-            return self._send(item["status"], item.get("content_type", "text/plain"), data)
+            raw = str(item.get("body", ""))
+            kind, headers = item.get("content_type", "text/plain"), item.get("headers")
+            if "chunks" not in item:
+                return self._send(item["status"], kind, raw.encode(), headers)
+            self._send(item["status"], kind, headers=headers)
+            for piece in _pieces(raw, item["chunks"]):
+                self.wfile.write(piece.encode())
+                self.wfile.flush()
+                time.sleep(item.get("chunk_delay", 0))
+            return
         text = item.get("text", "")
         calls = [
             (self.llm.next_call_id(), call["name"], call.get("arguments", {}))
@@ -289,10 +305,15 @@ class _Handler(BaseHTTPRequestHandler):
 
         deltas = [{"role": "assistant", "content": ""}]
         if item.get("reasoning"):
-            deltas.append({"reasoning_content": item["reasoning"]})
+            deltas.append({item.get("reasoning_field", "reasoning_content"): item["reasoning"]})
         deltas += [{"content": piece} for piece in _pieces(text, item.get("chunks", 1))]
         # The fragments of different calls interleave, as a client must cope with.
         fragments = [_pieces(arguments, 3) or [""] for _, _, arguments in calls]
+        if item.get("whole_calls"):
+            for id_, name, arguments in calls:
+                function = {"name": name, "arguments": arguments}
+                deltas.append({"tool_calls": [{"index": 0, "id": id_, "function": function}]})
+            fragments = []
         for round_ in range(max((len(f) for f in fragments), default=0)):
             for index, (id_, name, _) in enumerate(calls):
                 if round_ < len(fragments[index]):
