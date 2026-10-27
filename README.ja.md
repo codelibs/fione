@@ -14,6 +14,7 @@ English: [README.md](README.md)
 - **Fione Serving**：学習したモデルを予測 API（`/invocations`、`/model`、`/ping`）として動かします。イメージは共通で、配るのはモデルのファイルだけです。
 - **ユーザーと共有**：管理者・編集者・閲覧者の 3 つのロールと、ユーザーごとのプロジェクト共有。スクリプト用の API トークンと REST API（`/api/v1`）。
 - **Python モジュール**によるデータ操作（組み込みのフレーム操作、k-means、低ランク分解。管理者は独自のモジュールもアップロードできます）。
+- **ノートブック**（任意）：Fione の画面の中で、ユーザーごとのコンテナの JupyterLab を開けます。Python クライアント `fione-sdk` も付属します。
 - **ストレージ**は SeaweedFS などの S3 互換サービス、メタデータは SQLite。
 - 日本語と英語、ライト・ダークテーマ、スマートフォン表示に対応。
 
@@ -29,9 +30,14 @@ docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "
 
 サンプルデータを使った手順は[クイックスタート](docs/quickstart.ja.md)を参照してください。
 
+## ノートブック
+
+Fione の画面の中で、あなた専用のコンテナの JupyterLab を、二度目のログインなしで開けます。任意の機能（Compose のプロファイル `notebook`）で、`docker/.env` にアドレスを 2 つとシークレットを足します。手順は[ノートブック](docs/notebook.ja.md)を参照してください。ノートブックでも、スクリプトでも、手元の Jupyter でも、`fione-sdk`（`sdk/`、`pip install ./sdk`）と API トークンで Fione を操作できます。データセット、データの概要、AutoML の学習、リーダーボード、予測、Python モジュールを、pandas のデータフレームで扱えます。詳しくは [sdk/README.md](sdk/README.md)（英語）を参照してください。
+
 ## ドキュメント
 
 - [クイックスタート](docs/quickstart.ja.md)（[English](docs/quickstart.md)）
+- [ノートブック](docs/notebook.ja.md)（[English](docs/notebook.md)）：JupyterLab と `fione-sdk`
 - [設定](docs/configuration.md)（英語）：すべての設定項目、リバースプロキシ、秘密鍵のバックアップ
 - [Fione Serving](docs/serving.md)（英語）：モデルを予測 API として動かす
 - [v1 から v2 への移行](docs/migrating-from-v1.ja.md)（[English](docs/migrating-from-v1.md)）
@@ -39,7 +45,7 @@ docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "
 
 ## 現状
 
-この版は中核機能（データ、分析、AutoML、モデルとその説明、予測、サービング、ジョブ、ユーザーと共有）を備えています。**この版には含まれず、予定しているもの**：Notebook 連携（JupyterLab と Python SDK）、LLM アシスタント（Ollama。Mac では既定で `gemma4:12b-mlx`）、MCP サーバー、ONNX 出力。イメージはまだ公開していないため、リポジトリからビルドしてください。
+この版は中核機能（データ、分析、AutoML、モデルとその説明、予測、サービング、ジョブ、ユーザーと共有）と、任意のノートブック（JupyterLab と Python SDK）を備えています。**この版には含まれず、予定しているもの**：LLM アシスタント（Ollama。Mac では既定で `gemma4:12b-mlx`）、MCP サーバー、ONNX 出力。イメージはまだ公開していないため、リポジトリからビルドしてください（バージョンタグを付けると、`fione`、`fione-serving`、`fione-notebook`、`fione-notebook-launcher` のイメージが公開されます）。
 
 Java 版の v1（Fess プラグイン）は、このリポジトリの v2 マージ前の履歴に残っています。
 

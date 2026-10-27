@@ -22,7 +22,7 @@ English: [Moving from Fione v1 to v2](migrating-from-v1.md)
 - **v1 のデータは読み込みません。** v1 の MinIO のバケットは使いません。CSV をアップロードし直して学習してください。
 - **ユーザーは移行されません。** 管理者が「ユーザー」画面で作り直します。
 - **Python モジュールは書き直しが必要です。**（新しい API に合わせます）
-- **H2O Flow、Rapids、MOJO / genmodel のダウンロードはなくなりました。** Flow の後継として Notebook 連携を予定しています。データ操作は pandas ベースのモジュールで行います。
+- **H2O Flow、Rapids、MOJO / genmodel のダウンロードはなくなりました。** Flow の後継は[ノートブック](notebook.ja.md)（JupyterLab と Python SDK）です。データ操作は pandas ベースのモジュールで行います。
 
 ## 用語
 
@@ -59,7 +59,7 @@ English: [Moving from Fione v1 to v2](migrating-from-v1.md)
 | 予測結果サマリー（最良モデル、星評価、Fione 君） | あり |
 | サービング用 zip | サービング用ファイルと共通イメージに置き換え |
 | MOJO / genmodel のダウンロード | 廃止。可能な範囲での ONNX 出力を予定 |
-| H2O Flow | 廃止。Notebook 連携（JupyterLab）を**予定** |
+| H2O Flow | 廃止。[ノートブック](notebook.ja.md)に置き換え：ユーザーごとのコンテナで動く JupyterLab と Python の `fione-sdk`（任意の機能） |
 | Rapids | 廃止（pandas ベースのモジュール） |
 | Python モジュール: フレーム操作（cbind、concat、cor、cslice、fillna、floor、pivot、rbind、replace、rslice、sort、split、tokenize） | 組み込みモジュールとしてあり |
 | Python モジュール: kmeans の学習・予測 | あり（scikit-learn の KMeans） |
@@ -70,7 +70,7 @@ English: [Moving from Fione v1 to v2](migrating-from-v1.md)
 | 3 つのロール、ユーザー別のセッション | 作り直し: admin / editor / viewer とプロジェクトの共有 |
 | 日本語と英語 | あり |
 
-**この版には含まれず、予定しているもの**：Notebook 連携（JupyterLab と Python SDK）、LLM アシスタント（Ollama。Mac では既定で `gemma4:12b-mlx`）、MCP サーバー、ONNX 出力。
+**この版には含まれず、予定しているもの**：LLM アシスタント（Ollama。Mac では既定で `gemma4:12b-mlx`）、MCP サーバー、ONNX 出力。
 
 ## Python モジュール
 

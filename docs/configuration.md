@@ -98,7 +98,7 @@ when you create a `Client` without arguments:
 ## Notebook launcher
 
 The `notebook-launcher` service of the Compose profile `notebook` starts one JupyterLab
-container per user for Fione. It is the only service with the Docker socket. It reads these at
+container per user for Fione (see [Notebooks](notebook.md)). It is the only service with the Docker socket. It reads these at
 start and exits when one is missing or malformed:
 
 | Variable | Default | What it does |
@@ -117,7 +117,8 @@ When an administrator deletes a user, Fione asks the launcher to remove that use
 and volume. Fione reuses user ids: a user created later may get the deleted user's id, and with
 it the same volume name. If that removal fails (the launcher is down, say), Fione logs it and
 deletes the user anyway, and the volume stays. Remove it by hand
-(`docker volume rm <project>-nb-home-<user id>`) before creating more users.
+(`docker volume rm <project>-nb-home-<user id>`, or by label as [Notebooks](notebook.md#files-and-persistence)
+shows) before creating more users.
 
 ## Internal variables
 
