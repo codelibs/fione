@@ -8,7 +8,11 @@ import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from fione_notebook.auth import FioneAuthorizer, FioneIdentityProvider
+from fione_notebook.auth import (
+    FioneAuthorizer,
+    FioneIdentityProvider,
+    hide_terminals_unless_admin,
+)
 
 _DIGITS = re.compile(r"[0-9]+")
 _USER_ID = re.compile(r"[1-9][0-9]{0,17}")  # as Fione writes it: no sign, no leading zero
@@ -108,6 +112,7 @@ def configure(c, env: Mapping[str, str]) -> None:
                 f"frame-ancestors 'self' {origin}; report-uri {base_url}api/security/csp-report"
             ),
         },
+        "page_config_hook": hide_terminals_unless_admin,
     }
     # The browser drops the cookie when the container ends, whenever the sign-in was.
     c.IdentityProvider.cookie_options = {
@@ -121,7 +126,8 @@ def configure(c, env: Mapping[str, str]) -> None:
     c.MappingKernelManager.cull_idle_timeout = 1800
     c.MappingKernelManager.cull_interval = 300
     c.ServerApp.shutdown_no_activity_timeout = 3600
-    c.ServerApp.terminals_enabled = True  # admins only, by the authorizer
+    # Admins only, by the authorizer; JupyterLab shows them to admins only (page_config_hook).
+    c.ServerApp.terminals_enabled = True
     # Notebook trust signatures are kept in memory, as the data dir is read-only: outputs of
     # notebooks saved before a container restart show as untrusted until they are run again.
     c.NotebookNotary.db_file = ":memory:"

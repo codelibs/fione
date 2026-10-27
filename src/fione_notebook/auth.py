@@ -223,6 +223,16 @@ _ADMIN = _SIGNED_IN | {
 }
 
 
+def hide_terminals_unless_admin(handler, page_config: dict) -> dict:
+    """JupyterLab's ``page_config_hook``: a user the authorizer refuses terminals (anyone but
+    an admin, or no user at all) gets ``terminalsAvailable: false``, so JupyterLab neither
+    offers terminals nor polls their list (a 403 each time)."""
+    user = getattr(handler, "current_user", None)
+    if isinstance(user, FioneUser) and user.role == "admin":
+        return page_config
+    return {**page_config, "terminalsAvailable": False}
+
+
 class FioneAuthorizer(Authorizer):
     """The owner only, and only the pairs above. A viewer granted notebooks runs code too:
     their boundary is their read-only Fione token, not Jupyter.

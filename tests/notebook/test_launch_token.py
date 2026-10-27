@@ -20,6 +20,7 @@ from fione_notebook.auth import (
     FioneAuthorizer,
     FioneIdentityProvider,
     FioneUser,
+    hide_terminals_unless_admin,
     verify_launch_token,
 )
 from fione_notebook.config import configure
@@ -223,6 +224,23 @@ def test_authorizer_grants_exactly_the_table(user, expected):
     assert _granted(user) == expected
 
 
+@pytest.mark.parametrize(
+    ("user", "available"),
+    [
+        (FioneUser(username="7", name="a", role="viewer"), False),
+        (FioneUser(username="7", name="a", role="editor"), False),
+        (FioneUser(username="7", name="a", role="admin"), True),
+        (None, False),
+    ],
+    ids=["viewer", "editor", "admin", "anonymous"],
+)
+def test_only_admins_are_shown_terminals(user, available):
+    page_config = {"terminalsAvailable": True, "baseUrl": "/user/7/"}
+    shown = hide_terminals_unless_admin(SimpleNamespace(current_user=user), page_config)
+    assert shown == {"terminalsAvailable": available, "baseUrl": "/user/7/"}
+    assert hide_terminals_unless_admin(object(), page_config)["terminalsAvailable"] is False
+
+
 # --- configure ----------------------------------------------------------------------------
 
 
@@ -276,6 +294,7 @@ def test_configure_sets_the_security_traits(env):
         "frame-ancestors 'self' http://127.0.0.1:18080; report-uri /user/7/api/security/csp-report"
     )
     assert app.terminals_enabled is True
+    assert app.tornado_settings["page_config_hook"] is hide_terminals_unless_admin
     assert app.shutdown_no_activity_timeout == 3600
     assert c.MappingKernelManager.cull_idle_timeout == 1800
     assert c.MappingKernelManager.cull_interval == 300

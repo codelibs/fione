@@ -533,6 +533,22 @@ def test_editor_cannot_use_terminals_or_shutdown(server, terminal):
     assert _ws_status(_ws_request(ws_url, cookies=_cookie_header(c))) == 403
 
 
+def _page_config(c: httpx.Client) -> dict:
+    found = re.search(
+        r'<script id="jupyter-config-data" type="application/json">(.*?)</script>',
+        c.get("lab").text,
+        re.S,
+    )
+    assert found, "no page config in the lab page"
+    return json.loads(found.group(1))
+
+
+def test_only_admins_are_shown_terminals(server):
+    assert _page_config(server.login("editor"))["terminalsAvailable"] is False
+    assert _page_config(server.login("viewer"))["terminalsAvailable"] is False
+    assert _page_config(server.login("admin"))["terminalsAvailable"] is True
+
+
 def test_admin_can_open_a_terminal(terminal):
     c, created, ws_url = terminal
     assert created.status_code == 200
