@@ -95,7 +95,8 @@ def _remove_locked(conn: sqlite3.Connection, launcher: Launcher, user_id: int, p
     except LauncherError:
         conn.execute(
             "INSERT INTO notebook_pending_stops (user_id, purge) VALUES (?, ?)"
-            " ON CONFLICT (user_id) DO UPDATE SET purge = MAX(purge, excluded.purge)",
+            " ON CONFLICT (user_id) DO UPDATE SET purge = MAX(purge, excluded.purge),"
+            " since = CURRENT_TIMESTAMP",  # to the back: one stuck row never blocks the rest
             (user_id, int(purge)),
         )
         raise
@@ -104,7 +105,9 @@ def _remove_locked(conn: sqlite3.Connection, launcher: Launcher, user_id: int, p
 
 def retry_pending(conn: sqlite3.Connection, launcher: Launcher) -> None:
     """Retry the pending stops and purges, oldest first, until one fails again (the launcher
-    is likely still failing; that is logged by its code). Never raises a launcher error."""
+    is likely still failing; that is logged by its code). A failed row goes to the back, so
+    one that keeps failing for its own reason does not hold up the others for more than one
+    pass. Never raises a launcher error."""
     rows = conn.execute(
         "SELECT user_id FROM notebook_pending_stops ORDER BY since, user_id"
     ).fetchall()

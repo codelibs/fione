@@ -361,6 +361,35 @@ def test_retrying_stops_at_the_first_failure(conn, editor, caplog):
     assert "unreachable" in caplog.text and "500" not in caplog.text
 
 
+def test_a_row_that_keeps_failing_does_not_block_the_others(conn, editor):
+    other = auth_service.create_user(conn, "other", "password-123", Role.EDITOR)
+    launcher = FakeLauncher()
+    launcher.fail = LauncherError("unreachable")
+    for uid in (editor.id, other.id):
+        service.quietly(service.stop, conn, launcher, uid)
+    conn.execute("UPDATE notebook_pending_stops SET since = '2000-01-01 00:00:00'")
+    conn.execute(  # the editor's row is the oldest, and it fails for its own reason
+        "UPDATE notebook_pending_stops SET since = '1999-01-01 00:00:00' WHERE user_id = ?",
+        (editor.id,),
+    )
+    launcher.fail = None
+    stop = launcher.stop
+
+    def stuck_for_editor(uid):
+        if uid == editor.id:
+            launcher.calls.append(("stop", uid))
+            raise LauncherError("unreachable")
+        stop(uid)
+
+    launcher.stop = stuck_for_editor
+    launcher.calls.clear()
+    service.retry_pending(conn, launcher)  # fails on the editor's row: it goes to the back
+    assert _pending(conn) == {editor.id: 0, other.id: 0}
+    service.retry_pending(conn, launcher)
+    assert _pending(conn) == {editor.id: 0}
+    assert launcher.calls == [("stop", editor.id), ("stop", other.id), ("stop", editor.id)]
+
+
 def test_a_start_is_refused_while_a_stop_is_pending(conn, settings, editor):
     # User ids are reused: a pending purge must not remove a new notebook's files later.
     launcher = FakeLauncher()

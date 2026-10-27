@@ -249,7 +249,7 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
   administrator role away and deleting the user end the notebook's token at once, but the
   container is removed by the launcher. If the launcher cannot be reached, the change is made
   anyway, the **Users** page (or the API's `notebook_stop_pending` notice) says so, and Fione
-  retries every minute and before every notebook action. Until a retry succeeds, a browser
+  retries every minute and before every notebook start, stop and status check. Until a retry succeeds, a browser
   already signed in to that JupyterLab keeps using it (the sign-in cookie lasts as long as
   the container). Pending stops are kept in Fione's database, so a restart keeps retrying.
 - **The launcher and Fione keep notebook state in the process**: the per-user start and stop
@@ -332,6 +332,6 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - ノートブックの信頼の署名はメモリにだけあり、再起動で失われます。JupyterLab の設定とレイアウトは保存されません。実行中のカーネルは、停止時、ランチャーの再起動時、`docker compose down` で失われます。JupyterLab のタブで開かれていない、30 分使われないカーネルは停止し（開いたままのタブはノートブックを寿命まで動かし続け、同時実行の枠を 1 つ使います）、実行中のカーネルがなく 1 時間操作がないノートブックは終了し、`FIONE_NOTEBOOK_MAX_LIFETIME_SECS`（既定 12 時間）でも必ず終了します。
 - ゲートウェイの中継は、`.` や `..` の区間を含む生のパスを拒否するため、名前がちょうど `.` または `..` の列は、ノートブックから列ごとの概要（`column_profile`）を取得できません（データセット全体の読み込みはできます）。ゲートウェイは外へ出られるネットワークにも属するため、未知の `nb-<数字>` の名前の問い合わせがホストの DNS に渡ることがあり、入れ替えたノートブックに古いアドレスで最大 10 秒届くことがあります。HTTPS でも JupyterLab の `_xsrf` Cookie には `Secure` が付きません（認証情報ではありません）。
 - ユーザーを削除するとノートブックとそのファイルも削除されます。`docker compose down -v` でもボリュームは残り、初期化したインストールではユーザー ID が最初からになるため、その場合もユーザーを作る前にラベルを指定して削除してください。そのときランチャーに届かないと削除は保留になり、成功するまでその ID のノートブックは起動しません。Fione とランチャーは 1 プロセスで動かしてください。
-- 権限の取り消し、新しいパスワード、管理者のロールを外すこと、ユーザーの削除では、ノートブックのトークンはすぐに無効になりますが、コンテナを削除するのはランチャーです。ランチャーに届かないと停止は保留になり、「ユーザー」画面（API では `notebook_stop_pending`）に表示され、Fione が 1 分ごとと、ノートブックの操作のたびに再試行します。成功するまで、すでにその JupyterLab にログインしているブラウザは使い続けられます。保留中の停止はデータベースに残るため、再起動しても再試行が続きます。
+- 権限の取り消し、新しいパスワード、管理者のロールを外すこと、ユーザーの削除では、ノートブックのトークンはすぐに無効になりますが、コンテナを削除するのはランチャーです。ランチャーに届かないと停止は保留になり、「ユーザー」画面（API では `notebook_stop_pending`）に表示され、Fione が 1 分ごとと、ノートブックの起動・停止・状態確認のたびに再試行します。成功するまで、すでにその JupyterLab にログインしているブラウザは使い続けられます。保留中の停止はデータベースに残るため、再起動しても再試行が続きます。
 - JupyterLab を開いたまま停止すると、ブラウザのコンソールにエラーが出ることがあります。新しいノートブックの最初の Shift+Enter が無視されることがあります（標準の JupyterLab でも起こります）。Firefox と Safari、rootless Docker、Podman は検証していません。ノートブックのイメージは約 950 MB（arm64 で 947 MB を測定）です。ノートブックのボリュームとコンテナのファイルには容量の上限がなく、1 人のユーザーがホストのディスクを使い切ることがあります。
 - ダークモードは Chrome / Edge 123 以降、Firefox 120 以降、Safari 17.5 以降が必要です。ログインには JavaScript が必要です。簡易・詳細の表示はブラウザごとに記憶されます。

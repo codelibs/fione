@@ -118,7 +118,7 @@ once its lifetime ends.
 When an administrator deletes a user, Fione asks the launcher to remove that user's container
 and volume. Fione reuses user ids: a user created later may get the deleted user's id, and with
 it the same volume name. If that removal fails (the launcher is down, say), Fione deletes the
-user anyway and retries the removal every minute and before every notebook action; no
+user anyway and retries the removal every minute and before every notebook start, stop and status check; no
 notebook starts for that user id until it succeeds. To check, list the volumes by label as
 [Notebooks](notebook.md#files-and-persistence) shows.
 

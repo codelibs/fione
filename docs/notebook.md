@@ -59,7 +59,12 @@ Fione ──> launcher ──> Docker                   starts and removes the c
 Fione frames JupyterLab from its own page and signs the browser in with a one-time launch
 link. JupyterLab accepts that sign-in only from a page on the **same site** whose `Referer` is
 Fione's origin (`FIONE_PUBLIC_URL`; the Notebook page sends it), so the two origins must differ
-but share a site:
+but share a site. The browser must send that `Referer` across origins: the Notebook page
+sends `Referrer-Policy: origin`, so do not override it in a proxy in front of Fione, and a
+browser, extension or privacy setting that strips cross-origin `Referer` headers breaks the
+sign-in. A bare 403 in the notebook frame means the `Referer` did not arrive.
+
+The two origins:
 
 - **Locally:** the same host name with another port, for example `http://127.0.0.1:8080` and
   `http://127.0.0.1:8888`. `localhost` and `127.0.0.1` are different sites: if you open Fione at
@@ -100,7 +105,7 @@ permission have no **Notebook** link, and the page answers 403.
 If the launcher cannot be reached at that moment, the change is made anyway and the token
 ends, but the container may still run: the **Users** page then says that the notebook could
 not be stopped yet (the API answers with `"notice": "notebook_stop_pending"` and the header
-`X-Fione-Notice`). Fione retries the stop every minute and before every notebook action, and
+`X-Fione-Notice`). Fione retries the stop every minute and before every notebook start, stop and status check, and
 the user cannot start a notebook until it succeeds. Until then, a browser that is already
 signed in to that JupyterLab keeps working.
 
@@ -208,7 +213,7 @@ the notebook volumes with the commands above before creating users.
 
 Deleting a user in Fione also removes their notebook and its volume. If the launcher is
 unreachable at that moment, Fione retries the removal (every minute and before every notebook
-action) and refuses to start a notebook for that user id until it succeeds, since Fione reuses
+start, stop and status check) and refuses to start a notebook for that user id until it succeeds, since Fione reuses
 user ids. To be sure, check with the commands above that the volume is gone.
 
 ## Stopping
