@@ -3,19 +3,24 @@ daemon's default API version and never pulls an image."""
 
 import http.client
 import json
+import logging
 import socket
 from typing import Any
 from urllib.parse import quote, urlencode
 
 _TIMEOUT = 30.0
 
+log = logging.getLogger("fione_launcher")
+
 
 class DockerError(Exception):
-    """Docker answered with an error status. The message names the call and the status only."""
+    """Docker answered with an error status. The message names the call and the status only;
+    ``detail`` is Docker's own message, for decisions, not for logs."""
 
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, detail: str = ""):
         super().__init__(message)
         self.status = status
+        self.detail = detail
 
 
 class _UnixConnection(http.client.HTTPConnection):
@@ -65,7 +70,8 @@ class DockerAPI:
     def _call(self, method: str, path: str, body: dict | None = None, ok=(200,)) -> Any:
         status, data = self.request(method, path, body)
         if status not in ok:
-            raise DockerError(status, f"{method} {path.split('?')[0]}: {status}")
+            detail = data.get("message", "") if isinstance(data, dict) else ""
+            raise DockerError(status, f"{method} {path.split('?')[0]}: {status}", str(detail))
         return data
 
     def inspect_self(self) -> dict:
@@ -103,7 +109,11 @@ class DockerAPI:
     def create(self, name: str, body: dict) -> str:
         """The id of a new container (never pulls: a missing image is a 404 ``DockerError``)."""
         query = urlencode({"name": name})
-        return self._call("POST", f"/containers/create?{query}", body, ok=(201,))["Id"]
+        data = self._call("POST", f"/containers/create?{query}", body, ok=(201,))
+        if data.get("Warnings"):
+            # For example a limit this host cannot enforce; Docker does not say which one here.
+            log.warning("Docker created %s with %d warning(s)", name, len(data["Warnings"]))
+        return data["Id"]
 
     def start(self, container_id: str) -> None:
         self._call("POST", f"/containers/{quote(container_id, safe='')}/start", ok=(204, 304))

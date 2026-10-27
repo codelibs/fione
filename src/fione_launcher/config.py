@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from fione_launcher.spec import ORIGIN
 
 _MIN_SECRET = 32
+_SECRET = re.compile(r"[\x21-\x7e]+")  # visible ASCII: it travels in an HTTP header
 _IMAGE = re.compile(r"\S+")
 _COUNT = re.compile(r"[1-9][0-9]{0,3}")
 
@@ -27,8 +28,10 @@ class LauncherConfig:
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "LauncherConfig":
         secret = env.get("FIONE_LAUNCHER_SECRET", "")
-        if len(secret) < _MIN_SECRET:
-            raise _exit(f"FIONE_LAUNCHER_SECRET must be at least {_MIN_SECRET} characters")
+        if len(secret) < _MIN_SECRET or not _SECRET.fullmatch(secret):
+            raise _exit(
+                f"FIONE_LAUNCHER_SECRET must be at least {_MIN_SECRET} visible ASCII characters"
+            )
         image = env.get("FIONE_NOTEBOOK_IMAGE", "")
         if not _IMAGE.fullmatch(image):
             raise _exit("FIONE_NOTEBOOK_IMAGE is missing or malformed")

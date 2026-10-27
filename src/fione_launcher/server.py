@@ -63,6 +63,13 @@ def _state(info: dict | None) -> str:
     return "absent"  # exited, dead or being removed: AutoRemove takes it away
 
 
+def _of_project(container: dict, project: str) -> bool:
+    """Whether a listed container is one of ``project``'s notebooks: checked again here, so a
+    filter Docker did not apply can never get another project's container removed."""
+    labels = container.get("Labels") or {}
+    return labels.get("fione.notebook") == "1" and labels.get("fione.project") == project
+
+
 def _expired(labels: dict, now: float) -> bool:
     expires = labels.get("fione.expires", "")
     return not _DIGITS.fullmatch(expires) or int(expires) <= now  # unreadable: expired
@@ -127,7 +134,7 @@ class Launcher:
             try:
                 container_id = self.docker.create(name, body)
             except DockerError as e:
-                if e.status == 404:
+                if e.status == 404 and "no such image" in e.detail.lower():
                     raise Refused(503, "image_missing") from None
                 if e.status == 409:
                     raise Refused(409, "exists") from None
@@ -135,7 +142,7 @@ class Launcher:
             try:
                 self.docker.start(container_id)
             except Exception:
-                self.docker.remove(container_id)
+                self._remove(container_id)  # best effort: the start's error is the one to report
                 raise
         return "starting"
 
@@ -144,16 +151,24 @@ class Launcher:
         if info is not None:
             self.docker.remove(info["Id"])  # the volume stays
 
+    def _remove(self, container_id: str) -> None:
+        """Remove one container; a failure is logged and does not stop the caller."""
+        try:
+            self.docker.remove(container_id)
+        except Exception as e:
+            log.error("removing a notebook container failed: %s", _describe(e))
+
     def remove_all(self) -> None:
         for container in self.docker.list_notebooks(self.project):
-            self.docker.remove(container["Id"])
+            if _of_project(container, self.project):
+                self._remove(container["Id"])
 
     def reap(self, now: float) -> None:
         for container in self.docker.list_notebooks(self.project):
             labels = container.get("Labels") or {}
-            if _expired(labels, now):
+            if _of_project(container, self.project) and _expired(labels, now):
                 log.info("removing an expired notebook (uid %s)", labels.get("fione.uid"))
-                self.docker.remove(container["Id"])
+                self._remove(container["Id"])
 
     def close(self) -> None:
         """Refuse new starts and remove every notebook of the project."""
@@ -193,7 +208,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _authorized(self) -> bool:
-        given = self.headers.get(SECRET_HEADER, "").encode("utf-8", "surrogateescape")
+        # The stdlib decodes header values as latin-1; the configured secret is ASCII.
+        given = self.headers.get(SECRET_HEADER, "").encode("latin-1")
         return hmac.compare_digest(given, self.launcher.cfg.secret.encode())
 
     def _body(self) -> object:
@@ -201,7 +217,13 @@ class _Handler(BaseHTTPRequestHandler):
         if not _DIGITS.fullmatch(length) or not 0 < int(length) <= _MAX_BODY:
             raise InvalidRequest("length")
         try:
-            return json.loads(self.rfile.read(int(length)), object_pairs_hook=_no_duplicates)
+            data = self.rfile.read(int(length))
+        except OSError as e:  # a timeout: the client sent less than it announced
+            raise InvalidRequest("short body") from e
+        if len(data) != int(length):
+            raise InvalidRequest("short body")
+        try:
+            return json.loads(data, object_pairs_hook=_no_duplicates)
         except ValueError as e:  # JSONDecodeError and UnicodeDecodeError too
             raise InvalidRequest("json") from e
 

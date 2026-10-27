@@ -12,7 +12,10 @@ if TYPE_CHECKING:
 _UID = re.compile(r"[1-9][0-9]{0,17}")  # as Fione writes it: no sign, no leading zero
 _HEX_32_BYTES = re.compile(r"[0-9a-f]{64}")
 _TOKEN = re.compile(r"fione_[A-Za-z0-9_-]{20,100}")
-ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?")
+# scheme://host[:port]: dot-separated labels of letters, digits and inner hyphens (stricter
+# than the notebook image's check, so the image never refuses what the launcher accepted).
+_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+ORIGIN = re.compile(rf"https?://{_LABEL}(?:\.{_LABEL})*(?::[0-9]{{1,5}})?")
 # A container lives at most this long (seconds), like its token and its Jupyter cookie.
 MAX_LIFETIME = 604800
 _FIELDS = {"launch_key", "cookie_secret", "token", "fione_origin", "expires_at"}

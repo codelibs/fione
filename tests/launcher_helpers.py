@@ -96,9 +96,11 @@ class FakeDocker:
     def create(self, name, body):
         self.calls.append(("create", name, body))
         if body["Image"] not in self.images:
-            raise DockerError(404, "No such image")
+            raise DockerError(
+                404, "POST /containers/create: 404", f"No such image: {body['Image']}"
+            )
         if name in self.containers:
-            raise DockerError(409, "Conflict")
+            raise DockerError(409, "POST /containers/create: 409", "Conflict. The name is in use")
         return self.add(name, body["Labels"], status="created")
 
     def start(self, container_id):

@@ -4,11 +4,16 @@ Docker call, the start conflicts and the states, and logs without secrets."""
 import http.client
 import json
 import logging
+import socket
+import threading
 import time
 
 import pytest
 
-from launcher_helpers import IMAGE, PROJECT, SECRET, labels, start_request
+from fione_launcher.docker import DockerError
+from fione_launcher.server import SECRET_HEADER
+from fione_launcher.spec import StartRequest
+from launcher_helpers import IMAGE, PROJECT, SECRET, labels, make_config, start_request
 
 UID = "7"
 NAME = f"{PROJECT}-nb-{UID}"
@@ -54,6 +59,11 @@ def _invalid_cases():
         "token-short": (UID, start_request(token="fione_" + "T" * 19)),
         "origin-path": (UID, start_request(fione_origin="http://127.0.0.1:8080/x")),
         "origin-newline": (UID, start_request(fione_origin="http://127.0.0.1:8080\n")),
+        "origin-empty-label": (UID, start_request(fione_origin="http://a..b")),
+        "origin-dots": (UID, start_request(fione_origin="http://..")),
+        "origin-leading-hyphen": (UID, start_request(fione_origin="http://-x:8080")),
+        "origin-trailing-hyphen": (UID, start_request(fione_origin="http://x-")),
+        "origin-ipv6": (UID, start_request(fione_origin="http://[::1]:8080")),
         "expires-past": (UID, start_request(expires_at=now - 1)),
         "expires-8-days": (UID, start_request(expires_at=now + 8 * 86400)),
         "extra-image": (UID, {**valid, "image": "evil:latest"}),
@@ -102,9 +112,12 @@ def test_duplicate_keys_are_refused(api, docker):
 
 @pytest.mark.parametrize("uid", ["7", "../1"])
 def test_get_and_delete_validate_the_uid(api, docker, uid):
-    expected = 200 if uid == "7" else 422
-    assert api.call("GET", f"/notebooks/{uid}")[0] == expected
-    if uid != "7":
+    if uid == "7":
+        assert api.call("GET", f"/notebooks/{uid}") == (200, {"state": "absent"})
+        assert api.call("DELETE", f"/notebooks/{uid}") == (204, None)
+        assert ("inspect", NAME) in docker.calls
+    else:
+        assert api.call("GET", f"/notebooks/{uid}") == (422, {"error": "invalid"})
         assert api.call("DELETE", f"/notebooks/{uid}") == (422, {"error": "invalid"})
         assert docker.calls == []
 
@@ -162,6 +175,76 @@ def test_start_failure_removes_the_container(api, docker):
     docker.start = broken
     assert api.call("PUT", f"/notebooks/{UID}", start_request())[0] == 500
     assert NAME not in docker.containers
+
+
+def test_start_failure_reports_the_start_error_when_removal_fails(launcher, docker, caplog):
+    def broken_start(container_id):
+        raise OSError("start failed")
+
+    def broken_remove(container_id):
+        raise TimeoutError("remove failed")
+
+    docker.start = broken_start
+    docker.remove = broken_remove
+    req = StartRequest.parse(start_request(), now=time.time())
+    with pytest.raises(OSError, match="start failed"):
+        launcher.ensure(UID, req)
+    assert "removing a notebook container failed: TimeoutError" in caplog.text
+
+
+def test_a_404_other_than_a_missing_image_is_500(api, docker, caplog):
+    def broken(name, body):
+        raise DockerError(404, "POST /containers/create: 404", "network p_notebooks not found")
+
+    docker.create = broken
+    assert api.call("PUT", f"/notebooks/{UID}", start_request()) == (500, {"error": "internal"})
+    assert "POST /containers/create: 404" in caplog.text
+    assert "network p_notebooks not found" not in caplog.text
+
+
+def test_concurrent_starts_respect_the_limit(api, launcher, docker):
+    launcher.cfg = make_config(FIONE_NOTEBOOK_MAX_RUNNING="1")
+    create = docker.create
+
+    def slow_create(name, body):
+        time.sleep(0.2)
+        return create(name, body)
+
+    docker.create = slow_create
+    results = []
+
+    def put(uid):
+        results.append(api.call("PUT", f"/notebooks/{uid}", start_request()))
+
+    threads = [threading.Thread(target=put, args=(uid,)) for uid in ("1", "2", "3")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert sorted(results, key=lambda r: r[0]) == [
+        (200, {"state": "starting"}),
+        (409, {"error": "limit"}),
+        (409, {"error": "limit"}),
+    ]
+    assert len(docker.containers) == 1
+
+
+def test_short_body_is_422(api, docker):
+    raw = json.dumps(start_request()).encode()
+    with socket.create_connection(("127.0.0.1", api.port), timeout=10) as sock:
+        head = (
+            f"PUT /notebooks/{UID} HTTP/1.1\r\nHost: x\r\n{SECRET_HEADER}: {SECRET}\r\n"
+            f"Content-Length: {len(raw) + 10}\r\n\r\n"
+        )
+        sock.sendall(head.encode() + raw)
+        sock.shutdown(socket.SHUT_WR)  # fewer bytes than announced, then the end
+        response = b""
+        while chunk := sock.recv(4096):
+            response += chunk
+    status_line, _, rest = response.partition(b"\r\n")
+    assert status_line.split()[1] == b"422", response
+    assert json.loads(rest.split(b"\r\n\r\n", 1)[1]) == {"error": "invalid"}
+    assert docker.calls == []
 
 
 def test_state_follows_health(api, docker):

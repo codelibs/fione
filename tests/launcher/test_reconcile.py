@@ -123,3 +123,45 @@ def test_reaper_survives_a_docker_error():
 def test_fake_docker_has_the_same_methods():
     public = {name for name in vars(DockerAPI) if not name.startswith("_")}
     assert public <= set(dir(FakeDocker))
+
+
+def test_remove_all_goes_on_after_a_failed_removal(caplog):
+    docker = FakeDocker()
+    for uid in ("1", "2", "3"):
+        docker.add(f"p-nb-{uid}", labels(PROJECT, uid))
+    remove = docker.remove
+    failing = docker.containers["p-nb-1"]["Id"]
+
+    def flaky(container_id):
+        if container_id == failing:
+            raise TimeoutError("remove failed")
+        remove(container_id)
+
+    docker.remove = flaky
+    launcher = Launcher(make_config(), docker, project=PROJECT, network=NETWORK)
+    launcher.close()
+    assert docker.names() == {"p-nb-1"}
+    assert "removing a notebook container failed: TimeoutError" in caplog.text
+    docker.add("p-nb-4", labels(PROJECT, "4", expires=1))
+    launcher.reap(1_800_000_000)
+    assert docker.names() == {"p-nb-1"}
+
+
+def test_listed_containers_of_other_projects_are_never_removed():
+    """Even when Docker's answer holds containers the label filter should have left out."""
+    docker = FakeDocker()
+    docker.add("p-nb-1", labels(PROJECT, "1", expires=1))
+    docker.add("q-nb-1", labels("q", "1", expires=1))
+    docker.add("p-other", {"fione.project": PROJECT, "fione.expires": "1"})
+
+    def unfiltered(project):
+        docker.calls.append(("list_notebooks", project))
+        return [{"Id": c["Id"], "Labels": c["Labels"]} for c in docker.containers.values()]
+
+    docker.list_notebooks = unfiltered
+    launcher = Launcher(make_config(), docker, project=PROJECT, network=NETWORK)
+    launcher.reap(1_800_000_000)
+    assert docker.names() == {"q-nb-1", "p-other"}
+    docker.add("p-nb-2", labels(PROJECT, "2"))
+    launcher.remove_all()
+    assert docker.names() == {"q-nb-1", "p-other"}
