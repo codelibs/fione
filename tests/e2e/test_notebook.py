@@ -178,7 +178,7 @@ def test_without_permission_there_is_no_link_and_403(stack, users, new_page, con
 
 
 ESCAPE = """
-import os, socket, urllib.error, urllib.request
+import errno, os, socket, urllib.error, urllib.request
 
 def connect(host, port):
     try:
@@ -193,6 +193,28 @@ def resolve(name):
         return "resolves"
     except OSError:
         return "unresolved"
+
+def probe(host, port):
+    # "refused" still means that the host answered: only a service listening there is missing.
+    try:
+        socket.create_connection((host, port), timeout=5).close()
+        return "connects"
+    except socket.timeout:
+        return "timeout"
+    except OSError as e:
+        return {errno.ECONNREFUSED: "refused"}.get(e.errno, "unreachable")
+
+def host_address():
+    # The default gateway, or (an internal network has no default route) the first address
+    # of eth0's subnet, which Docker gives the bridge on the host.
+    rows = [line.split() for line in open("/proc/net/route").read().splitlines()[1:]]
+    for row in rows:
+        if row[1] == "00000000" and row[2] != "00000000":
+            return socket.inet_ntoa(bytes.fromhex(row[2])[::-1])
+    for row in rows:
+        if row[0] == "eth0" and row[2] == "00000000":
+            network = int.from_bytes(bytes.fromhex(row[1])[::-1], "big")
+            return socket.inet_ntoa((network + 1).to_bytes(4, "big"))
 
 def status(url, token=None):
     headers = {"Authorization": "Bearer " + token} if token else {}
@@ -213,6 +235,9 @@ print("tokens", status(relay + "/tokens", token))
 print("projects without token", status(relay + "/projects"))
 print("projects", status(relay + "/projects", token))
 print("other contents", status("http://notebook-gateway:8080/user/%s/api/contents" % OTHER))
+host = host_address()
+print("host:22", probe(host, 22))
+print("host:80", probe(host, 80))
 print("END")
 """
 
@@ -237,7 +262,12 @@ def test_cells_cannot_escape(stack, users, new_page, console, record_property):
             "projects without token 401",
             "projects 200",
             "other contents 403",
-        ]
+        ], lines
+        # The host through the `notebooks` bridge address: no service there may answer. The
+        # host itself may (refused): see known-limitations.md.
+        host = dict(line.split(" ", 1) for line in lines[9:11])
+        record_property("host_bridge", host)
+        assert set(host) == {"host:22", "host:80"} and "connects" not in host.values(), lines
     finally:
         try:
             stop(page)

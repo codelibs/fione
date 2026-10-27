@@ -59,6 +59,7 @@ def test_launcher_publishes_nothing_and_gateway_binds_localhost():
     gateway = SERVICES["notebook-gateway"]
     assert gateway["ports"] == ["127.0.0.1:${FIONE_NOTEBOOK_PORT:-8888}:8080"]
     assert gateway["cap_drop"] == ["ALL"] and gateway["read_only"] is True
+    assert gateway["security_opt"] == ["no-new-privileges:true"]
     assert "./notebook-gateway.conf:/etc/nginx/conf.d/default.conf:ro" in gateway["volumes"]
     assert re.fullmatch(r"nginxinc/nginx-unprivileged:\d+\.\d+\.\d+-alpine", gateway["image"])
 
@@ -72,6 +73,8 @@ def test_notebook_services_are_in_the_profile():
     assert SERVICES["notebook-image"]["scale"] == 0
     launcher_env = SERVICES["notebook-launcher"]["environment"]
     assert launcher_env["FIONE_NOTEBOOK_IMAGE"] == SERVICES["notebook-image"]["image"]
+    # Set in docker/.env like the other notebook values; the launcher's own default otherwise.
+    assert launcher_env["FIONE_NOTEBOOK_MAX_RUNNING"] == "${FIONE_NOTEBOOK_MAX_RUNNING:-4}"
 
 
 def test_no_required_interpolation_in_profile_services():
@@ -98,3 +101,13 @@ def test_gateway_conf_has_no_query_in_logs():
     # Every server logs with that format, never the image's default (which has $request).
     servers = GATEWAY_CONF.count("\nserver {")
     assert GATEWAY_CONF.count("access_log /dev/stdout fione_gateway;") == servers == 2
+
+
+def test_both_gateway_servers_proxy_with_http_1_1():
+    # The public server for WebSockets, the relay for streamed (unbuffered, chunked) uploads.
+    relay = GATEWAY_CONF[GATEWAY_CONF.index("listen 8081;") :]
+    public = GATEWAY_CONF[GATEWAY_CONF.index("listen 8080;") : GATEWAY_CONF.index("listen 8081;")]
+    assert "proxy_http_version 1.1;" in public
+    location = relay[relay.index("location /api/v1/ {") :]
+    location = location[: location.index("\n    }")]
+    assert "proxy_http_version 1.1;" in location and "proxy_request_buffering off;" in location

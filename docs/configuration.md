@@ -58,6 +58,7 @@ Used by `docker/compose.yaml` (see `docker/.env.example`).
 | `FIONE_NOTEBOOK_LAUNCHER_SECRET` | with notebooks | The secret Fione and the `notebook-launcher` service share. Generate it, for example `openssl rand -hex 32`. |
 | `FIONE_NOTEBOOK_PORT` | no | The host port of the `notebook-gateway` service (default `8888`, on 127.0.0.1). |
 | `FIONE_NOTEBOOK_MAX_LIFETIME_SECS` | no | Passed to Fione (default `43200`, see above). |
+| `FIONE_NOTEBOOK_MAX_RUNNING` | no | Passed to the `notebook-launcher` service (default `4`, see below). |
 
 Compose refuses to start while `FIONE_S3_ACCESS_KEY` or `FIONE_S3_SECRET_KEY` is empty. The
 two S3 values may only use `A-Z a-z 0-9 / + = . _ -`; SeaweedFS refuses to start otherwise.
@@ -68,7 +69,8 @@ and `FIONE_NOTEBOOK_URL` must use the same host name (`localhost` and `127.0.0.1
 different sites, and the notebook frame then cannot sign in). The gateway
 (`docker/notebook-gateway.conf`) publishes JupyterLab on port 8888 and relays the notebooks'
 API calls to Fione on port 8081, inside Compose only; the relay refuses `/api/v1/auth`,
-`/api/v1/tokens` and `/api/v1/users`. Behind HTTPS, JupyterLab's `_xsrf` cookie is not marked
+`/api/v1/tokens`, `/api/v1/users` and raw paths with a `.` or `..` segment (see
+[Known limitations](known-limitations.md#notebooks)). Behind HTTPS, JupyterLab's `_xsrf` cookie is not marked
 `Secure`; it guards form posts and is not a credential.
 
 ## Fione Serving
@@ -115,10 +117,10 @@ once its lifetime ends.
 
 When an administrator deletes a user, Fione asks the launcher to remove that user's container
 and volume. Fione reuses user ids: a user created later may get the deleted user's id, and with
-it the same volume name. If that removal fails (the launcher is down, say), Fione logs it and
-deletes the user anyway, and the volume stays. Remove it by hand
-(`docker volume rm <project>-nb-home-<user id>`, or by label as [Notebooks](notebook.md#files-and-persistence)
-shows) before creating more users.
+it the same volume name. If that removal fails (the launcher is down, say), Fione deletes the
+user anyway and retries the removal every minute and before every notebook action; no
+notebook starts for that user id until it succeeds. To check, list the volumes by label as
+[Notebooks](notebook.md#files-and-persistence) shows.
 
 ## Internal variables
 

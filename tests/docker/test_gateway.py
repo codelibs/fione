@@ -88,7 +88,9 @@ def _remove_all() -> None:
     """Remove what carries this module's label, and nothing else."""
     for container in _docker("ps", "-aq", "--filter", f"label={LABEL}", check=False).split():
         _docker("rm", "-f", container, check=False)
-    for network in _docker("network", "ls", "-q", "--filter", f"label={LABEL}").split():
+    for network in _docker(
+        "network", "ls", "-q", "--filter", f"label={LABEL}", check=False
+    ).split():
         _docker("network", "rm", network, check=False)
 
 
@@ -110,6 +112,7 @@ def gateway():
         _docker(
             "create", "--name", GATEWAY, "--label", LABEL, "--network", NET_GATEWAY,
             "-p", "127.0.0.1::8080", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges:true",
             "-v", f"{conf}:/etc/nginx/conf.d/default.conf:ro", NGINX_IMAGE,
         )  # fmt: skip
         _docker("network", "connect", NET_NOTEBOOKS, GATEWAY)

@@ -172,6 +172,12 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - **A viewer who is granted notebooks still runs code**, with a token that can only read the
   data they may read. Granting notebooks gives a user a container with 2 CPUs, 4 GiB of memory,
   512 processes and no capabilities, on an internal network with no egress.
+- **The Docker host answers on the `notebooks` network.** The network is internal (no route
+  out), but the host's own address on its bridge (the subnet's first address) accepts
+  connections from notebook code: a host service listening on all addresses (`0.0.0.0`), such
+  as SSH, is reachable from every notebook. Bind host services to the addresses they serve,
+  or firewall the bridge of `notebooks` on the host. The end-to-end tests check that nothing
+  answers on ports 22 and 80 there, on the machine they run on.
 - **The notebooks of different users share one network.** Another user's container is
   reachable at TCP level on the internal network `notebooks`; each JupyterLab refuses everyone
   but its owner.
@@ -202,14 +208,22 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
   the cells are run again.
 - **JupyterLab's settings and layout are not saved.** The gateway refuses writes to its
   settings and workspaces.
-- **Notebooks end.** A kernel idle for 30 minutes is stopped; a notebook with no kernel and no
-  activity for 1 hour shuts down; and every notebook ends after
+- **Notebooks end.** A kernel idle for 30 minutes is stopped when no JupyterLab tab has it
+  open; a notebook with no kernel and no activity for 1 hour shuts down; and every notebook
+  ends after
   `FIONE_NOTEBOOK_MAX_LIFETIME_SECS` (12 hours by default), together with its token. Running
   kernels are lost whenever the container goes: on stop, on shutdown and when the launcher
   restarts or `docker compose down` stops it. The files in the user's volume stay.
+- **An open JupyterLab tab keeps its notebook running.** Idle culling skips kernels that a tab
+  has open, and a notebook with a running kernel does not shut down, so a forgotten tab keeps
+  the container until its lifetime ends and holds one of the `FIONE_NOTEBOOK_MAX_RUNNING`
+  places.
 - **At most `FIONE_NOTEBOOK_MAX_RUNNING` notebooks run at once** (4 by default), whatever the
   host can carry. Each may use 2 CPUs and 4 GiB, so four use up to 8 CPUs and 16 GiB beside
   Fione's own jobs.
+- **Notebook disk use has no limit.** Neither the users' volumes nor the containers' own files
+  have a quota: one user can fill the Docker host's disk, which Fione's database and storage
+  volumes share.
 - **There is no egress.** Code in a notebook cannot install packages or fetch data; the
   libraries are the image's (JupyterLab, pandas, pyarrow, scikit-learn, matplotlib, httpx and
   `fione-sdk`).
@@ -311,10 +325,10 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - 1 プロセス・1 ワーカーで動かしてください。イメージは約 1.65 GB / 1.7 GB で、まだ公開していません（リリースは amd64 のみ、タグは CI が通ったコミットにだけ付けてください）。ベースイメージはタグ固定で、ダイジェスト固定ではありません。
 - モデルはイメージのタグに結び付いています。古い版のモデルが新しい版で読み込める保証はありません。
 - ノートブックは任意の機能です（Compose のプロファイル `notebook`）。ランチャーは Docker ソケットを持ち、これはホストの root と同等です。ノートブックのコンテナには、所有者の API トークン（`FIONE_TOKEN`）と鍵が環境変数に入り、ホストで Docker を使える人には `docker inspect` で見えます。ノートブックを許可された閲覧者もコードを実行できます（トークンは読み取り専用）。コンテナの上限は CPU 2、メモリ 4 GiB、プロセス 512、ケーパビリティなし、外部通信なしで、同時に動くノートブックは既定で 4 つまで（`FIONE_NOTEBOOK_MAX_RUNNING`）です。
-- 他のユーザーのコンテナとは、内部ネットワーク上で TCP としては到達できます（各 JupyterLab は所有者以外を拒否します）。全ユーザーの JupyterLab は 1 つのオリジンを共有し、信頼済みのノートブックの出力（ユーザーが書ける内容）はそこでサンドボックスなしに動きます。ログインは、同一サイトからで `Referer` が Fione のオリジンのものだけを受け付けるため、他のサイトや同じサイトの他のページから被害者のブラウザを攻撃者のノートブックにログインさせることはできません。ユーザーごとのサブドメインを採用するまで（未決事項）、ノートブックのユーザー同士は信頼し合うものとして扱ってください。同じ登録可能ドメインのすべてのオリジン（ローカルでは同じホスト名のすべてのポート）がゲートウェイと同一サイトになるため、ゲートウェイには Fione 専用の登録可能ドメインを使ってください。ノートブックのコードは、コンテナ内の Jupyter サーバーと同じ OS ユーザーで動くため、ユーザーは自分のコンテナのサーバーのプロセスを調べられます（対策は seccomp で `ptrace` と `process_vm_writev` を拒否すること。これも未決事項）。所有者は自分のコンテナの起動用の鍵をサーバーのプロセスの環境変数から読んで、自分のコンテナ用の起動トークンを作れます（他のコンテナには影響しません）。
-- ノートブックの信頼の署名はメモリにだけあり、再起動で失われます。JupyterLab の設定とレイアウトは保存されません。実行中のカーネルは、停止時、ランチャーの再起動時、`docker compose down` で失われます。30 分使われないカーネルは停止し、実行中のカーネルがなく 1 時間操作がないノートブックは終了し、`FIONE_NOTEBOOK_MAX_LIFETIME_SECS`（既定 12 時間）でも必ず終了します。
+- 他のユーザーのコンテナとは、内部ネットワーク上で TCP としては到達できます（各 JupyterLab は所有者以外を拒否します）。`notebooks` は外へ出られない内部ネットワークですが、そのブリッジ上のホスト自身のアドレス（サブネットの最初のアドレス）には接続できるため、すべてのアドレス（`0.0.0.0`）で待ち受けるホストのサービス（SSH など）にはノートブックから届きます。ホストのサービスは必要なアドレスだけで待ち受けるか、ホストで `notebooks` のブリッジを遮断してください。全ユーザーの JupyterLab は 1 つのオリジンを共有し、信頼済みのノートブックの出力（ユーザーが書ける内容）はそこでサンドボックスなしに動きます。ログインは、同一サイトからで `Referer` が Fione のオリジンのものだけを受け付けるため、他のサイトや同じサイトの他のページから被害者のブラウザを攻撃者のノートブックにログインさせることはできません。ユーザーごとのサブドメインを採用するまで（未決事項）、ノートブックのユーザー同士は信頼し合うものとして扱ってください。同じ登録可能ドメインのすべてのオリジン（ローカルでは同じホスト名のすべてのポート）がゲートウェイと同一サイトになるため、ゲートウェイには Fione 専用の登録可能ドメインを使ってください。ノートブックのコードは、コンテナ内の Jupyter サーバーと同じ OS ユーザーで動くため、ユーザーは自分のコンテナのサーバーのプロセスを調べられます（対策は seccomp で `ptrace` と `process_vm_writev` を拒否すること。これも未決事項）。所有者は自分のコンテナの起動用の鍵をサーバーのプロセスの環境変数から読んで、自分のコンテナ用の起動トークンを作れます（他のコンテナには影響しません）。
+- ノートブックの信頼の署名はメモリにだけあり、再起動で失われます。JupyterLab の設定とレイアウトは保存されません。実行中のカーネルは、停止時、ランチャーの再起動時、`docker compose down` で失われます。JupyterLab のタブで開かれていない、30 分使われないカーネルは停止し（開いたままのタブはノートブックを寿命まで動かし続け、同時実行の枠を 1 つ使います）、実行中のカーネルがなく 1 時間操作がないノートブックは終了し、`FIONE_NOTEBOOK_MAX_LIFETIME_SECS`（既定 12 時間）でも必ず終了します。
 - ゲートウェイの中継は、`.` や `..` の区間を含む生のパスを拒否するため、名前がちょうど `.` または `..` の列は、ノートブックから列ごとの概要（`column_profile`）を取得できません（データセット全体の読み込みはできます）。ゲートウェイは外へ出られるネットワークにも属するため、未知の `nb-<数字>` の名前の問い合わせがホストの DNS に渡ることがあり、入れ替えたノートブックに古いアドレスで最大 10 秒届くことがあります。HTTPS でも JupyterLab の `_xsrf` Cookie には `Secure` が付きません（認証情報ではありません）。
 - ユーザーを削除するとノートブックとそのファイルも削除されます。`docker compose down -v` でもボリュームは残り、初期化したインストールではユーザー ID が最初からになるため、その場合もユーザーを作る前にラベルを指定して削除してください。そのときランチャーに届かないと削除は保留になり、成功するまでその ID のノートブックは起動しません。Fione とランチャーは 1 プロセスで動かしてください。
 - 権限の取り消し、新しいパスワード、管理者のロールを外すこと、ユーザーの削除では、ノートブックのトークンはすぐに無効になりますが、コンテナを削除するのはランチャーです。ランチャーに届かないと停止は保留になり、「ユーザー」画面（API では `notebook_stop_pending`）に表示され、Fione が 1 分ごとと、ノートブックの操作のたびに再試行します。成功するまで、すでにその JupyterLab にログインしているブラウザは使い続けられます。保留中の停止はデータベースに残るため、再起動しても再試行が続きます。
-- JupyterLab を開いたまま停止すると、ブラウザのコンソールにエラーが出ることがあります。新しいノートブックの最初の Shift+Enter が無視されることがあります（標準の JupyterLab でも起こります）。Firefox と Safari、rootless Docker、Podman は検証していません。ノートブックのイメージは約 950 MB（arm64 で 947 MB を測定）です。
+- JupyterLab を開いたまま停止すると、ブラウザのコンソールにエラーが出ることがあります。新しいノートブックの最初の Shift+Enter が無視されることがあります（標準の JupyterLab でも起こります）。Firefox と Safari、rootless Docker、Podman は検証していません。ノートブックのイメージは約 950 MB（arm64 で 947 MB を測定）です。ノートブックのボリュームとコンテナのファイルには容量の上限がなく、1 人のユーザーがホストのディスクを使い切ることがあります。
 - ダークモードは Chrome / Edge 123 以降、Firefox 120 以降、Safari 17.5 以降が必要です。ログインには JavaScript が必要です。簡易・詳細の表示はブラウザごとに記憶されます。

@@ -139,6 +139,7 @@ services:
     volumes:
       - ./notebook-gateway.conf:/etc/nginx/conf.d/default.conf:ro
     cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     read_only: true
     tmpfs: [/tmp]
     networks: [gateway, notebooks]
@@ -159,6 +160,7 @@ services:
     environment:
       FIONE_LAUNCHER_SECRET: ${FIONE_NOTEBOOK_LAUNCHER_SECRET:-}
       FIONE_NOTEBOOK_IMAGE: ghcr.io/codelibs/fione-notebook:${FIONE_IMAGE_TAG:-dev}
+      FIONE_NOTEBOOK_MAX_RUNNING: ${FIONE_NOTEBOOK_MAX_RUNNING:-4}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     cap_drop: [ALL]

@@ -33,9 +33,9 @@ alone (an upgrade would not rebuild their images), and a start without them make
 **Notebook** page report that the service is not available.
 
 Every setting is in [Configuration](configuration.md): `FIONE_PUBLIC_URL`,
-`FIONE_NOTEBOOK_URL`, `FIONE_NOTEBOOK_LAUNCHER_SECRET`, `FIONE_NOTEBOOK_PORT` and
-`FIONE_NOTEBOOK_MAX_LIFETIME_SECS` in `docker/.env`, and the launcher's
-`FIONE_NOTEBOOK_MAX_RUNNING`.
+`FIONE_NOTEBOOK_URL`, `FIONE_NOTEBOOK_LAUNCHER_SECRET`, `FIONE_NOTEBOOK_PORT`,
+`FIONE_NOTEBOOK_MAX_LIFETIME_SECS` and the launcher's `FIONE_NOTEBOOK_MAX_RUNNING`, all in
+`docker/.env`.
 
 ## Where the pieces are
 
@@ -159,13 +159,19 @@ Each notebook container gets:
 | Processes | 512 |
 | Capabilities | none; `no-new-privileges` |
 | Network | internal: no internet, no Fione but through the relay |
-| Files | the user's own volume |
+| Files | the user's own volume (no size limit) |
 
 - **Running notebooks** are capped at `FIONE_NOTEBOOK_MAX_RUNNING` (default 4) for all users
   together; another start says that too many notebooks are running. Each one may use 2 CPUs and
   4 GiB, so size the host for the number you allow.
-- **Culling:** a kernel idle for 30 minutes is stopped (checked every 5 minutes), and a notebook
-  with no running kernel and no activity for 1 hour shuts down, which removes its container.
+- **Culling:** a kernel idle for 30 minutes is stopped (checked every 5 minutes) when no
+  JupyterLab tab has it open, and a notebook with no running kernel and no activity for 1 hour
+  shuts down, which removes its container. A JupyterLab tab with a notebook open keeps its
+  kernel, and with it the notebook, so a forgotten tab keeps the notebook running until its
+  lifetime ends and holds one of the `FIONE_NOTEBOOK_MAX_RUNNING` places: stop notebooks you
+  are done with.
+- **Disk:** neither the user's volume nor the container's own files have a size limit; they
+  share the Docker host's disk with Fione's database and storage.
 - **Lifetime:** a notebook ends after `FIONE_NOTEBOOK_MAX_LIFETIME_SECS` (default 12 hours)
   whatever it is doing; its API token ends with it. Start it again from the page.
 - **No egress:** code cannot download anything, so `pip install` does not work. The libraries

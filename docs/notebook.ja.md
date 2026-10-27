@@ -20,7 +20,7 @@ docker compose -f docker/compose.yaml --env-file docker/.env --profile notebook 
 
 ビルドでノートブックのイメージ（約 950 MB。arm64 で 947 MB を測定）とランチャーができます。ランチャーはイメージを取得しないため、ノートブックのイメージがないまま起動すると「ノートブックのイメージがインストールされていません」と表示されます。`--profile notebook` を付けなければ、これまでどおりノートブックなしで動き、`FIONE_NOTEBOOK_URL` が空の間は「**ノートブック**」のリンクも出ません。`docker/.env` にノートブックの値を入れたら、以後の Compose のコマンド（`build`、`up`、`down`）にはすべて `--profile notebook` を付けてください。付けないと、Compose はノートブック用のサービスに手を付けず（更新してもそのイメージはビルドし直されません）、それらを起動しないままだとノートブックの画面に「現在、ノートブックのサービスを利用できません」と表示されます。
 
-設定項目はすべて[設定](configuration.md)（英語）にあります。`docker/.env` では `FIONE_PUBLIC_URL`、`FIONE_NOTEBOOK_URL`、`FIONE_NOTEBOOK_LAUNCHER_SECRET`、`FIONE_NOTEBOOK_PORT`、`FIONE_NOTEBOOK_MAX_LIFETIME_SECS`、ランチャーでは `FIONE_NOTEBOOK_MAX_RUNNING` です。
+設定項目はすべて[設定](configuration.md)（英語）にあります。`docker/.env` で設定するのは `FIONE_PUBLIC_URL`、`FIONE_NOTEBOOK_URL`、`FIONE_NOTEBOOK_LAUNCHER_SECRET`、`FIONE_NOTEBOOK_PORT`、`FIONE_NOTEBOOK_MAX_LIFETIME_SECS`、ランチャーの `FIONE_NOTEBOOK_MAX_RUNNING` です。
 
 ## 構成
 
@@ -102,10 +102,11 @@ export FIONE_TOKEN=fione_...
 | プロセス数 | 512 |
 | ケーパビリティ | なし。`no-new-privileges` |
 | ネットワーク | 内部のみ。インターネットには出られず、Fione へは中継経由だけ |
-| ファイル | ユーザー専用のボリューム |
+| ファイル | ユーザー専用のボリューム（容量の上限なし） |
 
 - **同時に動くノートブック**は、全ユーザーの合計で `FIONE_NOTEBOOK_MAX_RUNNING`（既定 4）までです。超えると「起動中のノートブックが多すぎます」と表示されます。1 つで 2 CPU・4 GiB まで使えるので、許す数に合わせてホストを用意してください。
-- **自動停止：** 30 分使われていないカーネルは停止します（5 分ごとに確認）。実行中のカーネルがなく、1 時間操作がないノートブックは終了し、コンテナも削除されます。
+- **自動停止：** 30 分使われていないカーネルは、JupyterLab のタブで開かれていなければ停止します（5 分ごとに確認）。実行中のカーネルがなく、1 時間操作がないノートブックは終了し、コンテナも削除されます。ノートブックを開いたままの JupyterLab のタブはカーネルを保ち、カーネルが動いている間はノートブックも終了しないため、閉じ忘れたタブがあるとノートブックは寿命まで動き続け、`FIONE_NOTEBOOK_MAX_RUNNING` の枠を 1 つ使い続けます。使い終わったノートブックは停止してください。
+- **ディスク：** ユーザーのボリュームにも、コンテナ自身のファイルにも容量の上限はありません。Docker ホストのディスクを Fione のデータベースやストレージと共有します。
 - **寿命：** ノートブックは、動いていても `FIONE_NOTEBOOK_MAX_LIFETIME_SECS`（既定 12 時間）で終わります。API トークンも一緒に終わります。もう一度画面から起動してください。
 - **外部通信なし：** コードは何もダウンロードできないため、`pip install` は使えません。使えるライブラリはイメージのもの（JupyterLab、pandas、pyarrow、scikit-learn、matplotlib、httpx、`fione-sdk`）だけです。
 
