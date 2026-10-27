@@ -173,6 +173,7 @@ MIGRATIONS: list[str] = [
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX conversations_project_user ON conversations(project_id, user_id);
+    CREATE INDEX conversations_user ON conversations(user_id);
     CREATE TABLE chat_messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -200,6 +201,7 @@ MIGRATIONS: list[str] = [
         decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         decided_at TEXT
     );
+    CREATE INDEX chat_proposals_conversation ON chat_proposals(conversation_id);
     CREATE TABLE llm_sample_optins (
         base_url TEXT PRIMARY KEY,
         enabled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,

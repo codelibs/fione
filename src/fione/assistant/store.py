@@ -20,7 +20,7 @@ MAX_MESSAGE_CHARS = 4000
 MAX_USER_MESSAGES = 100  # per conversation
 MAX_CONVERSATIONS = 100  # per user and project
 MAX_TITLE_CHARS = 80
-_ACTIVE = ("queued", "running")
+TERMINAL_STATES = ("done", "failed", "cancelled")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
@@ -126,17 +126,24 @@ def _dumps(value) -> str:
 def create_conversation(
     conn: sqlite3.Connection, user: User, project_id: str, title: str = ""
 ) -> Conversation:
+    """A new conversation of the user in the project, which the user must be able to read
+    (``ConversationNotFound`` otherwise, also for a project that does not exist)."""
     with db.immediate(conn):
+        if not can_access_project(conn, user, project_id, "read"):
+            raise ConversationNotFound(project_id)
         count = conn.execute(
             "SELECT COUNT(*) FROM conversations WHERE project_id = ? AND user_id = ?",
             (project_id, user.id),
         ).fetchone()[0]
         if count >= MAX_CONVERSATIONS:
             raise LimitReached(f"at most {MAX_CONVERSATIONS} conversations per project")
-        cur = conn.execute(
-            "INSERT INTO conversations (project_id, user_id, title) VALUES (?, ?, ?)",
-            (project_id, user.id, clean_text(title, MAX_TITLE_CHARS)),
-        )
+        try:
+            cur = conn.execute(
+                "INSERT INTO conversations (project_id, user_id, title) VALUES (?, ?, ?)",
+                (project_id, user.id, clean_text(title, MAX_TITLE_CHARS)),
+            )
+        except sqlite3.IntegrityError:  # no such project (an admin passes the access check)
+            raise ConversationNotFound(project_id) from None
     return _conversation(
         conn.execute("SELECT * FROM conversations WHERE id = ?", (cur.lastrowid,)).fetchone()
     )
@@ -239,7 +246,8 @@ def update_message(
     state: str | None = None,
     error_code: str | None = None,
 ) -> None:
-    """Set the given fields (``None`` leaves a field as it is)."""
+    """Set the given fields (``None`` leaves a field as it is). For edits that do not end the
+    message; a turn ends with ``finish_message``, which cannot overwrite an earlier ending."""
     values = {
         "content": content,
         "tool_calls_json": None if tool_calls is None else _dumps(tool_calls),
@@ -249,9 +257,40 @@ def update_message(
     changes = {column: value for column, value in values.items() if value is not None}
     if changes:
         assignments = ", ".join(f"{column} = ?" for column in changes)
-        conn.execute(
-            f"UPDATE chat_messages SET {assignments} WHERE id = ?", (*changes.values(), message_id)
-        )
+        try:
+            conn.execute(
+                f"UPDATE chat_messages SET {assignments} WHERE id = ?",
+                (*changes.values(), message_id),
+            )
+        except sqlite3.IntegrityError:
+            raise ValueError("invalid message state") from None
+
+
+def finish_message(
+    conn: sqlite3.Connection,
+    message_id: int,
+    state: str,
+    *,
+    content: str | None = None,
+    error_code: str | None = None,
+) -> bool:
+    """End a ``queued`` or ``running`` message in a terminal ``state``; true if this call did.
+    Whichever ending lands first wins: a late answer cannot overwrite a cancellation, a
+    timeout or an interruption, nor the other way round."""
+    if state not in TERMINAL_STATES:
+        raise ValueError(f"{state!r} is not a terminal state")
+    sets = ["state = ?"]
+    values = [state]
+    for column, value in (("content", content), ("error_code", error_code)):
+        if value is not None:
+            sets.append(f"{column} = ?")
+            values.append(value)
+    cur = conn.execute(
+        f"UPDATE chat_messages SET {', '.join(sets)}"
+        " WHERE id = ? AND state IN ('queued', 'running')",
+        (*values, message_id),
+    )
+    return cur.rowcount == 1
 
 
 def messages(conn: sqlite3.Connection, conversation_id: int, after_id: int = 0) -> list[Message]:
@@ -319,11 +358,23 @@ def add_proposal(
     config: dict,
     details: dict,
 ) -> Proposal:
-    cur = conn.execute(
-        "INSERT INTO chat_proposals (message_id, conversation_id, dataset_id, config_json,"
-        " details_json) VALUES (?, ?, ?, ?, ?)",
-        (message_id, conversation_id, dataset_id, _dumps(config), _dumps(details)),
-    )
+    """Attach a proposal to an assistant message of the conversation (``ValueError`` for any
+    other message, or one that has a proposal already)."""
+    message = conn.execute(
+        "SELECT conversation_id, role FROM chat_messages WHERE id = ?", (message_id,)
+    ).fetchone()
+    if message is None or message["conversation_id"] != conversation_id:
+        raise ValueError("no such message in the conversation")
+    if message["role"] != "assistant":
+        raise ValueError("only an assistant message carries a proposal")
+    try:
+        cur = conn.execute(
+            "INSERT INTO chat_proposals (message_id, conversation_id, dataset_id, config_json,"
+            " details_json) VALUES (?, ?, ?, ?, ?)",
+            (message_id, conversation_id, dataset_id, _dumps(config), _dumps(details)),
+        )
+    except sqlite3.IntegrityError:
+        raise ValueError("the message has a proposal already") from None
     return _proposal(
         conn.execute("SELECT * FROM chat_proposals WHERE id = ?", (cur.lastrowid,)).fetchone()
     )
@@ -372,8 +423,16 @@ def release_proposal(conn: sqlite3.Connection, proposal_id: int) -> None:
     )
 
 
-def set_proposal_job(conn: sqlite3.Connection, proposal_id: int, job_id: int) -> None:
-    conn.execute("UPDATE chat_proposals SET job_id = ? WHERE id = ?", (job_id, proposal_id))
+def set_proposal_job(conn: sqlite3.Connection, proposal_id: int, job_id: int) -> bool:
+    """Record the job of a claimed proposal, once; true if this call did."""
+    return (
+        conn.execute(
+            "UPDATE chat_proposals SET job_id = ? WHERE id = ? AND state = 'confirmed'"
+            " AND job_id IS NULL",
+            (job_id, proposal_id),
+        ).rowcount
+        == 1
+    )
 
 
 def dismiss_proposal(conn: sqlite3.Connection, proposal_id: int, user_id: int) -> bool:
@@ -392,22 +451,27 @@ def dismiss_proposal(conn: sqlite3.Connection, proposal_id: int, user_id: int) -
 
 def normal_base_url(url: str) -> str:
     """``url`` in the form opt-ins are keyed by: scheme and host in lower case, the default
-    port and any trailing ``/`` removed."""
+    port and any trailing ``/`` removed. ``ValueError`` unless it is an http(s) URL with a host."""
     parts = urlsplit(url.strip())
     scheme = parts.scheme.lower()
     host = (parts.hostname or "").lower()
     if ":" in host:
         host = f"[{host}]"  # an IPv6 literal
+    if scheme not in _DEFAULT_PORTS or not host:
+        raise ValueError("a base URL is http(s)://host[:port][/path]")
     port = parts.port
     netloc = host if port is None or port == _DEFAULT_PORTS.get(scheme) else f"{host}:{port}"
     return f"{scheme}://{netloc}{parts.path.rstrip('/')}"
 
 
 def samples_allowed(conn: sqlite3.Connection, base_url: str) -> bool:
+    """Whether samples may be sent to ``base_url``; a URL that is not one is never allowed."""
+    try:
+        key = normal_base_url(base_url)
+    except ValueError:
+        return False
     return (
-        conn.execute(
-            "SELECT 1 FROM llm_sample_optins WHERE base_url = ?", (normal_base_url(base_url),)
-        ).fetchone()
+        conn.execute("SELECT 1 FROM llm_sample_optins WHERE base_url = ?", (key,)).fetchone()
         is not None
     )
 
