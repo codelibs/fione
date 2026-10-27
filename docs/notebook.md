@@ -116,8 +116,8 @@ notebook has at most the access of the user's role.
 ```python
 from fione_sdk import Client
 
-fione = Client()                      # FIONE_URL and FIONE_TOKEN are already set
-print(fione.projects())               # the projects you can see
+fione = Client()  # FIONE_URL and FIONE_TOKEN are already set
+print(fione.projects())  # the projects you can see
 ```
 
 The notebook's token is made for this notebook. It acts with your role (an administrator's

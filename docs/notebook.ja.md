@@ -69,8 +69,8 @@ Fione は自分の画面の中に JupyterLab を埋め込み、一度だけ使�
 ```python
 from fione_sdk import Client
 
-fione = Client()                      # FIONE_URL と FIONE_TOKEN は設定済み
-print(fione.projects())               # 見えるプロジェクト
+fione = Client()  # FIONE_URL と FIONE_TOKEN は設定済み
+print(fione.projects())  # 見えるプロジェクト
 ```
 
 ノートブックのトークンは、そのノートブックのために作られます。権限はユーザーのロールと同じです（管理者のノートブックは**編集者**として動きます）。ノートブックと一緒に期限切れになり、アカウント、トークン、Python モジュール、モデルのインポート、プロジェクトの共有は操作できません。それ以外の SDK の機能は使えます。データセット（`upload`、`read`、`preview`、`profile`）、`train`、`leaderboard`、`models`、`predict`、`run_module`（既存のモジュールを実行します。アップロードにはフルのトークンが必要です）などです。一通りの使い方は [SDK の README](../sdk/README.md)（英語）を参照してください。
