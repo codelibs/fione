@@ -33,7 +33,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from fione.auth.roles import Role, can_access_project
+from fione.auth.roles import Role, can_access_project, project_access
 from fione.data.profile import (
     SCORE_REASONS,
     ColumnProfile,
@@ -68,6 +68,9 @@ _MESSAGE_CHARS = 200
 _RATIONALE_CHARS = 500
 _EVENT_DEPTH = 3
 _EVENT_LIST = 20
+_MAX_PROJECTS = 50  # listed at most; the size cap may cut more
+_MAX_DATASETS = 200
+_MAX_MODELS = 200
 
 # Event strings that are engine vocabulary rather than user data.
 _EVENT_ENUMS = frozenset(
@@ -119,7 +122,10 @@ def _r(x):
 
 def _authorize(ctx: ToolContext, project_id: str | None) -> None:
     """Raise ``PermissionError``/``ProjectNotFound`` unless the user may read the project; a
-    job without a project is for admins only."""
+    job without a project is for admins only. With ``ctx.project_id`` set, any other project,
+    and a job without one, is refused whoever asks."""
+    if ctx.project_id is not None and project_id != ctx.project_id:
+        raise PermissionError("outside the project of this conversation")
     if project_id is None:
         if ctx.user.role != Role.ADMIN:
             raise PermissionError("admin only")
@@ -717,10 +723,70 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     }
 
 
+# --- listings -------------------------------------------------------------
+
+
+def _listing(key: str, items: list, limit: int) -> dict:
+    """``{key: items}`` cut to ``limit``, saying so when it was."""
+    result = {key: items[:limit]}
+    if len(items) > limit:
+        result["truncated"] = True
+        result["truncated_lists"] = [key]
+    return result
+
+
+def _list_projects(ctx: ToolContext, args: dict) -> dict:
+    readable = [
+        p
+        for p in projects.list_projects(ctx.conn, ctx.user)
+        if ctx.project_id is None or p.id == ctx.project_id
+    ]
+    result = _listing("projects", readable, _MAX_PROJECTS)
+    result["projects"] = [
+        {
+            "id": p.id,
+            "name": clean_text(p.name),
+            # only an admin reaches a project without owning or being a member of it
+            "access": (project_access(ctx.conn, ctx.user, p.id) or Role.ADMIN).value,
+            "n_datasets": projects.count_datasets(ctx.conn, p.id),
+            "n_models": len(models.list_models_brief(ctx.conn, p.id)),
+        }
+        for p in result["projects"]
+    ]
+    return result
+
+
+def _list_datasets(ctx: ToolContext, args: dict) -> dict:
+    _authorize(ctx, args["project_id"])
+    datasets = projects.list_datasets(ctx.conn, args["project_id"])
+    result = _listing("datasets", datasets, _MAX_DATASETS)
+    result["datasets"] = [_dataset_block(d) for d in result["datasets"]]
+    return result
+
+
+def _list_models(ctx: ToolContext, args: dict) -> dict:
+    _authorize(ctx, args["project_id"])
+    records = models.list_models_brief(ctx.conn, args["project_id"])
+    result = _listing("models", records, _MAX_MODELS)
+    result["models"] = [
+        {
+            "id": m.id,
+            "name": clean_text(m.name),
+            "task": m.task,
+            "target": clean_text(m.target),
+            "dataset_id": m.dataset_id,
+            "best_model": clean_text(m.best_model),
+        }
+        for m in result["models"]
+    ]
+    return result
+
+
 # --- registration -----------------------------------------------------------
 
 _ID = {"type": "integer", "minimum": 1, "maximum": 2**63 - 1}  # SQLite integers
 _COLUMN = {"type": "string", "maxLength": 500}
+_PROJECT = {"type": "string", "maxLength": 64}
 
 
 def _schema(properties: dict, required: list[str]) -> dict:
@@ -824,6 +890,28 @@ for _tool in (
         ),
         True,
         _propose_training_config,
+    ),
+    Tool(
+        "list_projects",
+        "The projects the user can read, with the number of datasets and models in each.",
+        _schema({}, []),
+        True,
+        _list_projects,
+    ),
+    Tool(
+        "list_datasets",
+        "The datasets of a project: id, name, type and size.",
+        _schema({"project_id": _PROJECT}, ["project_id"]),
+        True,
+        _list_datasets,
+    ),
+    Tool(
+        "list_models",
+        "The trained models of a project, newest first: id, name, task, target, the dataset "
+        "they were trained on and the best model.",
+        _schema({"project_id": _PROJECT}, ["project_id"]),
+        True,
+        _list_models,
     ),
 ):
     register(_tool)

@@ -15,6 +15,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
@@ -51,6 +52,8 @@ class ToolContext:
     storage: Storage
     user: User
     allow_samples: bool = False  # whether raw cell values may reach the model
+    project_id: str | None = None  # when set, no tool reaches an object of any other project
+    via: Literal["chat", "mcp", "test"] = "test"  # the channel, for the log
 
 
 _TOOLS: dict[str, Tool] = {}
@@ -189,9 +192,10 @@ def call_tool(name: str, args: dict, ctx: ToolContext) -> dict:
         return _cap({"_data_notice": DATA_NOTICE, **_strict(result)})
     finally:
         log.info(
-            "tool=%s user=%s args=%s outcome=%s duration_ms=%d",
+            "tool=%s user=%s via=%s args=%s outcome=%s duration_ms=%d",
             clean_text(name, 40),
             ctx.user.id,
+            ctx.via,
             _log_args(args),
             outcome,
             (time.monotonic() - start) * 1000,
