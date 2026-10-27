@@ -70,6 +70,7 @@ class Server:
     key: bytes
     root: Path  # the contents root
     home: Path
+    config_dir: Path
     data_dir: Path
     log: Path
     expires: int  # FIONE_NB_EXPIRES
@@ -280,6 +281,7 @@ def server(tmp_path_factory):
             key=key,
             root=dirs["work"],
             home=dirs["home"],
+            config_dir=dirs["config"],
             data_dir=dirs["data"],
             log=log,
             expires=int(env["FIONE_NB_EXPIRES"]),
@@ -794,6 +796,49 @@ def test_lab_settings_and_workspaces_are_not_writable(server):
     workspace = c.put(
         "lab/api/workspaces/x", json={"data": {}, "metadata": {"id": "x"}}, headers=_xsrf(c)
     )
-    # Observed: the read-only dirs make both writes fail with a server error.
-    assert (settings.status_code, workspace.status_code) == (500, 500)
+    # Observed: the read-only dirs make both writes fail (a server error); any refusal will do.
+    assert settings.status_code >= 400 and workspace.status_code >= 400
+    assert [p.name for p in server.config_dir.rglob("*")] == ["jupyter_server_config.py"]
     assert not any(server.data_dir.rglob("*"))
+
+
+def test_modules_planted_in_the_working_directory_are_never_imported(tmp_path):
+    """The server's working directory is the user's writable contents root, so Python must
+    never search it: ``-P`` here, and the image's ``jupyter lab`` script puts its own
+    directory first. Covers imports at start and lazy ones (nbconvert on export)."""
+    dirs = _layout(tmp_path)
+    for name in ("config", "data"):
+        dirs[name].chmod(0o555)
+    marker = tmp_path / "imported"
+    for module in ("jupyterlab", "jupyter_server", "fione_notebook", "nbconvert"):
+        (dirs["work"] / module).mkdir()
+        planted = f"open({str(marker)!r}, 'a').write({module!r} + '\\n')\n"
+        (dirs["work"] / module / "__init__.py").write_text(planted)
+    key = os.urandom(32)
+    env = _server_env(dirs, key)
+    log = tmp_path / "server.log"
+    proc, port = _launch(env, dirs["work"], log)
+    try:
+        server = Server(
+            origin=f"http://127.0.0.1:{port}",
+            url=f"http://127.0.0.1:{port}{BASE}",
+            ws_url=f"ws://127.0.0.1:{port}{BASE}",
+            key=key,
+            root=dirs["work"],
+            home=dirs["home"],
+            config_dir=dirs["config"],
+            data_dir=dirs["data"],
+            log=log,
+            expires=int(env["FIONE_NB_EXPIRES"]),
+        )
+        c = server.login()
+        notebook = {"type": "notebook", "content": {"cells": [], "metadata": {}}}
+        notebook["content"] |= {"nbformat": 4, "nbformat_minor": 5}
+        assert c.put("api/contents/n.ipynb", json=notebook, headers=_xsrf(c)).status_code == 201
+        converted = c.get("nbconvert/html/n.ipynb", headers={"Referer": f"{server.url}lab"})
+        assert converted.status_code == 200
+    finally:
+        _stop(proc)
+        for name in ("config", "data"):
+            dirs[name].chmod(0o755)
+    assert not marker.exists(), marker.read_text()
