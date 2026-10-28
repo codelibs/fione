@@ -181,7 +181,7 @@ class _Turn:
             project_id, user = self._authorize()
             if not store.update_message(self.conn, self.row, state="running"):
                 raise _Stop()
-            completion = self._complete(project_id, first)
+            completion = self._complete(project_id, first, refresh=rounds == 0)
             content = completion.content[:MAX_CONTENT_CHARS]
             if not completion.tool_calls:
                 store.finish_message(self.conn, self.row, "done", content=content)
@@ -202,18 +202,39 @@ class _Turn:
             raise _Failed("forbidden")
         return row["project_id"], user
 
-    def _complete(self, project_id: str, first: int) -> Completion:
+    def _complete(self, project_id: str, first: int, *, refresh: bool) -> Completion:
         rows = store.messages(self.conn, self.conversation_id)
         project = projects.require_project(self.conn, project_id)
         tools = list_tools()
-        messages = build_messages(
-            system_prompt(self.language, project_id, project.name),
-            [m for m in rows if m.id < first],
-            [m for m in rows if m.id >= first],
-            budget_bytes(self.monitor.effective_context(), self.settings.llm_max_tokens, tools),
-        )
+        system = system_prompt(self.language, project_id, project.name)
+
+        def build(context: int) -> list[dict]:
+            return build_messages(
+                system,
+                [m for m in rows if m.id < first],
+                [m for m in rows if m.id >= first],
+                budget_bytes(context, self.settings.llm_max_tokens, tools),
+            )
+
+        if refresh or not self.monitor.context_known():  # the server may have restarted
+            self._bounded(self.monitor.refresh_context)
+        if not self.monitor.context_known():
+            wanted = build(self.settings.llm_context_tokens)
+            fallback = self.monitor.effective_context()
+            if size(wanted) > budget_bytes(fallback, self.settings.llm_max_tokens, tools):
+                # Ollama reports a model's context once it is loaded: load it, then ask
+                self._bounded(lambda: self.monitor.load_model(self._abandoned))
+                self._bounded(self.monitor.refresh_context)
+                if not self.monitor.context_known():
+                    log.warning(
+                        "assistant request conversation=%d: the server's context is unknown,"
+                        " so the request is sized for %d tokens and leaves out what does not fit",
+                        self.conversation_id,
+                        fallback,
+                    )
+        messages = build(self.monitor.effective_context())
         completion = self._stream(messages, tools)
-        self.monitor.refresh_context()
+        self._bounded(self.monitor.refresh_context)
         log.info(
             "assistant request conversation=%d request_bytes=%d prompt_tokens=%s",
             self.conversation_id,
@@ -221,6 +242,33 @@ class _Turn:
             completion.prompt_tokens,
         )
         return completion
+
+    def _abandoned(self) -> bool:
+        return self.cancel.is_set() or time.monotonic() >= self.deadline
+
+    def _bounded(self, work):
+        """``work()`` in a thread of its own, left to end by itself at a cancel or the
+        deadline (an HTTP call can stall past its timeouts)."""
+        done = threading.Event()
+        outcome: dict = {}
+
+        def run() -> None:
+            try:
+                outcome["value"] = work()
+            except BaseException as e:  # handed to the turn
+                outcome["error"] = e
+            finally:
+                done.set()
+
+        threading.Thread(target=run, name="llm-provider", daemon=True).start()
+        while not done.wait(_POLL_SECS):
+            if self.cancel.is_set():
+                raise LlmError("cancelled", "the turn was cancelled")
+            if time.monotonic() >= self.deadline:
+                raise LlmError("timeout", "the LLM server did not answer in time")
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome.get("value")
 
     def _stream(self, messages: list[dict], tools: list[dict]) -> Completion:
         """One completion, in a thread of its own: the client may not return at the deadline

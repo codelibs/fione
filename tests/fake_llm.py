@@ -105,6 +105,8 @@ class FakeLlm:
         self.port = port
         self.pull_error = pull_error  # the pull stops with this error line after its first step
         self.pull_garbage = pull_garbage  # bytes with no newline sent as a pull's first line
+        self.generate_status = 200  # of POST /api/generate, which loads the model
+        self.generate_delay = 0.0  # seconds before it answers: the time a model takes to load
         self.raw_replies: dict[str, bytes] = {}  # GET path -> body sent instead of the usual
         self.paths: list[str] = []  # "METHOD /path" of every request
         self.requests: list[dict] = []  # every chat body
@@ -165,6 +167,14 @@ class FakeLlm:
                 {"name": self._served, "model": self._served, "context_length": self.context_length}
             ]
 
+    def load(self, model) -> None:
+        with self._lock:
+            self._served = model
+
+    def unload(self) -> None:
+        """Forget the loaded model, as a restarted server would."""
+        self.load(None)
+
     def installed_models(self) -> list[dict]:
         with self._lock:
             return [{"name": name, "model": name} for name in self.models]
@@ -215,6 +225,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._chat(body, self.llm.record_chat(body, headers))
         elif path == "/api/pull":
             self._pull(body)
+        elif path == "/api/generate":
+            time.sleep(self.llm.generate_delay)
+            if self.llm.generate_status != 200:
+                return self._json({"error": "model failed to load"}, self.llm.generate_status)
+            self.llm.load(body.get("model"))
+            self._json({"model": body.get("model"), "response": "", "done": True})
         else:
             self._json({"error": "not found"}, 404)
 

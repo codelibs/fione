@@ -31,7 +31,7 @@ from fione.assistant.store import LimitReached, TurnBusy
 from fione.assistant.turns import LlmUnavailable, TurnManager, run_turn
 from fione.auth import service as auth
 from fione.auth.roles import ProjectAccess, Role
-from fione.config import MIN_LLM_CONTEXT_TOKENS
+from fione.config import MIN_PROMPT_TOKENS
 from fione.projects import ingest
 from fione.projects import service as projects
 from fione.projects.service import DatasetType
@@ -440,6 +440,21 @@ def test_a_stalled_server_is_abandoned_at_the_turn_deadline(env):
     assert (last.state, last.error_code) == ("failed", "timeout")
 
 
+def test_a_stalled_ollama_server_is_abandoned_at_the_turn_deadline(env):
+    """The context check before the first request is held to the deadline too."""
+    drip = _HeaderDrip()
+    try:
+        settings = make_settings(env.tmp / "data", llm_base_url=drip.url, llm_provider="ollama")
+        settings = settings.model_copy(update={"llm_turn_timeout_secs": 1})
+        worker = in_thread(start(env, settings))
+        worker.join(timeout=5)
+        assert not worker.is_alive(), "the turn waited for the stalled server"
+    finally:
+        drip.stop()
+    last = store.messages(env.conn, env.conversation.id)[-1]
+    assert (last.state, last.error_code) == ("failed", "timeout")
+
+
 def test_a_stalled_server_does_not_hold_up_a_cancel(env):
     drip = _HeaderDrip()
     try:
@@ -651,14 +666,14 @@ def test_context_too_small(env, fake_llm):
 
 
 def test_the_smallest_context_fits_a_question():
-    """At the floor of FIONE_LLM_CONTEXT_TOKENS and the fewest reply tokens, the tools, the
-    longest system prompt and a short question fit; a little below it, nothing does. A tool
-    set that grows needs a higher floor."""
+    """With MIN_PROMPT_TOKENS of room after the reply, the tools, the longest system prompt
+    and a short question fit; a little less, and nothing does. A tool set that grows needs a
+    higher floor."""
     system = prompt.system_prompt("ja", "p" * 40 + "-abcdef", "名" * 200)
     request = [{"role": "system", "content": system}, {"role": "user", "content": "?" * 64}]
-    assert size(request) <= budget_bytes(MIN_LLM_CONTEXT_TOKENS, 64, list_tools())
+    assert size(request) <= budget_bytes(MIN_PROMPT_TOKENS + 1024, 1024, list_tools())
     request = request[:1] + [{"role": "user", "content": "?"}]
-    assert size(request) > budget_bytes(MIN_LLM_CONTEXT_TOKENS - 80, 64, list_tools())
+    assert size(request) > budget_bytes(MIN_PROMPT_TOKENS - 80 + 1024, 1024, list_tools())
 
 
 def test_ollama_context_is_learned(env, fake_llm, monkeypatch):
@@ -675,8 +690,82 @@ def test_ollama_context_is_learned(env, fake_llm, monkeypatch):
     )
     settings = settings_for(env, fake, llm_provider="ollama", llm_max_tokens=256)
     rows = turn(env, settings)
-    assert contexts == [4096, 8192]
+    # round 1 at the fallback (the short question needs no model load), round 2 learned
+    assert contexts[-2:] == [4096, 8192]
+    assert "POST /api/generate" not in fake.paths
     assert rows[-1].state == "done"
+
+
+QUESTION_JA = "この列で種類を最もよく予測できるのはどれですか。" * 12  # about 300 characters
+
+
+def test_an_unknown_context_loads_the_model_first(env, fake_llm):
+    """Ollama reports a model's context only once it is loaded: a first question too long for
+    the 4096 fallback loads the model, learns its context and is sent whole."""
+    assert len(QUESTION_JA.encode()) > budget_bytes(4096, 1024, list_tools()) - 560
+    fake = fake_llm([{"text": "ok"}], context_length=16384)
+    settings = settings_for(env, fake, llm_provider="ollama")
+    monitor = LlmMonitor(settings)
+    env.monitors.append(monitor)
+    rows = turn(env, settings, QUESTION_JA, monitor=monitor)
+    assert (rows[-1].state, rows[-1].content) == ("done", "ok")
+    assert fake.paths.index("POST /api/generate") < fake.paths.index("POST /v1/chat/completions")
+    assert fake.requests[0]["messages"][-1]["content"] == QUESTION_JA
+    assert monitor.snapshot().server_context == 16384
+
+
+def test_an_unknown_context_that_stays_unknown_is_logged(env, fake_llm, caplog):
+    fake = fake_llm([{"text": "ok"}], context_length=16384)
+    fake.generate_status = 500
+    fake.raw_replies["/api/ps"] = b'{"models": []}'  # nothing ever loads
+    settings = settings_for(env, fake, llm_provider="ollama", llm_max_tokens=256)
+    turn(env, settings, "x" * 1000)
+    turn(env, settings, "y" * 1000)  # the first turn is history that no longer fits
+    assert "sized for 4096 tokens" in caplog.text
+    assert size(fake.requests[-1]["messages"]) <= budget_bytes(4096, 256, list_tools())
+
+
+def test_the_context_follows_the_server_down(env, fake_llm, monkeypatch):
+    contexts = []
+
+    def spy(context_tokens, max_tokens, tools):
+        contexts.append(context_tokens)
+        return budget_bytes(context_tokens, max_tokens, tools)
+
+    monkeypatch.setattr(turns, "budget_bytes", spy)
+    fake = fake_llm([{"text": "a" * 3000}, {"text": "ok"}, {"text": "ok"}], context_length=8192)
+    settings = settings_for(env, fake, llm_provider="ollama", llm_max_tokens=256)
+    monitor = LlmMonitor(settings)
+    env.monitors.append(monitor)
+    turn(env, settings, monitor=monitor)
+    assert monitor.snapshot().server_context == 8192
+
+    fake.context_length = 4096  # restarted with a smaller context, the model loaded again
+    contexts.clear()
+    turn(env, settings, monitor=monitor)
+    assert contexts[-1] == 4096
+    assert size(fake.requests[-1]["messages"]) <= budget_bytes(4096, 256, list_tools())
+
+    fake.unload()  # restarted again: nothing loaded, so nothing known
+    fake.context_length = 4096
+    monitor._update(server_context=8192)  # what a monitor learned before the restart
+    contexts.clear()
+    turn(env, settings, monitor=monitor)
+    assert "POST /api/generate" in fake.paths
+    assert contexts[-1] == 4096 and monitor.snapshot().server_context == 4096
+    assert size(fake.requests[-1]["messages"]) <= budget_bytes(4096, 256, list_tools())
+
+
+def test_a_slow_model_load_ends_at_the_turn_deadline(env, fake_llm):
+    fake = fake_llm(context_length=16384)
+    fake.generate_delay = 5
+    settings = settings_for(env, fake, llm_provider="ollama")
+    settings = settings.model_copy(update={"llm_turn_timeout_secs": 1})
+    began = time.monotonic()
+    rows = turn(env, settings, QUESTION_JA)
+    assert time.monotonic() - began < 3
+    assert (rows[-1].state, rows[-1].error_code) == ("failed", "timeout")
+    assert fake.requests == []
 
 
 def m(id_, role, content="", *, state="done", calls=None, call_id=None):
@@ -768,6 +857,9 @@ class StubMonitor:
 
     def effective_context(self):
         return self.context
+
+    def context_known(self):
+        return True
 
     def refresh_context(self):
         pass

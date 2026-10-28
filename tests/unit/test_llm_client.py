@@ -12,7 +12,7 @@ from api_helpers import make_settings
 from fake_llm import FakeLlm
 from fione.assistant import client as client_module
 from fione.assistant.client import ChatClient, Completion, LlmError, ToolCall, _Reply
-from fione.config import MIN_LLM_CONTEXT_TOKENS
+from fione.config import MIN_PROMPT_TOKENS
 
 KEY = "sk-test-0123456789"
 HELLO = [{"role": "user", "content": "hello"}]
@@ -278,18 +278,22 @@ def test_settings_rules(tmp_path, monkeypatch):
         {"llm_model": "é"},
         {"llm_model": "m" * 201},
         {"llm_max_tokens": 63},
-        {"llm_context_tokens": MIN_LLM_CONTEXT_TOKENS - 1},
+        {"llm_context_tokens": MIN_PROMPT_TOKENS + 1024 - 1},
+        {"llm_context_tokens": MIN_PROMPT_TOKENS + 8192 - 1, "llm_max_tokens": 8192},
         {"llm_api_key": "bad\nkey"},
     ):
         with pytest.raises(ValidationError):
             check(**bad)
     assert check(llm_model="m" * 200).llm_model == "m" * 200
     with pytest.raises(ValidationError) as raised:
-        check(llm_context_tokens=2048)
+        check(llm_context_tokens=4000)  # less the default 1024 reply tokens: too little room
     text = str(raised.value)
-    assert "FIONE_LLM_CONTEXT_TOKENS" in text and str(MIN_LLM_CONTEXT_TOKENS) in text
-    assert "4096" in text and "OLLAMA_CONTEXT_LENGTH=16384" in text
-    assert check(llm_context_tokens=MIN_LLM_CONTEXT_TOKENS).llm_context_tokens == 3072
+    assert "FIONE_LLM_CONTEXT_TOKENS" in text and "FIONE_LLM_MAX_TOKENS" in text
+    assert str(MIN_PROMPT_TOKENS) in text and "OLLAMA_CONTEXT_LENGTH=16384" in text
+    assert check(llm_context_tokens=MIN_PROMPT_TOKENS + 1024).llm_context_tokens == 4032
+    assert check(llm_context_tokens=MIN_PROMPT_TOKENS + 64, llm_max_tokens=64).llm_max_tokens == 64
+    defaults = check()
+    assert defaults.llm_context_tokens - defaults.llm_max_tokens >= MIN_PROMPT_TOKENS
 
     settings = check(llm_base_url="https://api.example.com/v1/", llm_provider="ollama")
     assert settings.llm_base_url == "https://api.example.com/v1"

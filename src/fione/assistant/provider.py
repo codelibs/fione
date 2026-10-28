@@ -36,6 +36,8 @@ MAX_BODY_BYTES = 4 * 2**20  # of /api/tags and /api/ps
 MAX_PULL_LINE_BYTES = 64 * 1024  # a progress line is about 200 bytes
 _BAD_ANSWER = (ValueError, RecursionError)  # JSON that is not JSON, too deep, or of the wrong shape
 PULL_READ_TIMEOUT_SECS = 120.0  # a pull reports progress much more often than this
+LOAD_READ_TIMEOUT_SECS = 120.0  # loading a large model takes a while
+MAX_LOAD_ANSWER_BYTES = 64 * 1024
 _SINGLE_LABEL = re.compile(r"[a-z][a-z0-9_-]*")  # not a number in disguise (3232235781, 0xc0...)
 
 
@@ -152,21 +154,57 @@ class LlmMonitor:
         known = self.snapshot().server_context
         return min(limit, OLLAMA_DEFAULT_CONTEXT if known is None else known)
 
+    def context_known(self) -> bool:
+        """False while Ollama has not reported the context of the loaded model."""
+        return not self._ollama or self.snapshot().server_context is not None
+
     def refresh_context(self) -> None:
-        """Read the loaded model's context from ``/api/ps``; any failure, or an answer that
-        does not make sense, keeps the old value."""
+        """Read the loaded model's context from ``/api/ps``. When the model is not loaded, the
+        context is unknown again: the server may have restarted with another one. Any
+        failure, or an entry that does not make sense, keeps the old value."""
         if not self._ollama:
             return
         try:
             entries = self._get_models("/api/ps")
         except (httpx.HTTPError, RuntimeError, *_BAD_ANSWER):
             return
-        for entry in entries:
-            if isinstance(entry, dict) and self._is_model(entry.get("name"), entry.get("model")):
-                context = entry.get("context_length")
-                if _is_count(context) and context > 0:
-                    self._update(server_context=context)
-                    return
+        mine = [
+            e
+            for e in entries
+            if isinstance(e, dict) and self._is_model(e.get("name"), e.get("model"))
+        ]
+        for entry in mine:
+            context = entry.get("context_length")
+            if _is_count(context) and context > 0:
+                self._update(server_context=context)
+                return
+        if not mine:
+            self._update(server_context=None)
+
+    def load_model(self, cancelled=lambda: False) -> bool:
+        """Ask Ollama to load the model (``/api/generate`` with no prompt), so that
+        ``/api/ps`` reports its context; whether it answered that it did. Never raises, but
+        may take long: callers bound it."""
+        if not self._ollama:
+            return False
+        size = 0
+        try:
+            with self._http.stream(
+                "POST",
+                f"{self._root}/api/generate",
+                json={"model": self._model},
+                headers=self._headers,
+                timeout=self._timeout(LOAD_READ_TIMEOUT_SECS),
+            ) as response:
+                response.raise_for_status()
+                for part in response.iter_bytes():
+                    size += len(part)
+                    if size > MAX_LOAD_ANSWER_BYTES or cancelled():
+                        return False
+            return True
+        except Exception:  # a closed client or a server error: not loaded
+            log.warning("loading the LLM model on %s failed", self._status.host)
+            return False
 
     def pull_now(self) -> bool:
         """Start pulling the model in the background; false when a pull is already running

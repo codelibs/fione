@@ -12,8 +12,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 MIN_SETUP_TOKEN_LENGTH = 16
 MIN_LAUNCHER_SECRET_LENGTH = 32  # as the launcher requires
-# The assistant's tools and system prompt take about 2,900 tokens: below this, no question fits.
-MIN_LLM_CONTEXT_TOKENS = 3072
+# The room a request needs besides the reply: the assistant's tools and longest system prompt
+# take about 2,940 tokens (at 2 bytes per token), and a short question the rest.
+MIN_PROMPT_TOKENS = 3008
 _VISIBLE_ASCII = re.compile(r"[\x21-\x7e]+")  # it travels in an HTTP header
 # scheme://host[:port] with dot-separated labels: what the launcher accepts as Fione's origin.
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
@@ -162,11 +163,13 @@ class Settings(BaseSettings):
             raise ValueError("FIONE_LLM_API_KEY must be visible ASCII characters")
         if not _LLM_MODEL.fullmatch(self.llm_model):
             raise ValueError("FIONE_LLM_MODEL must be 1 to 200 visible ASCII characters")
-        if self.llm_context_tokens < MIN_LLM_CONTEXT_TOKENS:
+        if self.llm_context_tokens - self.llm_max_tokens < MIN_PROMPT_TOKENS:
             raise ValueError(
-                f"FIONE_LLM_CONTEXT_TOKENS must be at least {MIN_LLM_CONTEXT_TOKENS}. Even 4096,"
-                " Ollama's default, is too small for the assistant's tools: use 16384, and set"
-                " OLLAMA_CONTEXT_LENGTH=16384 on the Ollama server (Compose does)"
+                "FIONE_LLM_CONTEXT_TOKENS less FIONE_LLM_MAX_TOKENS must be at least"
+                f" {MIN_PROMPT_TOKENS}, the room the assistant's tools and instructions need."
+                " Even 4096, Ollama's default context, is too small for the tools: use"
+                " FIONE_LLM_CONTEXT_TOKENS=16384, and set OLLAMA_CONTEXT_LENGTH=16384 on the"
+                " Ollama server (Compose's ollama profile does; set it for an Ollama on the host)"
             )
         if self.llm_extra_body is None:
             self.llm_extra_body = (
