@@ -31,7 +31,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Literal
 
-DEFAULT_MODEL = "gemma4:12b"
+DEFAULT_MODEL = "gemma4:12b-mlx"  # Fione's default
 _FAKE_CALL = re.compile(r"FAKE_CALL:([A-Za-z_][A-Za-z0-9_]*):")
 
 

@@ -36,7 +36,7 @@ Rulings (each with its reason):
 - **Thinking off, verified.** Provider `ollama` sends `"reasoning_effort": "none"`. Ollama 0.40.4's `docs/api/openai-compatibility.mdx` says `"none"` requests no thinking output; `tool_choice` is unsupported there, so it is never sent. Other providers use `FIONE_LLM_EXTRA_BODY`. The opt-in real-model test (Task 5) pins the behaviour.
 - **Context window.** Ollama's default context is 4096 tokens (Ollama FAQ, v0.40.4), and an overflow is truncated silently.
   - `server/prompt.go` (`chatPrompt`) keeps the system messages and the latest message and drops the oldest others. So what is lost is the user's question and the round's earlier tool results, not the system prompt.
-  - Compose sets `OLLAMA_CONTEXT_LENGTH=16384`, and the docs tell host-native users (the Mac default) to set it too.
+  - Compose's `ollama` service sets `OLLAMA_CONTEXT_LENGTH=16384`, and the docs tell host-native users (the default) to set it too.
   - Fione never relies on the server's truncation. Every request fits the **effective context**: the smaller of `FIONE_LLM_CONTEXT_TOKENS` and, for Ollama, the loaded model's `context_length` from `GET /api/ps`. Until `/api/ps` reports it, Fione assumes Ollama's documented 4096.
   - Size is estimated from UTF-8 bytes at `BYTES_PER_TOKEN = 2.0`. That is conservative for Japanese text (3 bytes per character) and for digit-heavy statistics JSON. The real-model step calibrates it (Task 5).
   - The system page warns when the server's context is below the setting (Task 4).
@@ -120,7 +120,7 @@ docs/{assistant.md,assistant.ja.md,configuration.md,known-limitations.md,...}
 | `llm_base_url` | `str \| None = None` | `http(s)://host[:port][/path]`, no query or fragment, trailing `/` stripped. `None` = assistant off |
 | `llm_provider` | `Literal["openai","ollama"] = "openai"` | `ollama`: the path must end in `/v1` |
 | `llm_api_key` | `SecretStr \| None = None` | never logged, never in `repr`, never shown |
-| `llm_model` | `str = "gemma4:12b"` | 1–200 visible ASCII characters |
+| `llm_model` | `str = "gemma4:12b-mlx"` | 1–200 visible ASCII characters. MLX needs a host-native Ollama on Apple Silicon; elsewhere `gemma4:12b` |
 | `llm_extra_body` | `dict \| None = None` (JSON) | merged into every request. The keys `model`, `messages`, `tools`, `stream`, `stream_options` and `max_tokens` are refused. `None` → `{"reasoning_effort": "none"}` for `ollama`, `{}` for `openai` |
 | `llm_max_tokens` | `int = Field(1024, ge=64, le=8192)` | per completion |
 | `llm_context_tokens` | `int = Field(16384, ge=2048, le=262144)` | the request budget (Task 5) |
@@ -288,7 +288,7 @@ CREATE TABLE llm_sample_optins (
 
 **Files:**
 - Create: `src/fione/assistant/provider.py`
-- Modify: `src/fione/config.py` (`llm_auto_pull: bool = True`), `src/fione/api/app.py` (lifespan), `src/fione/api/routes_system.py`, `src/fione/web/admin_ui.py`, `src/fione/web/templates/admin_system.html` (and `_system_status.html` if the card is polled there), `src/fione/i18n/{en,ja}.json`, `docs/configuration.md`, `tests/api/test_jobs_models_api.py` (its `body["ollama"]` assertion becomes the new `llm` shape)
+- Modify: `src/fione/config.py` (`llm_auto_pull: bool = False`: a host Ollama is the user's, so an administrator pulls with the system page's button; the Compose `ollama` profile turns it on), `src/fione/api/app.py` (lifespan), `src/fione/api/routes_system.py`, `src/fione/web/admin_ui.py`, `src/fione/web/templates/admin_system.html` (and `_system_status.html` if the card is polled there), `src/fione/i18n/{en,ja}.json`, `docs/configuration.md`, `tests/api/test_jobs_models_api.py` (its `body["ollama"]` assertion becomes the new `llm` shape)
 - Test: `tests/unit/test_llm_provider.py`, `tests/web/test_admin_ui.py`, `tests/web/test_routes.py`
 
 **Interfaces:**
@@ -319,7 +319,7 @@ CREATE TABLE llm_sample_optins (
 
 - [ ] **Step 1: Write the failing tests** (`tests/unit/test_llm_provider.py`).
   - `test_is_local_url`, parametrized: `http://localhost:11434/v1`, `http://127.0.0.1/v1`, `http://[::1]:1/v1`, `http://ollama:11434/v1` and `http://host.docker.internal:11434/v1` → True. `http://192.168.1.5/v1`, `http://10.0.0.2/v1`, `https://api.example.com/v1` and `http://localhost.example.com/v1` → False.
-  - `test_missing_model_is_pulled_with_progress`: `FakeLlm(models=[], pull_steps=3, pull_delay=0.2)` → the snapshots go `missing`/`pulling` (with `0 < completed < total` at least once) and end `ready`.
+  - `test_missing_model_is_pulled_with_progress`: `FakeLlm(models=[], pull_steps=3, pull_delay=0.2)` with `llm_auto_pull=True` → the snapshots go `missing`/`pulling` (with `0 < completed < total` at least once) and end `ready`.
   - `test_no_auto_pull_leaves_missing`, `test_unreachable_then_recovers` (start the fake after the monitor), `test_pull_error_is_a_code_not_text` and `test_pull_now_is_single_flight`.
   - `test_effective_context`: `ollama` before any `/api/ps` → 4096. After `refresh_context` against `FakeLlm(context_length=8192)` (after one chat request) → 8192 with `llm_context_tokens=16384`, and 16384 with `FakeLlm(context_length=32768)`. `openai` → `llm_context_tokens`.
   - `test_openai_provider_is_ready_without_probing`: `FakeLlm.requests` is empty and the `/api/*` endpoints were not hit.
@@ -562,12 +562,12 @@ CREATE TABLE llm_sample_optins (
   - `environment: {OLLAMA_CONTEXT_LENGTH: "16384"}`, `volumes: [ollama-data:/root/.ollama]`, `networks: [llm]`, `restart: unless-stopped`.
   - No `ports`. A healthcheck: `["CMD", "ollama", "list"]`.
 - Produces on `fione`:
-  - Environment: `FIONE_LLM_BASE_URL: ${FIONE_LLM_BASE_URL:-http://ollama:11434/v1}`, `FIONE_LLM_PROVIDER: ${FIONE_LLM_PROVIDER:-ollama}`, `FIONE_LLM_MODEL: ${FIONE_LLM_MODEL:-gemma4:12b}`, `FIONE_LLM_API_KEY: ${FIONE_LLM_API_KEY:-}`, `FIONE_LLM_AUTO_PULL: ${FIONE_LLM_AUTO_PULL:-true}` and `FIONE_MCP_ENABLED: ${FIONE_MCP_ENABLED:-false}`.
-  - `networks` adds `llm`, and `extra_hosts: ["host.docker.internal:host-gateway"]`, for host-native Ollama on Linux. No `depends_on: ollama`.
+  - Environment: `FIONE_LLM_BASE_URL: ${FIONE_LLM_BASE_URL:-http://host.docker.internal:11434/v1}`, `FIONE_LLM_PROVIDER: ${FIONE_LLM_PROVIDER:-ollama}`, `FIONE_LLM_MODEL: ${FIONE_LLM_MODEL:-gemma4:12b-mlx}`, `FIONE_LLM_API_KEY: ${FIONE_LLM_API_KEY:-}`, `FIONE_LLM_AUTO_PULL: ${FIONE_LLM_AUTO_PULL:-false}` and `FIONE_MCP_ENABLED: ${FIONE_MCP_ENABLED:-false}`. The default is an Ollama on the host, which Fione reaches over its API (MLX models need a host-native Ollama on Apple Silicon).
+  - `networks` adds `llm`, and `extra_hosts: ["host.docker.internal:host-gateway"]`, so the default base URL reaches the host on Linux too. No `depends_on: ollama`.
 - Produces in the top level of `compose.yaml`: `volumes: ollama-data`, and `networks: llm:`, which is not internal because the model pull needs egress. Only `fione` and `ollama` are on it. Ollama never joins `backend`, whose SeaweedFS ports have no credentials.
 - Produces in `docker/.env.example`:
-  - `COMPOSE_PROFILES=ollama`, uncommented, as the Linux default.
-  - A commented "macOS: use the Ollama app on the host" block: remove the `COMPOSE_PROFILES` line, then `FIONE_LLM_BASE_URL=http://host.docker.internal:11434/v1` and `FIONE_LLM_MODEL=gemma4:12b-mlx`.
+  - The default (no lines needed): the Ollama app on the host with `gemma4:12b-mlx`, pulled from the system page.
+  - A commented "Linux, or no Ollama on the host: run Ollama in Compose" block: `COMPOSE_PROFILES=ollama`, `FIONE_LLM_BASE_URL=http://ollama:11434/v1`, `FIONE_LLM_MODEL=gemma4:12b` and `FIONE_LLM_AUTO_PULL=true`.
   - Commented `FIONE_LLM_API_KEY=` and `FIONE_MCP_ENABLED=true`.
 - Produces in `compose.e2e.yaml`:
   - A `fake-llm` service: `image: python:3.12.15-slim-trixie`, `command: ["python", "/fake/fake_llm.py", "--port", "11434", "--policy", "e2e", "--missing"]`, `volumes: ["../tests/fake_llm.py:/fake/fake_llm.py:ro"]`, `networks: [llm]`, a Python `urlopen` healthcheck of `/api/version`, and `restart: "no"`.
@@ -578,7 +578,7 @@ CREATE TABLE llm_sample_optins (
   - `test_network_membership` now expects fione's networks to be `{"backend", "gateway", "launcher", "llm"}`, the members of `llm` to be `{"fione", "ollama"}`, and `llm` not to be internal. Ollama is not on `backend`.
   - `test_ollama_is_pinned_private_and_optional`: an exact `x.y.z` tag; no `ports`; `profiles == ["ollama"]`; `OLLAMA_CONTEXT_LENGTH == "16384"`; and `fione` has no `depends_on` on it.
   - `test_fione_reaches_the_host`: `extra_hosts` holds `host.docker.internal:host-gateway`.
-  - `test_env_example_enables_the_ollama_profile`: a line exactly `COMPOSE_PROFILES=ollama`.
+  - `test_env_example_offers_the_ollama_profile`: a commented block with `COMPOSE_PROFILES=ollama`, `FIONE_LLM_BASE_URL=http://ollama:11434/v1`, `FIONE_LLM_MODEL=gemma4:12b` and `FIONE_LLM_AUTO_PULL=true`; the defaults in `compose.yaml` are the host URL, `gemma4:12b-mlx` and auto-pull `false`.
   - `test_e2e_uses_the_fake_llm`: the overlay's fake service mounts `tests/fake_llm.py` read-only, with no `ports`.
   - `test_docs_list_every_compose_and_serving_variable` passes once the rows exist.
 - [ ] **Step 2: Write the docker test** `tests/docker/test_compose_profiles.py`. It writes a temp env file holding the two S3 keys and `COMPOSE_PROFILES=ollama`, then runs `docker compose --env-file <it> -f docker/compose.yaml config --services` → `ollama` is listed. Without that line → not listed. If Compose ignores `COMPOSE_PROFILES` in an `--env-file`, **stop and report**: the open decision on how Ollama is enabled must then be settled first.
@@ -630,7 +630,7 @@ CREATE TABLE llm_sample_optins (
 - Modify: `README.md`, `README.ja.md`, `docs/known-limitations.md` (en and the Japanese summary), `docs/quickstart.md`, `docs/quickstart.ja.md` (a link), `docs/migrating-from-v1.md`, `docs/migrating-from-v1.ja.md` (the "planned" LLM assistant and MCP become shipped; grep every doc for "planned" and "Ollama")
 
 - [ ] **Step 1: Write the assistant guide** (`docs/assistant.md`, with the same sections in Japanese):
-  - **Enabling.** Linux uses Compose's `ollama` profile. On macOS, use the Ollama app on the host with `gemma4:12b-mlx`, and set `OLLAMA_CONTEXT_LENGTH=16384` for it. Other OpenAI-compatible servers (llama.cpp, vLLM, cloud) need `FIONE_LLM_EXTRA_BODY` to turn thinking off.
+  - **Enabling.** The default is an Ollama on the host with `gemma4:12b-mlx` (MLX: host-native Ollama on Apple Silicon only); set `OLLAMA_CONTEXT_LENGTH=16384` for it, and pull the model with the system page's button. On Linux, or without a host Ollama, use Compose's `ollama` profile, which runs `gemma4:12b` and pulls it by itself. Other OpenAI-compatible servers (llama.cpp, vLLM, cloud) need `FIONE_LLM_EXTRA_BODY` to turn thinking off.
   - **The first start.** The download size (about 8 GB) and the progress on the system page.
   - **What is sent.** Schema and statistics; the sample opt-in; the remote warning.
   - **Proposals and confirmation.**
@@ -656,8 +656,8 @@ CREATE TABLE llm_sample_optins (
 ## Self-Review Notes
 
 - **Spec coverage (9 and related):**
-  - Ollama on by default, through the `.env.example` profile line: Task 9.
-  - The Mac host-native `gemma4:12b-mlx` and the non-MLX `gemma4:12b`: Tasks 9 and 11.
+  - Ollama on by default: a host Ollama through Compose's default base URL, or the `ollama` profile: Task 9.
+  - The host-native `gemma4:12b-mlx` default and the non-MLX `gemma4:12b` of the `ollama` profile: Tasks 9 and 11.
   - Pull progress, with the UI usable while pulling: Tasks 4 and 6.
   - The OpenAI-compatible client with configurable `base_url`/`api_key`/`model`: Task 1.
   - Typed read tools (11, flat): Task 2.
@@ -695,8 +695,8 @@ CREATE TABLE llm_sample_optins (
 
 ## Open decisions for the maintainer
 
-1. **How Ollama is on by default.** Recommended: the Compose profile `ollama`, enabled by `COMPOSE_PROFILES=ollama` in `.env.example`. Mac users remove that line and use the host app; Docker Desktop has no Metal, so a 12b model in a container is CPU-only. The alternative is a service always in the default set, the literal reading of spec 4.1, which makes Mac users carry an idle 3.8 GB image. Task 9 verifies that `--env-file` honours `COMPOSE_PROFILES`.
-2. **The default model and its licence.** Recommended: keep `gemma4:12b` and `gemma4:12b-mlx` (about 8 GB, 16 GB+ RAM), as the user chose. Before release, check the Gemma 4 licence terms on ollama.com: the model is auto-pulled, not bundled, but it should be stated in the docs. Consider a smaller tag as the CPU-only Linux default if the real-model test shows unusable latency.
+1. **How Ollama is on by default. Decided:** an Ollama on the host, reached at `http://host.docker.internal:11434/v1` (`extra_hosts: host-gateway`), with `gemma4:12b-mlx`. Docker Desktop has no Metal, so a 12b model in a container is CPU-only. Linux, or a machine without a host Ollama, uses the Compose profile `ollama` (`COMPOSE_PROFILES=ollama` in `.env`), which also sets `gemma4:12b` and auto-pull on. Task 9 verifies that `--env-file` honours `COMPOSE_PROFILES`.
+2. **The default model and its licence. Decided:** `gemma4:12b-mlx` on the host by default, changeable with `FIONE_LLM_MODEL`; `gemma4:12b` in the `ollama` profile (about 8 GB, 16 GB+ RAM). Before release, check the Gemma 4 licence terms on ollama.com: the model is auto-pulled, not bundled, but it should be stated in the docs. Consider a smaller tag as the CPU-only Linux default if the real-model test shows unusable latency.
 3. **The MCP implementation.** Recommended: in-house, as in Task 8. The `mcp` 2.3.0 SDK is MIT and all its dependencies are permitted, but it adds about 12 packages, including native `cryptography`, a second HTTP client (`httpx2`) and `opentelemetry-api`, and it moves fast. Optionally, add an interop test against the official client in a separate opt-in dependency group. Supporting the stateless `2026-07-28` revision is deferred.
 4. **The MCP credential.** Recommended for now: the user's `full` API tokens. A dedicated `mcp` scope needs an `api_tokens` table rebuild, because of the scope CHECK and the foreign key from `notebook_sessions`.
 5. **Where MCP is served, and whether it is on by default. This plan deviates from spec 9.** Spec 9 says 既定は localhost, which reads as on by default and reachable from localhost only.
@@ -705,4 +705,4 @@ CREATE TABLE llm_sample_optins (
    - Recommended: the plan's version for this release, unless you want MCP available out of the box. Then take the alternative; Task 8 changes only in its wiring.
 6. **Conversation visibility.** Recommended: private to the creator, admins included; tool calls are in the log for audit. The alternative is admin read access.
 7. **What counts as local.** Recommended: loopback, `host.docker.internal` and single-label service names. Private IP ranges warn.
-8. **Auto-pull on start.** Recommended: on (`FIONE_LLM_AUTO_PULL=true`) so the model is "ready to use" (spec 9). It downloads about 8 GB without a click.
+8. **Auto-pull on start. Decided:** off by default (`FIONE_LLM_AUTO_PULL=false`): a host Ollama is managed by its user, and the system page offers a pull button when the model is missing. The `ollama` profile sets it on, so its model is ready to use (spec 9).

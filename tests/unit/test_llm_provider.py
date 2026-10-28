@@ -130,7 +130,7 @@ def test_a_present_model_is_ready(fake_llm, monitors):
     assert monitor.snapshot().state == "checking"
     monitor.start()
     status = wait_for(monitor, "ready")
-    assert (status.model, status.error_code) == ("gemma4:12b", None)
+    assert (status.model, status.error_code) == ("gemma4:12b-mlx", None)
 
 
 def test_an_untagged_model_matches_latest(fake_llm, monitors):
@@ -144,7 +144,7 @@ def test_an_untagged_model_matches_latest(fake_llm, monitors):
 
 def test_missing_model_is_pulled_with_progress(fake_llm, monitors):
     fake = fake_llm(models=[], pull_steps=3, pull_delay=0.2)
-    monitor = monitors(fake.url)
+    monitor = monitors(fake.url, llm_auto_pull=True)
     seen = []
     monitor.start()
     end = time.monotonic() + 10
@@ -156,12 +156,12 @@ def test_missing_model_is_pulled_with_progress(fake_llm, monitors):
     assert "pulling" in {s.state for s in seen}
     assert any(s.completed and s.total and 0 < s.completed < s.total for s in seen)
     assert "POST /api/pull" in fake.paths
-    assert fake.models == ["gemma4:12b"]
+    assert fake.models == ["gemma4:12b-mlx"]
 
 
 def test_no_auto_pull_leaves_missing(fake_llm, monitors):
     fake = fake_llm(models=[])
-    monitor = monitors(fake.url, llm_auto_pull=False)
+    monitor = monitors(fake.url)  # the default: an administrator pulls on the system page
     monitor.start()
     wait_for(monitor, "missing")
     time.sleep(0.3)
@@ -182,7 +182,7 @@ def test_unreachable_then_recovers(fake_llm, monitors):
 
 def test_pull_error_is_a_code_not_text(fake_llm, monitors, caplog):
     fake = fake_llm(models=[], pull_error="pull model manifest: file does not exist\nSECRET-DETAIL")
-    monitor = monitors(fake.url)
+    monitor = monitors(fake.url, llm_auto_pull=True)
     with caplog.at_level(logging.INFO, logger="fione.assistant"):
         monitor.start()
         status = wait_for(monitor, "error")
@@ -212,7 +212,7 @@ def test_pull_now_is_single_flight(fake_llm, monitors):
 
 def test_the_api_key_is_sent_but_never_logged(fake_llm, monitors, caplog):
     fake = fake_llm(models=[])
-    monitor = monitors(fake.url, llm_api_key="sk-secret-key-123")
+    monitor = monitors(fake.url, llm_api_key="sk-secret-key-123", llm_auto_pull=True)
     with caplog.at_level(logging.DEBUG):
         monitor.start()
         wait_for(monitor, "ready")
@@ -232,7 +232,7 @@ def test_effective_context(fake_llm, monitors):
     monitor.refresh_context()  # nothing loaded yet: unchanged
     assert monitor.effective_context() == 4096
     deadline = time.monotonic() + 5
-    ChatClient(fake.url, "gemma4:12b").complete(
+    ChatClient(fake.url, "gemma4:12b-mlx").complete(
         [{"role": "user", "content": "hi"}], [], deadline=deadline
     )
     monitor.refresh_context()
@@ -241,7 +241,7 @@ def test_effective_context(fake_llm, monitors):
 
     big = fake_llm(context_length=32768)
     monitor = monitors(big.url)
-    ChatClient(big.url, "gemma4:12b").complete(
+    ChatClient(big.url, "gemma4:12b-mlx").complete(
         [{"role": "user", "content": "hi"}], [], deadline=deadline
     )
     monitor.refresh_context()
@@ -283,7 +283,7 @@ WRONG_SHAPES = [
     b'"models"',
     b'{"models": null}',
     b'{"models": 5}',
-    b'{"models": {"name": "gemma4:12b"}}',
+    b'{"models": {"name": "gemma4:12b-mlx"}}',
     b"not json",
     b'{"models": [',
     b"[" * 200_000,
@@ -319,10 +319,10 @@ def test_junk_entries_in_the_model_list_are_skipped(fake_llm, monitors):
     [
         *WRONG_SHAPES,
         b'{"models": [1, null, "x"]}',
-        b'{"models": [{"name": "gemma4:12b", "context_length": "big"}]}',
-        b'{"models": [{"name": "gemma4:12b", "context_length": true}]}',
-        b'{"models": [{"name": "gemma4:12b", "context_length": -1}]}',
-        b'{"models": [{"name": "gemma4:12b", "context_length": 1.5}]}',
+        b'{"models": [{"name": "gemma4:12b-mlx", "context_length": "big"}]}',
+        b'{"models": [{"name": "gemma4:12b-mlx", "context_length": true}]}',
+        b'{"models": [{"name": "gemma4:12b-mlx", "context_length": -1}]}',
+        b'{"models": [{"name": "gemma4:12b-mlx", "context_length": 1.5}]}',
         b'{"models": [{"name": "other:1b", "context_length": 99999}]}',
     ],
 )
@@ -341,7 +341,7 @@ def test_an_oversized_answer_is_refused(fake_llm, monitors, monkeypatch):
     pad = "x" * 5000
     fake.raw_replies["/api/tags"] = json.dumps({"models": [], "pad": pad}).encode()
     fake.raw_replies["/api/ps"] = json.dumps(
-        {"models": [{"name": "gemma4:12b", "context_length": 8192}], "pad": pad}
+        {"models": [{"name": "gemma4:12b-mlx", "context_length": 8192}], "pad": pad}
     ).encode()
     monitor = monitors(fake.url)
     monitor.refresh_context()
@@ -353,7 +353,7 @@ def test_an_oversized_answer_is_refused(fake_llm, monitors, monkeypatch):
 def test_a_pull_line_that_never_ends_is_a_failed_pull(fake_llm, monitors, monkeypatch, caplog):
     monkeypatch.setattr(provider, "MAX_PULL_LINE_BYTES", 1000)
     fake = fake_llm(models=[], pull_garbage=200_000)
-    monitor = monitors(fake.url)
+    monitor = monitors(fake.url, llm_auto_pull=True)
     with caplog.at_level(logging.WARNING, logger="fione.assistant"):
         monitor.start()
         status = wait_for(monitor, "error")
@@ -364,7 +364,7 @@ def test_a_pull_line_that_never_ends_is_a_failed_pull(fake_llm, monitors, monkey
 def test_a_failed_pull_stays_shown_through_an_outage(fake_llm, monitors):
     fake = fake_llm(models=[], pull_error="boom")
     port = fake.port
-    monitor = monitors(fake.url)
+    monitor = monitors(fake.url, llm_auto_pull=True)
     monitor.start()
     wait_for(monitor, "error")
     fake.stop()
@@ -377,10 +377,10 @@ def test_a_failed_pull_stays_shown_through_an_outage(fake_llm, monitors):
 
 def test_the_model_appearing_clears_a_failed_pull(fake_llm, monitors):
     fake = fake_llm(models=[], pull_error="boom")
-    monitor = monitors(fake.url)
+    monitor = monitors(fake.url, llm_auto_pull=True)
     monitor.start()
     wait_for(monitor, "error")
-    fake.add_model("gemma4:12b")
+    fake.add_model("gemma4:12b-mlx")
     status = wait_for(monitor, "ready")
     assert status.error_code is None
 

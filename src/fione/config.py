@@ -86,10 +86,13 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_provider: Literal["openai", "ollama"] = "openai"
     llm_api_key: SecretStr | None = None
-    llm_model: str = "gemma4:12b"
+    # MLX models need a host-native Ollama on Apple Silicon; elsewhere use gemma4:12b.
+    llm_model: str = "gemma4:12b-mlx"
     # Merged into every request; unset: no thinking output for ollama, nothing for openai.
     llm_extra_body: Annotated[dict | None, NoDecode] = None
-    llm_auto_pull: bool = True  # ollama: pull the model when the server lacks it
+    # ollama: pull the model when the server lacks it. Off: a host Ollama is the user's;
+    # an administrator pulls on the system page.
+    llm_auto_pull: bool = False
     llm_max_tokens: int = Field(1024, ge=64, le=8192)  # per completion
     llm_context_tokens: int = Field(16384, le=262144)  # the budget of one request
     llm_max_tool_rounds: int = Field(6, ge=1, le=20)  # completions with tool calls per turn

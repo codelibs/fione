@@ -168,7 +168,7 @@ def test_request_body_and_headers(fake_llm, tmp_path):
     body = fake.requests[-1]
     assert body["stream"] is True
     assert body["stream_options"] == {"include_usage": True}
-    assert body["model"] == "gemma4:12b"
+    assert body["model"] == "gemma4:12b-mlx"
     assert body["messages"] == HELLO
     assert body["tools"] == [tool]
     assert body["reasoning_effort"] == "none"
@@ -297,6 +297,7 @@ def test_settings_rules(tmp_path, monkeypatch):
     for url in ("http://[::1]:11434/v1", "http://my_ollama:11434/v1"):
         assert check(llm_base_url=url, llm_provider="ollama").llm_base_url == url
     assert check().llm_base_url is None
+    assert (check().llm_model, check().llm_auto_pull) == ("gemma4:12b-mlx", False)
     assert check().llm_extra_body == {}
     assert settings.llm_extra_body == {"reasoning_effort": "none"}
     assert check(llm_provider="ollama", llm_extra_body={}).llm_extra_body == {}
