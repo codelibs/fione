@@ -12,6 +12,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 MIN_SETUP_TOKEN_LENGTH = 16
 MIN_LAUNCHER_SECRET_LENGTH = 32  # as the launcher requires
+# The assistant's tools and system prompt take about 2,900 tokens: below this, no question fits.
+MIN_LLM_CONTEXT_TOKENS = 3072
 _VISIBLE_ASCII = re.compile(r"[\x21-\x7e]+")  # it travels in an HTTP header
 # scheme://host[:port] with dot-separated labels: what the launcher accepts as Fione's origin.
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
@@ -89,7 +91,10 @@ class Settings(BaseSettings):
     llm_extra_body: Annotated[dict | None, NoDecode] = None
     llm_auto_pull: bool = True  # ollama: pull the model when the server lacks it
     llm_max_tokens: int = Field(1024, ge=64, le=8192)  # per completion
-    llm_context_tokens: int = Field(16384, ge=2048, le=262144)  # the budget of one request
+    llm_context_tokens: int = Field(16384, le=262144)  # the budget of one request
+    llm_max_tool_rounds: int = Field(6, ge=1, le=20)  # completions with tool calls per turn
+    llm_turn_timeout_secs: int = Field(180, ge=10, le=1800)  # one turn, all its rounds
+    llm_max_concurrent_turns: int = Field(2, ge=1, le=16)
 
     @field_validator("llm_extra_body", mode="before")
     @classmethod
@@ -154,6 +159,12 @@ class Settings(BaseSettings):
             raise ValueError("FIONE_LLM_API_KEY must be visible ASCII characters")
         if not _LLM_MODEL.fullmatch(self.llm_model):
             raise ValueError("FIONE_LLM_MODEL must be 1 to 200 visible ASCII characters")
+        if self.llm_context_tokens < MIN_LLM_CONTEXT_TOKENS:
+            raise ValueError(
+                f"FIONE_LLM_CONTEXT_TOKENS must be at least {MIN_LLM_CONTEXT_TOKENS}. Even 4096,"
+                " Ollama's default, is too small for the assistant's tools: use 16384, and set"
+                " OLLAMA_CONTEXT_LENGTH=16384 on the Ollama server (Compose does)"
+            )
         if self.llm_extra_body is None:
             self.llm_extra_body = (
                 {"reasoning_effort": "none"} if self.llm_provider == "ollama" else {}

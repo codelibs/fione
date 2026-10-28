@@ -30,7 +30,9 @@ from fione.api import (
 from fione.api.deps import UPLOAD_SLACK_BYTES
 from fione.api.errors import error_response, install_error_handlers
 from fione.api.security import LoginThrottle, SessionSigner, ensure_setup_token
+from fione.assistant import store as assistant_store
 from fione.assistant.provider import LlmMonitor
+from fione.assistant.turns import TurnManager
 from fione.auth import service as auth_service
 from fione.config import Settings, get_settings, load_secret
 from fione.jobs.runner import JobRunner
@@ -144,6 +146,8 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         _announce_setup(settings, db_path)
+        with closing(db.connect(db_path)) as conn:  # before any turn can start
+            assistant_store.fail_interrupted(conn)
         auth_service.warm_up()
         runner = None
         if run_jobs:
@@ -160,6 +164,7 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
         try:
             yield
         finally:
+            app.state.turns.shutdown()
             app.state.llm_monitor.stop()
             if retrier is not None:
                 retrier.stop()
@@ -186,6 +191,7 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.runner = None
     app.state.notebook_retrier = None
     app.state.llm_monitor = LlmMonitor(settings)  # off unless FIONE_LLM_BASE_URL is set
+    app.state.turns = TurnManager(db_path, app.state.storage, settings, app.state.llm_monitor)
     app.state.started_at = time.monotonic()  # the system page's uptime
     app.state.signer = SessionSigner(secret, settings.session_max_age_secs)
     app.state.notebook_launcher = (
