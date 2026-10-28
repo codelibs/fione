@@ -335,6 +335,18 @@ def test_refresh_context_ignores_a_wrong_answer(fake_llm, monitors, body):
     assert monitor.effective_context() == OLLAMA_DEFAULT_CONTEXT
 
 
+def test_loading_the_model_reads_a_bounded_answer(fake_llm, monitors, monkeypatch):
+    monkeypatch.setattr(provider, "MAX_LOAD_ANSWER_BYTES", 1000)
+    fake = fake_llm(context_length=8192)
+    monitor = monitors(fake.url)
+    assert monitor.load_model() is True
+    monitor.refresh_context()
+    assert monitor.snapshot().server_context == 8192
+    fake.generate_padding = 5000
+    assert monitor.load_model() is False
+    assert monitors(fake_llm().url, "openai").load_model() is False
+
+
 def test_an_oversized_answer_is_refused(fake_llm, monitors, monkeypatch):
     monkeypatch.setattr(provider, "MAX_BODY_BYTES", 1000)
     fake = fake_llm()

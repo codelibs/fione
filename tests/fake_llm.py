@@ -107,6 +107,7 @@ class FakeLlm:
         self.pull_garbage = pull_garbage  # bytes with no newline sent as a pull's first line
         self.generate_status = 200  # of POST /api/generate, which loads the model
         self.generate_delay = 0.0  # seconds before it answers: the time a model takes to load
+        self.generate_padding = 0  # bytes of filler in its answer
         self.raw_replies: dict[str, bytes] = {}  # GET path -> body sent instead of the usual
         self.paths: list[str] = []  # "METHOD /path" of every request
         self.requests: list[dict] = []  # every chat body
@@ -230,7 +231,8 @@ class _Handler(BaseHTTPRequestHandler):
             if self.llm.generate_status != 200:
                 return self._json({"error": "model failed to load"}, self.llm.generate_status)
             self.llm.load(body.get("model"))
-            self._json({"model": body.get("model"), "response": "", "done": True})
+            answer = {"model": body.get("model"), "response": "", "done": True}
+            self._json({**answer, "pad": "x" * self.llm.generate_padding})
         else:
             self._json({"error": "not found"}, 404)
 

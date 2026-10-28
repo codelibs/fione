@@ -234,3 +234,8 @@ request but cannot always close it: a server that keeps sending a byte at a time
 request's connection until the server's own timeouts (or a restart of Fione) end it. Each such
 request keeps one connection of the shared pool (about 100), so a misbehaving server can make
 later answers end as timed out. Point Fione only at an LLM server you run or trust.
+
+Ollama reports the context of a model only while it is loaded. When the model has been
+unloaded (after Ollama's `OLLAMA_KEEP_ALIVE`, 5 minutes by default), Fione loads it again before
+a request that needs more than 4096 tokens, and the system page's warning about a server
+context below `FIONE_LLM_CONTEXT_TOKENS` shows only while the model is loaded.

@@ -847,6 +847,46 @@ def test_budget_bytes():
     assert size([{"content": "日本"}]) == len('[{"content": "日本"}]'.encode())
 
 
+def test_a_cancel_during_the_last_tool_stores_no_proposal(env, fake_llm, monkeypatch):
+    cancel = threading.Event()
+    real = turns.call_tool
+
+    def cancelling(name, args, ctx):
+        cancel.set()  # the user presses stop while the proposal is checked
+        return real(name, args, ctx)
+
+    monkeypatch.setattr(turns, "call_tool", cancelling)
+    propose = {"dataset_id": env.iris.id, "target": "species"}
+    fake = fake_llm([{"tool_calls": [{"name": "propose_training_config", "arguments": propose}]}])
+    rows = turn(env, settings_for(env, fake), cancel=cancel)
+    assert [m.role for m in rows] == ["user", "assistant"]
+    assert (rows[-1].state, rows[-1].tool_calls) == ("cancelled", None)
+    assert store.proposals_for(env.conn, env.conversation.id) == {}
+
+
+def test_a_slow_context_check_after_the_answer_keeps_the_answer(env, fake_llm):
+    class SlowSecondRefresh(StubMonitor):
+        """The context check after the answer takes longer than the turn has left."""
+
+        def __init__(self):
+            super().__init__("ready")
+            self.refreshes = 0
+
+        def refresh_context(self):
+            self.refreshes += 1
+            if self.refreshes == 2:
+                time.sleep(2)
+
+    fake = fake_llm([{"text": "full answer"}])
+    settings = settings_for(env, fake).model_copy(update={"llm_turn_timeout_secs": 1})
+    monitor = SlowSecondRefresh()
+    began = time.monotonic()
+    rows = turn(env, settings, monitor=monitor)
+    assert time.monotonic() - began < 1.8
+    assert (rows[-1].state, rows[-1].content) == ("done", "full answer")
+    assert monitor.refreshes == 2
+
+
 def test_a_cancel_during_the_tools_stores_no_round(env, fake_llm, monkeypatch):
     cancel = threading.Event()
     real = turns.call_tool

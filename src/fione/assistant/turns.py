@@ -154,11 +154,9 @@ class _Turn:
         except ContextTooSmall:
             self._end("failed", error_code="context_too_small")
         except LlmError as e:
+            # LlmError's message is cleaned and short already
             log.warning(
-                "assistant turn of conversation %d: %s (%s)",
-                self.conversation_id,
-                clean_text(str(e), 300),
-                e.code,
+                "assistant turn of conversation %d: %s (%s)", self.conversation_id, e, e.code
             )
             if e.code == "cancelled":
                 self._end("cancelled", content=self.partial)
@@ -255,7 +253,8 @@ class _Turn:
                     )
         messages = build(self.monitor.effective_context())
         completion = self._stream(messages, tools)
-        self._bounded(self.monitor.refresh_context)
+        # for the next round; at a cancel or the deadline it is dropped, not the answer
+        self._bounded(self.monitor.refresh_context, give_up=True)
         log.info(
             "assistant request conversation=%d request_bytes=%d prompt_tokens=%s",
             self.conversation_id,
@@ -267,9 +266,10 @@ class _Turn:
     def _abandoned(self) -> bool:
         return self.cancel.is_set() or time.monotonic() >= self.deadline
 
-    def _bounded(self, work):
+    def _bounded(self, work, *, give_up: bool = False):
         """``work()`` in a thread of its own, left to end by itself at a cancel or the
-        deadline (an HTTP call can stall past its timeouts)."""
+        deadline (an HTTP call can stall past its timeouts): then the turn stops, or with
+        ``give_up`` this returns None and the turn goes on to its own checks."""
         done = threading.Event()
         outcome: dict = {}
 
@@ -283,10 +283,10 @@ class _Turn:
 
         threading.Thread(target=run, name="llm-provider", daemon=True).start()
         while not done.wait(_POLL_SECS):
-            if self.cancel.is_set():
-                raise LlmError("cancelled", "the turn was cancelled")
-            if time.monotonic() >= self.deadline:
-                raise LlmError("timeout", "the LLM server did not answer in time")
+            if self._abandoned():
+                if give_up:
+                    return None
+                self._check_stop()
         if "error" in outcome:
             raise outcome["error"]
         return outcome.get("value")
@@ -387,6 +387,7 @@ class _Turn:
                     result = {"error": str(e)}
             runs.append((args, result))
 
+        self._check_stop()  # a stop during the last call: store nothing of the round
         with db.immediate(self.conn):
             if not store.update_message(self.conn, self.row, content=content, tool_calls=calls):
                 raise _Stop()
