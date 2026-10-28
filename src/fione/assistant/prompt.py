@@ -17,7 +17,10 @@ TOO_LARGE = json.dumps(
     {"error": "result too large for the model's context; ask about fewer columns or one column"}
 )
 
-PROJECT_LINE = 'This conversation is about project {project_id} named "{project_name}".'
+# The name is a JSON string, so a quote in it cannot end it.
+PROJECT_LINE = (
+    "This conversation is about project {project_id} named {project_name}, a label its users chose."
+)
 SYSTEM_PROMPT = (
     "You are Fione-kun, the assistant of Fione, a machine learning application. "
     "Answer in {language}.\n"
@@ -39,7 +42,9 @@ def system_prompt(language: str, project_id: str, project_name: str) -> str:
     return SYSTEM_PROMPT.format(
         language=LANGUAGE_NAMES.get(language, "English"),
         project_id=project_id,
-        project_name=clean_text(project_name, MAX_PROJECT_NAME_CHARS),
+        project_name=json.dumps(
+            clean_text(project_name, MAX_PROJECT_NAME_CHARS), ensure_ascii=False
+        ),
     )
 
 
@@ -69,11 +74,11 @@ def _openai(message: Message) -> dict:
 
 
 def _rounds(messages: list[dict]) -> list[list[dict]]:
-    """``messages`` cut before each user message and each assistant message with tool calls,
-    so a tool call is never apart from its results."""
+    """``messages`` cut before each user message: whole turns, so a tool call is never apart
+    from its results and what is kept starts with a question."""
     rounds: list[list[dict]] = []
     for message in messages:
-        if not rounds or message["role"] == "user" or message.get("tool_calls"):
+        if not rounds or message["role"] == "user":
             rounds.append([])
         rounds[-1].append(message)
     return rounds

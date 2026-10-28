@@ -225,3 +225,12 @@ on the host; only `fione` reaches it, on the Compose network `backend`. Its othe
 filer, volume) need no credentials on that network, which only `fione` and SeaweedFS join. The
 optional `fione-serving` service runs on a network of its own (`serving`) and cannot reach
 them.
+
+### The LLM server
+
+An answer ends by `FIONE_LLM_TURN_TIMEOUT_SECS`, counted from the moment it was asked, and soon
+after the user stops it, even when the LLM server stalls. Fione then stops waiting for that
+request but cannot always close it: a server that keeps sending a byte at a time holds the
+request's connection until the server's own timeouts (or a restart of Fione) end it. Each such
+request keeps one connection of the shared pool (about 100), so a misbehaving server can make
+later answers end as timed out. Point Fione only at an LLM server you run or trust.

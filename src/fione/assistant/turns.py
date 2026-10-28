@@ -9,6 +9,11 @@ completion run anything, and only the read-only tools of the registry. A success
 A message ends only through ``store.finish_message``, so whichever ending lands first (the
 answer, a cancel, the deadline, a restart) wins. A row's error is a code; the provider's own
 text goes to the log only.
+
+Calls to the LLM server (the completion, ``/api/ps``, loading the model) run in threads that
+the turn leaves at a cancel or its deadline. httpx's per-read timeouts do not bound a server
+that sends one byte at a time, so such a thread, and its connection in the shared pool, can
+outlive the turn until the server stops or Fione shuts down and closes its clients.
 """
 
 import json
@@ -19,6 +24,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 
 from fione import db
@@ -44,6 +50,8 @@ from fione.tools import ToolContext, ToolError, call_tool, list_tools
 log = logging.getLogger("fione.assistant")
 
 MAX_CALLS_PER_ROUND = 4  # run; the others are refused
+MAX_TURNS_PER_USER = 3  # running or waiting, across the user's conversations
+MAX_WAITING_TURNS = 8  # waiting for a free slot of the pool, all users together
 MAX_CALLS_KEPT = 16  # stored and answered; a reply with more loses the rest
 MAX_CONTENT_CHARS = 20_000  # of an assistant message
 MAX_ARGUMENT_CHARS = 8_000  # of one call's arguments
@@ -75,6 +83,11 @@ ERROR_CODES = (
 
 class LlmUnavailable(Exception):
     """No LLM is configured, or the provider is not ready (unreachable, pulling...)."""
+
+
+class TooManyTurns(Exception):
+    """The user, or all users together, have as many answers running or waiting as allowed;
+    the UI's code for it is ``too_many_turns``."""
 
 
 class _Stop(Exception):
@@ -142,7 +155,10 @@ class _Turn:
             self._end("failed", error_code="context_too_small")
         except LlmError as e:
             log.warning(
-                "assistant turn of conversation %d: %s (%s)", self.conversation_id, e, e.code
+                "assistant turn of conversation %d: %s (%s)",
+                self.conversation_id,
+                clean_text(str(e), 300),
+                e.code,
             )
             if e.code == "cancelled":
                 self._end("cancelled", content=self.partial)
@@ -172,13 +188,10 @@ class _Turn:
             raise ValueError("the turn has no user message")
         rounds = 0
         while True:
-            if self.cancel.is_set():
-                raise LlmError("cancelled", "the turn was cancelled")
-            if time.monotonic() >= self.deadline:
-                raise LlmError("timeout", "the turn took too long")
+            self._check_stop()
             if rounds >= self.settings.llm_max_tool_rounds:
                 raise _Failed("too_many_steps")
-            project_id, user = self._authorize()
+            project_id, _ = self._authorize()
             if not store.update_message(self.conn, self.row, state="running"):
                 raise _Stop()
             completion = self._complete(project_id, first, refresh=rounds == 0)
@@ -186,9 +199,17 @@ class _Turn:
             if not completion.tool_calls:
                 store.finish_message(self.conn, self.row, "done", content=content)
                 return
-            self.row = self._run_tools(project_id, user, completion, content)
+            self.partial = content  # what a cancel or the deadline keeps from here on
+            self._check_stop()
+            self.row = self._run_tools(project_id, completion, content)
             self.partial = ""
             rounds += 1
+
+    def _check_stop(self) -> None:
+        if self.cancel.is_set():
+            raise LlmError("cancelled", "the turn was cancelled")
+        if time.monotonic() >= self.deadline:
+            raise LlmError("timeout", "the turn took too long")
 
     def _authorize(self) -> tuple[str, User]:
         """The conversation's project and its user, who must still be able to read it."""
@@ -323,17 +344,12 @@ class _Turn:
             raise outcome["error"]
         return outcome["completion"]
 
-    def _run_tools(self, project_id: str, user: User, completion: Completion, content: str) -> int:
+    def _run_tools(self, project_id: str, completion: Completion, content: str) -> int:
         """Run the calls, store the round (the calls, their results, a proposal) and the next
-        assistant row in one transaction; the next row's id."""
-        ctx = ToolContext(
-            self.conn,
-            self.storage,
-            user,
-            allow_samples=store.samples_allowed(self.conn, self.settings.llm_base_url),
-            project_id=project_id,
-            via="chat",
-        )
+        assistant row in one transaction; the next row's id. Before each call, the turn stops
+        at a cancel or the deadline, and the user's access is checked again; then nothing of
+        the round is stored."""
+        allow_samples = store.samples_allowed(self.conn, self.settings.llm_base_url)
         calls: list[dict] = []
         runs: list[tuple[dict | None, dict]] = []
         for n, call in enumerate(completion.tool_calls[:MAX_CALLS_KEPT]):
@@ -355,6 +371,16 @@ class _Turn:
             elif args is None:
                 result = BAD_ARGUMENTS
             else:
+                self._check_stop()
+                _, user = self._authorize()
+                ctx = ToolContext(
+                    self.conn,
+                    self.storage,
+                    user,
+                    allow_samples=allow_samples,
+                    project_id=project_id,
+                    via="chat",
+                )
                 try:
                     result = call_tool(call.name, args, ctx)
                 except ToolError as e:
@@ -412,21 +438,34 @@ def run_turn(
     cancel: threading.Event,
     *,
     language: str,
+    deadline: float | None = None,
 ) -> None:
     """Answer the conversation's latest user message, starting in the ``queued`` assistant row
     ``assistant_id``. It always ends that row, or the one its rounds got to (``done``,
-    ``cancelled`` or ``failed`` with an ``ERROR_CODES`` code), within
-    ``llm_turn_timeout_secs`` and soon after ``cancel`` is set; it does not raise."""
-    deadline = time.monotonic() + settings.llm_turn_timeout_secs
+    ``cancelled`` or ``failed`` with an ``ERROR_CODES`` code), by ``deadline`` (a
+    ``time.monotonic`` value; ``llm_turn_timeout_secs`` from now by default) and soon after
+    ``cancel`` is set; it does not raise."""
+    if deadline is None:
+        deadline = time.monotonic() + settings.llm_turn_timeout_secs
     with closing(db.connect(db_path)) as conn:
         _Turn(
             conn, storage, settings, client, monitor, conversation_id, cancel, deadline, language
         ).run(assistant_id)
 
 
+@dataclass(frozen=True)
+class _Entry:
+    cancel: threading.Event
+    future: Future
+    user_id: int
+    assistant_id: int
+
+
 class TurnManager:
     """Runs turns in a pool of ``llm_max_concurrent_turns`` threads, with one chat client for
-    them all. ``store.start_turn`` keeps it to one turn at a time per conversation."""
+    them all. ``store.start_turn`` keeps it to one turn at a time per conversation; a user has
+    at most ``MAX_TURNS_PER_USER`` turns running or waiting, and at most ``MAX_WAITING_TURNS``
+    wait for the pool. A turn's deadline counts from its submission, the wait included."""
 
     def __init__(
         self,
@@ -446,7 +485,7 @@ class TurnManager:
             settings.llm_max_concurrent_turns, thread_name_prefix="assistant-turn"
         )
         self._lock = threading.Lock()
-        self._turns: dict[int, tuple[threading.Event, Future]] = {}
+        self._turns: dict[int, _Entry] = {}
 
     def submit(
         self,
@@ -461,25 +500,32 @@ class TurnManager:
         """Queue an answer to ``text``; the ``queued`` assistant message.
 
         ``ConversationNotFound`` unless it is the user's conversation in a project the user
-        can read; ``LlmUnavailable`` unless the provider is ready; ``TurnBusy``,
-        ``LimitReached`` and ``ValueError`` from ``store.start_turn``."""
+        can read; ``LlmUnavailable`` unless the provider is ready; ``TooManyTurns`` past the
+        limits; ``TurnBusy``, ``LimitReached`` and ``ValueError`` from ``store.start_turn``."""
         store.get_conversation(conn, user, project_id, conversation_id)
         if self._client is None or self._monitor.snapshot().state != "ready":
             raise LlmUnavailable()
-        _, placeholder = store.start_turn(conn, conversation_id, text)
-        cancel = threading.Event()
-        with self._lock:
+        with self._lock:  # held while the turn is created, so the counts stay true
+            entries = [e for e in self._turns.values() if not e.future.done()]
+            if (
+                sum(e.user_id == user.id for e in entries) >= MAX_TURNS_PER_USER
+                or len(entries) >= self._settings.llm_max_concurrent_turns + MAX_WAITING_TURNS
+            ):
+                raise TooManyTurns()
+            _, placeholder = store.start_turn(conn, conversation_id, text)
+            deadline = time.monotonic() + self._settings.llm_turn_timeout_secs
+            cancel = threading.Event()
             try:
                 future = self._pool.submit(
-                    self._run, conversation_id, placeholder.id, cancel, language
+                    self._run, conversation_id, placeholder.id, cancel, language, deadline
                 )
             except RuntimeError:  # shut down
                 store.finish_message(conn, placeholder.id, "failed", error_code="unavailable")
                 raise LlmUnavailable() from None
-            self._turns[conversation_id] = (cancel, future)
+            self._turns[conversation_id] = _Entry(cancel, future, user.id, placeholder.id)
         return placeholder
 
-    def _run(self, conversation_id: int, assistant_id: int, cancel: threading.Event, language):
+    def _run(self, conversation_id, assistant_id, cancel: threading.Event, language, deadline):
         try:
             run_turn(
                 self._db_path,
@@ -491,12 +537,14 @@ class TurnManager:
                 assistant_id,
                 cancel,
                 language=language,
+                deadline=deadline,
             )
         except Exception:  # run_turn ends its rows itself; this is a database failure
             log.exception("assistant turn of conversation %d failed", conversation_id)
         finally:
             with self._lock:
-                if self._turns.get(conversation_id, (None,))[0] is cancel:
+                entry = self._turns.get(conversation_id)
+                if entry is not None and entry.cancel is cancel:
                     del self._turns[conversation_id]
 
     def cancel(self, conversation_id: int) -> bool:
@@ -504,8 +552,10 @@ class TurnManager:
         one at its next step with the text it has. False when no turn is active."""
         with self._lock:
             entry = self._turns.get(conversation_id)
-        if entry is not None:
-            entry[0].set()
+            if entry is not None:
+                entry.cancel.set()
+                if entry.future.cancel():  # it never started, so it frees its place now
+                    del self._turns[conversation_id]
         with closing(db.connect(self._db_path)) as conn:
             active = store.active_message(conn, conversation_id)
             if active is not None and active.state == "queued":
@@ -513,13 +563,19 @@ class TurnManager:
         return active is not None
 
     def shutdown(self, timeout: float = 5.0) -> None:
-        """Cancel every turn and wait up to ``timeout`` seconds for them to end. Rows left
-        active are marked ``interrupted`` at the next start."""
+        """Cancel every turn and wait up to ``timeout`` seconds for them to end. A turn that
+        never started ends ``interrupted``; the rows of turns still running are marked
+        ``interrupted`` at the next start."""
         with self._lock:
             entries = list(self._turns.values())
-        for cancel, _ in entries:
-            cancel.set()
-        wait([future for _, future in entries], timeout=timeout)
+        for entry in entries:
+            entry.cancel.set()
+        wait([entry.future for entry in entries], timeout=timeout)
         self._pool.shutdown(wait=False, cancel_futures=True)
+        never_started = [e.assistant_id for e in entries if e.future.cancelled()]
+        if never_started:
+            with closing(db.connect(self._db_path)) as conn:
+                for row in never_started:
+                    store.finish_message(conn, row, "failed", error_code="interrupted")
         if self._client is not None:
             self._client.close()

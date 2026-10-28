@@ -160,6 +160,7 @@ def test_project_scope_refuses_other_projects(env):
         ("list_models", {"project_id": env.b.id}),
         ("get_training_events", {"job_id": env.job_b.id}),
         ("get_training_events", {"job_id": env.job_none.id}),
+        ("propose_training_config", {"dataset_id": env.ds_b.id, "target": "label"}),
     ]
     for name, args in refused:
         with pytest.raises(ToolError, match=NOT_ALLOWED):
