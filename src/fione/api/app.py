@@ -30,6 +30,7 @@ from fione.api import (
 from fione.api.deps import UPLOAD_SLACK_BYTES
 from fione.api.errors import error_response, install_error_handlers
 from fione.api.security import LoginThrottle, SessionSigner, ensure_setup_token
+from fione.assistant.provider import LlmMonitor
 from fione.auth import service as auth_service
 from fione.config import Settings, get_settings, load_secret
 from fione.jobs.runner import JobRunner
@@ -155,9 +156,11 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
             retrier = PendingStopRetrier(db_path, app.state.notebook_launcher)
             retrier.start()
         app.state.notebook_retrier = retrier
+        app.state.llm_monitor.start()  # nothing to do unless FIONE_LLM_BASE_URL is set
         try:
             yield
         finally:
+            app.state.llm_monitor.stop()
             if retrier is not None:
                 retrier.stop()
             if runner is not None:
@@ -182,6 +185,7 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.live_models = LiveModels(app.state.storage, secret)
     app.state.runner = None
     app.state.notebook_retrier = None
+    app.state.llm_monitor = LlmMonitor(settings)  # off unless FIONE_LLM_BASE_URL is set
     app.state.started_at = time.monotonic()  # the system page's uptime
     app.state.signer = SessionSigner(secret, settings.session_max_age_secs)
     app.state.notebook_launcher = (

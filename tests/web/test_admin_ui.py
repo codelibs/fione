@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 
 from api_helpers import PW, add_user, connect, login
 from fione import i18n
+from fione.assistant import store as assistant_store
+from fione.assistant.provider import LlmStatus
 from fione.auth import service as auth_service
 from fione.auth.roles import NotebookPermission, Role
 from fione.jobs import store
@@ -294,7 +296,7 @@ def test_the_system_page_says_how_the_server_is(client):
     assert "Stopped" in stat("Job runner")
     assert re.fullmatch(r"\d+ min", stat("Up for"))
     assert "20.0.0" in stat("Version") and stat("Storage") == "Local disk"
-    assert "Not configured" in page and "Ollama" in page
+    assert "The assistant is off" in page and "FIONE_LLM_BASE_URL" in page
     assert 'hx-trigger="every 10s"' in page and 'aria-live="polite"' in page
     assert "/static/js/system.js" in page
 
@@ -317,7 +319,9 @@ def test_the_system_page_in_japanese(client):
     login(client, "admin")
     client.cookies.set("fione_lang", "ja")
     page = client.get("/admin/system").text
-    assert "システムの状態" in page and "未設定" in page and "ローカルディスク" in page
+    assert (
+        "システムの状態" in page and "アシスタントは無効です" in page and "ローカルディスク" in page
+    )
 
 
 def test_the_system_page_shows_no_secret_path_or_url(client):
@@ -449,3 +453,170 @@ def test_the_users_page_survives_a_user_created_meanwhile(client, monkeypatch):
     login(client, "admin")
     r = client.get("/admin/users")
     assert r.status_code == 200 and i18n.t("users.notebook_none", "en") in row_of(r.text, "ed")
+
+
+# --- the LLM card ---------------------------------------------------------------------------
+
+
+class StubMonitor:
+    """What ``app.state.llm_monitor`` offers, with a status chosen by the test."""
+
+    def __init__(self, **status):
+        values = dict(
+            state="ready", model="gemma4:12b", local=True, host="ollama:11434", completed=None,
+            total=None, error_code=None, server_context=None,
+        )  # fmt: skip
+        self.status = LlmStatus(**{**values, **status})
+        self.pulls = 0
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def snapshot(self):
+        return self.status
+
+    def pull_now(self):
+        self.pulls += 1
+        return True
+
+
+@pytest.fixture
+def llm_client(make_client):
+    client = make_client(llm_base_url="http://ollama:11434/v1", llm_provider="ollama")
+    client.app.state.llm_monitor.stop()  # the real one would look for a server called ollama
+    add_user(client, "admin", Role.ADMIN)
+    add_user(client, "ed", Role.EDITOR)
+    return client
+
+
+def llm_card(client, **status) -> str:
+    client.app.state.llm_monitor = StubMonitor(**status)
+    login(client, "admin")
+    return client.get("/admin/system").text
+
+
+@pytest.mark.parametrize(
+    ("status", "badge"),
+    [
+        ({"state": "checking"}, "Checking"),
+        ({"state": "unreachable"}, "Not reachable"),
+        ({"state": "missing"}, "Model missing"),
+        ({"state": "ready"}, "Ready"),
+        ({"state": "error", "error_code": "pull_failed"}, "Error"),
+    ],
+)
+def test_the_llm_card_shows_each_state(llm_client, status, badge):
+    page = llm_card(llm_client, **status)
+    assert badge in page and "<code>gemma4:12b</code>" in page and "ollama:11434" in page
+    assert ">Local<" in page and "<progress" not in page
+    assert "not on this machine" not in page  # the remote warning is for remote servers only
+    if status["state"] == "error":
+        assert "could not be downloaded" in page
+
+
+def test_the_llm_card_shows_the_pull_progress(llm_client):
+    page = llm_card(llm_client, state="pulling", completed=250_000_000, total=1_000_000_000)
+    assert "Downloading the model" in page
+    assert 'max="1000000000" value="250000000"' in page and "25%" in page
+    assert "Downloaded 250.0 MB of 1.0 GB" in page
+
+
+def test_the_llm_card_warns_about_a_low_server_context(llm_client):
+    page = llm_card(llm_client, server_context=4096)
+    assert "context of 4096 tokens" in page and "16384" in page and "OLLAMA_CONTEXT_LENGTH" in page
+    assert "OLLAMA_CONTEXT_LENGTH" not in llm_card(llm_client, server_context=16384)
+    assert "OLLAMA_CONTEXT_LENGTH" not in llm_card(llm_client, server_context=None)
+
+
+def test_the_llm_card_warns_about_a_remote_server(llm_client):
+    page = llm_card(llm_client, local=False, host="api.example.com")
+    assert (
+        ">Remote<" in page and "not on this machine" in page and "sent to api.example.com" in page
+    )
+    assert "HTTP_PROXY" in page and "NO_PROXY" in page
+
+
+def test_the_llm_card_in_japanese_and_in_the_poll(llm_client):
+    llm_client.app.state.llm_monitor = StubMonitor(state="missing")
+    login(llm_client, "admin")
+    llm_client.cookies.set("fione_lang", "ja")
+    page = llm_client.get("/admin/system").text
+    assert "モデルがありません" in page and "モデルをダウンロード" in page
+    polled = llm_client.get("/admin/system", headers={"HX-Request": "true"}).text
+    assert "モデルがありません" in polled and "/admin/system/llm" not in polled  # no forms to lose
+
+
+def test_pull_button_calls_pull_now(llm_client):
+    llm_card(llm_client, state="missing")
+    csrf = login(llm_client, "admin")
+    r = llm_client.post("/admin/system/llm/pull", data={"csrf_token": csrf}, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/admin/system")
+    assert llm_client.app.state.llm_monitor.pulls == 1
+    no_csrf = llm_client.post("/admin/system/llm/pull", data={}, follow_redirects=False)
+    assert no_csrf.status_code == 403 and llm_client.app.state.llm_monitor.pulls == 1
+    csrf = login(llm_client, "ed")
+    r = llm_client.post("/admin/system/llm/pull", data={"csrf_token": csrf})
+    assert r.status_code == 403 and llm_client.app.state.llm_monitor.pulls == 1
+
+
+def samples_rows(client):
+    with closing(connect(client)) as conn:
+        return [
+            tuple(r) for r in conn.execute("SELECT base_url, enabled_by FROM llm_sample_optins")
+        ]
+
+
+def test_the_samples_opt_in_needs_the_admin_the_csrf_token_and_the_confirmation(llm_client):
+    llm_client.app.state.llm_monitor = StubMonitor()
+    url = "/admin/system/llm/samples"
+    csrf = login(llm_client, "ed")
+    forbidden = llm_client.post(url, data={"csrf_token": csrf, "allowed": "on", "confirm": "on"})
+    assert forbidden.status_code == 403
+    csrf = login(llm_client, "admin")
+    on = {"allowed": "on", "confirm": "on"}
+    assert llm_client.post(url, data=on, follow_redirects=False).status_code == 403  # no CSRF
+    foreign = llm_client.post(url, data={"csrf_token": csrf, **on}, headers=EVIL)
+    assert foreign.status_code == 403
+    assert samples_rows(llm_client) == []
+
+    r = llm_client.post(url, data={"csrf_token": csrf, "allowed": "on"}, follow_redirects=False)
+    assert r.status_code == 303 and samples_rows(llm_client) == []  # not confirmed: not enabled
+    assert llm_client.post(url, data={"csrf_token": csrf, "allowed": "x"}).status_code == 400
+
+    r = llm_client.post(url, data={"csrf_token": csrf, **on}, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/admin/system")
+    admin = user_id(llm_client, "admin")
+    assert samples_rows(llm_client) == [("http://ollama:11434/v1", admin)]
+    with closing(connect(llm_client)) as conn:
+        assert assistant_store.samples_allowed(conn, "HTTP://Ollama:11434/v1/")
+    page = llm_client.get("/admin/system").text
+    assert 'name="allowed" value="off"' in page and "Turn off" in page
+
+    off = llm_client.post(url, data={"csrf_token": csrf, "allowed": "off"}, follow_redirects=False)
+    assert off.status_code == 303 and samples_rows(llm_client) == []
+    page = llm_client.get("/admin/system").text
+    assert 'name="allowed" value="on"' in page and 'name="confirm"' in page
+    assert "column values will be sent to ollama:11434" in page
+
+
+def test_the_llm_controls_are_absent_without_an_llm(client):
+    login(client, "admin")
+    page = client.get("/admin/system").text
+    assert "/admin/system/llm" not in page and "The assistant is off" in page
+    csrf = login(client, "admin")
+    r = client.post(
+        "/admin/system/llm/samples", data={"csrf_token": csrf, "allowed": "on", "confirm": "on"}
+    )
+    assert r.status_code == 404
+
+
+def test_openai_has_no_pull_button(make_client):
+    client = make_client(llm_base_url="https://api.example.com/v1")
+    add_user(client, "admin", Role.ADMIN)
+    login(client, "admin")
+    page = client.get("/admin/system").text
+    assert "/admin/system/llm/pull" not in page and "/admin/system/llm/samples" in page
+    assert "not on this machine" in page  # the monitor's own status: remote, ready

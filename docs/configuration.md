@@ -41,6 +41,7 @@ Read by the `fione` container at start. Booleans accept `true` / `false`.
 | `FIONE_LLM_API_KEY` | unset | The key sent as `Authorization: Bearer <key>`, visible ASCII characters. It is never logged or shown. | With a server that needs one. |
 | `FIONE_LLM_MODEL` | `gemma4:12b` | The model name sent with each request, 1 to 200 visible ASCII characters. | To use another model. |
 | `FIONE_LLM_EXTRA_BODY` | unset | A JSON object merged into every request, for example `{"reasoning_effort": "none"}`. The keys `model`, `messages`, `tools`, `stream`, `stream_options` and `max_tokens` are refused. Unset: `{"reasoning_effort": "none"}` for `ollama`, `{}` for `openai`. | To turn thinking off or set sampling options on a server that supports them. |
+| `FIONE_LLM_AUTO_PULL` | `true` | With `ollama`: pulls the model when the server does not have it, and shows the progress on the system page. With `false`, an administrator starts the pull there. Ignored for `openai`. | Set `false` to keep a large download from starting by itself. |
 | `FIONE_LLM_MAX_TOKENS` | `1024` | The most tokens one completion may have. From 64 to 8192. | For longer answers, or to cap slow models. |
 | `FIONE_LLM_CONTEXT_TOKENS` | `16384` | The token budget of one request: the longest prompt Fione sends. From 2048 to 262144. Set it no higher than the model's context window. | To match the model's context window. |
 

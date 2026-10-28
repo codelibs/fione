@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     llm_model: str = "gemma4:12b"
     # Merged into every request; unset: no thinking output for ollama, nothing for openai.
     llm_extra_body: Annotated[dict | None, NoDecode] = None
+    llm_auto_pull: bool = True  # ollama: pull the model when the server lacks it
     llm_max_tokens: int = Field(1024, ge=64, le=8192)  # per completion
     llm_context_tokens: int = Field(16384, ge=2048, le=262144)  # the budget of one request
 

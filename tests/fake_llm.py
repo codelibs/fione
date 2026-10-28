@@ -93,6 +93,7 @@ class FakeLlm:
         pull_delay: float = 0.0,
         context_length: int = 16384,
         port: int = 0,
+        pull_error: str | None = None,
     ):
         self.script = list(script or [])
         self.policy = policy
@@ -101,6 +102,8 @@ class FakeLlm:
         self.pull_delay = pull_delay
         self.context_length = context_length
         self.port = port
+        self.pull_error = pull_error  # the pull stops with this error line after its first step
+        self.paths: list[str] = []  # "METHOD /path" of every request
         self.requests: list[dict] = []  # every chat body
         self.request_headers: list[dict] = []  # the matching headers, names in lower case
         self._served: str | None = None  # the model of the last chat request
@@ -186,6 +189,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        self.llm.paths.append(f"GET {path}")
         if path == "/api/version":
             self._json({"version": "0.0.0-fake"})
         elif path == "/api/tags":
@@ -200,6 +204,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self._read_json()
         path = self.path.split("?")[0]
+        self.llm.paths.append(f"POST {path}")
         if path.endswith("/chat/completions"):
             headers = {name.lower(): value for name, value in self.headers.items()}
             self._chat(body, self.llm.record_chat(body, headers))
@@ -252,6 +257,9 @@ class _Handler(BaseHTTPRequestHandler):
             }
             self.wfile.write(json.dumps(line).encode() + b"\n")
             self.wfile.flush()
+            if self.llm.pull_error is not None:
+                self.wfile.write(json.dumps({"error": self.llm.pull_error}).encode() + b"\n")
+                return
         self.llm.add_model(name)
         self.wfile.write(b'{"status":"success"}\n')
 

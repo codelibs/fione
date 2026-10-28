@@ -10,10 +10,34 @@
   </header>
   <p class="visually-hidden" id="system-announce" aria-live="polite" aria-atomic="true"></p>
   {% include "_system_status.html" %}
-  <section class="card card-padded stack-tight" aria-labelledby="llm-title">
-    <h2 class="section-header__title section-header__title-icon" id="llm-title">{{ icon("info") }}{{ t('system.llm_title') }}</h2>
-    <p><span class="badge badge-neutral">{{ t('system.llm_state') }}</span></p>
-    <p class="text-muted text-sm">{{ t('system.llm_text') }}</p>
+  {% if info.llm.configured %}
+  <section class="card card-padded stack-tight" aria-labelledby="llm-controls-title">
+    <h2 class="section-header__title" id="llm-controls-title">{{ t('system.llm_controls_title') }}</h2>
+    {% set host = info.llm.host %}
+    {% if llm_ollama %}
+    <form class="stack-tight" method="post" action="/admin/system/llm/pull" data-busy-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <p class="text-muted text-sm">{{ t('system.llm_pull_hint', model=info.llm.model) }}</p>
+      <div><button type="submit" class="btn btn-secondary"><span class="spinner" aria-hidden="true"></span>{{ t('system.llm_pull') }}</button></div>
+    </form>
+    {% endif %}
+    <form class="stack-tight" method="post" action="/admin/system/llm/samples" data-busy-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <p><strong>{{ t('system.llm_samples_label', host=host) }}</strong>: <span class="badge badge-{{ 'warning' if info.llm.samples_allowed else 'neutral' }}">{{ t('system.llm_samples_state_on' if info.llm.samples_allowed else 'system.llm_samples_state_off') }}</span></p>
+      <p class="text-muted text-sm">{{ t('system.llm_samples_hint', host=host) }}</p>
+      {% if info.llm.samples_allowed %}
+      <input type="hidden" name="allowed" value="off">
+      <div><button type="submit" class="btn btn-secondary">{{ t('system.llm_samples_off') }}</button></div>
+      {% else %}
+      <input type="hidden" name="allowed" value="on">
+      <div class="check-field">
+        <input class="checkbox" type="checkbox" id="llm-samples-confirm" name="confirm" value="on" required>
+        <label class="field__label" for="llm-samples-confirm">{{ t('system.llm_samples_confirm', host=host) }}</label>
+      </div>
+      <div><button type="submit" class="btn btn-secondary">{{ t('system.llm_samples_on') }}</button></div>
+      {% endif %}
+    </form>
   </section>
+  {% endif %}
 </div>
 {% endblock %}
