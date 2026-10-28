@@ -1,6 +1,6 @@
 # Fione v2 Phase 3 (LLM assistant and MCP) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Work through the plan task by task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Fione-kun an LLM assistant. It works per project over an OpenAI-compatible API (Ollama by default). It reads data only through the typed read-only tools, and it turns a training request into a proposal that a person confirms in the UI. The same tools are also exposed read-only over MCP.
 
