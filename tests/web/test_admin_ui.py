@@ -485,8 +485,9 @@ class StubMonitor:
 
 @pytest.fixture
 def llm_client(make_client):
-    client = make_client(llm_base_url="http://ollama:11434/v1", llm_provider="ollama")
-    client.app.state.llm_monitor.stop()  # the real one would look for a server called ollama
+    # Nothing listens on port 9: the real monitor, started by the lifespan, fails at once.
+    client = make_client(llm_base_url="http://127.0.0.1:9/v1", llm_provider="ollama")
+    client.app.state.llm_monitor.stop()
     add_user(client, "admin", Role.ADMIN)
     add_user(client, "ed", Role.EDITOR)
     return client
@@ -549,6 +550,23 @@ def test_the_llm_card_in_japanese_and_in_the_poll(llm_client):
     assert "モデルがありません" in polled and "/admin/system/llm" not in polled  # no forms to lose
 
 
+@pytest.mark.parametrize(
+    ("state", "shown"),
+    [
+        ("missing", True),
+        ("error", True),
+        ("ready", False),
+        ("pulling", False),
+        ("unreachable", False),
+        ("checking", False),
+    ],
+)
+def test_the_pull_button_is_for_a_missing_model_or_an_error(llm_client, state, shown):
+    page = llm_card(llm_client, state=state)
+    assert ("/admin/system/llm/pull" in page) is shown
+    assert "/admin/system/llm/samples" in page
+
+
 def test_pull_button_calls_pull_now(llm_client):
     llm_card(llm_client, state="missing")
     csrf = login(llm_client, "admin")
@@ -589,9 +607,9 @@ def test_the_samples_opt_in_needs_the_admin_the_csrf_token_and_the_confirmation(
     r = llm_client.post(url, data={"csrf_token": csrf, **on}, follow_redirects=False)
     assert (r.status_code, r.headers["location"]) == (303, "/admin/system")
     admin = user_id(llm_client, "admin")
-    assert samples_rows(llm_client) == [("http://ollama:11434/v1", admin)]
+    assert samples_rows(llm_client) == [("http://127.0.0.1:9/v1", admin)]
     with closing(connect(llm_client)) as conn:
-        assert assistant_store.samples_allowed(conn, "HTTP://Ollama:11434/v1/")
+        assert assistant_store.samples_allowed(conn, "HTTP://127.0.0.1:9/v1/")
     page = llm_client.get("/admin/system").text
     assert 'name="allowed" value="off"' in page and "Turn off" in page
 

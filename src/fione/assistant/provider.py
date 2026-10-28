@@ -32,6 +32,9 @@ OLLAMA_DEFAULT_CONTEXT = 4096  # what Ollama serves unless it is configured othe
 READY_RECHECK_SECS = 300.0
 CONNECT_TIMEOUT_SECS = 5.0
 READ_TIMEOUT_SECS = 10.0
+MAX_BODY_BYTES = 4 * 2**20  # of /api/tags and /api/ps
+MAX_PULL_LINE_BYTES = 64 * 1024  # a progress line is about 200 bytes
+_BAD_ANSWER = (ValueError, RecursionError)  # JSON that is not JSON, too deep, or of the wrong shape
 PULL_READ_TIMEOUT_SECS = 120.0  # a pull reports progress much more often than this
 _SINGLE_LABEL = re.compile(r"[a-z][a-z0-9_-]*")  # not a number in disguise (3232235781, 0xc0...)
 
@@ -75,6 +78,24 @@ def native_root(base_url: str) -> str:
     """``base_url`` without its final ``/v1``: where Ollama's own API lives."""
     root = base_url.rstrip("/")
     return root.removesuffix("/v1")
+
+
+def _is_count(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _lines(response: httpx.Response):
+    """The lines of a streamed answer, none longer than ``MAX_PULL_LINE_BYTES`` (``ValueError``)."""
+    buffer = b""
+    for data in response.iter_bytes():
+        *lines, buffer = (buffer + data).split(b"\n")
+        if len(buffer) > MAX_PULL_LINE_BYTES or any(
+            len(line) > MAX_PULL_LINE_BYTES for line in lines
+        ):
+            raise ValueError("a line of the answer is too long")
+        yield from (line.decode("utf-8", "replace") for line in lines)
+    if buffer:
+        yield buffer.decode("utf-8", "replace")
 
 
 def _host(base_url: str) -> str:
@@ -132,26 +153,20 @@ class LlmMonitor:
         return min(limit, OLLAMA_DEFAULT_CONTEXT if known is None else known)
 
     def refresh_context(self) -> None:
-        """Read the loaded model's context from ``/api/ps``; a failure keeps the old value."""
+        """Read the loaded model's context from ``/api/ps``; any failure, or an answer that
+        does not make sense, keeps the old value."""
         if not self._ollama:
             return
         try:
-            response = self._http.get(
-                f"{self._root}/api/ps", headers=self._headers, timeout=self._timeout()
-            )
-            response.raise_for_status()
-            entries = response.json().get("models", [])
-            context = next(
-                e["context_length"]
-                for e in entries
-                if isinstance(e, dict)
-                and self._is_model(e.get("name"), e.get("model"))
-                and isinstance(e.get("context_length"), int)
-                and e["context_length"] > 0
-            )
-        except (httpx.HTTPError, RuntimeError, ValueError, AttributeError, StopIteration):
+            entries = self._get_models("/api/ps")
+        except (httpx.HTTPError, RuntimeError, *_BAD_ANSWER):
             return
-        self._update(server_context=context)
+        for entry in entries:
+            if isinstance(entry, dict) and self._is_model(entry.get("name"), entry.get("model")):
+                context = entry.get("context_length")
+                if _is_count(context) and context > 0:
+                    self._update(server_context=context)
+                    return
 
     def pull_now(self) -> bool:
         """Start pulling the model in the background; false when a pull is already running
@@ -179,32 +194,39 @@ class LlmMonitor:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            self._stop.wait(self._check())
+            try:
+                wait = self._check()
+            except Exception:  # the thread must outlive anything a server can say
+                if not self._stop.is_set():
+                    log.exception("checking the LLM server (%s) failed", self._status.host)
+                self._update_idle(state="error", error_code="probe_failed")
+                wait = self._recheck_secs
+            self._stop.wait(wait)
 
     def _check(self) -> float:
         """One look at the server; the seconds until the next."""
         try:
             present = self._model_present()
         except httpx.TransportError:
-            self._update(state="unreachable", error_code=None, completed=None, total=None)
+            self._update_idle(state="unreachable", error_code=None, completed=None, total=None)
             return self._recheck_secs
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, *_BAD_ANSWER):
             log.warning("the LLM server (%s) could not be queried", self._status.host)
-            self._update(state="error", error_code="probe_failed")
+            self._update_idle(state="error", error_code="probe_failed")
             return self._recheck_secs
         if present:
-            self._update(state="ready", error_code=None, completed=None, total=None)
+            with self._lock:
+                self._pull_blocked = False  # the model is there, however it got there
+            self._update_idle(state="ready", error_code=None, completed=None, total=None)
             self.refresh_context()
             return READY_RECHECK_SECS
         with self._lock:
-            if (
-                self._pulling or self._pull_blocked
-            ):  # a failure stays until the administrator retries
+            if self._pull_blocked:  # stays until the administrator asks again
+                self._set_idle(state="error", error_code="pull_failed")
                 return self._recheck_secs
-            self._status = replace(
-                self._status, state="missing", error_code=None, completed=None, total=None
-            )
-        if self._settings.llm_auto_pull and self._begin_pull(forced=False):
+            self._set_idle(state="missing", error_code=None, completed=None, total=None)
+            pulling = self._pulling
+        if not pulling and self._settings.llm_auto_pull and self._begin_pull(forced=False):
             self._pull()
         return self._recheck_secs
 
@@ -215,14 +237,28 @@ class LlmMonitor:
         return any(isinstance(n, str) and n in wanted for n in names)
 
     def _model_present(self) -> bool:
-        response = self._http.get(
-            f"{self._root}/api/tags", headers=self._headers, timeout=self._timeout()
-        )
-        response.raise_for_status()
         return any(
             isinstance(m, dict) and self._is_model(m.get("name"), m.get("model"))
-            for m in response.json().get("models", [])
+            for m in self._get_models("/api/tags")
         )
+
+    def _get_models(self, path: str) -> list:
+        """The ``models`` list of an Ollama answer. ``ValueError`` for a body that is too
+        large, is not JSON or does not have that shape."""
+        data = b""
+        with self._http.stream(
+            "GET", f"{self._root}{path}", headers=self._headers, timeout=self._timeout()
+        ) as response:
+            response.raise_for_status()
+            for part in response.iter_bytes():
+                data += part
+                if len(data) > MAX_BODY_BYTES:
+                    raise ValueError("the answer is too large")
+        body = json.loads(data)
+        models = body.get("models") if isinstance(body, dict) else None
+        if not isinstance(models, list):
+            raise ValueError("the answer has an unexpected shape")
+        return models
 
     @staticmethod
     def _timeout(read: float = READ_TIMEOUT_SECS) -> httpx.Timeout:
@@ -256,7 +292,7 @@ class LlmMonitor:
             ) as response:
                 response.raise_for_status()
                 outcome = "done"
-                for line in response.iter_lines():
+                for line in _lines(response):
                     if self._stop.is_set():
                         outcome = "stopped"
                         break
@@ -264,9 +300,14 @@ class LlmMonitor:
                         outcome = "failed"
                         break
         except httpx.TransportError:
-            outcome = "unreachable"
+            outcome = "stopped" if self._stop.is_set() else "unreachable"
+        except (httpx.HTTPError, *_BAD_ANSWER):
+            outcome = "failed"
+            log.warning("pulling the LLM model from %s failed", self._status.host)
         except Exception:
-            log.exception("pulling the LLM model from %s failed", self._status.host)
+            outcome = "failed"
+            if not self._stop.is_set():  # a shutdown closes the client under the pull
+                log.exception("pulling the LLM model from %s failed", self._status.host)
         with self._lock:
             self._pulling = False
             self._pull_blocked = outcome == "failed"
@@ -280,7 +321,7 @@ class LlmMonitor:
     def _after_pull(self) -> None:
         try:
             present = self._model_present()
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, RuntimeError, *_BAD_ANSWER):
             return  # the next check finds out
         if present:
             self._update(state="ready", error_code=None, completed=None, total=None)
@@ -303,10 +344,19 @@ class LlmMonitor:
             )
             return "failed"
         total, completed = entry.get("total"), entry.get("completed")
-        if isinstance(total, int) and isinstance(completed, int) and total > 0:
+        if _is_count(total) and _is_count(completed) and total > 0:
             self._update(completed=completed, total=total)
         return None
 
     def _update(self, **changes) -> None:
         with self._lock:
+            self._status = replace(self._status, **changes)
+
+    def _update_idle(self, **changes) -> None:
+        """``_update``, unless a pull is running: it owns the state until it ends."""
+        with self._lock:
+            self._set_idle(**changes)
+
+    def _set_idle(self, **changes) -> None:
+        if not self._pulling:  # the caller holds the lock
             self._status = replace(self._status, **changes)

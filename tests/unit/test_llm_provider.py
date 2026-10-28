@@ -1,6 +1,7 @@
 """The LLM provider's status: which URLs are local, the monitor that checks an Ollama server
 and pulls its model, and the context the server really gives."""
 
+import json
 import logging
 import time
 
@@ -8,6 +9,7 @@ import pytest
 
 from api_helpers import make_settings
 from fake_llm import FakeLlm
+from fione.assistant import provider
 from fione.assistant.provider import (
     OLLAMA_DEFAULT_CONTEXT,
     LlmMonitor,
@@ -273,3 +275,159 @@ def test_the_app_starts_the_monitor_and_stops_it_on_exit(fake_llm, tmp_path):
     with TestClient(create_app(make_settings(tmp_path / "off"))) as client:
         assert client.app.state.llm_monitor.snapshot().state == "off"
         assert client.app.state.llm_monitor._thread is None
+
+
+WRONG_SHAPES = [
+    b"[]",
+    b"null",
+    b'"models"',
+    b'{"models": null}',
+    b'{"models": 5}',
+    b'{"models": {"name": "gemma4:12b"}}',
+    b"not json",
+    b'{"models": [',
+    b"[" * 200_000,
+    b"\xff\xfe",
+    b"",
+]
+
+
+@pytest.mark.parametrize("body", WRONG_SHAPES, ids=range(len(WRONG_SHAPES)))
+def test_a_wrong_answer_is_an_error_code_and_the_thread_lives_on(fake_llm, monitors, body):
+    fake = fake_llm()
+    fake.raw_replies["/api/tags"] = body
+    monitor = monitors(fake.url)
+    monitor.start()
+    status = wait_for(monitor, "error")
+    assert status.error_code == "probe_failed"
+    assert monitor._thread.is_alive()
+    del fake.raw_replies["/api/tags"]  # the server is fixed: the monitor recovers by itself
+    wait_for(monitor, "ready")
+
+
+def test_junk_entries_in_the_model_list_are_skipped(fake_llm, monitors):
+    fake = fake_llm()
+    fake.raw_replies["/api/tags"] = json.dumps({"models": [1, "x", None, {"name": 5}]}).encode()
+    monitor = monitors(fake.url, llm_auto_pull=False)
+    monitor.start()
+    wait_for(monitor, "missing")
+    assert monitor._thread.is_alive()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        *WRONG_SHAPES,
+        b'{"models": [1, null, "x"]}',
+        b'{"models": [{"name": "gemma4:12b", "context_length": "big"}]}',
+        b'{"models": [{"name": "gemma4:12b", "context_length": true}]}',
+        b'{"models": [{"name": "gemma4:12b", "context_length": -1}]}',
+        b'{"models": [{"name": "gemma4:12b", "context_length": 1.5}]}',
+        b'{"models": [{"name": "other:1b", "context_length": 99999}]}',
+    ],
+)
+def test_refresh_context_ignores_a_wrong_answer(fake_llm, monitors, body):
+    fake = fake_llm()
+    fake.raw_replies["/api/ps"] = body
+    monitor = monitors(fake.url)
+    monitor.refresh_context()  # never raises
+    assert monitor.snapshot().server_context is None
+    assert monitor.effective_context() == OLLAMA_DEFAULT_CONTEXT
+
+
+def test_an_oversized_answer_is_refused(fake_llm, monitors, monkeypatch):
+    monkeypatch.setattr(provider, "MAX_BODY_BYTES", 1000)
+    fake = fake_llm()
+    pad = "x" * 5000
+    fake.raw_replies["/api/tags"] = json.dumps({"models": [], "pad": pad}).encode()
+    fake.raw_replies["/api/ps"] = json.dumps(
+        {"models": [{"name": "gemma4:12b", "context_length": 8192}], "pad": pad}
+    ).encode()
+    monitor = monitors(fake.url)
+    monitor.refresh_context()
+    assert monitor.snapshot().server_context is None
+    monitor.start()
+    assert wait_for(monitor, "error").error_code == "probe_failed"
+
+
+def test_a_pull_line_that_never_ends_is_a_failed_pull(fake_llm, monitors, monkeypatch, caplog):
+    monkeypatch.setattr(provider, "MAX_PULL_LINE_BYTES", 1000)
+    fake = fake_llm(models=[], pull_garbage=200_000)
+    monitor = monitors(fake.url)
+    with caplog.at_level(logging.WARNING, logger="fione.assistant"):
+        monitor.start()
+        status = wait_for(monitor, "error")
+    assert status.error_code == "pull_failed"
+    assert "Traceback" not in caplog.text and not [r for r in caplog.records if r.exc_info]
+
+
+def test_a_failed_pull_stays_shown_through_an_outage(fake_llm, monitors):
+    fake = fake_llm(models=[], pull_error="boom")
+    port = fake.port
+    monitor = monitors(fake.url)
+    monitor.start()
+    wait_for(monitor, "error")
+    fake.stop()
+    wait_for(monitor, "unreachable")
+    restarted = fake_llm(models=[], port=port)
+    status = wait_for(monitor, "error")  # not stuck at unreachable, and the reason is back
+    assert status.error_code == "pull_failed"
+    assert "POST /api/pull" not in restarted.paths  # and still no pull of its own accord
+
+
+def test_the_model_appearing_clears_a_failed_pull(fake_llm, monitors):
+    fake = fake_llm(models=[], pull_error="boom")
+    monitor = monitors(fake.url)
+    monitor.start()
+    wait_for(monitor, "error")
+    fake.add_model("gemma4:12b")
+    status = wait_for(monitor, "ready")
+    assert status.error_code is None
+
+
+def test_a_check_leaves_a_running_pull_alone(fake_llm, monitors):
+    fake = fake_llm(models=[], pull_steps=3, pull_delay=0.4)
+    monitor = monitors(fake.url, llm_auto_pull=False)
+    monitor.start()
+    wait_for(monitor, "missing")
+    assert monitor.pull_now() is True
+    wait_for(monitor, "pulling")
+    for _ in range(3):
+        monitor._check()  # what the thread does every recheck
+        assert monitor.snapshot().state == "pulling"
+    wait_for(monitor, "ready")
+
+
+@pytest.mark.parametrize("by", ["monitor", "pull_now"])
+def test_stopping_during_a_pull_is_quiet(fake_llm, monitors, caplog, by):
+    fake = fake_llm(models=[], pull_steps=5, pull_delay=0.4)
+    monitor = monitors(fake.url, llm_auto_pull=by == "monitor")
+    with caplog.at_level(logging.DEBUG, logger="fione.assistant"):
+        monitor.start()
+        if by == "pull_now":
+            wait_for(monitor, "missing")
+            assert monitor.pull_now()
+        wait_for(monitor, "pulling")
+        monitor.stop()
+        time.sleep(1.0)
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING or r.exc_info]
+
+
+def test_an_unexpected_pull_error_is_logged_unless_the_monitor_is_stopping(
+    fake_llm, monitors, caplog, monkeypatch
+):
+    for stopping in (False, True):
+        caplog.clear()
+        monitor = monitors(fake_llm(models=[], pull_steps=1).url)
+
+        def boom(line, monitor=monitor, stopping=stopping):
+            if stopping:
+                monitor._stop.set()  # a shutdown closes the client under the pull
+            raise RuntimeError("client closed")
+
+        monkeypatch.setattr(monitor, "_pull_line", boom)
+        assert monitor._begin_pull(forced=True)
+        with caplog.at_level(logging.INFO, logger="fione.assistant"):
+            monitor._pull()
+        assert bool([r for r in caplog.records if r.exc_info]) is (not stopping)
+        assert monitor.snapshot().error_code == "pull_failed" and not monitor._pulling

@@ -94,6 +94,7 @@ class FakeLlm:
         context_length: int = 16384,
         port: int = 0,
         pull_error: str | None = None,
+        pull_garbage: int = 0,
     ):
         self.script = list(script or [])
         self.policy = policy
@@ -103,6 +104,8 @@ class FakeLlm:
         self.context_length = context_length
         self.port = port
         self.pull_error = pull_error  # the pull stops with this error line after its first step
+        self.pull_garbage = pull_garbage  # bytes with no newline sent as a pull's first line
+        self.raw_replies: dict[str, bytes] = {}  # GET path -> body sent instead of the usual
         self.paths: list[str] = []  # "METHOD /path" of every request
         self.requests: list[dict] = []  # every chat body
         self.request_headers: list[dict] = []  # the matching headers, names in lower case
@@ -190,6 +193,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         self.llm.paths.append(f"GET {path}")
+        if path in self.llm.raw_replies:
+            return self._send(200, "application/json", self.llm.raw_replies[path])
         if path == "/api/version":
             self._json({"version": "0.0.0-fake"})
         elif path == "/api/tags":
@@ -247,6 +252,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.llm.add_model(name)
             return self._json({"status": "success"})
         self._send(200, "application/x-ndjson")
+        for _ in range(0, self.llm.pull_garbage, 8192):
+            self.wfile.write(b"x" * 8192)
+            self.wfile.flush()
         total = 1_000_000
         for step in range(1, self.llm.pull_steps + 1):
             time.sleep(self.llm.pull_delay)
