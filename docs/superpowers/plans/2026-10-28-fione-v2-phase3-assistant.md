@@ -706,3 +706,43 @@ CREATE TABLE llm_sample_optins (
 6. **Conversation visibility.** Recommended: private to the creator, admins included; tool calls are in the log for audit. The alternative is admin read access.
 7. **What counts as local.** Recommended: loopback, `host.docker.internal` and single-label service names. Private IP ranges warn.
 8. **Auto-pull on start. Decided:** off by default (`FIONE_LLM_AUTO_PULL=false`): a host Ollama is managed by its user, and the system page offers a pull button when the model is missing. The `ollama` profile sets it on, so its model is ready to use (spec 9).
+
+## Rulings made during implementation
+
+These decisions are binding for the remaining tasks. Where they differ from the task text above, they win.
+
+**Code layout and wiring**
+1. `normal_base_url` and `samples_allowed` live in `fione/assistant/store.py`; `provider.py` imports them.
+2. Every web POST added by Tasks 6 and 7 calls `same_site(request)` first, then `access.action(...)`. `access.action` checks the session and the CSRF token but not `Origin`.
+3. `POST …/assistant/c/{cid}/messages` maps the exceptions of `TurnManager.submit` as follows: `ConversationNotFound` → 404, `TurnBusy` → 409, `LimitReached` → 409, `TooManyTurns` → 429 (i18n `assistant.error.too_many_turns`), `LlmUnavailable` → 503, and any other `ValueError` (empty or too-long text) → 422. `TurnBusy` and `LimitReached` subclass `ValueError`, so `except ValueError` comes last. Each response keeps the posted text.
+4. `TurnManager.cancel(conversation_id)` takes no user, and it also ends a queued row. Cancel and delete routes call `store.get_conversation(conn, user, pid, cid)` first, so a conversation id reaches `cancel` only after it is known to be the user's own.
+5. The project navigation shows Fione-kun from a flag that `render()` adds to the shared template context from `settings.llm_base_url`, like `notebook_link`, with no database access. It is hidden when the assistant is not configured, and it shows in the simple view too.
+6. Confirming a proposal claims it, calls `models.submit_training` and records the job in one `db.immediate` transaction. A failure rolls back, so the proposal stays pending. `release_proposal` stays in the store API but is not called. The time `check_target` spends under the write lock is measured once in Task 7.
+7. `fione.mcp` normalises `Settings.public_url` to an origin itself; `config.py` does so only when `FIONE_NOTEBOOK_URL` is set.
+8. `fione.mcp` converts `list_tools()` (the OpenAI shape, `function.parameters`) to MCP's `name`, `description` and `inputSchema`.
+9. `mcp_endpoint` is async and reads the body with `await request.body()`; `BodyLimit` caps it at `MAX_BODY_BYTES` (1 MiB) while it arrives. The rest runs in a sync function through `run_in_threadpool`, so SQLite and semaphore waits do not block the event loop.
+
+**Defaults and Compose**
+10. Defaults: `FIONE_LLM_MODEL=gemma4:12b-mlx` and `FIONE_LLM_AUTO_PULL=false`. MLX needs an Ollama on the host of an Apple Silicon Mac; elsewhere use a non-MLX tag such as `gemma4:12b`. With auto-pull off, the system page offers the pull button when the model is missing.
+11. Compose's default is an Ollama on the host: `FIONE_LLM_BASE_URL=http://host.docker.internal:11434/v1`, `extra_hosts: host.docker.internal:host-gateway`, `gemma4:12b-mlx` and auto-pull `false`. `.env.example` carries a commented "Linux, or no Ollama on the host" block that sets `COMPOSE_PROFILES=ollama`, `FIONE_LLM_BASE_URL=http://ollama:11434/v1`, `FIONE_LLM_MODEL=gemma4:12b` and `FIONE_LLM_AUTO_PULL=true` together; a test checks that the block's values agree.
+12. `FIONE_LLM_CONTEXT_TOKENS` less `FIONE_LLM_MAX_TOKENS` must be at least `MIN_PROMPT_TOKENS` (3008). The runtime code `context_too_small` stays for a server that loaded the model with less, and its UI text gives the remedy: `FIONE_LLM_CONTEXT_TOKENS=16384` and `OLLAMA_CONTEXT_LENGTH=16384`.
+13. The model-load request (`POST /api/generate`) sends only `model`; Fione does not override the host's `OLLAMA_KEEP_ALIVE`.
+
+**Tests and the fake LLM**
+14. The e2e overlay sets `FIONE_LLM_AUTO_PULL: "true"` on `fione`, so the fake's short pull runs through the pull path; the shipped default stays `false`.
+15. `FakeLlm` takes `host="127.0.0.1"` and binds to it; `url` reports `127.0.0.1` when the host is `0.0.0.0`. Its CLI gains `--host` (the e2e service uses `--host 0.0.0.0`) and `--pull-delay` (for manual checks).
+16. e2e does not assert pull progress, because the automatic pull ends while the stack starts. It asserts only that the system page's card reaches ready. The progress display is covered by Task 4's web tests.
+17. The hostile-data e2e test uses a fresh project of its own.
+
+**Task 6 and 7 details**
+18. Chat UI:
+    - It shows the stored final `content` once a turn ends; streamed text is not final.
+    - It strips leading newlines when rendering; the stored content is unchanged.
+    - The remote warning reuses `is_local_url` and the host from `LlmStatus`.
+    - A failing HTMX poll gets a final fragment with status 286, like `easyml._polling_stopped`; only 401 is raised.
+    - The `access` label of `list_projects` is membership, not a permission; buttons follow `Ctx.can_write`.
+    - Conversations have no title in Task 6; an empty title shows as `assistant.untitled` with the creation time.
+19. Confirming a proposal:
+    - The confirm route checks, in order: `same_site`, `access.action(need="write")`, `get_proposal` (404 for anyone else's), a non-pending state (an idempotent 303 to the conversation), the dataset still in the project and of type train (409), and `TrainConfig.from_dict` (422).
+    - It then runs the transaction of ruling 6. Exceptions are caught in this order: `DatasetNotFound` → 409, `ProjectNotFound` → 404, `PermissionError` → 403, `TargetError` → 422, `ValueError` → 422 with the redacted reason.
+    - Dismissing a proposal that is not pending is also an idempotent 303.
