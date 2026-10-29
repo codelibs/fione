@@ -70,7 +70,7 @@ English: [Moving from Fione v1 to v2](migrating-from-v1.md)
 | 3 つのロール、ユーザー別のセッション | 作り直し: admin / editor / viewer とプロジェクトの共有 |
 | 日本語と英語 | あり |
 
-**この版には含まれず、予定しているもの**：LLM アシスタント（Ollama。Mac では既定で `gemma4:12b-mlx`）、MCP サーバー、ONNX 出力。
+v2 の新機能：LLM アシスタントの **Fione 君**（Ollama。Mac では既定で `gemma4:12b-mlx`）と、任意の読み取り専用 MCP サーバー。[Fione 君](assistant.ja.md)を参照してください。**この版には含まれず、予定しているもの**：ONNX 出力。
 
 ## Python モジュール
 

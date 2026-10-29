@@ -34,10 +34,15 @@ docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "
 
 Fione の画面の中で、あなた専用のコンテナの JupyterLab を、二度目のログインなしで開けます。任意の機能（Compose のプロファイル `notebook`）で、`docker/.env` にアドレスを 2 つとシークレットを足します。手順は[ノートブック](docs/notebook.ja.md)を参照してください。ノートブックでも、スクリプトでも、手元の Jupyter でも、`fione-sdk`（`sdk/`、`pip install ./sdk`）と API トークンで Fione を操作できます。データセット、データの概要、AutoML の学習、リーダーボード、予測、Python モジュールを、pandas のデータフレームで扱えます。詳しくは [sdk/README.md](sdk/README.md)（英語）を参照してください。
 
+## Fione 君（アシスタント）
+
+Fione 君は、プロジェクトのデータセットやモデルについての質問に答え、学習の設定を提案します。提案は人が確認して初めて動き、Fione 君は読むだけです。言語モデルのサーバーが必要で、既定は Mac の Ollama アプリ（`gemma4:12b-mlx`）、Linux では Compose の Ollama（プロファイル `ollama`）、そのほか OpenAI 互換のサーバーも使えます。同じ読み取り専用のツールを MCP クライアントにも提供できます（既定はオフ）。詳しくは [Fione 君](docs/assistant.ja.md)（[English](docs/assistant.md)）を参照してください。
+
 ## ドキュメント
 
 - [クイックスタート](docs/quickstart.ja.md)（[English](docs/quickstart.md)）
 - [ノートブック](docs/notebook.ja.md)（[English](docs/notebook.md)）：JupyterLab と `fione-sdk`
+- [Fione 君（アシスタント）](docs/assistant.ja.md)（[English](docs/assistant.md)）：言語モデル、送られる情報、提案、MCP
 - [設定](docs/configuration.md)（英語）：すべての設定項目、リバースプロキシ、秘密鍵のバックアップ
 - [Fione Serving](docs/serving.md)（英語）：モデルを予測 API として動かす
 - [v1 から v2 への移行](docs/migrating-from-v1.ja.md)（[English](docs/migrating-from-v1.md)）
@@ -45,7 +50,7 @@ Fione の画面の中で、あなた専用のコンテナの JupyterLab を、�
 
 ## 現状
 
-この版は中核機能（データ、分析、AutoML、モデルとその説明、予測、サービング、ジョブ、ユーザーと共有）と、任意のノートブック（JupyterLab と Python SDK）を備えています。**この版には含まれず、予定しているもの**：LLM アシスタント（Ollama。Mac では既定で `gemma4:12b-mlx`）、MCP サーバー、ONNX 出力。イメージはまだ公開していないため、リポジトリからビルドしてください（バージョンタグを付けると、`fione`、`fione-serving`、`fione-notebook`、`fione-notebook-launcher` のイメージが公開されます）。
+この版は中核機能（データ、分析、AutoML、モデルとその説明、予測、サービング、ジョブ、ユーザーと共有）と、任意のノートブック（JupyterLab と Python SDK）を備えています。LLM アシスタント Fione 君（任意の MCP サーバー付き）も備えています。**この版には含まれず、予定しているもの**：ONNX 出力。イメージはまだ公開していないため、リポジトリからビルドしてください（バージョンタグを付けると、`fione`、`fione-serving`、`fione-notebook`、`fione-notebook-launcher` のイメージが公開されます）。
 
 Java 版の v1（Fess プラグイン）は、このリポジトリの v2 マージ前の履歴に残っています。
 
