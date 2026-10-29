@@ -21,3 +21,6 @@ test-results/
 *.tgz
 /iris.csv
 docker/model/
+
+# Local superpowers specs and plans (not tracked)
+docs/superpowers/
