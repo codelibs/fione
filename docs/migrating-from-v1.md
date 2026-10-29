@@ -2,7 +2,7 @@
 
 Fione v2 keeps v1's idea (a CSV in the browser, a model, a prediction API) and its main path
 (upload → data analysis → run → prediction summary → predict / serve), but it is a new
-implementation. Japanese: [v1 から v2 への移行](migrating-from-v1.ja.md).
+implementation.
 
 ## What changed
 
