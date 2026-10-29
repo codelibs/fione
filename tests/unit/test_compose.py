@@ -111,3 +111,12 @@ def test_both_gateway_servers_proxy_with_http_1_1():
     location = relay[relay.index("location /api/v1/ {") :]
     location = location[: location.index("\n    }")]
     assert "proxy_http_version 1.1;" in location and "proxy_request_buffering off;" in location
+
+
+def test_gateway_relay_never_forwards_mcp():
+    # /mcp is served on Fione's own port only: the relay forwards /api/v1/ and answers 404 to
+    # everything else, and the public server does not mention it either.
+    assert "/mcp" not in GATEWAY_CONF
+    relay = GATEWAY_CONF[GATEWAY_CONF.index("listen 8081;") :]
+    catch_all = relay[relay.index("location / {") :]
+    assert "return 404;" in catch_all[: catch_all.index("}")]

@@ -36,6 +36,7 @@ from fione.assistant.turns import TurnManager
 from fione.auth import service as auth_service
 from fione.config import Settings, get_settings, load_secret
 from fione.jobs.runner import JobRunner
+from fione.mcp import mcp_endpoint
 from fione.models.live import LiveModels
 from fione.notebooks.launcher import HttpLauncher
 from fione.notebooks.service import PendingStopRetrier
@@ -208,5 +209,11 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.add_middleware(UIHeaders)
     for router in ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
+    app.add_api_route(
+        "/mcp",
+        mcp_endpoint,
+        methods=["POST", "GET", "DELETE"],
+        include_in_schema=False,
+    )
     web.install(app)
     return app

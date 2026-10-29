@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     # ollama: pull the model when the server lacks it. Off: a host Ollama is the user's;
     # an administrator pulls on the system page.
     llm_auto_pull: bool = False
+    # The read-only tools over MCP at /mcp, for a full-scope API token; off unless set.
+    mcp_enabled: bool = False
     llm_max_tokens: int = Field(1024, ge=64, le=8192)  # per completion
     llm_context_tokens: int = Field(16384, le=262144)  # the budget of one request
     llm_max_tool_rounds: int = Field(6, ge=1, le=20)  # completions with tool calls per turn

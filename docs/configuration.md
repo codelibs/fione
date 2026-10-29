@@ -47,6 +47,7 @@ Read by the `fione` container at start. Booleans accept `true` / `false`.
 | `FIONE_LLM_MAX_TOOL_ROUNDS` | `6` | How many times one answer may call tools before it is stopped as "too many steps". From 1 to 20. | For questions that need more lookups. |
 | `FIONE_LLM_TURN_TIMEOUT_SECS` | `180` | How long one answer may take, all its tool rounds included, before it ends as timed out. From 10 to 1800. | For slow models or hardware. |
 | `FIONE_LLM_MAX_CONCURRENT_TURNS` | `2` | How many answers are written at once, across all users; more wait in a queue. From 1 to 16. | For a server that handles parallel requests. |
+| `FIONE_MCP_ENABLED` | `false` | Serves the assistant's read-only tools over MCP at `/mcp` on Fione's own port (Streamable HTTP, JSON-RPC over POST, stateless). A client needs a full-scope API token as `Authorization: Bearer`; session cookies and notebook tokens are refused. It can list and call the read-only tools of the projects the token's user can read, and never receives example values from a dataset. It cannot start, change or delete anything. | Set `true` to let an MCP client read your projects. |
 
 Fixed limits that are not settings: a model import file can be up to 512 MiB, an uploaded
 Python module up to 256 KiB.
