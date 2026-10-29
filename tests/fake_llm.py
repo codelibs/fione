@@ -2,9 +2,8 @@
 
 Each chat request takes the next item of the script (when it runs out, the reply is the text
 "ok"). The one exception is the gullible rule, which stands in for a model that obeys
-injected text: when a ``tool`` message holds ``FAKE_CALL:<name>:<json object>`` that no earlier
-assistant message acted on (none after that tool message made the call), the reply is that
-tool call, and the script keeps its place.
+injected text: when a ``tool`` message holds ``FAKE_CALL:<name>:<json object>`` that no assistant
+message has made yet, the reply is that tool call, and the script keeps its place.
 
 Script items (the keys combine, except ``status``)::
 
@@ -65,15 +64,81 @@ def _was_called(message: dict, name: str, arguments: dict) -> bool:
 
 
 def gullible_call(messages: list[dict]) -> tuple[str, dict] | None:
-    """The first ``FAKE_CALL`` in a tool message that no later assistant message made."""
-    for i, message in enumerate(messages):
+    """The first ``FAKE_CALL`` in a tool message that no assistant message made yet. (A tool
+    result may echo the injected text, as a proposal's warnings do: the call made after the
+    first sighting is then not made again.)"""
+    assistants = [m for m in messages if m.get("role") == "assistant"]
+    for message in messages:
         if message.get("role") != "tool":
             continue
         for name, arguments in _fake_calls(str(message.get("content") or "")):
-            later = (m for m in messages[i + 1 :] if m.get("role") == "assistant")
-            if not any(_was_called(m, name, arguments) for m in later):
+            if not any(_was_called(m, name, arguments) for m in assistants):
                 return name, arguments
     return None
+
+
+_PROPOSE = re.compile(r"propose target=(\S+)")
+_PROJECT = re.compile(r"project (\S+) named")
+
+
+def _call(name: str, arguments: dict) -> dict:
+    return {"tool_calls": [{"name": name, "arguments": arguments}]}
+
+
+def _result(message: dict) -> dict:
+    try:
+        value = json.loads(str(message.get("content") or ""))
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def e2e_item(messages: list[dict]) -> dict:
+    """The deterministic reply of the ``e2e`` policy, from the last user message and the tool
+    results since it::
+
+        propose target=<col>   list_datasets, then propose_training_config for the first train
+                               dataset, then "I proposed a training configuration. ..."
+        describe               list_datasets, describe_dataset of the first one, then a count
+        slow                   a long text, slowly (a reply there is time to stop)
+        anything else          "Hello, I am Fione-kun (fake)."
+    """
+    last = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=None)
+    if last is None:
+        return {"text": "Hello, I am Fione-kun (fake)."}
+    asked = str(messages[last].get("content") or "").strip()
+    since = messages[last + 1 :]
+    made = [
+        (c.get("function") or {}).get("name")
+        for m in since
+        if m.get("role") == "assistant"
+        for c in m.get("tool_calls") or []
+    ]
+    tools = [_result(m) for m in since if m.get("role") == "tool"]
+    system = next((str(m.get("content")) for m in messages if m.get("role") == "system"), "")
+    project = _PROJECT.search(system)
+    listed = next((r for r, n in zip(tools, made, strict=False) if n == "list_datasets"), {})
+    datasets = listed.get("datasets") or []
+    if (match := _PROPOSE.match(asked)) is not None:
+        if "propose_training_config" in made:
+            return {"text": "I proposed a training configuration. Please check it."}
+        if "list_datasets" not in made:
+            return _call("list_datasets", {"project_id": project[1] if project else ""})
+        train = next((d for d in datasets if d.get("type") == "train"), None)
+        return _call("propose_training_config", {"dataset_id": train["id"], "target": match[1]})
+    if asked == "describe":
+        if "describe_dataset" in made:
+            described = next(
+                (r for r, n in zip(tools, made, strict=False) if n == "describe_dataset"), {}
+            )
+            return {"text": f"The dataset has {len(described.get('columns') or [])} columns."}
+        if "list_datasets" not in made:
+            return _call("list_datasets", {"project_id": project[1] if project else ""})
+        return _call("describe_dataset", {"dataset_id": datasets[0]["id"]})
+    if asked == "slow":
+        return {"text": "This is a slow answer, written one small piece at a time. " * 4,
+                "chunks": 60, "chunk_delay": 0.2}  # fmt: skip
+    return {"text": "Hello, I am Fione-kun (fake)."}
 
 
 def _pieces(text: str, count: int) -> list[str]:
@@ -163,6 +228,8 @@ class FakeLlm:
             messages = body.get("messages") or []
             if (call := gullible_call(messages)) is not None:
                 return {"tool_calls": [{"name": call[0], "arguments": call[1]}]}
+            if self.policy == "e2e":
+                return e2e_item(messages)
             return self.script.pop(0) if self.script else {"text": "ok"}
 
     def running_models(self) -> list[dict]:

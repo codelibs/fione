@@ -2929,3 +2929,24 @@ select.input {
   min-height: 5rem;
   resize: vertical;
 }
+
+/* A training proposal under a message: the facts as a two-column list, long names wrapped. */
+.chat-proposal {
+  margin-top: var(--space-2);
+}
+
+.chat-proposal__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.chat-proposal__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-proposal li {
+  overflow-wrap: anywhere;
+}
