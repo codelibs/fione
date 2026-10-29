@@ -1,6 +1,7 @@
 """The MCP endpoint: off by default, a full-scope bearer token only, a browser's Origin
 checked, and nothing but the registry's read-only tools behind it."""
 
+import asyncio
 import io
 import json
 import logging
@@ -242,3 +243,37 @@ def test_token_not_logged_and_calls_say_via_mcp(mcp, caplog):
         post(client, rpc("ping"), {"Authorization": "Bearer wrong-token-value"})
     assert token not in caplog.text and "wrong-token-value" not in caplog.text
     assert "via=mcp" in caplog.text
+
+
+def test_nan_and_odd_ids_and_deep_nesting_are_refused_not_500(mcp):
+    client, user = mcp
+    headers = bearer(client, user)
+    for raw in (
+        b'{"jsonrpc":"2.0","id":NaN,"method":"ping"}',
+        b'{"jsonrpc":"2.0","id":Infinity,"method":"ping"}',
+        b"[" * 100_000 + b"]" * 100_000,
+    ):
+        r = client.post("/mcp", content=raw, headers=headers)
+        assert (r.status_code, r.json()["error"]["code"]) == (400, -32700), raw[:40]
+    for odd in (True, None, [1], {"a": 1}, 1.5):
+        r = post(client, {"jsonrpc": "2.0", "id": odd, "method": "ping"}, headers)
+        assert r.status_code in (202, 400) and r.status_code != 500, odd
+    assert post(client, rpc("ping", id="abc"), headers).json()["id"] == "abc"
+
+
+def test_a_call_waits_for_a_slot_and_then_says_busy(mcp, monkeypatch):
+    client, user = mcp
+    monkeypatch.setattr("fione.mcp.BUSY_WAIT_SECS", 0.05)
+    client.app.state.mcp_slots = asyncio.Semaphore(0)  # both slots taken
+    r = post(client, rpc("tools/call", {"name": "list_projects"}, id=7), bearer(client, user))
+    assert (r.status_code, r.json()["error"]) == (200, {"code": -32000, "message": "busy"})
+    assert r.json()["id"] == 7
+
+
+def test_the_log_line_names_a_bounded_number_of_arguments(mcp, caplog):
+    client, user = mcp
+    many = {f"k{i}": i for i in range(5000)}
+    with caplog.at_level(logging.INFO, logger="fione.tools"):
+        call(client, bearer(client, user), "list_projects", many)
+    (line,) = [r.getMessage() for r in caplog.records if r.name == "fione.tools"]
+    assert len(line) < 2000

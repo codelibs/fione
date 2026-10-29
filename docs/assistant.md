@@ -30,6 +30,11 @@ OpenAI-compatible server. Nothing is installed with Fione and no model is bundle
   another server that has its own switch for that, pass it with `FIONE_LLM_EXTRA_BODY`. Without
   Compose, the same settings are environment variables of the Fione process.
 
+On Linux, the Ollama of the host is reached through the Docker host gateway, so it must listen
+beyond the loopback address (`OLLAMA_HOST=0.0.0.0`). Ollama has no authentication, so that opens
+it to your network and to the notebook containers: bind it to the Docker bridge address and
+firewall it, or use the Compose `ollama` profile, which is not published.
+
 All the settings are in [Configuration](configuration.md). Fione-kun appears in a project's
 menu once `FIONE_LLM_BASE_URL` is set.
 

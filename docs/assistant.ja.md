@@ -12,6 +12,8 @@ Fione 君には言語モデルのサーバーが必要です。[Ollama](https://
 - **Linux、またはホストに Ollama がない場合。** Compose の中で Ollama を動かします。`docker/.env` の「Linux, or no Ollama on the host」のブロック(`COMPOSE_PROFILES=ollama`、`FIONE_LLM_BASE_URL`、`FIONE_LLM_MODEL=gemma4:12b`、`FIONE_LLM_AUTO_PULL=true`)のコメントを外し、いつもどおり起動します。CPU だけで動くため回答は遅く、初回にイメージ(約 3.8 GB)とモデル(約 8 GB)をダウンロードします。
 - **ほかの OpenAI 互換サーバー**(llama.cpp、vLLM、クラウドのサービス)。`FIONE_LLM_BASE_URL`、`FIONE_LLM_PROVIDER=openai`、`FIONE_LLM_MODEL`、必要なら `FIONE_LLM_API_KEY` を設定します。Ollama では Fione 君がモデルの思考出力を止めます。ほかのサーバーで専用の切り替えがあるなら `FIONE_LLM_EXTRA_BODY` で渡します。Compose を使わない場合、同じ設定は Fione プロセスの環境変数です。
 
+Linux では、ホストの Ollama は Docker のホストゲートウェイ経由で届くため、ループバック以外でも待ち受ける必要があります(`OLLAMA_HOST=0.0.0.0`)。Ollama には認証がないので、ネットワークとノートブックのコンテナに公開されることになります。Docker ブリッジのアドレスにだけバインドしてファイアウォールで守るか、公開されない Compose の `ollama` プロファイルを使ってください。
+
 すべての設定は[設定](configuration.md)にあります。`FIONE_LLM_BASE_URL` を設定すると、プロジェクトのメニューに Fione 君が出ます。
 
 既定のモデル Gemma 4 は Apache License 2.0 で公開されています(2026-10-29 に、Google の Gemma 4 のライセンスのページと、Ollama がモデルに付けているライセンス文で確認)。Fione は Ollama 経由でダウンロードするだけです。ほかのモデルを選ぶときは、その条項を確認してください。

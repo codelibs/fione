@@ -12,7 +12,7 @@ from fione.assistant import store
 from fione.assistant.client import ChatClient
 from fione.assistant.turns import run_turn
 from fione.auth import service as auth_service
-from fione.auth.roles import Role
+from fione.auth.roles import ProjectAccess, Role
 from fione.engine.config import ConfigError, TrainConfig
 from fione.jobs import store as jobs
 from fione.models import service as models
@@ -249,4 +249,59 @@ def test_dataset_not_for_training_here_is_409(setup, where):
         conn.execute("UPDATE chat_proposals SET dataset_id = ? WHERE id = ?", (other, proposal.id))
     before = job_count(world)
     assert post(world, "confirm", proposal).status_code == 409
+    assert (job_count(world), stored(world, proposal)) == (before, ("pending", None))
+
+
+def test_concurrent_confirms_make_one_job(setup):
+    world, proposal = proposal_of(setup)
+    before = job_count(world)
+    csrf = world.login("ed")
+    path = f"/projects/{world.p}/assistant/proposals/{proposal.id}/confirm"
+    start, answers = threading.Barrier(4), []
+
+    def press():
+        start.wait()
+        r = world.client.post(path, data={"csrf_token": csrf}, follow_redirects=False)
+        answers.append(r.status_code)
+
+    threads = [threading.Thread(target=press) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert answers == [303] * 4
+    assert job_count(world) == before + 1
+    assert stored(world, proposal)[0] == "confirmed"
+
+
+def test_confirm_and_dismiss_together_agree(setup):
+    world, proposal = proposal_of(setup)
+    before = job_count(world)
+    csrf = world.login("ed")
+    base = f"/projects/{world.p}/assistant/proposals/{proposal.id}"
+    start = threading.Barrier(2)
+
+    def press(route):
+        start.wait()
+        world.client.post(f"{base}/{route}", data={"csrf_token": csrf}, follow_redirects=False)
+
+    threads = [threading.Thread(target=press, args=(r,)) for r in ("confirm", "dismiss")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    state, job_id = stored(world, proposal)
+    # whichever came first decided: a job exactly when it was confirmed
+    assert (state, job_count(world) - before) in {("confirmed", 1), ("dismissed", 0)}
+    assert (job_id is not None) is (state == "confirmed")
+
+
+def test_downgraded_to_viewer_member_cannot_confirm(setup):
+    world, proposal = proposal_of(setup, "co")
+    before = job_count(world)
+    with closing(connect(world.client)) as conn:
+        users = dict(conn.execute("SELECT username, id FROM users").fetchall())
+        owner = auth_service.get_user(conn, users["ed"])
+        projects.share_project(conn, owner, world.p, "co", ProjectAccess.VIEWER)
+    assert post(world, "confirm", proposal, "co").status_code == 403
     assert (job_count(world), stored(world, proposal)) == (before, ("pending", None))

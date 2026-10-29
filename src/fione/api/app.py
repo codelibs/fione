@@ -5,6 +5,7 @@ A new router is one more entry in ``ROUTERS``; a route that accepts uploads also
 path pattern to ``UPLOAD_PATHS`` (other requests are limited to ``MAX_BODY_BYTES``).
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -36,6 +37,7 @@ from fione.assistant.turns import TurnManager
 from fione.auth import service as auth_service
 from fione.config import Settings, get_settings, load_secret
 from fione.jobs.runner import JobRunner
+from fione.mcp import MAX_CONCURRENT_CALLS as MCP_MAX_CONCURRENT_CALLS
 from fione.mcp import mcp_endpoint
 from fione.models.live import LiveModels
 from fione.notebooks.launcher import HttpLauncher
@@ -193,6 +195,7 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.notebook_retrier = None
     app.state.llm_monitor = LlmMonitor(settings)  # off unless FIONE_LLM_BASE_URL is set
     app.state.turns = TurnManager(db_path, app.state.storage, settings, app.state.llm_monitor)
+    app.state.mcp_slots = asyncio.Semaphore(MCP_MAX_CONCURRENT_CALLS)  # tool calls over MCP
     app.state.started_at = time.monotonic()  # the system page's uptime
     app.state.signer = SessionSigner(secret, settings.session_max_age_secs)
     app.state.notebook_launcher = (

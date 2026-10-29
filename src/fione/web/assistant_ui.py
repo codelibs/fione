@@ -387,10 +387,14 @@ def confirm(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
         return _refused(
             request, conn, ctx, conversation, 422, "assistant.proposal.failed", _reason(e)
         )
+    # The claim is short and alone in its transaction: it makes the one job of the proposal.
+    # The data is read for the checks of submit_training outside any lock (it may be on S3).
+    with db.immediate(conn):
+        claimed = store.claim_proposal(conn, proposal.id, ctx.auth.user.id)
+    if not claimed:
+        return back  # another confirmation came first
     try:
-        with db.immediate(conn):
-            if not store.claim_proposal(conn, proposal.id, ctx.auth.user.id):
-                return back  # another confirmation came first
+        try:
             job = models.submit_training(
                 conn,
                 request.app.state.storage,
@@ -400,6 +404,11 @@ def confirm(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
                 config,
                 name=f"Fione-kun proposal {proposal.id}",
             )
+        except BaseException:
+            with db.immediate(conn):  # no job: the proposal waits for the next try
+                store.release_proposal(conn, proposal.id)
+            raise
+        with db.immediate(conn):
             store.set_proposal_job(conn, proposal.id, job.id)
     except DatasetNotFound:
         return gone()
