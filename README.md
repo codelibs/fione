@@ -2,7 +2,6 @@
 
 Fione is an open-source AutoML server: upload a CSV in the browser, get a trained model, make
 predictions and serve the model as a prediction API. It runs with one `docker compose up`.
-Japanese: [README.ja.md](README.ja.md).
 
 This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinIO.
 
@@ -45,10 +44,10 @@ The full walk-through, with a sample dataset: [Quick start](docs/quickstart.md).
 
 ## Documentation
 
-- [Quick start](docs/quickstart.md) ([日本語](docs/quickstart.ja.md))
+- [Quick start](docs/quickstart.md)
 - [Configuration](docs/configuration.md): every setting, reverse proxy, backups of the secret key
 - [Fione Serving](docs/serving.md): running a model as a prediction API
-- [Moving from v1](docs/migrating-from-v1.md) ([日本語](docs/migrating-from-v1.ja.md))
+- [Moving from v1](docs/migrating-from-v1.md)
 - [Known limitations](docs/known-limitations.md)
 
 ## Status

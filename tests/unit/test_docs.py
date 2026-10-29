@@ -10,7 +10,7 @@ from fione.config import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DOC = ROOT / "docs" / "configuration.md"
-PAGES = sorted([ROOT / "README.md", ROOT / "README.ja.md", *(ROOT / "docs").glob("*.md")])
+PAGES = sorted([ROOT / "README.md", *(ROOT / "docs").glob("*.md")])
 NAME = re.compile(r"FIONE_[A-Z0-9_]*[A-Z0-9]")
 
 
@@ -57,14 +57,6 @@ def test_docs_name_no_setting_that_does_not_exist():
     for page in PAGES:
         unknown = set(NAME.findall(page.read_text())) - known
         assert not unknown, (page.name, unknown)
-
-
-def test_docs_japanese_quickstart_runs_the_same_commands():
-    blocks = [
-        re.findall(r"```sh\n(.*?)```", (ROOT / "docs" / name).read_text(), re.S)
-        for name in ("quickstart.md", "quickstart.ja.md")
-    ]
-    assert blocks[0] == blocks[1]
 
 
 def _slug(heading: str) -> str:
