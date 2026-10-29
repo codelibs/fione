@@ -69,7 +69,7 @@
 
       {% if llm_on %}
       {% if notice %}
-      <div class="alert alert-danger" role="alert" id="assistant-notice" tabindex="-1" autofocus>{{ icon("alert") }}<span>{{ t(notice) }}</span></div>
+      <div class="alert alert-danger" role="alert" id="assistant-notice" tabindex="-1" autofocus>{{ icon("alert") }}<span>{{ t(notice) }}{% if detail %} {{ detail }}{% endif %}</span></div>
       {% endif %}
       {% if conversation is defined %}
       <form class="chat-form stack-tight" method="post" action="{{ chat }}/c/{{ conversation.id }}/messages">

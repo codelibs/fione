@@ -1,0 +1,66 @@
+{# A training proposal of Fione-kun: the stored configuration and what the check found.
+   Every text is escaped; the warnings are the tool's own (English) sentences. Only a person
+   who can write confirms or dismisses, and only while it is pending. #}
+{% set p = card.proposal %}
+{% set c = p.config %}
+{% set base = "/projects/" ~ ctx.project.id ~ "/assistant/proposals/" ~ p.id %}
+<section class="card card-padded stack-tight chat-proposal" data-state="{{ p.state }}" aria-label="{{ t('assistant.proposal.title') }}">
+  <h3>{{ t('assistant.proposal.title') }}</h3>
+  <dl class="chat-proposal__facts text-sm">
+    <dt>{{ t('assistant.proposal.dataset') }}</dt>
+    <dd>{% if card.dataset_name %}{{ card.dataset_name }}{% else %}{{ t('assistant.proposal.dataset_gone') }}{% endif %}</dd>
+    <dt>{{ t('assistant.proposal.target') }}</dt>
+    <dd>{{ c.target }}</dd>
+    <dt>{{ t('assistant.proposal.task') }}</dt>
+    <dd>{{ c.task }}</dd>
+    <dt>{{ t('assistant.proposal.max_runtime') }}</dt>
+    <dd>{{ c.max_runtime_secs }}</dd>
+    {% if c.ignored_columns %}
+    <dt>{{ t('assistant.proposal.ignored') }}</dt>
+    <dd>{{ c.ignored_columns | join(", ") }}</dd>
+    {% endif %}
+  </dl>
+  {% if p.details.ignored_suggestions %}
+  <div class="text-sm">
+    <p class="text-muted">{{ t('assistant.proposal.ignored_suggestions') }}</p>
+    <ul>
+      {% for s in p.details.ignored_suggestions %}
+      <li>{{ s.column }}: {{ s.reason }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if p.details.warnings %}
+  <div class="text-sm">
+    <p class="text-muted">{{ t('assistant.proposal.warnings') }}</p>
+    <ul>
+      {% for w in p.details.warnings %}
+      <li>{{ w }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if p.details.rationale %}
+  <p class="text-sm"><span class="text-muted">{{ t('assistant.proposal.rationale') }}</span> {{ p.details.rationale }}</p>
+  {% endif %}
+  {% if p.state == "confirmed" %}
+  {% if p.job_id %}
+  <p><a href="/projects/{{ ctx.project.id }}/jobs/{{ p.job_id }}">{{ t('assistant.proposal.confirmed') }}</a></p>
+  {% endif %}
+  {% elif p.state == "dismissed" %}
+  <p class="text-muted text-sm">{{ t('assistant.proposal.dismissed') }}</p>
+  {% elif ctx.can_write %}
+  <div class="row-actions">
+    <form method="post" action="{{ base }}/confirm">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button type="submit" class="btn btn-primary btn-sm">{{ t('assistant.proposal.confirm') }}</button>
+    </form>
+    <form method="post" action="{{ base }}/dismiss">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button type="submit" class="btn btn-secondary btn-sm">{{ t('assistant.proposal.dismiss') }}</button>
+    </form>
+  </div>
+  {% else %}
+  <p class="text-muted text-sm">{{ t('assistant.proposal.viewer_note') }}</p>
+  {% endif %}
+</section>

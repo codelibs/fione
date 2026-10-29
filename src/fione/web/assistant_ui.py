@@ -14,11 +14,23 @@ from dataclasses import dataclass
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 
-from fione import i18n
+from fione import db, i18n
 from fione.api.deps import Conn
 from fione.assistant import store
-from fione.assistant.store import Conversation, ConversationNotFound, LimitReached, TurnBusy
+from fione.assistant.store import (
+    Conversation,
+    ConversationNotFound,
+    LimitReached,
+    ProposalNotFound,
+    TurnBusy,
+)
 from fione.assistant.turns import ERROR_CODES, LlmUnavailable, TooManyTurns
+from fione.engine.config import TargetError, TrainConfig
+from fione.models import service as models
+from fione.modules.registry import redact
+from fione.projects import service as projects
+from fione.projects.service import DatasetNotFound, DatasetType, ProjectNotFound
+from fione.schema import clean_text
 from fione.tools import list_tools
 from fione.web.access import (
     Ctx,
@@ -48,6 +60,15 @@ class Line:
     text: str  # escaped by the template; for a tool row, its label's key
     state: str
     error_key: str | None = None
+    proposal: "Card | None" = None  # the training proposal this message carries
+
+
+@dataclass(frozen=True)
+class Card:
+    """A training proposal as its card shows it."""
+
+    proposal: store.Proposal
+    dataset_name: str | None  # None once the dataset is gone
 
 
 def _tool_names() -> set[str]:
@@ -63,9 +84,28 @@ def _error_key(message: store.Message) -> str | None:
     return None
 
 
-def _lines(messages: list[store.Message]) -> list[Line]:
+def _cards(conn, conversation: Conversation) -> dict[int, Card]:
+    """The conversation's proposals by message id, each with its dataset's name (only for a
+    dataset of the conversation's own project)."""
+    cards = {}
+    for message_id, proposal in store.proposals_for(conn, conversation.id).items():
+        name = None
+        if proposal.dataset_id is not None:
+            try:
+                dataset = projects.get_dataset(conn, proposal.dataset_id)
+            except DatasetNotFound:
+                pass
+            else:
+                if dataset.project_id == conversation.project_id:
+                    name = dataset.name
+        cards[message_id] = Card(proposal, name)
+    return cards
+
+
+def _lines(messages: list[store.Message], cards: dict[int, Card]) -> list[Line]:
     """What the thread shows: the questions, Fione-kun's texts (a leading blank line of a
-    reply is left out), what it looked at, and why a message ended early."""
+    reply is left out), what it looked at, the proposals it made, and why a message ended
+    early."""
     tools = _tool_names()
     lines = []
     for m in messages:
@@ -75,9 +115,10 @@ def _lines(messages: list[store.Message]) -> list[Line]:
             continue
         text = (m.content or "").lstrip("\r\n")
         error = _error_key(m)
-        if m.role == "assistant" and not text and m.state == "done":
+        card = cards.get(m.id)
+        if m.role == "assistant" and not text and m.state == "done" and card is None:
             continue  # a step that only called tools
-        lines.append(Line(m.role, text, m.state, error))
+        lines.append(Line(m.role, text, m.state, error, card))
     return lines
 
 
@@ -85,7 +126,7 @@ def _thread(conn, conversation: Conversation) -> dict:
     messages = store.messages(conn, conversation.id)
     return {
         "conversation": conversation,
-        "lines": _lines(messages),
+        "lines": _lines(messages, _cards(conn, conversation)),
         "active": any(m.state in ACTIVE for m in messages),
     }
 
@@ -134,13 +175,15 @@ def conversation_page(
     *,
     status: int = 200,
     notice: str | None = None,
+    detail: str = "",
     text: str = "",
 ) -> Response:
     """The chat page showing ``conversation`` (or none), with a refusal ``notice`` (an i18n
-    key) above the form, which holds ``text``."""
+    key, and a ``detail`` sentence after it) above the form, which holds ``text``."""
     context = {
         "conversations": store.list_conversations(conn, ctx.auth.user, ctx.project.id),
         "notice": notice,
+        "detail": detail,
         "text": text,
         **_llm(request, conn),
     }
@@ -294,3 +337,92 @@ def delete(request: Request, conn: Conn, pid: str, cid: str, form: SmallForm) ->
     except ConversationNotFound:
         raise UiError(404, "error.not_found") from None
     return RedirectResponse(_page_url(pid), 303)
+
+
+# --- training proposals -----------------------------------------------------
+
+
+def _proposal(request: Request, conn, pid: str, prid: str, token: str):
+    """The signed-in user's own proposal and its conversation, for a person who can write to
+    the project (404 for anyone else's, other projects' and missing ones)."""
+    same_site(request)
+    ctx = action(request, conn, pid, token, need="write")
+    try:
+        proposal = store.get_proposal(conn, ctx.auth.user, pid, parse_id(prid))
+        conversation = store.get_conversation(conn, ctx.auth.user, pid, proposal.conversation_id)
+    except (ProposalNotFound, ConversationNotFound):
+        raise UiError(404, "error.not_found") from None
+    return ctx, proposal, conversation
+
+
+def _refused(request: Request, conn, ctx: Ctx, conversation, status, key, detail=""):
+    return conversation_page(
+        request, conn, ctx, conversation, status=status, notice=key, detail=detail
+    )
+
+
+@router.post("/projects/{pid}/assistant/proposals/{prid}/confirm")
+def confirm(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) -> Response:
+    """Start the training a proposal stores, once: the stored configuration is submitted, never
+    a posted one. A decided proposal only goes back to its conversation."""
+    ctx, proposal, conversation = _proposal(request, conn, pid, prid, field(form, "csrf_token"))
+    back = RedirectResponse(_page_url(pid, conversation.id), 303)
+    if proposal.state != "pending":
+        return back
+
+    def gone() -> Response:
+        return _refused(request, conn, ctx, conversation, 409, "assistant.proposal.dataset_gone")
+
+    if proposal.dataset_id is None:
+        return gone()
+    try:
+        dataset = projects.get_dataset(conn, proposal.dataset_id)
+    except DatasetNotFound:
+        return gone()
+    if dataset.project_id != pid or dataset.type != DatasetType.TRAIN:
+        return gone()
+    try:
+        config = TrainConfig.from_dict(proposal.config)
+    except ValueError as e:  # ConfigError
+        return _refused(
+            request, conn, ctx, conversation, 422, "assistant.proposal.failed", _reason(e)
+        )
+    try:
+        with db.immediate(conn):
+            if not store.claim_proposal(conn, proposal.id, ctx.auth.user.id):
+                return back  # another confirmation came first
+            job = models.submit_training(
+                conn,
+                request.app.state.storage,
+                ctx.auth.user,
+                pid,
+                proposal.dataset_id,
+                config,
+                name=f"Fione-kun proposal {proposal.id}",
+            )
+            store.set_proposal_job(conn, proposal.id, job.id)
+    except DatasetNotFound:
+        return gone()
+    except ProjectNotFound:
+        raise UiError(404, "error.not_found") from None
+    except PermissionError:
+        raise UiError(403, "error.forbidden") from None
+    except TargetError:
+        return _refused(request, conn, ctx, conversation, 422, "assistant.proposal.target_data")
+    except ValueError as e:  # ConfigError too; after TargetError
+        return _refused(
+            request, conn, ctx, conversation, 422, "assistant.proposal.failed", _reason(e)
+        )
+    return RedirectResponse(f"/projects/{pid}/jobs/{job.id}", 303)
+
+
+def _reason(error: Exception) -> str:
+    return clean_text(redact(str(error)), 300)
+
+
+@router.post("/projects/{pid}/assistant/proposals/{prid}/dismiss")
+def dismiss(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) -> Response:
+    ctx, proposal, conversation = _proposal(request, conn, pid, prid, field(form, "csrf_token"))
+    with db.immediate(conn):
+        store.dismiss_proposal(conn, proposal.id, ctx.auth.user.id)
+    return RedirectResponse(_page_url(pid, conversation.id), 303)

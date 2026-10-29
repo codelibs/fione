@@ -26,7 +26,7 @@ from fione.web import (
     sharing_ui,
     views,
 )
-from web_helpers import iris_test_csv, make_world
+from web_helpers import iris_test_csv, make_proposal, make_world
 
 # (method, path) -> (anonymous status, logged-in status); 303s for anonymous page views go
 # to /login?next=<path>. Actions are sent with the session's CSRF token when logged in.
@@ -263,7 +263,8 @@ SHARING_PATHS = {
 # The Fione-kun chat x the AutoML personas, on an app with a ready LLM. Conversations are
 # their creator's alone, so each signed-in persona uses one of its own; anonymous visitors
 # and the stranger use the owner's. The thread of a conversation with no active turn is the
-# poller's last fragment (286).
+# poller's last fragment (286). A proposal is its conversation's creator's too; the personas
+# without a conversation or write access of their own use the owner's pending proposal.
 CHAT = P + "/assistant"
 ASSISTANT_ROUTES = {
     ("GET", CHAT): READ,
@@ -272,6 +273,8 @@ ASSISTANT_ROUTES = {
     ("GET", CHAT + "/c/{cid}/thread"): (303, 286, 286, 286, 404, 286),
     ("POST", CHAT + "/c/{cid}/cancel"): (401, 303, 303, 303, 404, 303),
     ("POST", CHAT + "/c/{cid}/delete"): (401, 303, 303, 303, 404, 303),
+    ("POST", CHAT + "/proposals/{prid}/confirm"): WRITE_POST,
+    ("POST", CHAT + "/proposals/{prid}/dismiss"): WRITE_POST,
 }
 ASSISTANT_PATHS = {
     "/projects/{pid}/assistant": CHAT,
@@ -280,6 +283,8 @@ ASSISTANT_PATHS = {
     "/projects/{pid}/assistant/c/{cid}/thread": CHAT + "/c/{cid}/thread",
     "/projects/{pid}/assistant/c/{cid}/cancel": CHAT + "/c/{cid}/cancel",
     "/projects/{pid}/assistant/c/{cid}/delete": CHAT + "/c/{cid}/delete",
+    "/projects/{pid}/assistant/proposals/{prid}/confirm": CHAT + "/proposals/{prid}/confirm",
+    "/projects/{pid}/assistant/proposals/{prid}/dismiss": CHAT + "/proposals/{prid}/dismiss",
 }
 
 # The notebook page x anonymous, a user without the permission, one with it and an admin
@@ -381,7 +386,12 @@ def test_assistant_route(make_client, fake_llm, route, persona):
         cid = assistant_store.create_conversation(conn, user, world.p).id
     csrf = world.login(username)
     method, template = route
-    path = world.path(template.replace("{cid}", str(cid)))
+    template = template.replace("{cid}", str(cid))
+    if "{prid}" in template:
+        train = world.ids[world.p]["train"]
+        proposal = make_proposal(world.client, fake, username if own else "ed", world.p, train)
+        template = template.replace("{prid}", str(proposal.id))
+    path = world.path(template)
     if method == "GET":
         r = world.client.get(path, follow_redirects=False)
     else:
