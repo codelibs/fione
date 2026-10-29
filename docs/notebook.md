@@ -5,7 +5,6 @@ Code there reaches your projects through `fione-sdk`, with your access rights, w
 sign-in. Notebooks are off by default and opt-in: they add three services (the gateway, the
 launcher and the notebook image) to the Compose stack, and the launcher holds the Docker
 socket (see [Known limitations](known-limitations.md#notebooks)).
-Japanese: [ノートブック](notebook.ja.md).
 
 ## Enable notebooks
 

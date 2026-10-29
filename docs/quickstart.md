@@ -1,7 +1,6 @@
 # Quick start
 
 From nothing to a trained model, a prediction file and a running prediction API, with Docker.
-Japanese: [クイックスタート](quickstart.ja.md).
 
 ## What you need
 
