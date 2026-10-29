@@ -2831,3 +2831,101 @@ select.input {
   border-radius: var(--radius-lg);
   background: var(--color-surface);
 }
+
+/* ---------- Fione-kun chat ---------- */
+.chat-layout {
+  display: grid;
+  gap: var(--space-5);
+}
+
+@media (min-width: 60rem) {
+  .chat-layout {
+    grid-template-columns: 16rem minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.chat-conversations {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+}
+
+.chat-conversations a {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.chat-conversations a:hover {
+  background: var(--color-surface-2);
+}
+
+.chat-conversations a[aria-current="page"] {
+  background: var(--color-primary-subtle);
+  font-weight: var(--weight-medium);
+}
+
+.chat-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+}
+
+.chat-message {
+  display: grid;
+  gap: var(--space-1);
+  max-width: 48rem;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.chat-message-user {
+  justify-self: end;
+  background: var(--color-primary-subtle);
+}
+
+.chat-message__who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.mascot-xs {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.chat-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-tool,
+.chat-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.chat-status-warning {
+  color: var(--color-warning-text);
+}
+
+.chat-status-danger {
+  color: var(--color-danger-text);
+}
+
+.chat-input {
+  min-height: 5rem;
+  resize: vertical;
+}

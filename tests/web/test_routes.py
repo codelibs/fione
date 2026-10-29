@@ -8,6 +8,7 @@ import pytest
 
 from api_helpers import PW, add_user, connect, iris_csv, login, make_settings, notebook_client
 from fione.api.app import create_app
+from fione.assistant import store as assistant_store
 from fione.auth import service as auth_service
 from fione.auth.roles import NotebookPermission, Role
 from fione.models import service as models_service
@@ -16,6 +17,7 @@ from fione.modules import service as modules_service
 from fione.web import (
     account_ui,
     admin_ui,
+    assistant_ui,
     automl,
     easyml,
     models_ui,
@@ -258,6 +260,28 @@ SHARING_PATHS = {
     "/projects/{pid}/delete": P + "/delete",
 }
 
+# The Fione-kun chat x the AutoML personas, on an app with a ready LLM. Conversations are
+# their creator's alone, so each signed-in persona uses one of its own; anonymous visitors
+# and the stranger use the owner's. The thread of a conversation with no active turn is the
+# poller's last fragment (286).
+CHAT = P + "/assistant"
+ASSISTANT_ROUTES = {
+    ("GET", CHAT): READ,
+    ("POST", CHAT + "/conversations"): (401, 303, 303, 303, 404, 303),
+    ("POST", CHAT + "/c/{cid}/messages"): (401, 303, 303, 303, 404, 303),
+    ("GET", CHAT + "/c/{cid}/thread"): (303, 286, 286, 286, 404, 286),
+    ("POST", CHAT + "/c/{cid}/cancel"): (401, 303, 303, 303, 404, 303),
+    ("POST", CHAT + "/c/{cid}/delete"): (401, 303, 303, 303, 404, 303),
+}
+ASSISTANT_PATHS = {
+    "/projects/{pid}/assistant": CHAT,
+    "/projects/{pid}/assistant/conversations": CHAT + "/conversations",
+    "/projects/{pid}/assistant/c/{cid}/messages": CHAT + "/c/{cid}/messages",
+    "/projects/{pid}/assistant/c/{cid}/thread": CHAT + "/c/{cid}/thread",
+    "/projects/{pid}/assistant/c/{cid}/cancel": CHAT + "/c/{cid}/cancel",
+    "/projects/{pid}/assistant/c/{cid}/delete": CHAT + "/c/{cid}/delete",
+}
+
 # The notebook page x anonymous, a user without the permission, one with it and an admin
 # (always allowed), on an install with notebooks; with notebooks off, every one gets 404.
 NOTEBOOK_PERSONAS = {"anonymous": None, "editor": "ed", "allowed": "nb", "admin": "admin"}
@@ -336,6 +360,39 @@ def test_table_covers_every_ui_route():
     assert routes == set(SHARING_ROUTES)
     routes = {(m, r.path) for r in notebook_ui.router.routes for m in r.methods - {"HEAD"}}
     assert routes == set(NOTEBOOK_ROUTES)
+    routes = {
+        (m, ASSISTANT_PATHS[r.path])
+        for r in assistant_ui.router.routes
+        for m in r.methods - {"HEAD"}
+    }
+    assert routes == set(ASSISTANT_ROUTES)
+
+
+@pytest.mark.parametrize("persona", list(AUTOML_PERSONAS))
+@pytest.mark.parametrize("route", sorted(ASSISTANT_ROUTES))
+def test_assistant_route(make_client, fake_llm, route, persona):
+    fake = fake_llm()
+    world = make_world(make_client(llm_base_url=fake.url, llm_provider="openai"))
+    username = AUTOML_PERSONAS[persona]
+    own = username not in (None, "st")
+    with closing(connect(world.client)) as conn:
+        names = dict(conn.execute("SELECT username, id FROM users").fetchall())
+        user = auth_service.get_user(conn, names[username if own else "ed"])
+        cid = assistant_store.create_conversation(conn, user, world.p).id
+    csrf = world.login(username)
+    method, template = route
+    path = world.path(template.replace("{cid}", str(cid)))
+    if method == "GET":
+        r = world.client.get(path, follow_redirects=False)
+    else:
+        form = {"csrf_token": csrf or "", "text": "hi"}
+        r = world.client.post(path, data=form, follow_redirects=False)
+    expected = ASSISTANT_ROUTES[route][list(AUTOML_PERSONAS).index(persona)]
+    assert r.status_code == expected, r.text
+    if expected == 303 and persona == "anonymous":
+        assert r.headers["location"].startswith("/login?next=")
+    if expected in (401, 403, 404):
+        assert "text/html" in r.headers["content-type"]
 
 
 @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])

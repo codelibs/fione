@@ -49,3 +49,20 @@ def make_client(tmp_path):
 @pytest.fixture
 def client(make_client):
     return make_client()
+
+
+@pytest.fixture
+def fake_llm():
+    """``fake_llm(script=None, **kwargs)``: a started ``FakeLlm``, stopped at teardown."""
+    from fake_llm import FakeLlm
+
+    started = []
+
+    def factory(script=None, **kwargs):
+        fake = FakeLlm(script, **kwargs).start()
+        started.append(fake)
+        return fake
+
+    yield factory
+    for fake in started:
+        fake.stop()

@@ -10,6 +10,7 @@
   <header class="page-header">
     <h1 class="page-header__title">{{ t('analysis.title') }}</h1>
     <p class="page-header__lead text-muted">{{ t('analysis.lead', name=dataset.name) }}</p>
+    {% if assistant_link %}<p><a class="btn btn-ghost btn-sm" href="/projects/{{ ctx.project.id }}/assistant?ask=dataset:{{ dataset.id }}">{{ t('assistant.ask_link') }}</a></p>{% endif %}
   </header>
 
   <dl class="stats">
