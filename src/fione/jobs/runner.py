@@ -7,6 +7,7 @@ terminal status only when the worker cannot: it was killed on cancel, it died (c
 SIGKILL, OOM), or the server restarted under it.
 """
 
+import json
 import logging
 import os
 import secrets
@@ -17,6 +18,8 @@ import sys
 import threading
 from contextlib import closing
 from pathlib import Path
+
+from pydantic import SecretStr
 
 from fione import db
 from fione.config import Settings
@@ -31,6 +34,16 @@ LOG_TAIL_BYTES = 8192
 LOG_TAIL_LINES = 20
 
 
+def _exported(value) -> str:
+    """A setting as the text ``Settings`` reads back: JSON for an object (``str`` would give a
+    Python dict), the secret itself for a ``SecretStr`` (``str`` would give asterisks)."""
+    if isinstance(value, dict):
+        return json.dumps(value)
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
+    return str(value)
+
+
 def worker_env(settings: Settings, db_path: Path) -> dict[str, str]:
     """The worker's environment: ours, with every Settings field exported as ``FIONE_*``."""
     env = dict(os.environ)
@@ -41,7 +54,7 @@ def worker_env(settings: Settings, db_path: Path) -> dict[str, str]:
         if value is None:
             env.pop(key, None)
         else:
-            env[key] = str(value)
+            env[key] = _exported(value)
     env["FIONE_JOB_DB"] = str(db_path)
     return env
 
