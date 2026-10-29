@@ -38,7 +38,8 @@ UP_TIMEOUT_SECS = 600  # building both images from scratch included
 # test opened that URL expecting the error (``console.expect_error``): a 403 or 404 page.
 FAILED_LOAD = "Failed to load resource"
 # The developer's own FIONE_* settings must not reach the throwaway stack (compose prefers
-# the shell over docker/e2e.env): only these pass.
+# the shell over docker/e2e.env): only these pass. COMPOSE_PROFILES is dropped too: an exported
+# `ollama` would start a real Ollama and download 8 GB.
 PASSED_SETTINGS = ("FIONE_IMAGE_TAG",)
 # Both built and removed; only the notebook profile is started (fione-serving needs a model).
 PROFILES = ("--profile", "serving", "--profile", "notebook")
@@ -180,7 +181,9 @@ def stack(request):
     artifacts.mkdir(parents=True, exist_ok=True)
     port, notebook_port = _free_port(), _free_port()
     env = {
-        k: v for k, v in os.environ.items() if not k.startswith("FIONE_") or k in PASSED_SETTINGS
+        k: v
+        for k, v in os.environ.items()
+        if (not k.startswith("FIONE_") or k in PASSED_SETTINGS) and k != "COMPOSE_PROFILES"
     } | {
         "FIONE_PORT": str(port),
         "FIONE_SERVING_PORT": str(_free_port()),

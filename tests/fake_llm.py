@@ -18,8 +18,10 @@ Script items (the keys combine, except ``status``)::
     {"status": int, "body": str, "content_type": str, "headers": dict, "chunks": int}
                                              a raw reply, its body sent in ``chunks`` pieces
 
-Run it with ``python fake_llm.py --port N --policy e2e [--missing]``; the ``e2e`` policy is
-filled in with the end-to-end tests, until then it behaves as ``script``.
+Run it with ``python fake_llm.py --port N --policy e2e [--missing] [--host H] [--pull-delay S]``
+(``--host 0.0.0.0`` inside a container; ``--pull-delay`` slows a pull down, to watch its
+progress); the ``e2e`` policy is filled in with the end-to-end tests, until then it behaves as
+``script``.
 """
 
 import argparse
@@ -93,6 +95,7 @@ class FakeLlm:
         pull_delay: float = 0.0,
         context_length: int = 16384,
         port: int = 0,
+        host: str = "127.0.0.1",
         pull_error: str | None = None,
         pull_garbage: int = 0,
     ):
@@ -103,6 +106,7 @@ class FakeLlm:
         self.pull_delay = pull_delay
         self.context_length = context_length
         self.port = port
+        self.host = host
         self.pull_error = pull_error  # the pull stops with this error line after its first step
         self.pull_garbage = pull_garbage  # bytes with no newline sent as a pull's first line
         self.generate_status = 200  # of POST /api/generate, which loads the model
@@ -124,7 +128,7 @@ class FakeLlm:
         class Handler(_Handler):
             llm = fake
 
-        self._server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
+        self._server = ThreadingHTTPServer((self.host, self.port), Handler)
         self._thread = threading.Thread(
             target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
         )
@@ -141,7 +145,8 @@ class FakeLlm:
 
     @property
     def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/v1"
+        host = "127.0.0.1" if self.host == "0.0.0.0" else self.host  # noqa: S104
+        return f"http://{host}:{self.port}/v1"
 
     def join(self) -> None:
         if self._thread is not None:
@@ -369,13 +374,26 @@ class _Handler(BaseHTTPRequestHandler):
         self._event("[DONE]")
 
 
-def main() -> None:
+def from_args(argv: list[str] | None = None) -> FakeLlm:
+    """The fake the command line describes (not started)."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--policy", choices=["script", "e2e"], default="script")
     parser.add_argument("--missing", action="store_true", help="start without the model")
-    args = parser.parse_args()
-    fake = FakeLlm(policy=args.policy, models=[] if args.missing else None, port=args.port)
+    parser.add_argument("--pull-delay", type=float, default=0.0, help="seconds per pull step")
+    args = parser.parse_args(argv)
+    return FakeLlm(
+        policy=args.policy,
+        models=[] if args.missing else None,
+        port=args.port,
+        host=args.host,
+        pull_delay=args.pull_delay,
+    )
+
+
+def main() -> None:
+    fake = from_args()
     fake.start()
     print(f"fake LLM at {fake.url}", flush=True)
     try:

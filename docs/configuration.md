@@ -71,6 +71,12 @@ Used by `docker/compose.yaml` (see `docker/.env.example`).
 | `FIONE_NOTEBOOK_PORT` | no | The host port of the `notebook-gateway` service (default `8888`, on 127.0.0.1). |
 | `FIONE_NOTEBOOK_MAX_LIFETIME_SECS` | no | Passed to Fione (default `43200`, see above). |
 | `FIONE_NOTEBOOK_MAX_RUNNING` | no | Passed to the `notebook-launcher` service (default `4`, see below). |
+| `FIONE_LLM_BASE_URL` | no | Passed to Fione (see above). Default in Compose: the Ollama on the host, `http://host.docker.internal:11434/v1`. With the `ollama` profile: `http://ollama:11434/v1`. |
+| `FIONE_LLM_PROVIDER` | no | Passed to Fione (default `ollama` in Compose). |
+| `FIONE_LLM_MODEL` | no | Passed to Fione (default `gemma4:12b-mlx` in Compose; `gemma4:12b` with the `ollama` profile). |
+| `FIONE_LLM_API_KEY` | no | Passed to Fione (see above). |
+| `FIONE_LLM_AUTO_PULL` | no | Passed to Fione (default `false`; `true` with the `ollama` profile, which has no one to click the button). |
+| `FIONE_MCP_ENABLED` | no | Passed to Fione (default `false`, see above). |
 
 Compose refuses to start while `FIONE_S3_ACCESS_KEY` or `FIONE_S3_SECRET_KEY` is empty. The
 two S3 values may only use `A-Z a-z 0-9 / + = . _ -`; SeaweedFS refuses to start otherwise.

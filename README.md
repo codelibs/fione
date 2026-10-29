@@ -109,4 +109,4 @@ listed in [VENDOR.md](src/fione/web/static/vendor/VENDOR.md):
 | htmx | 2.0.11 | 0BSD |
 | Apache ECharts (with ZRender and parts of d3) | 6.1.0 | Apache-2.0 (ZRender and d3: BSD-3-Clause) |
 
-The Compose stack also runs SeaweedFS (Apache-2.0).
+The Compose stack also runs SeaweedFS (Apache-2.0) and, with the `ollama` profile, Ollama (MIT).

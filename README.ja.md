@@ -81,4 +81,4 @@ Web 画面は 2 つの JavaScript ライブラリをアプリケーション自�
 | htmx | 2.0.11 | 0BSD |
 | Apache ECharts（ZRender と d3 の一部を含む） | 6.1.0 | Apache-2.0（ZRender と d3 は BSD-3-Clause） |
 
-Compose 環境では SeaweedFS（Apache-2.0）も動きます。
+Compose 環境では SeaweedFS（Apache-2.0）も動きます。`ollama` プロファイルでは Ollama（MIT）も動きます。
