@@ -2,7 +2,6 @@
 
 Fione is an open-source AutoML server: upload a CSV in the browser, get a trained model, make
 predictions and serve the model as a prediction API. It runs with one `docker compose up`.
-Japanese: [README.ja.md](README.ja.md).
 
 This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinIO.
 
@@ -60,17 +59,17 @@ Fione-kun answers questions about a project's datasets and models and suggests a
 that a person confirms; it only reads. It needs a language model server: the Ollama app on
 your Mac by default (`gemma4:12b-mlx`), an Ollama in Compose (profile `ollama`) on Linux, or any
 OpenAI-compatible server. The same read-only tools are available to MCP clients, off by
-default. See [Fione-kun](docs/assistant.md) ([日本語](docs/assistant.ja.md)).
+default. See [Fione-kun](docs/assistant.md).
 
 ## Documentation
 
-- [Quick start](docs/quickstart.md) ([日本語](docs/quickstart.ja.md))
-- [Notebooks](docs/notebook.md) ([日本語](docs/notebook.ja.md)): JupyterLab and `fione-sdk`
-- [Fione-kun, the assistant](docs/assistant.md) ([日本語](docs/assistant.ja.md)): the language
+- [Quick start](docs/quickstart.md)
+- [Notebooks](docs/notebook.md): JupyterLab and `fione-sdk`
+- [Fione-kun, the assistant](docs/assistant.md): the language
   model, what is sent, proposals, MCP
 - [Configuration](docs/configuration.md): every setting, reverse proxy, backups of the secret key
 - [Fione Serving](docs/serving.md): running a model as a prediction API
-- [Moving from v1](docs/migrating-from-v1.md) ([日本語](docs/migrating-from-v1.ja.md))
+- [Moving from v1](docs/migrating-from-v1.md)
 - [Known limitations](docs/known-limitations.md)
 
 ## Status

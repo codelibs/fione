@@ -2,7 +2,7 @@
 
 Fione-kun answers questions about a project's datasets and models in plain language, and can
 suggest a training run that a person then confirms. It also exposes the same read-only tools
-to other programs over MCP. Japanese: [assistant.ja.md](assistant.ja.md).
+to other programs over MCP.
 
 Fione-kun reads, and only reads. It cannot start a training, change a dataset or delete
 anything; a training it suggests starts only when someone who can edit the project presses
