@@ -33,7 +33,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from fione.auth.roles import Role, can_access_project, project_access
+from fione.auth.roles import ProjectAccess, Role, can_access_project, project_access
 from fione.data.profile import (
     SCORE_REASONS,
     ColumnProfile,
@@ -732,7 +732,18 @@ def _listing(key: str, items: list, limit: int) -> dict:
     if len(items) > limit:
         result["truncated"] = True
         result["truncated_lists"] = [key]
+        result[f"n_more_{key}"] = len(items) - limit
     return result
+
+
+def _access_label(ctx: ToolContext, project_id: str) -> str:
+    """What the user may do in the project, as the rest of Fione decides it: only an admin
+    reaches a project without owning or being a member of it, and a global viewer is held to
+    ``viewer`` whatever the membership. A label only; no decision rests on it."""
+    access = project_access(ctx.conn, ctx.user, project_id)
+    if access is None:
+        return Role.ADMIN.value
+    return ProjectAccess.VIEWER.value if ctx.user.role == Role.VIEWER else access.value
 
 
 def _list_projects(ctx: ToolContext, args: dict) -> dict:
@@ -746,10 +757,9 @@ def _list_projects(ctx: ToolContext, args: dict) -> dict:
         {
             "id": p.id,
             "name": clean_text(p.name),
-            # only an admin reaches a project without owning or being a member of it
-            "access": (project_access(ctx.conn, ctx.user, p.id) or Role.ADMIN).value,
+            "access": _access_label(ctx, p.id),
             "n_datasets": projects.count_datasets(ctx.conn, p.id),
-            "n_models": len(models.list_models_brief(ctx.conn, p.id)),
+            "n_models": projects.count_models(ctx.conn, p.id),
         }
         for p in result["projects"]
     ]

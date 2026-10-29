@@ -156,6 +156,9 @@ def test_project_scope_refuses_other_projects(env):
     refused = [
         ("describe_dataset", {"dataset_id": env.ds_b.id}),
         ("get_leaderboard", {"model_id": env.model_b.id}),
+        ("get_feature_importance", {"model_id": env.model_b.id}),
+        ("get_model_diagnostics", {"model_id": env.model_b.id}),
+        ("get_partial_dependence", {"model_id": env.model_b.id, "column": "x"}),
         ("list_datasets", {"project_id": env.b.id}),
         ("list_models", {"project_id": env.b.id}),
         ("get_training_events", {"job_id": env.job_b.id}),
@@ -165,7 +168,7 @@ def test_project_scope_refuses_other_projects(env):
     for name, args in refused:
         with pytest.raises(ToolError, match=NOT_ALLOWED):
             call(env, name, args, **kw)
-        # the same call without a scope: the owner may read the project's objects
+    # the same calls without a scope: the owner may read the project's objects
     assert call(env, "describe_dataset", {"dataset_id": env.ds_b.id})["dataset"]["id"]
     assert call(env, "get_leaderboard", {"model_id": env.model_b.id})["model"]["id"]
     assert call(env, "list_datasets", {"project_id": env.b.id})["datasets"]
@@ -220,7 +223,30 @@ def test_listings_are_cut(env, monkeypatch):
     datasets = call(env, "list_datasets", {"project_id": env.b.id})
     assert len(datasets["datasets"]) == 2 and datasets["truncated_lists"] == ["datasets"]
     listed = call(env, "list_models", {"project_id": env.b.id})
-    assert len(listed["models"]) == 2 and listed["truncated"] is True
+    assert len(listed["models"]) == 2 and listed["truncated_lists"] == ["models"]
+    # the rest is counted, as describe_dataset does for the columns it leaves out
+    assert projects_["n_more_projects"] == 5 - 3  # a, b and three extras
+    assert datasets["n_more_datasets"] == 4 - 2
+    assert listed["n_more_models"] == 4 - 2
+
+
+def test_the_access_label_is_the_effective_level(env):
+    """A global viewer is held to viewer even in a project they own; an administrator who
+    owns a project is its owner; one who has no part in it is labelled admin."""
+    maker = auth.create_user(env.conn, "maker", "pw-maker-1", Role.EDITOR)
+    mine = projects.create_project(env.conn, maker, "Maker's")
+    assert call(env, "list_projects", {}, user=maker)["projects"][0]["access"] == "owner"
+    auth.set_role(env.conn, maker.id, Role.VIEWER)
+    demoted = auth.get_user(env.conn, maker.id)
+    assert [p["access"] for p in call(env, "list_projects", {}, user=demoted)["projects"]] == [
+        "viewer"
+    ]
+    boss = projects.create_project(env.conn, env.users.admin, "Admin's")
+    labels = {
+        p["id"]: p["access"]
+        for p in call(env, "list_projects", {}, user=env.users.admin)["projects"]
+    }
+    assert labels[boss.id] == "owner" and labels[mine.id] == "admin"
 
 
 def test_log_names_the_channel(env, caplog):

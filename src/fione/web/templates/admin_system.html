@@ -14,7 +14,7 @@
   <section class="card card-padded stack-tight" aria-labelledby="llm-controls-title">
     <h2 class="section-header__title" id="llm-controls-title">{{ t('system.llm_controls_title') }}</h2>
     {% set host = info.llm.host %}
-    {% if llm_ollama and llm_status.state in ('missing', 'error') %}
+    {% if llm_ollama and llm_status.state != 'ready' %}
     <form class="stack-tight" method="post" action="/admin/system/llm/pull" data-busy-form>
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <p class="text-muted text-sm">{{ t('system.llm_pull_hint', model=info.llm.model) }}</p>

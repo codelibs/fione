@@ -556,12 +556,14 @@ def test_the_llm_card_in_japanese_and_in_the_poll(llm_client):
         ("missing", True),
         ("error", True),
         ("ready", False),
-        ("pulling", False),
-        ("unreachable", False),
-        ("checking", False),
+        ("pulling", True),
+        ("unreachable", True),
+        ("checking", True),
     ],
 )
-def test_the_pull_button_is_for_a_missing_model_or_an_error(llm_client, state, shown):
+def test_the_pull_button_is_there_until_the_model_is_ready(llm_client, state, shown):
+    """The card is not polled, so a page opened while the state was still changing must have the
+    button for when a pull then fails; pressing it during a pull does nothing."""
     page = llm_card(llm_client, state=state)
     assert ("/admin/system/llm/pull" in page) is shown
     assert "/admin/system/llm/samples" in page

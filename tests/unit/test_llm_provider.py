@@ -5,6 +5,7 @@ import json
 import logging
 import time
 
+import httpx
 import pytest
 
 from api_helpers import make_settings
@@ -443,3 +444,74 @@ def test_an_unexpected_pull_error_is_logged_unless_the_monitor_is_stopping(
             monitor._pull()
         assert bool([r for r in caplog.records if r.exc_info]) is (not stopping)
         assert monitor.snapshot().error_code == "pull_failed" and not monitor._pulling
+
+
+def test_lines_refuses_a_line_that_never_ends(monkeypatch):
+    monkeypatch.setattr(provider, "MAX_PULL_LINE_BYTES", 1000)
+    endless = httpx.Response(200, content=iter([b"x" * 600] * 5))  # no newline in 3000 bytes
+    with pytest.raises(ValueError, match="too long"):
+        list(provider._lines(endless))
+    fine = httpx.Response(200, content=iter([b'{"a":1}\n{"b"', b":2}\n", b"last"]))
+    assert list(provider._lines(fine)) == ['{"a":1}', '{"b":2}', "last"]
+
+
+def test_a_failed_pull_is_tried_again_when_the_model_goes_missing_again(
+    fake_llm, monitors, monkeypatch
+):
+    monkeypatch.setattr(provider, "READY_RECHECK_SECS", 0.05)
+    fake = fake_llm(models=[], pull_error="boom")
+    monitor = monitors(fake.url, llm_auto_pull=True)
+    monitor.start()
+    wait_for(monitor, "error")  # the first pull failed: no more of its own accord
+    fake.add_model("gemma4:12b-mlx")
+    wait_for(monitor, "ready")
+    pulls = fake.paths.count("POST /api/pull")
+    fake.models.clear()  # the model is removed from the server
+    deadline = time.monotonic() + 10
+    while fake.paths.count("POST /api/pull") == pulls and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert fake.paths.count("POST /api/pull") == pulls + 1  # a new automatic pull
+
+
+def test_the_thread_outlives_an_unexpected_error_and_logs_it_unless_stopping(
+    fake_llm, monitors, caplog, monkeypatch
+):
+    monitor = monitors(fake_llm().url, recheck_secs=0.05)
+    calls = []
+
+    def boom():
+        calls.append(1)
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(monitor, "_check", boom)
+    with caplog.at_level(logging.INFO, logger="fione.assistant"):
+        monitor.start()
+        deadline = time.monotonic() + 10
+        while len(calls) < 3 and time.monotonic() < deadline:  # it keeps looking
+            time.sleep(0.02)
+        status = monitor.snapshot()
+    assert len(calls) >= 3 and (status.state, status.error_code) == ("error", "probe_failed")
+    assert [r for r in caplog.records if r.exc_info]
+    monitor.stop()  # joins the thread: nothing of it is left to log after this
+    caplog.clear()
+    monitor._run()  # a run that is stopping logs nothing, even when its check fails
+    assert not caplog.records
+
+
+@pytest.mark.parametrize("stopping", [False, True])
+def test_a_transport_error_during_a_pull_is_stopped_or_unreachable(fake_llm, monitors, stopping):
+    monitor = monitors(fake_llm(models=[]).url)
+
+    def refuse(*args, **kwargs):
+        raise httpx.ConnectError("closed")
+
+    monkeypatched = monitor._http
+    monkeypatched.stream = refuse
+    if stopping:
+        monitor._stop.set()
+    assert monitor._begin_pull(forced=True)
+    monitor._pull()
+    status = monitor.snapshot()
+    assert not monitor._pulling and monitor._pull_blocked is False  # never a failed pull
+    assert status.state == ("unreachable" if not stopping else status.state)
+    assert status.error_code is None

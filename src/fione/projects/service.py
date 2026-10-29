@@ -267,6 +267,12 @@ def count_datasets(conn: sqlite3.Connection, project_id: str) -> int:
     ).fetchone()[0]
 
 
+def count_models(conn: sqlite3.Connection, project_id: str) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM models WHERE project_id = ?", (project_id,)
+    ).fetchone()[0]
+
+
 def get_dataset(conn: sqlite3.Connection, dataset_id: int) -> Dataset:
     row = conn.execute("SELECT * FROM datasets WHERE id = ?", (dataset_id,)).fetchone()
     if row is None:
