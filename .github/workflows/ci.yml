@@ -30,8 +30,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       # Unit, API, web and contract tests (acceptance, e2e, docker and notebook are deselected
-      # by default).
-      - run: uv run pytest -q
+      # by default). Spread over the runner's cores: the suite is thousands of small tests.
+      - run: uv run pytest -q -n auto
       # The notebook image's Jupyter extension, against a real Jupyter server.
       - run: uv run pytest -m notebook -q
 
