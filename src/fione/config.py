@@ -1,21 +1,38 @@
+import ipaddress
+import json
 import os
 import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 MIN_SETUP_TOKEN_LENGTH = 16
 MIN_LAUNCHER_SECRET_LENGTH = 32  # as the launcher requires
-_LAUNCHER_SECRET = re.compile(r"[\x21-\x7e]+")  # visible ASCII: it travels in an HTTP header
+# The room a request needs besides the reply: the assistant's tools and longest system prompt
+# take about 2,940 tokens (at 2 bytes per token), and a short question the rest.
+MIN_PROMPT_TOKENS = 3008
+_VISIBLE_ASCII = re.compile(r"[\x21-\x7e]+")  # it travels in an HTTP header
 # scheme://host[:port] with dot-separated labels: what the launcher accepts as Fione's origin.
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
 _ORIGIN = re.compile(
     rf"(?P<scheme>https?)://(?P<host>{_LABEL}(?:\.{_LABEL})*)(?::(?P<port>[0-9]{{1,5}}))?"
 )
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+# scheme://host[:port] and an optional path, no credentials, query or fragment. The host is a
+# name (Compose service names may have underscores), an IPv4 address or a bracketed IPv6 one.
+_LLM_LABEL = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?"
+_LLM_URL = re.compile(
+    rf"(?P<origin>https?://(?:{_LLM_LABEL}(?:\.{_LLM_LABEL})*|\[(?P<v6>[0-9A-Fa-f:.]+)\])"
+    r"(?::(?P<port>[0-9]{1,5}))?)"
+    r"(?P<path>(?:/[A-Za-z0-9._~%!$&'()*+,;=:@-]*)*)"
+)
+_LLM_MODEL = re.compile(r"[\x21-\x7e]{1,200}")
+# The request body is Fione's; the extra body only adds to it.
+LLM_RESERVED_KEYS = ("model", "messages", "tools", "stream", "stream_options", "max_tokens")
 _NOTEBOOK_FIELDS = (
     "public_url",
     "notebook_url",
@@ -25,7 +42,8 @@ _NOTEBOOK_FIELDS = (
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="FIONE_")
+    # A validation error would otherwise quote the input, secrets included.
+    model_config = SettingsConfigDict(env_prefix="FIONE_", hide_input_in_errors=True)
 
     data_dir: Path = Path("/data")
     # Defaults below are derived from data_dir when left unset.
@@ -65,6 +83,36 @@ class Settings(BaseSettings):
     notebook_launcher_url: str | None = None
     notebook_launcher_secret: str | None = None
     notebook_max_lifetime_secs: int = Field(43200, ge=600, le=604800)  # the launcher's bound
+    # LLM assistant (off unless llm_base_url is set): an OpenAI-compatible server, or Ollama.
+    llm_base_url: str | None = None
+    llm_provider: Literal["openai", "ollama"] = "openai"
+    llm_api_key: SecretStr | None = None
+    # MLX models need a host-native Ollama on Apple Silicon; elsewhere use gemma4:12b.
+    llm_model: str = "gemma4:12b-mlx"
+    # Merged into every request; unset: no thinking output for ollama, nothing for openai.
+    llm_extra_body: Annotated[dict | None, NoDecode] = None
+    # ollama: pull the model when the server lacks it. Off: a host Ollama is the user's;
+    # an administrator pulls on the system page.
+    llm_auto_pull: bool = False
+    # The read-only tools over MCP at /mcp, for a full-scope API token; off unless set.
+    mcp_enabled: bool = False
+    llm_max_tokens: int = Field(1024, ge=64, le=8192)  # per completion
+    llm_context_tokens: int = Field(16384, le=262144)  # the budget of one request
+    llm_max_tool_rounds: int = Field(6, ge=1, le=20)  # completions with tool calls per turn
+    llm_turn_timeout_secs: int = Field(180, ge=10, le=1800)  # one turn, all its rounds
+    llm_max_concurrent_turns: int = Field(2, ge=1, le=16)
+
+    @field_validator("llm_extra_body", mode="before")
+    @classmethod
+    def _parse_extra_body(cls, value):
+        if not isinstance(value, str):
+            return value
+        if not value.strip():
+            return None
+        try:
+            return json.loads(value)
+        except ValueError:
+            raise ValueError("FIONE_LLM_EXTRA_BODY must be a JSON object") from None
 
     @model_validator(mode="after")
     def _derive_defaults(self) -> "Settings":
@@ -79,6 +127,7 @@ class Settings(BaseSettings):
         if self.secret_key_path is None:
             self.secret_key_path = self.data_dir / "secret.key"
         self._check_notebooks()
+        self._check_llm()
         return self
 
     def _check_notebooks(self) -> None:
@@ -99,15 +148,67 @@ class Settings(BaseSettings):
         if not self.notebook_launcher_url.startswith(("http://", "https://")):
             raise ValueError("FIONE_NOTEBOOK_LAUNCHER_URL must be an http(s) URL")
         secret = self.notebook_launcher_secret
-        if len(secret) < MIN_LAUNCHER_SECRET_LENGTH or not _LAUNCHER_SECRET.fullmatch(secret):
+        if len(secret) < MIN_LAUNCHER_SECRET_LENGTH or not _VISIBLE_ASCII.fullmatch(secret):
             raise ValueError(
                 f"FIONE_NOTEBOOK_LAUNCHER_SECRET must be at least {MIN_LAUNCHER_SECRET_LENGTH}"
                 " visible ASCII characters"
             )
 
+    def _check_llm(self) -> None:
+        """Empty values are unset; the base URL is kept without a trailing slash, and the
+        extra body defaults to what turns thinking off."""
+        if self.llm_api_key is not None and not self.llm_api_key.get_secret_value():
+            self.llm_api_key = None
+        if self.llm_api_key is not None and not _VISIBLE_ASCII.fullmatch(
+            self.llm_api_key.get_secret_value()
+        ):
+            raise ValueError("FIONE_LLM_API_KEY must be visible ASCII characters")
+        if not _LLM_MODEL.fullmatch(self.llm_model):
+            raise ValueError("FIONE_LLM_MODEL must be 1 to 200 visible ASCII characters")
+        if self.llm_context_tokens - self.llm_max_tokens < MIN_PROMPT_TOKENS:
+            raise ValueError(
+                "FIONE_LLM_CONTEXT_TOKENS less FIONE_LLM_MAX_TOKENS must be at least"
+                f" {MIN_PROMPT_TOKENS}, the room the assistant's tools and instructions need."
+                " Even 4096, Ollama's default context, is too small for the tools: use"
+                " FIONE_LLM_CONTEXT_TOKENS=16384, and set OLLAMA_CONTEXT_LENGTH=16384 on the"
+                " Ollama server (Compose's ollama profile does; set it for an Ollama on the host)"
+            )
+        if self.llm_extra_body is None:
+            self.llm_extra_body = (
+                {"reasoning_effort": "none"} if self.llm_provider == "ollama" else {}
+            )
+        reserved = sorted(set(self.llm_extra_body) & set(LLM_RESERVED_KEYS))
+        if reserved:
+            raise ValueError(f"FIONE_LLM_EXTRA_BODY must not set {', '.join(reserved)}")
+        if not self.llm_base_url:
+            self.llm_base_url = None
+            return
+        match = _match_llm_url(self.llm_base_url)
+        if match is None:
+            raise ValueError(
+                "FIONE_LLM_BASE_URL must be http(s)://host[:port][/path], no credentials,"
+                " query or fragment"
+            )
+        self.llm_base_url = (match["origin"] + match["path"]).rstrip("/")
+        if self.llm_provider == "ollama" and not match["path"].rstrip("/").endswith("/v1"):
+            raise ValueError("FIONE_LLM_BASE_URL must end in /v1 with FIONE_LLM_PROVIDER=ollama")
+
     @property
     def notebooks_enabled(self) -> bool:
         return self.notebook_url is not None
+
+
+def _match_llm_url(value: str) -> re.Match | None:
+    """``value`` matched as an LLM base URL, or None if it is not one."""
+    match = _LLM_URL.fullmatch(value)
+    if match is None or (match["port"] and not 0 < int(match["port"]) <= 65535):
+        return None
+    if match["v6"]:
+        try:
+            ipaddress.IPv6Address(match["v6"])
+        except ValueError:
+            return None
+    return match
 
 
 def _normal_origin(name: str, value: str) -> str:

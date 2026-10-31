@@ -1,0 +1,42 @@
+{% from "_macros.html" import icon, mascot %}
+{# The thread of one conversation. While a message is active it polls itself every second;
+   the last answer (286) has no trigger, so polling ends. Every text is escaped plain text. #}
+{% set base = "/projects/" ~ ctx.project.id ~ "/assistant/c/" ~ conversation.id %}
+<section class="chat-thread stack" id="assistant-thread" aria-labelledby="thread-title"{% if active %} hx-get="{{ base }}/thread" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+  <h2 class="visually-hidden" id="thread-title">{{ t('assistant.title') }}</h2>
+  {% if not lines %}
+  <p class="text-muted">{{ t('assistant.empty') }}</p>
+  {% endif %}
+  <ol class="chat-list" role="list">
+    {% for line in lines %}
+    {% if line.kind == "tool" %}
+    <li class="chat-tool text-muted text-sm">{{ icon("info", "icon icon-sm") }}{{ t('assistant.looked_at', label=t(line.text)) }}</li>
+    {% elif line.kind == "user" %}
+    <li class="chat-message chat-message-user">
+      <p class="chat-message__who">{{ t('assistant.you') }}</p>
+      <div class="chat-text">{{ line.text }}</div>
+    </li>
+    {% else %}
+    <li class="chat-message chat-message-assistant" data-state="{{ line.state }}">
+      <p class="chat-message__who">{{ mascot("happy", "mascot mascot-xs") }}{{ t('fione.name') }}</p>
+      {% if line.text %}<div class="chat-text">{{ line.text }}</div>{% endif %}
+      {% if line.proposal %}{% with card = line.proposal %}{% include "_assistant_proposal.html" %}{% endwith %}{% endif %}
+      {% if line.state == "running" %}
+      <p class="chat-status text-muted text-sm"><span class="dot dot-pulse" aria-hidden="true"></span>{{ t('assistant.writing') }}</p>
+      {% elif line.state == "queued" %}
+      <p class="chat-status text-muted text-sm">{{ t('assistant.waiting') }}</p>
+      {% endif %}
+      {% if line.error_key %}
+      <p class="chat-status chat-status-{{ 'warning' if line.state == 'cancelled' else 'danger' }} text-sm" role="note">{{ icon("alert", "icon icon-sm") }}{{ t(line.error_key) }}</p>
+      {% endif %}
+    </li>
+    {% endif %}
+    {% endfor %}
+  </ol>
+  {% if active %}
+  <form method="post" action="{{ base }}/cancel">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button type="submit" class="btn btn-secondary btn-sm">{{ icon("close", "icon icon-sm") }}{{ t('assistant.stop') }}</button>
+  </form>
+  {% endif %}
+</section>

@@ -537,6 +537,7 @@ dependencies = [
     { name = "boto3" },
     { name = "catboost" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "joblib" },
     { name = "lightgbm" },
@@ -554,7 +555,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "playwright" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -577,6 +577,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.43.118" },
     { name = "catboost", specifier = ">=1.2.10" },
     { name = "fastapi", specifier = ">=0.162.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "joblib", specifier = ">=1.6.0" },
     { name = "lightgbm", specifier = ">=4.7.0" },
@@ -594,7 +595,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "playwright" },
     { name = "pytest" },
     { name = "pytest-cov" },

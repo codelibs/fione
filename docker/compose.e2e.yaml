@@ -16,6 +16,16 @@ services:
       # The tests sign in with wrong passwords on purpose.
       FIONE_LOGIN_MAX_FAILURES: "1000"
       FIONE_LOGIN_MAX_FAILURES_PER_IP: "10000"
+      # Fione-kun against the fake LLM below, which downloads its model at once. These two
+      # values are for the tests only: compose.yaml has both off.
+      FIONE_LLM_BASE_URL: http://fake-llm:11434/v1
+      FIONE_LLM_MODEL: fake-model
+      FIONE_LLM_AUTO_PULL: "true"
+      FIONE_MCP_ENABLED: "true"
+    # The monitor's first probe must find the fake: the next one is 30 seconds later.
+    depends_on:
+      fake-llm:
+        condition: service_healthy
     restart: "no"
     healthcheck:
       interval: 3s
@@ -25,6 +35,36 @@ services:
     restart: "no"
     healthcheck:
       interval: 2s
+
+  # A stand-in for Ollama (tests/fake_llm.py, stdlib only, read-only mount): starts without the
+  # model, which Fione pulls. Not published. Raise --pull-delay to watch the progress by hand.
+  fake-llm:
+    image: python:3.12.15-slim-trixie
+    command:
+      - python
+      - /fake/fake_llm.py
+      - --host
+      - 0.0.0.0
+      - --port
+      - "11434"
+      - --policy
+      - e2e
+      - --missing
+      - --pull-delay
+      - "0.2"
+    volumes:
+      - ../tests/fake_llm.py:/fake/fake_llm.py:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:11434/api/version", timeout=2)
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    networks: [llm]
+    restart: "no"
 
   notebook-gateway:
     restart: "no"

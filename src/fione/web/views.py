@@ -179,6 +179,8 @@ def render(
             "mode": ui_mode(request),
             # Called by base.html only: fragments never open its connection.
             "notebook_link": lambda: _notebook_link(request, auth),
+            # Fione-kun's place in a project's navigation and entry links: configured or not.
+            "assistant_link": request.app.state.settings.llm_base_url is not None,
             **context,  # may override ``here``: where the language switch returns to
         },
         status_code=status,
@@ -404,6 +406,7 @@ def install(app: FastAPI) -> None:
     from fione.web import (  # they import this module
         account_ui,
         admin_ui,
+        assistant_ui,
         automl,
         easyml,
         models_ui,
@@ -422,6 +425,7 @@ def install(app: FastAPI) -> None:
     app.include_router(admin_ui.router)
     app.include_router(sharing_ui.router)
     app.include_router(notebook_ui.router)
+    app.include_router(assistant_ui.router)
     app.add_exception_handler(UiError, _ui_error)
     api_http_error = app.exception_handlers[StarletteHTTPException]
 

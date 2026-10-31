@@ -1,0 +1,6 @@
+{% from "_macros.html" import icon %}
+{# The poller's last fragment when the thread can no longer be shown (no trigger: polling ends). #}
+<section class="chat-thread stack" id="assistant-thread" data-thread="gone">
+  <div class="alert alert-danger" role="alert">{{ icon("alert") }}<span>{{ message }}</span></div>
+  <p class="cluster"><a class="btn btn-primary" href="">{{ t('job.reload') }}</a></p>
+</section>

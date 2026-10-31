@@ -1,10 +1,15 @@
 """Helpers shared by the web UI tests: a project with one object of every kind."""
 
 import io
+import threading
 from contextlib import closing
 from dataclasses import dataclass
 
 from api_helpers import add_user, connect, iris_frame, login, store_model
+from fione.assistant import store as assistant_store
+from fione.assistant.client import ChatClient
+from fione.assistant.turns import run_turn
+from fione.auth import service as auth_service
 from fione.auth.roles import ProjectAccess, Role
 from fione.jobs import store
 from fione.jobs.store import JobStatus
@@ -97,3 +102,27 @@ def make_world(client) -> World:
         projects.share_project(conn, owner, p.id, "co", ProjectAccess.EDITOR)
         ids = {p.id: _objects(client, conn, owner, p.id), q.id: _objects(client, conn, owner, q.id)}
     return World(client, p.id, q.id, ids)
+
+
+def make_proposal(client, fake, username, project_id, dataset_id, target="species"):
+    """The one pending training proposal of a new conversation of ``username``, made by a turn
+    against ``fake`` whose model proposes ``target`` for ``dataset_id``."""
+    with closing(connect(client)) as conn:
+        user = auth_service.get_user(
+            conn, dict(conn.execute("SELECT username, id FROM users").fetchall())[username]
+        )
+        conversation = assistant_store.create_conversation(conn, user, project_id)
+        _, placeholder = assistant_store.start_turn(conn, conversation.id, "Train on it")
+        fake.script = [
+            {"tool_calls": [{"name": "propose_training_config",
+                             "arguments": {"dataset_id": dataset_id, "target": target}}]},
+            {"text": "Please check it."},
+        ]  # fmt: skip
+        state = client.app.state
+        with ChatClient.from_settings(state.settings) as chat:
+            run_turn(
+                state.db_path, state.storage, state.settings, chat, state.llm_monitor,
+                conversation.id, placeholder.id, threading.Event(), language="en",
+            )  # fmt: skip
+        (proposal,) = assistant_store.proposals_for(conn, conversation.id).values()
+    return proposal

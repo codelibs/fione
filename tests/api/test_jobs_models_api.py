@@ -3,6 +3,7 @@ import os
 import shlex
 import time
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from api_helpers import (
     upload,
     wait_job,
 )
+from fione.assistant import store as assistant_store
 from fione.auth.roles import Role
 from fione.engine.events import Event
 from fione.jobs import store
@@ -855,7 +857,8 @@ def test_system_status_names_no_secret_path_or_credential(make_client):
     body = r.json()
     assert body["storage"] == "s3" and body["is_admin"] is False
     assert body["runner"] == "stopped" and body["jobs"] == {"queued": 0, "running": 0}
-    assert body["ollama"] == {"configured": False}
+    assert "ollama" not in body
+    assert body["llm"] == {"configured": False, "state": "off", "model": None, "local": False}
     secret = client.app.state.secret
     data_dir = str(client.app.state.settings.data_dir)
     for leaked in (
@@ -871,6 +874,36 @@ def test_system_status_names_no_secret_path_or_credential(make_client):
     as_admin = client.get("/api/v1/system/status", headers=bearer(client, admin.id)).json()
     assert as_admin["is_admin"] is True
     assert client.get("/api/v1/system/status").status_code == 401
+
+
+def test_system_status_reports_the_llm_without_url_path_key_or_error(make_client):
+    key = "sk-llm-key-0123456789"
+    client = make_client(
+        llm_base_url="https://llm.example.com:8443/private/prefix/v1",
+        llm_api_key=key,
+        llm_model="big-model",
+    )
+    viewer = add_user(client, "someone")
+    admin = add_user(client, "boss", Role.ADMIN)
+    r = client.get("/api/v1/system/status", headers=bearer(client, viewer.id))
+    assert r.json()["llm"] == {
+        "configured": True,
+        "state": "ready",
+        "model": "big-model",
+        "local": False,
+    }
+    r = client.get("/api/v1/system/status", headers=bearer(client, admin.id))
+    llm = r.json()["llm"]
+    assert llm["host"] == "llm.example.com:8443" and llm["samples_allowed"] is False
+    assert (llm["completed"], llm["total"]) == (None, None)
+    with closing(connect(client)) as conn:
+        assistant_store.set_samples_allowed(
+            conn, "HTTPS://LLM.example.com:8443/private/prefix/v1/", True, admin.id
+        )
+    r = client.get("/api/v1/system/status", headers=bearer(client, admin.id))
+    assert r.json()["llm"]["samples_allowed"] is True
+    for leaked in (key, "private/prefix"):
+        assert leaked not in r.text
 
 
 def test_system_status_counts_the_queue(env):

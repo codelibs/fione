@@ -74,8 +74,9 @@ The Japanese screen terms are kept.
 | Three roles and per-user sessions | Rebuilt: admin / editor / viewer and project sharing |
 | English and Japanese | Shipped |
 
-Planned, **not in this release**: the LLM assistant (Ollama, by default with `gemma4:12b-mlx`
-on a Mac), an MCP server and ONNX export.
+New in v2: **Fione-kun**, an LLM assistant (Ollama, by default with `gemma4:12b-mlx` on a Mac) and
+an optional read-only MCP server; see [Fione-kun](assistant.md). Planned, **not in this
+release**: ONNX export.
 
 ## Python modules
 

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, breadcrumb, mascot with context %}
+{% block title %}{{ t('assistant.title') }} · {{ ctx.project.name }}{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+{% set chat = "/projects/" ~ pid ~ "/assistant" %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, t('assistant.title'), section="assistant") }}
+  <header class="page-header guide">
+    {{ mascot("happy") }}
+    <div>
+      <h1 class="page-header__title">{{ t('assistant.title') }}</h1>
+      <p class="page-header__lead text-muted">{{ t('assistant.lead') }}</p>
+    </div>
+  </header>
+
+  {% if not llm_on %}
+  <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('assistant.off') }}</span></div>
+  {% else %}
+  {% if remote_host %}
+  <div class="alert alert-warning" role="note" data-remote-warning>{{ icon("alert") }}<span>{{ t('assistant.remote_warning', host=remote_host) }}</span></div>
+  {% endif %}
+  {% if samples_on %}
+  <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('assistant.samples_on') }}</span></div>
+  {% endif %}
+  {% if not llm_ready %}
+  <div class="alert alert-warning" role="status">
+    {{ icon("alert") }}
+    <div class="stack-tight">
+      <p>{{ t('assistant.state.' ~ llm.state) }}</p>
+      {% if llm.state == "pulling" %}
+      {% if llm.total %}
+      <progress class="progress" max="{{ llm.total }}" value="{{ llm.completed or 0 }}" aria-label="{{ t('assistant.state.pulling') }}">{{ ((llm.completed or 0) * 100 / llm.total)|round|int }}%</progress>
+      <p class="text-muted text-sm">{{ t('assistant.progress', done=(llm.completed or 0)|filesizeformat, total=llm.total|filesizeformat) }}</p>
+      {% else %}
+      <progress class="progress" aria-label="{{ t('assistant.state.pulling') }}"></progress>
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
+
+  <div class="chat-layout">
+    <aside class="chat-side stack-tight" aria-labelledby="conversations-title">
+      <h2 class="section-header__title" id="conversations-title">{{ t('assistant.conversations') }}</h2>
+      <p class="text-muted text-sm">{{ t('assistant.private') }}</p>
+      {% if llm_on %}
+      <form method="post" action="{{ chat }}/conversations">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn btn-secondary btn-sm">{{ icon("plus", "icon icon-sm") }}{{ t('assistant.new') }}</button>
+      </form>
+      {% endif %}
+      {% if conversations %}
+      <ul class="chat-conversations" role="list">
+        {% for c in conversations %}
+        <li><a href="{{ chat }}?c={{ c.id }}"{% if conversation is defined and conversation.id == c.id %} aria-current="page"{% endif %}>{{ c.title or t('assistant.untitled') }} <time class="text-muted text-xs" datetime="{{ c.created_at|iso }}">{{ t('time.utc', time=c.created_at|utc) }}</time></a></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted text-sm">{{ t('assistant.no_conversations') }}</p>
+      {% endif %}
+    </aside>
+
+    <div class="chat-main stack">
+      {% if conversation is defined %}
+      {% include "_assistant_thread.html" %}
+      {% endif %}
+
+      {% if llm_on %}
+      {% if notice %}
+      <div class="alert alert-danger" role="alert" id="assistant-notice" tabindex="-1" autofocus>{{ icon("alert") }}<span>{{ t(notice) }}{% if detail %} {{ detail }}{% endif %}</span></div>
+      {% endif %}
+      {% if conversation is defined %}
+      <form class="chat-form stack-tight" method="post" action="{{ chat }}/c/{{ conversation.id }}/messages">
+      {% else %}
+      <form class="chat-form stack-tight" method="post" action="{{ chat }}/conversations">
+      {% endif %}
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <div class="field">
+          <label class="field__label" for="assistant-text">{{ t('assistant.input_label') }}</label>
+          <textarea class="input chat-input" id="assistant-text" name="text" rows="3" maxlength="4000" required aria-describedby="assistant-hint"{% if not llm_ready %} disabled{% endif %}>{{ text }}</textarea>
+          <p class="field__hint" id="assistant-hint">{{ t('assistant.input_hint') }}</p>
+        </div>
+        {% if conversation is defined %}
+        <p><button type="submit" class="btn btn-primary"{% if not llm_ready %} disabled{% endif %}>{{ t('assistant.send') }}</button></p>
+        {% else %}
+        <p><button type="submit" class="btn btn-primary"{% if not llm_ready %} disabled{% endif %}>{{ t('assistant.send') }}</button></p>
+        {% endif %}
+      </form>
+      {% endif %}
+
+      {% if conversation is defined %}
+      <details class="confirm" data-confirm-panel>
+        <summary class="btn btn-ghost btn-sm">{{ t('assistant.delete') }}</summary>
+        <div class="confirm__panel" role="group" aria-labelledby="delete-chat-q">
+          <p id="delete-chat-q"><strong>{{ t('assistant.delete_question') }}</strong></p>
+          <p class="text-muted text-sm">{{ t('assistant.delete_effect') }}</p>
+          <form class="cluster" method="post" action="{{ chat }}/c/{{ conversation.id }}/delete">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <button type="submit" class="btn btn-danger">{{ t('assistant.delete_yes') }}</button>
+            <button type="button" class="btn btn-ghost" data-confirm-close>{{ t('action.keep') }}</button>
+          </form>
+        </div>
+      </details>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

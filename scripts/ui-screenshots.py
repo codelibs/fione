@@ -8,7 +8,9 @@ Starts Fione on a free port with a temporary data directory, creates the first a
 and creates two projects through the UI, then walks the EasyML wizard with the iris data (a real
 training run of at most a minute, a prediction, a failed and a cancelled run) and writes PNGs to
 OUTPUT_DIR. The notebook page is shown not running and starting, against a stub launcher this
-script runs (a running notebook needs the Docker stack: tests/e2e). Fails if a page logs a
+script runs (a running notebook needs the Docker stack: tests/e2e). Fione-kun's page is shown
+against the fake LLM of tests/fake_llm.py, run as a process, with a pending training proposal.
+Fails if a page logs a
 console error (a Content-Security-Policy violation, say), raises one, or scrolls sideways.
 """
 
@@ -35,6 +37,7 @@ from fione.api.app import DB_FILE
 from fione.auth import service as auth_service
 from fione.auth.tokens import TokenScope
 
+FAKE_LLM = Path(__file__).resolve().parent.parent / "tests" / "fake_llm.py"
 SETUP_TOKEN = "screenshot-setup-token-0123456789"
 ADMIN, PASSWORD = "admin", "screenshot-password"
 LAUNCHER_SECRET = "screenshot-launcher-secret-0123456789"
@@ -246,6 +249,7 @@ def run(base: str, out: Path, errors: list[str], data_dir: Path) -> None:
         model_screens(s, base, project)
         account_and_admin(s, base, project, data_dir)
         notebook_page(s, base)
+        assistant_page(s, base, project)
         browser.close()
 
 
@@ -786,6 +790,21 @@ def account_and_admin(s: "Shooter", base: str, project: str, data_dir: Path) -> 
     page.context.close()
 
 
+def assistant_page(s: "Shooter", base: str, project: str) -> None:
+    """Fione-kun's page against the fake LLM: empty, then with a question, what it looked at
+    and a pending training proposal (nothing is confirmed, so no job starts)."""
+    shoot_all(s, base, project + "/assistant", "assistant-empty", ("en", "ja"))
+    page = s.page("light", "desktop")
+    sign_in(page, base)
+    page.goto(base + project + "/assistant")
+    page.fill("#assistant-text", "propose target=species")
+    page.click(".chat-form button[type=submit]")
+    page.locator(".chat-proposal").wait_for(timeout=60_000)
+    wait_settled(page)
+    page.context.close()
+    shoot_all(s, base, project + "/assistant", "assistant-proposal", ("en", "ja"))
+
+
 class StubLauncher(BaseHTTPRequestHandler):
     """The notebook launcher's API in memory: a started notebook stays ``starting``."""
 
@@ -839,6 +858,13 @@ def main() -> None:
     base = f"http://127.0.0.1:{port}"
     launcher = ThreadingHTTPServer(("127.0.0.1", 0), StubLauncher)
     threading.Thread(target=launcher.serve_forever, daemon=True).start()
+    # Fione-kun's language model: tests/fake_llm.py run as the Compose stack runs it (a
+    # process, not an import: tests/ is not on this script's path).
+    llm_port = free_port()
+    fake = subprocess.Popen(
+        [sys.executable, str(FAKE_LLM), "--port", str(llm_port), "--policy", "e2e"],
+        stdout=subprocess.DEVNULL,
+    )
     with tempfile.TemporaryDirectory() as data_dir:
         env = {
             **os.environ,
@@ -851,6 +877,8 @@ def main() -> None:
             "FIONE_NOTEBOOK_URL": f"http://127.0.0.1:{free_port()}",  # never framed here
             "FIONE_NOTEBOOK_LAUNCHER_URL": f"http://127.0.0.1:{launcher.server_address[1]}",
             "FIONE_NOTEBOOK_LAUNCHER_SECRET": LAUNCHER_SECRET,
+            "FIONE_LLM_BASE_URL": f"http://127.0.0.1:{llm_port}/v1",
+            "FIONE_LLM_PROVIDER": "ollama",
         }
         server = subprocess.Popen(
             [
@@ -875,6 +903,8 @@ def main() -> None:
         finally:
             server.terminate()
             server.wait(timeout=30)
+            fake.terminate()
+            fake.wait(timeout=30)
             launcher.shutdown()
             if errors:
                 print("\n".join(["Page errors:", *errors]), file=sys.stderr)

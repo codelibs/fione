@@ -126,7 +126,8 @@ project sharing. Administrators also manage users, Python modules and the system
 that menu.
 
 To work with your data in JupyterLab, with Python and `fione-sdk`, enable
-[Notebooks](notebook.md) (opt-in).
+[Notebooks](notebook.md) (opt-in). To ask questions about your data and models in plain
+language, set up [Fione-kun](assistant.md) (opt-in; it needs a language model server).
 
 ## Stop, back up, upgrade
 

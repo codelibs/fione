@@ -16,6 +16,11 @@
 # Without FIONE_TRUST_PROXY every client seems to come from the proxy's address, so the
 # per-address limit of 50 failed sign-ins per 15 minutes is shared by all users.
 #
+# Fione-kun (the assistant) talks to an Ollama on the host by default (macOS: the Ollama app;
+# it cannot use the GPU from a container): http://host.docker.internal:11434/v1 with
+# gemma4:12b-mlx. An administrator downloads the model with the button on the system page.
+# Linux, or no Ollama on the host: run one in Compose, see "Fione-kun" in docker/.env.example.
+#
 # The serving image (prediction API for one downloaded model) is built only on request:
 #   docker compose -f docker/compose.yaml --env-file docker/.env --profile serving build
 name: fione
@@ -52,12 +57,22 @@ services:
       FIONE_NOTEBOOK_LAUNCHER_URL: http://notebook-launcher:8000
       FIONE_NOTEBOOK_LAUNCHER_SECRET: ${FIONE_NOTEBOOK_LAUNCHER_SECRET:-}
       FIONE_NOTEBOOK_MAX_LIFETIME_SECS: ${FIONE_NOTEBOOK_MAX_LIFETIME_SECS:-43200}
+      # Fione-kun: the language model server. Never `:?`; the stack runs without it.
+      FIONE_LLM_BASE_URL: ${FIONE_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      FIONE_LLM_PROVIDER: ${FIONE_LLM_PROVIDER:-ollama}
+      FIONE_LLM_MODEL: ${FIONE_LLM_MODEL:-gemma4:12b-mlx}
+      FIONE_LLM_API_KEY: ${FIONE_LLM_API_KEY:-}
+      FIONE_LLM_AUTO_PULL: ${FIONE_LLM_AUTO_PULL:-false}
+      FIONE_MCP_ENABLED: ${FIONE_MCP_ENABLED:-false}
+    # Reaches the host's Ollama on Linux as well (Docker Desktop has the name already).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${FIONE_PORT:-8080}:8080"
     volumes:
       - fione-data:/data
     # Never on `notebooks`: a notebook reaches Fione only through the gateway's relay.
-    networks: [backend, gateway, launcher]
+    networks: [backend, gateway, launcher, llm]
     restart: unless-stopped
 
   seaweedfs:
@@ -102,6 +117,26 @@ services:
       - seaweed-data:/data
     # Only fione shares its network: the master, volume and filer ports need no credentials.
     networks: [backend]
+    restart: unless-stopped
+
+  # Ollama (MIT) for Fione-kun, for hosts without one (Linux): started only with the profile,
+  #   COMPOSE_PROFILES=ollama in docker/.env (with the FIONE_LLM_* values of the block there).
+  # CPU only, and about 8 GB to download for gemma4:12b: slow, but it works. Fione is not
+  # made to wait for it (no depends_on). Not published: only fione talks to it. The context
+  # length is what Fione-kun's tools need; Ollama's own default is 4096 and cuts silently.
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:0.40.4
+    environment:
+      OLLAMA_CONTEXT_LENGTH: "16384"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks: [llm]
     restart: unless-stopped
 
   # Fione Serving, built from docker/Dockerfile.serving with the same FIONE_IMAGE_TAG (a
@@ -185,6 +220,7 @@ services:
 volumes:
   fione-data:
   seaweed-data:
+  ollama-data:
 
 networks:
   backend:
@@ -197,3 +233,5 @@ networks:
   # The gateway and the notebook containers: no egress, and no Fione.
   notebooks:
     internal: true
+  # Fione and Ollama only. Not internal: Ollama downloads models. Ollama is not on `backend`.
+  llm:

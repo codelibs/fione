@@ -1,3 +1,4 @@
+{% from "_macros.html" import icon %}
 {# The polled status card (every poll_secs seconds); a final 286 card ends the polling. #}
 {% set s = info %}
 <section id="system-status" class="stack" aria-labelledby="status-title" hx-get="/admin/system" hx-trigger="every {{ poll_secs }}s" hx-swap="outerHTML">
@@ -19,6 +20,35 @@
     <div><dt>{{ t('system.storage') }}</dt><dd>{{ t('system.storage.' ~ s.storage) }}</dd></div>
     <div><dt>{{ t('system.limits') }}</dt><dd>{{ t('system.limits_value', train=train_limit, short=short_limit) }}</dd></div>
   </dl>
+  {% set l = llm_status %}
+  <section class="card card-padded stack-tight" aria-labelledby="llm-title">
+    <h2 class="section-header__title section-header__title-icon" id="llm-title">{{ icon("info") }}{{ t('system.llm_title') }}</h2>
+    {% if l.state == 'off' %}
+    <p><span class="badge badge-neutral">{{ t('system.llm_state.off') }}</span></p>
+    <p class="text-muted text-sm">{{ t('system.llm_off') }}</p>
+    {% else %}
+    <dl class="facts facts-stacked">
+      <div><dt>{{ t('system.llm_state') }}</dt><dd><span class="badge badge-{{ {'ready': 'success', 'error': 'danger', 'unreachable': 'danger', 'missing': 'warning', 'pulling': 'info'}.get(l.state, 'neutral') }}">{{ t('system.llm_state.' ~ l.state) }}</span></dd></div>
+      <div><dt>{{ t('system.llm_model') }}</dt><dd><code>{{ l.model }}</code></dd></div>
+      <div><dt>{{ t('system.llm_server') }}</dt><dd>{{ l.host }} <span class="badge badge-{{ 'neutral' if l.local else 'warning' }}">{{ t('system.llm_local' if l.local else 'system.llm_remote') }}</span></dd></div>
+    </dl>
+    {% if l.state == 'pulling' and l.total %}
+    <progress class="progress" max="{{ l.total }}" value="{{ l.completed or 0 }}" aria-label="{{ t('system.llm_state.pulling') }}">{{ ((l.completed or 0) * 100 / l.total)|round|int }}%</progress>
+    <p class="text-muted text-sm">{{ t('system.llm_progress', done=(l.completed or 0)|filesizeformat, total=l.total|filesizeformat) }}</p>
+    {% elif l.state == 'pulling' %}
+    <progress class="progress" aria-label="{{ t('system.llm_state.pulling') }}"></progress>
+    {% endif %}
+    {% if l.error_code %}
+    <div class="alert alert-danger" role="note">{{ icon("alert") }}<span>{{ t('system.llm_error.' ~ l.error_code) }}</span></div>
+    {% endif %}
+    {% if l.server_context and l.server_context < llm_context_tokens %}
+    <div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('system.llm_context_low', server=l.server_context, setting=llm_context_tokens) }}</span></div>
+    {% endif %}
+    {% if not l.local %}
+    <div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('system.llm_remote_warning', host=l.host) }}</span></div>
+    {% endif %}
+    {% endif %}
+  </section>
   <p class="text-muted text-sm"><time datetime="{{ checked|iso }}">{{ t('system.checked', time=checked|utc) }}</time> · {{ t('system.refresh', n=poll_secs) }}</p>
   <p class="text-muted text-sm">{{ t('system.disk_note') }}</p>
 </section>

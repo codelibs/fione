@@ -163,6 +163,51 @@ MIGRATIONS: list[str] = [
         since TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    CREATE TABLE conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX conversations_project_user ON conversations(project_id, user_id);
+    CREATE INDEX conversations_user ON conversations(user_id);
+    CREATE TABLE chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+        content TEXT NOT NULL DEFAULT '',
+        tool_calls_json TEXT,
+        tool_call_id TEXT,
+        tool_name TEXT,
+        state TEXT NOT NULL DEFAULT 'done'
+            CHECK (state IN ('queued', 'running', 'done', 'failed', 'cancelled')),
+        error_code TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX chat_messages_conversation ON chat_messages(conversation_id, id);
+    CREATE TABLE chat_proposals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER NOT NULL UNIQUE REFERENCES chat_messages(id) ON DELETE CASCADE,
+        conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        dataset_id INTEGER REFERENCES datasets(id) ON DELETE SET NULL,
+        config_json TEXT NOT NULL,
+        details_json TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending'
+            CHECK (state IN ('pending', 'confirmed', 'dismissed')),
+        job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+        decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        decided_at TEXT
+    );
+    CREATE INDEX chat_proposals_conversation ON chat_proposals(conversation_id);
+    CREATE TABLE llm_sample_optins (
+        base_url TEXT PRIMARY KEY,
+        enabled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        enabled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 

@@ -53,10 +53,20 @@ Jupyter can drive Fione with `fione-sdk` (`sdk/`, `pip install ./sdk`): datasets
 profiles, AutoML training, leaderboards, predictions and Python modules, as pandas frames, with
 an API token. See [sdk/README.md](sdk/README.md).
 
+## Fione-kun, the assistant
+
+Fione-kun answers questions about a project's datasets and models and suggests a training run
+that a person confirms; it only reads. It needs a language model server: the Ollama app on
+your Mac by default (`gemma4:12b-mlx`), an Ollama in Compose (profile `ollama`) on Linux, or any
+OpenAI-compatible server. The same read-only tools are available to MCP clients, off by
+default. See [Fione-kun](docs/assistant.md).
+
 ## Documentation
 
 - [Quick start](docs/quickstart.md)
 - [Notebooks](docs/notebook.md): JupyterLab and `fione-sdk`
+- [Fione-kun, the assistant](docs/assistant.md): the language
+  model, what is sent, proposals, MCP
 - [Configuration](docs/configuration.md): every setting, reverse proxy, backups of the secret key
 - [Fione Serving](docs/serving.md): running a model as a prediction API
 - [Moving from v1](docs/migrating-from-v1.md)
@@ -66,8 +76,8 @@ an API token. See [sdk/README.md](sdk/README.md).
 
 This release covers the core: data, analysis, AutoML, models and their explanations,
 predictions, serving, jobs, users and sharing, and the opt-in notebooks (JupyterLab and a
-Python SDK). **Planned, not in this release**: an LLM assistant (Ollama, by default with
-`gemma4:12b-mlx` on a Mac), an MCP server and ONNX export. No images are published yet;
+Python SDK), and Fione-kun, an LLM assistant with an optional read-only MCP server.
+**Planned, not in this release**: ONNX export. No images are published yet;
 you build them from the repository (a version tag publishes the `fione`, `fione-serving`,
 `fione-notebook` and `fione-notebook-launcher` images).
 
@@ -108,4 +118,4 @@ listed in [VENDOR.md](src/fione/web/static/vendor/VENDOR.md):
 | htmx | 2.0.11 | 0BSD |
 | Apache ECharts (with ZRender and parts of d3) | 6.1.0 | Apache-2.0 (ZRender and d3: BSD-3-Clause) |
 
-The Compose stack also runs SeaweedFS (Apache-2.0).
+The Compose stack also runs SeaweedFS (Apache-2.0) and, with the `ollama` profile, Ollama (MIT).

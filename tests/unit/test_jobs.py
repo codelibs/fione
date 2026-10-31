@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pydantic import SecretStr
 
 from fione import db
 from fione.auth import service as auth
@@ -241,6 +242,28 @@ def test_worker_env_exports_settings(settings, db_path):
     assert env["FIONE_JOB_DB"] == str(db_path)
     assert env["FIONE_JOB_HANDLER_MODULES"] == "job_test_handlers"
     assert "FIONE_S3_ENDPOINT" not in env
+
+
+def test_worker_env_round_trips_through_settings(settings, db_path, monkeypatch):
+    """A worker reads its settings back from the environment: the default thinking switch of
+    Ollama (an object) and an API key (a secret) must survive the trip."""
+    configured = settings.model_copy(
+        update={
+            "llm_base_url": "http://localhost:11434/v1",
+            "llm_provider": "ollama",
+            "llm_api_key": SecretStr("a-secret-key"),
+            "llm_extra_body": {"reasoning_effort": "none"},
+        }
+    )
+    for key in [k for k in os.environ if k.startswith("FIONE_")]:
+        monkeypatch.delenv(key)
+    for key, value in worker_env(configured, db_path).items():
+        if key.startswith("FIONE_"):
+            monkeypatch.setenv(key, value)
+    read = Settings()
+    assert read.llm_extra_body == {"reasoning_effort": "none"}
+    assert read.llm_api_key.get_secret_value() == "a-secret-key"
+    assert read.llm_provider == "ollama"
 
 
 def test_short_job_limit_setting_reads_env(monkeypatch):
