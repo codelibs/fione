@@ -43,7 +43,7 @@ MAX_NEXT_LENGTH = 2048
 NEXT_DECODE_ROUNDS = 3
 PROFILE_CACHE_SIZE = 16  # column profiles of datasets (the analysis page)
 BASELINE_CACHE_SIZE = 1024  # rating baselines of training targets (a few numbers each)
-LEAK_CACHE_SIZE = 256  # leak suspects per (dataset, target): a few column names each
+LEAK_CACHE_SIZE = 256  # leak check and task per (dataset, target): a few column names each
 SIZE_CACHE_SIZE = 4096  # stored size of each dataset (a HEAD request on S3)
 
 log = logging.getLogger(__name__)

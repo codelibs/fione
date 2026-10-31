@@ -6,7 +6,7 @@ is a 404, whatever the caller may see elsewhere.
 
 import datetime
 import math
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Annotated
 
 import numpy as np
@@ -19,7 +19,7 @@ from fione.api.deps import Conn, ProjectContext, project_access
 from fione.api.downloads import attachment, content_disposition, tmp_dir
 from fione.api.errors import ApiError, not_found, service_errors
 from fione.api.schemas import IdPath, dataset_out
-from fione.data.profile import profile_dataset
+from fione.data.profile import SCORE_REASONS, leak_check, profile_dataset
 from fione.engine.events import jsonable
 from fione.projects import service
 from fione.projects.ingest import export_csv, ingest_csv, read_dataset_sample
@@ -195,12 +195,30 @@ def profile(
     """Profile (EDA) of the first 100,000 rows: kinds, statistics, histograms, correlations
     and, with ``target``, leak suspects. For the UI, so ``top_values`` (raw cell values)
     are included, unlike the LLM-facing tools. ``n_rows`` is the whole dataset's row count,
-    ``sample_rows`` the number profiled."""
+    ``sample_rows`` the number profiled. Each leak suspect's ``kind`` is ``exact`` (the
+    column is left out of the EasyML defaults) or ``score`` (a warning only: a strong
+    legitimate column can score as high). The leak check, which can take seconds, is kept
+    per dataset and target in the app's leak-check cache (the UI's), unless its time budget
+    ran out. Its entries have keys of their own: this sample is not the one the UI checks."""
     dataset = _dataset(conn, ctx, dataset_id)
     frame = read_dataset_sample(request.app.state.storage, dataset, max_rows=PROFILE_SAMPLE_ROWS)
     with service_errors():
-        result = profile_dataset(frame, target)
-    return jsonable({**asdict(result), "n_rows": dataset.n_rows, "sample_rows": len(frame)})
+        result = profile_dataset(frame)
+        if target is not None:
+            if target not in frame.columns:
+                raise ValueError(f"target column '{target}' not found")
+            check = request.app.state.ui_leaks.get(
+                ("api-profile", dataset.id, target),
+                lambda: leak_check(frame, result.columns, target),
+                keep=lambda found: not found.partial,
+            )
+            result = replace(result, leak_suspects=check.suspects, leak_partial=check.partial)
+    out = {**asdict(result), "n_rows": dataset.n_rows, "sample_rows": len(frame)}
+    out["leak_suspects"] = [
+        {**s, "kind": "score" if s["reason"] in SCORE_REASONS else "exact"}
+        for s in out["leak_suspects"]
+    ]
+    return jsonable(out)
 
 
 @router.get("/{dataset_id}/columns/{column:path}")

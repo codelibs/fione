@@ -56,6 +56,7 @@ The Japanese screen terms are kept.
 | AutoML run with its parameters (folds, class balancing, seed, maximum models and run time, per-model time, stopping rounds/metric/tolerance, sort metric, keeping CV predictions/models/fold assignment, excluded columns) | Shipped |
 | Job list, delete, delete all, cancel | Shipped |
 | Leaderboard and model details (importance, score history, CV metrics) | Shipped |
+| Model explanations | New: diagnostics (confusion matrix, ROC and precision-recall curves, calibration, residuals), each column's contribution to a prediction, importance from those contributions, and partial dependence curves. Contributions come from the libraries' own tree explanations and are approximate for the ensemble ([Known limitations](known-limitations.md#explanations-and-leak-warnings)) |
 | Model export, import, export of all models | Shipped (import is for administrators) |
 | Batch prediction saved as a prediction dataset | Shipped |
 | Prediction summary (best model, star rating, Fione-kun) | Shipped |
@@ -72,9 +73,8 @@ The Japanese screen terms are kept.
 | Three roles and per-user sessions | Rebuilt: admin / editor / viewer and project sharing |
 | English and Japanese | Shipped |
 
-Planned, **not in this release**: Notebook integration (JupyterLab and a Python SDK), SHAP and
-partial dependence, the LLM assistant (Ollama, by default with `gemma4:12b-mlx` on a Mac), an
-MCP server and ONNX export.
+Planned, **not in this release**: Notebook integration (JupyterLab and a Python SDK), the LLM
+assistant (Ollama, by default with `gemma4:12b-mlx` on a Mac), an MCP server and ONNX export.
 
 ## Python modules
 

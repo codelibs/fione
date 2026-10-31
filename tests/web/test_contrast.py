@@ -38,6 +38,9 @@ PAIRS = [
     ("danger-text", "bg", 3.0),
     ("primary", "bg", 3.0),
     ("star", "surface-2", 3.0),
+    # confusion matrix cells: their text on each shade of the row share
+    *[("text", f"cm-{level}", 4.5) for level in range(4)],
+    *[("on-primary", f"cm-{level}", 4.5) for level in (4, 5)],
 ]
 
 

@@ -7,11 +7,13 @@ from collections.abc import Iterator
 import pandas as pd
 
 from fione.config import load_secret
+from fione.engine import explain
 from fione.engine.artifact import UntrustedArtifactError
 from fione.engine.config import ConfigError
 from fione.engine.events import Event
 from fione.jobs.handlers import JobContext, JobUserError, register_handler
 from fione.models import service as models_service
+from fione.predict import batch
 from fione.predict.batch import CHUNK_ROWS, PredictInputError, included_columns, predict_chunks
 from fione.projects import ingest
 from fione.projects import service as projects
@@ -52,6 +54,9 @@ def _watched(ctx: JobContext, chunks: Iterator[pd.DataFrame], total: int) -> Ite
 def batch_predict(ctx: JobContext) -> None:
     """Predict, store the result as a ``predict`` dataset and record it.
 
+    ``include_contributions`` (absent in older payloads: off) adds each row's contributions;
+    the row cap is checked again here, before reading, since the payload may predate it.
+
     A cancelled run leaves no dataset row and no objects: the stop flag is read forced right
     before the result is stored and again after the row is inserted, the second time undoing
     the row and the object. A SIGKILL during the store can leave an unreferenced object under
@@ -71,17 +76,28 @@ def batch_predict(ctx: JobContext) -> None:
             raise projects.DatasetNotFound(dataset.id)
     except projects.DatasetNotFound as e:
         raise JobUserError("the dataset no longer exists") from e
+    contributions = bool(payload.get("include_contributions"))
+    if contributions:
+        try:
+            batch.check_contribution_rows(dataset.n_rows)
+        except PredictInputError as e:
+            raise JobUserError(str(e)) from e
     start = time.monotonic()
     try:
         model = models_service.load_trained(ctx.storage, record, load_secret(ctx.settings))
     except UntrustedArtifactError as e:
         raise JobUserError("the model file failed verification") from e
+    if contributions:  # as the explain job: never more threads than its small calls need
+        explain.cap_threads(model)
     try:
         frame = ingest.read_dataset(ctx.storage, dataset, nullable_dtypes=True)
-        chunks = predict_chunks(model, frame, payload.get("include_columns"), chunk_rows=CHUNK_ROWS)
+        include = payload.get("include_columns")
+        chunks = predict_chunks(
+            model, frame, include, chunk_rows=CHUNK_ROWS, contributions=contributions
+        )
         # A column that is empty in the first chunk still needs the type its source has.
         source = ingest.read_schema(ctx.storage, dataset)
-        kept = included_columns(model, list(frame.columns), payload.get("include_columns"))
+        kept = included_columns(model, list(frame.columns), include, contributions=contributions)
         fallback = {out: source.field(column).type for out, column in kept.items()}
         ctx.emit(
             Event(

@@ -44,7 +44,10 @@ class Rating:
 def _finite(value) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    return float(value) if math.isfinite(value) else None
+    try:
+        return float(value) if math.isfinite(value) else None
+    except OverflowError:  # an int beyond the float range
+        return None
 
 
 def _skill(task: str, metrics: dict, majority_rate, target_std) -> tuple[float | None, str, str]:

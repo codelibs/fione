@@ -323,7 +323,8 @@ class Trained:
 def trained(stack, browser, admin, data) -> Trained:
     """The EasyML wizard by browser, once per session: a project, iris uploaded, the
     analysis defaults (species, classification), the 1-minute preset, Run, the live
-    progress until it moves on to the summary. Later tests reuse the model."""
+    progress until it moves on to the summary, then the explain job the training queued.
+    Later tests reuse the model, with its explanation stored and no job left running."""
     context = browser.new_context(base_url=stack.base, viewport={"width": 1280, "height": 800})
     page = context.new_page()
     console = Console()
@@ -347,4 +348,14 @@ def trained(stack, browser, admin, data) -> Trained:
     summary = page.url.removeprefix(stack.base)
     context.close()
     assert console.errors == []
+    model_id = summary.split("/")[-2]
+    deadline = time.monotonic() + 120
+    with admin.api(stack) as api:
+        while True:
+            explained = api.get(f"/api/v1/models/{model_id}/explanations").json()
+            if explained["status"] not in ("none", "queued", "running"):
+                break
+            assert time.monotonic() < deadline, f"the explain job did not finish: {explained}"
+            time.sleep(1)
+    assert explained["status"] == "done", explained
     return Trained(project, job, summary)

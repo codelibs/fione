@@ -42,6 +42,14 @@
   --color-neutral-subtle: var(--color-surface-2);
   --color-neutral-text: light-dark(#454e5c, #c3cad5);
 
+  /* Confusion matrix cells, by the row's share: 0-3 carry --color-text, 4-5 --color-on-primary */
+  --color-cm-0: light-dark(#ffffff, #161a21);
+  --color-cm-1: light-dark(#e9eefc, #1c2648);
+  --color-cm-2: light-dark(#ccd8f7, #263a7a);
+  --color-cm-3: light-dark(#a3b7ef, #34509e);
+  --color-cm-4: light-dark(#4467d4, #8ea7ff);
+  --color-cm-5: light-dark(#2a48ad, #c3d1ff);
+
   /* Focus ring: at least 3:1 against every surface */
   --color-focus: light-dark(#2f6bf0, #9ab6ff);
   --focus-ring: 0 0 0 3px var(--color-focus);
@@ -136,6 +144,12 @@
     --color-danger-subtle: #fcebeb;
     --color-danger-text: #a52524;
     --color-neutral-text: #454e5c;
+    --color-cm-0: #ffffff;
+    --color-cm-1: #e9eefc;
+    --color-cm-2: #ccd8f7;
+    --color-cm-3: #a3b7ef;
+    --color-cm-4: #4467d4;
+    --color-cm-5: #2a48ad;
     --color-focus: #2f6bf0;
     --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.06);
     --shadow-md: 0 2px 4px rgb(16 24 40 / 0.06), 0 6px 16px rgb(16 24 40 / 0.08);

@@ -1,9 +1,12 @@
 // Charts under the strict CSP: each [data-chart] element names a JSON block (plain data, read
-// with JSON.parse, never as markup) that is drawn with ECharts' canvas renderer. Tooltips are
+// with JSON.parse, never as markup) that is drawn with ECharts' canvas renderer; in fragments
+// HTMX swaps in (which lose their script elements), [data-chart-spec] holds the JSON itself. Tooltips are
 // drawn on the canvas too (renderMode "richText"), so no HTML or inline style is added to the
 // page. Colours come from the design tokens (resolved through hidden probe elements), the
 // chart is redrawn when the theme changes, sized when its container gets a size (charts in a
-// hidden tab start at zero) and animated only when motion is welcome.
+// hidden tab start at zero) and animated only when motion is welcome. Charts are found at
+// start-up and in content HTMX adds (each element is set up once: data-chart-ready); charts
+// whose element HTMX has taken out of the page are released then.
 (function () {
   "use strict";
   if (!window.echarts) return;
@@ -63,7 +66,7 @@
         type: "line",
         name: spec.line.name,
         data: spec.line.points,
-        step: "end",
+        step: spec.line.step === undefined ? "end" : spec.line.step,
         symbol: "none",
         lineStyle: { color: c.text, width: 2, type: "dashed" },
         itemStyle: { color: c.text },
@@ -146,23 +149,131 @@
     };
   }
 
+  // Curves (ROC, precision-recall, calibration, partial dependence): one line per series on a
+  // value or category x axis (category points are [index, y], in the order of ``categories``).
+  // Faint series (a reference diagonal, single-row curves) are thin and muted, dashed unless
+  // ``solid``, left out of the legend and silent; short series show their points.
+  function linesOption(spec, c) {
+    var onCategories = spec.x_type === "category";
+    var data = function (points) {
+      return onCategories
+        ? points.map(function (p) {
+            return p[1];
+          })
+        : points;
+    };
+    var axis = function (horizontal) {
+      var category = horizontal && onCategories;
+      return {
+        type: category ? "category" : "value",
+        data: category ? spec.categories : undefined,
+        name: horizontal ? spec.x_name : spec.y_name,
+        nameLocation: horizontal ? "middle" : "end",
+        nameGap: horizontal ? 32 : 14,
+        nameTextStyle: { color: c.muted, align: horizontal ? "center" : "left" },
+        min: horizontal ? spec.x_min : spec.y_min,
+        max: horizontal ? spec.x_max : spec.y_max,
+        scale: true,
+        axisLine: { lineStyle: { color: c.axis } },
+        axisLabel: { color: c.muted, hideOverlap: true },
+        splitLine: { lineStyle: { color: c.grid } },
+      };
+    };
+    var shown = 0;
+    var series = spec.series.map(function (s) {
+      if (s.faint) {
+        return {
+          type: "line",
+          name: s.name,
+          data: data(s.points),
+          symbol: "none",
+          silent: true,
+          tooltip: { show: false },
+          lineStyle: {
+            color: c.muted,
+            width: 1,
+            type: s.solid ? "solid" : "dashed",
+            opacity: s.solid ? 0.45 : 1,
+          },
+          itemStyle: { color: c.muted },
+          z: 1,
+        };
+      }
+      var colour = c.series[shown++ % c.series.length];
+      return {
+        type: "line",
+        name: s.name,
+        data: data(s.points),
+        symbol: SYMBOLS[(shown - 1) % SYMBOLS.length],
+        showSymbol: s.points.length <= 20,
+        symbolSize: 7,
+        lineStyle: { color: colour, width: 2 },
+        itemStyle: { color: colour },
+        z: 2,
+      };
+    });
+    return {
+      animation: !reduceMotion.matches,
+      aria: { enabled: true, label: { description: spec.label } },
+      textStyle: { color: c.text, fontFamily: window.getComputedStyle(document.body).fontFamily },
+      legend: {
+        bottom: 0,
+        textStyle: { color: c.text },
+        data: spec.series
+          .filter(function (s) {
+            return !s.faint;
+          })
+          .map(function (s) {
+            return s.name;
+          }),
+      },
+      grid: { left: 12, right: 24, top: 36, bottom: 72, containLabel: true },
+      tooltip: {
+        trigger: "item",
+        renderMode: "richText",
+        backgroundColor: c.surface,
+        borderColor: c.axis,
+        textStyle: { color: c.text },
+      },
+      xAxis: axis(true),
+      yAxis: axis(false),
+      series: series,
+    };
+  }
+
   function draw(entry) {
     var c = colours(entry.figure);
+    var type = entry.spec.type;
     var built =
-      entry.spec.type === "scatter"
+      type === "scatter"
         ? scatterOption(entry.spec, c)
-        : option(entry.spec, c, entry.el.clientWidth);
+        : type === "lines"
+          ? linesOption(entry.spec, c)
+          : option(entry.spec, c, entry.el.clientWidth);
     entry.chart.setOption(built, true);
   }
 
-  document.querySelectorAll("[data-chart]").forEach(function (el) {
-    var source = document.getElementById(el.getAttribute("data-chart"));
-    if (!source) return;
-    var spec = JSON.parse(source.textContent);
-    var entry = { el: el, spec: spec, figure: el.closest("figure"), chart: null };
+  function setUp(el) {
+    if (el.hasAttribute("data-chart-ready")) return;
+    var text = el.getAttribute("data-chart-spec");
+    if (text === null) {
+      var source = document.getElementById(el.getAttribute("data-chart"));
+      if (!source) return;
+      text = source.textContent;
+    }
+    el.setAttribute("data-chart-ready", "");
+    var spec;
+    try {
+      spec = JSON.parse(text);
+    } catch (error) {
+      // One unreadable spec leaves its chart blank (the text alternative stays), never the rest.
+      console.warn("a chart's data could not be read", error);
+      return;
+    }
+    var entry = { el: el, spec: spec, figure: el.closest("figure"), chart: null, observer: null };
     charts.push(entry);
     // Started once the element has a size: a chart in a hidden tab waits until it is shown.
-    new ResizeObserver(function () {
+    entry.observer = new ResizeObserver(function () {
       if (!el.clientWidth || !el.clientHeight) return;
       if (!entry.chart) {
         entry.chart = window.echarts.init(el, null, { renderer: "canvas" });
@@ -171,7 +282,32 @@
         entry.chart.resize();
         draw(entry); // the label width follows the chart's width
       }
-    }).observe(el);
+    });
+    entry.observer.observe(el);
+  }
+
+  // Charts whose element is no longer in the page (HTMX swapped it out): their ECharts
+  // instance, observer and entry go, so swapped fragments do not pile up.
+  function release() {
+    charts = charts.filter(function (entry) {
+      if (entry.el.isConnected) return true;
+      entry.observer.disconnect();
+      if (entry.chart) entry.chart.dispose();
+      return false;
+    });
+  }
+
+  // The charts in ``root`` (the element itself included) not set up yet.
+  function scan(root) {
+    var selector = "[data-chart], [data-chart-spec]";
+    if (root.matches && root.matches(selector)) setUp(root);
+    if (root.querySelectorAll) root.querySelectorAll(selector).forEach(setUp);
+  }
+
+  scan(document);
+  document.addEventListener("htmx:load", function (event) {
+    release();
+    scan(event.target);
   });
 
   function redraw() {

@@ -9,6 +9,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import BinaryIO
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -26,6 +27,7 @@ _COPY_CHUNK = 1 << 20
 _BLOCK_SIZE = 1 << 20
 _ROW_GROUP_ROWS = 128 * 1024
 _EXPORT_BATCH_ROWS = 50_000
+_PAGE_BATCH_ROWS = 8192  # read_dataset_rows
 _DELIMITERS = ",;\t|"
 _SNIFF_ROWS = 20
 _MAX_EXACT_FLOAT_INT = 2**53  # integers up to this magnitude survive a float64 round trip
@@ -415,6 +417,51 @@ def read_dataset_sample(
     return pa.Table.from_batches(batches).slice(0, max_rows).to_pandas()
 
 
+def _head(parquet: pq.ParquetFile, group: int, rows: int, columns) -> list[pa.RecordBatch]:
+    """The first ``rows`` rows of the row group, decoding no more of it than that needs."""
+    batches = parquet.iter_batches(rows, row_groups=[group], columns=columns, use_threads=False)
+    return list(itertools.islice(batches, 1))
+
+
+def read_dataset_spread(
+    storage: Storage,
+    dataset: Dataset,
+    rows: int,
+    columns: list[str] | None = None,
+    *,
+    seed: int = 0,
+    max_groups: int = 8,
+    per_group: int | None = None,
+) -> pd.DataFrame:
+    """``rows`` rows drawn with ``seed`` from at most ``max_groups`` evenly spaced row groups
+    (all of their rows if there are fewer), in file order: a sample of the whole file, never
+    just its head, that is the same every time.
+
+    Without ``per_group``, memory is bounded by the groups, not by ``rows``: up to
+    ``max_groups`` whole groups of ``columns`` are read before sampling. A CSV upload's groups
+    hold 131,072 rows (so about 1M rows at most); a dataset written from frames (predictions,
+    module output) has one group per frame, which can be larger. With ``per_group``, only the
+    first ``per_group`` rows of each of those groups are read, whatever their size.
+    """
+    with storage.open_read(dataset.key) as f:
+        parquet = pq.ParquetFile(f)
+        count = parquet.metadata.num_row_groups
+        groups = np.unique(np.round(np.linspace(0, count - 1, min(count, max_groups))))
+        groups = groups.astype(int).tolist()
+        if per_group is None:
+            table = parquet.read_row_groups(groups, columns=columns) if count else None
+        else:
+            heads = [b for g in groups for b in _head(parquet, g, per_group, columns)]
+            table = pa.Table.from_batches(heads) if heads else None
+        if table is None:  # no rows
+            table = parquet.schema_arrow.empty_table()
+            return (table.select(columns) if columns is not None else table).to_pandas()
+    if table.num_rows > rows:
+        picked = np.random.default_rng(seed).choice(table.num_rows, rows, replace=False)
+        table = table.take(np.sort(picked))
+    return table.to_pandas()
+
+
 def read_dataset_rows(
     storage: Storage,
     dataset: Dataset,
@@ -423,7 +470,8 @@ def read_dataset_rows(
     columns: list[str] | None = None,
 ) -> pd.DataFrame:
     """Rows ``offset`` to ``offset + limit`` (fewer at the end), reading only the row groups
-    that hold them, so a page deep in a large file costs no more than the first one."""
+    that hold them, so a page deep in a large file costs no more than the first one. They are
+    read in batches of ``_PAGE_BATCH_ROWS``, so memory is bounded by the page, not the groups."""
     with storage.open_read(dataset.key) as f:
         parquet = pq.ParquetFile(f)
         meta = parquet.metadata
@@ -437,8 +485,20 @@ def read_dataset_rows(
         if not groups:  # past the end: no rows, the columns all the same
             table = parquet.schema_arrow.empty_table()
             return (table.select(columns) if columns is not None else table).to_pandas()
-        table = parquet.read_row_groups(groups, columns=columns)
-    return table.slice(offset - first_row, limit).to_pandas()
+        skip, batches, wanted = offset - first_row, [], limit
+        batches_of = parquet.iter_batches(
+            _PAGE_BATCH_ROWS, row_groups=groups, columns=columns, use_threads=False
+        )
+        for batch in batches_of:
+            if skip >= len(batch):
+                skip -= len(batch)
+                continue
+            batches.append(batch.slice(skip, wanted))
+            wanted -= len(batches[-1])
+            skip = 0
+            if wanted <= 0:
+                break
+    return pa.Table.from_batches(batches).to_pandas()
 
 
 def export_csv(storage: Storage, dataset: Dataset) -> Iterator[bytes]:

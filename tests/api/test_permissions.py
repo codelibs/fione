@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import pytest
 from fastapi.testclient import TestClient
 
-from api_helpers import CSV, PW, make_settings, store_model
+from api_helpers import CSV, PW, iris_csv, iris_frame, make_settings, store_model
 from fione import db
 from fione.api.app import DB_FILE, create_app
 from fione.auth import service as auth
@@ -83,6 +83,7 @@ def run(df, params, ctx):
     return df
 """
 READ = e(401, 200, 200, 200, 200, 404, 200)
+IRIS_ROWS = iris_frame().drop(columns="species").head(2).to_dict("records")
 WRITE_201 = e(401, 403, 201, 201, 201, 404, 403)
 ADMIN_ONLY = (401, 403, 403, 403)
 
@@ -359,6 +360,21 @@ ROWS = [
         json=lambda v: {"module_id": "nope", "dataset_id": v["D"]},
         note="unknown module",
     ),
+    Row(
+        "POST",
+        R_P + "/jobs/explain",
+        P + "/jobs/explain",
+        WRITE_201,
+        json=lambda v: {"model_id": v["M"], "dataset_id": v["DI"]},
+    ),
+    Row(
+        "POST",
+        R_P + "/jobs/explain",
+        P + "/jobs/explain",
+        e(401, 403, 404, 404, 404, 404, 403),
+        json=lambda v: {"model_id": v["M2"], "dataset_id": v["DI"]},
+        note="model of another project",
+    ),
     Row("POST", R_P + "/jobs/export", P + "/jobs/export", e(401, 201, 201, 201, 201, 404, 201)),
     Row("GET", "/api/v1/jobs", "/api/v1/jobs", e(401, 200, 200, 200, 200, 200, 200)),
     Row("GET", "/api/v1/jobs", "/api/v1/jobs?project_id={P}", READ, note="one project"),
@@ -428,6 +444,68 @@ ROWS = [
         "/api/v1/models/{M2}/serving/info",
         e(401, 404, 404, 404, 200, 200, 404),
         note="model of another project",
+    ),
+    Row("GET", M + "/diagnostics", "/api/v1/models/{M}/diagnostics", READ),
+    Row(
+        "GET",
+        M + "/diagnostics",
+        "/api/v1/models/{M2}/diagnostics",
+        e(401, 404, 404, 404, 200, 200, 404),
+        note="model of another project",
+    ),
+    Row("GET", M + "/explanations", "/api/v1/models/{M}/explanations", READ),
+    Row(
+        "GET",
+        M + "/explanations",
+        "/api/v1/models/{M2}/explanations",
+        e(401, 404, 404, 404, 200, 200, 404),
+        note="model of another project",
+    ),
+    Row(
+        "POST",
+        M + "/contributions",
+        "/api/v1/models/{M}/contributions",
+        READ,
+        json={"instances": IRIS_ROWS},
+    ),
+    Row(
+        "POST",
+        M + "/contributions",
+        "/api/v1/models/{M2}/contributions",
+        e(401, 404, 404, 404, 200, 200, 404),
+        json={"instances": IRIS_ROWS},
+        note="model of another project",
+    ),
+    Row(
+        "POST",
+        M + "/contributions",
+        "/api/v1/models/{M}/contributions",
+        e(401, 404, 404, 404, 404, 404, 404),
+        json=lambda v: {"dataset_id": v["D2"]},
+        note="dataset of another project",
+    ),
+    Row(
+        "POST",
+        M + "/partial-dependence",
+        "/api/v1/models/{M}/partial-dependence",
+        READ,
+        json=lambda v: {"column": "petal length (cm)", "dataset_id": v["DI"]},
+    ),
+    Row(
+        "POST",
+        M + "/partial-dependence",
+        "/api/v1/models/{M}/partial-dependence",
+        e(401, 404, 404, 404, 404, 404, 404),
+        json=lambda v: {"column": "petal length (cm)", "dataset_id": v["D2"]},
+        note="dataset of another project",
+    ),
+    Row(
+        "POST",
+        M + "/partial-dependence",
+        "/api/v1/models/{M}/partial-dependence",
+        e(401, 422, 422, 422, 422, 404, 422),
+        json={"column": "petal length (cm)"},
+        note="no dataset",
     ),
     Row("DELETE", M, "/api/v1/models/{M}", e(401, 403, 204, 204, 204, 404, 403)),
     Row(
@@ -505,10 +583,11 @@ ROWS = [
 
 @pytest.fixture(scope="session")
 def seed(tmp_path_factory):
-    """One seeded install: users; project P (owner, three members) with dataset D, model M, a
-    finished job JD, a queued job JQ and a finished export job JX; the outsider's project Q
-    with dataset D2, model M2 and job JQ2; an uploaded module ``seeded``. Returns (data dir,
-    path values and upload files, persona tokens)."""
+    """One seeded install: users; project P (owner, three members) with datasets D and DI
+    (iris, which has the models' columns), model M, a finished job JD, a queued job JQ and a
+    finished export job JX; the outsider's project Q with dataset D2, model M2 and job JQ2;
+    an uploaded module ``seeded``. Returns (data dir, path values and upload files, persona
+    tokens)."""
     data = tmp_path_factory.mktemp("seed") / "data"
     settings = make_settings(data, max_upload_bytes=MAX_UPLOAD)
     load_secret(settings)
@@ -531,6 +610,7 @@ def seed(tmp_path_factory):
         q = projects.create_project(conn, users["outsider"], "Q")
         d = ingest_csv(storage, conn, p.id, "d", DatasetType.TRAIN, io.BytesIO(TRAIN_CSV))
         d2 = ingest_csv(storage, conn, q.id, "d2", DatasetType.TRAIN, io.BytesIO(TRAIN_CSV))
+        di = ingest_csv(storage, conn, p.id, "iris", DatasetType.TRAIN, io.BytesIO(iris_csv()))
         secret = load_secret(settings)
         m = store_model(conn, storage, secret, p.id)
         m2 = store_model(conn, storage, secret, q.id)
@@ -552,6 +632,7 @@ def seed(tmp_path_factory):
         "P": p.id,
         "D": d.id,
         "D2": d2.id,
+        "DI": di.id,
         "victim": victim.id,
         "admin_id": users["admin"].id,
         "owner_id": users["owner"].id,

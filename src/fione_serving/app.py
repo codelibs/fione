@@ -5,6 +5,10 @@ row that cannot be predicted becomes ``{"exception": ...}`` and never fails the 
 are checked in bulk (missing columns, text in numeric columns) and the valid ones are predicted
 in a single batch; only if that batch call itself raises is each row predicted separately, to
 find the one that fails.
+
+With ``"contributions": true`` each predicted row also gets its contributions, computed in the
+same call as its prediction. Such requests have their own instance cap and a cap on how many
+run at once (503 beyond it); without the key, or with ``false``, nothing changes.
 """
 
 import json
@@ -19,6 +23,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
+from fione.engine import explain
 from fione.engine.config import ConfigError
 from fione.engine.events import jsonable
 from fione.predict.batch import encodable, unreadable_numbers
@@ -28,6 +33,8 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MAX_BODY = 10 << 20
 DEFAULT_MAX_INSTANCES = 10_000
+DEFAULT_MAX_CONTRIBUTION_INSTANCES = 100  # as the Fione API; plain predictions wait on them
+DEFAULT_MAX_CONTRIBUTION_REQUESTS = 2  # contribution requests in flight; more get 503
 MAX_DOMAIN = 1000  # categories listed per feature by /model
 _SHOWN_CHARS = 50  # of a value echoed back in a row's error
 
@@ -35,10 +42,11 @@ _SHOWN_CHARS = 50  # of a value echoed back in a row's error
 class Rejected(Exception):
     """A request refused as a whole, with its HTTP status."""
 
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, headers: dict[str, str] | None = None):
         super().__init__(message)
         self.status = status
         self.message = message
+        self.headers = headers
 
 
 def _env_int(name: str, default: int) -> int:
@@ -78,7 +86,7 @@ class Predictor:
             jsonable(list(self.model.classes_)) if self.model.classes_ is not None else None
         )
         self.description = self._describe()
-        self._lock = threading.Lock()  # one prediction at a time: the libraries use all cores
+        self._lock = threading.Lock()  # one prediction at a time: the libraries use several cores
 
     def _domain(self, column: str) -> list | None:
         prep = self.model.prep
@@ -109,8 +117,13 @@ class Predictor:
             "fioneVersion": self.manifest.fione_version,
         }
 
-    def predict(self, instances: list) -> list[dict]:
-        """One result per instance, in order: a prediction or ``{"exception": message}``."""
+    def predict(self, instances: list, *, contributions: bool = False) -> list[dict]:
+        """One result per instance, in order: a prediction or ``{"exception": message}``.
+
+        With ``contributions``, each prediction also has ``"contributions"``: ``{"bias": b,
+        "columns": {column: value}}`` for the output it explains (the positive class's
+        probability, the predicted class's, or the value), in ``model.columns`` order.
+        """
         results: list[dict | None] = [None] * len(instances)
         positions: list[int] = []
         rows: list[dict] = []
@@ -130,10 +143,12 @@ class Predictor:
             rows.append(row)
         if rows:
             frame = pd.DataFrame({c: [row[c] for row in rows] for c in self.columns})
-            self._predict_valid(frame, positions, results)
+            self._predict_valid(frame, positions, results, contributions)
         return results  # every slot is filled by now
 
-    def _predict_valid(self, frame: pd.DataFrame, positions: list[int], results: list) -> None:
+    def _predict_valid(
+        self, frame: pd.DataFrame, positions: list[int], results: list, contributions: bool
+    ) -> None:
         problems: dict[int, list[str]] = {}
         for column in self.model.prep.numeric_columns:
             values = frame[column]
@@ -149,25 +164,28 @@ class Predictor:
             return
         frame = frame.iloc[keep].reset_index(drop=True)
         slots = [positions[at] for at in keep]
-        for slot, output in zip(slots, self._predict_split(frame, top=True), strict=True):
+        outputs = self._predict_split(frame, contributions, top=True)
+        for slot, output in zip(slots, outputs, strict=True):
             results[slot] = output
 
-    def _predict_split(self, frame: pd.DataFrame, *, top: bool = False) -> list[dict]:
+    def _predict_split(
+        self, frame: pd.DataFrame, contributions: bool, *, top: bool = False
+    ) -> list[dict]:
         """Predict ``frame`` in one call; if that raises, bisect to find the rows that fail.
 
         k failing rows among n cost O(k log n) calls (a linear row-by-row fallback would let
         one bad row make the server predict every row of the request one at a time).
         """
         try:
-            return self._predict_frame(frame)
+            return self._predict_frame(frame, contributions)
         except Exception as e:
             if top:
                 log.warning("batch prediction failed, isolating the failing rows", exc_info=True)
             if len(frame) == 1:
                 return [self._failure(e)]
             middle = len(frame) // 2
-            return self._predict_split(frame.iloc[:middle]) + self._predict_split(
-                frame.iloc[middle:]
+            return self._predict_split(frame.iloc[:middle], contributions) + self._predict_split(
+                frame.iloc[middle:], contributions
             )
 
     @staticmethod
@@ -177,21 +195,37 @@ class Predictor:
         log.debug("a row could not be predicted: %s", type(e).__name__)
         return _exception(f"prediction failed ({type(e).__name__})")
 
-    def _predict_frame(self, frame: pd.DataFrame) -> list[dict]:
+    def _predict_frame(self, frame: pd.DataFrame, contributions: bool = False) -> list[dict]:
         with self._lock:
             if self.classes is None:
-                values = self.model.predict(frame).to_numpy()
-                return [{"value": jsonable(float(v))} for v in values]
-            proba = self.model.predict_proba(frame).to_numpy()
-        best = proba.argmax(axis=1)
-        return [
-            {
-                "label": self.classes[b],
-                "index": int(b),
-                "class_probabilities": jsonable(p.tolist()),
-            }
-            for b, p in zip(best, proba, strict=True)
-        ]
+                output = self.model.predict(frame).to_numpy()
+            else:
+                output = self.model.predict_proba(frame).to_numpy()
+            explained = explain.contributions(self.model, frame) if contributions else None
+        if self.classes is None:
+            rows = [{"value": jsonable(float(v))} for v in output]
+            best = np.zeros(len(rows), dtype=int)
+        else:
+            best = output.argmax(axis=1)
+            rows = [
+                {
+                    "label": self.classes[b],
+                    "index": int(b),
+                    "class_probabilities": jsonable(p.tolist()),
+                }
+                for b, p in zip(best, output, strict=True)
+            ]
+        if explained is not None:
+            # One output (binary: the positive class; regression) or one per class, where the
+            # row explains the class it predicts: its index, not the contributions' own argmax.
+            outputs = best if len(explained.outputs) > 1 else np.zeros(len(rows), dtype=int)
+            for at, (row, output) in enumerate(zip(rows, outputs, strict=True)):
+                values = jsonable(explained.values[at, output].tolist())
+                row["contributions"] = {
+                    "bias": jsonable(float(explained.bias[at, output])),
+                    "columns": dict(zip(self.columns, values, strict=True)),
+                }
+        return rows
 
 
 async def _read_body(request: Request, limit: int) -> bytes:
@@ -213,7 +247,8 @@ async def _read_body(request: Request, limit: int) -> bytes:
     return b"".join(chunks)
 
 
-def _instances(body: bytes, limit: int) -> list:
+def _request(body: bytes, max_instances: int, max_contribution_instances: int) -> tuple[list, bool]:
+    """The request's instances, and whether it asks for their contributions."""
     try:
         payload = json.loads(body, parse_constant=_refuse_constant)
     except (ValueError, RecursionError):
@@ -223,9 +258,37 @@ def _instances(body: bytes, limit: int) -> list:
     instances = payload.get("instances")
     if not isinstance(instances, list):
         raise Rejected(400, '"instances" must be a list of objects')
-    if len(instances) > limit:
-        raise Rejected(413, f"too many instances: at most {limit} per request")
-    return instances
+    if len(instances) > max_instances:
+        raise Rejected(413, f"too many instances: at most {max_instances} per request")
+    contributions = payload.get("contributions")
+    if contributions is None:  # absent, or null as typed clients send an unset field
+        contributions = False
+    if not isinstance(contributions, bool):
+        raise Rejected(400, '"contributions" must be true or false')
+    if contributions and len(instances) > max_contribution_instances:
+        raise Rejected(
+            413,
+            f"too many instances with contributions: at most {max_contribution_instances} "
+            "per request",
+        )
+    return instances, contributions
+
+
+def _check_width(predictor: Predictor, n_instances: int) -> None:
+    """Refuse contributions whose arrays (rows x classes x features) would pass the cap."""
+    allowed = explain.contribution_rows(predictor.model, n_instances)
+    if allowed >= n_instances:
+        return
+    if allowed == 0:
+        raise Rejected(422, "this model has too many classes and features for contributions")
+    raise Rejected(
+        422, f"with contributions, this model takes at most {allowed} instances per request"
+    )
+
+
+def _explained(predictor: Predictor, instances: list) -> JSONResponse:
+    # Built here, in the threadpool: a response of contributions can be large to render.
+    return JSONResponse({"predictions": predictor.predict(instances, contributions=True)})
 
 
 def create_app(model_dir: Path | None = None, *, image_tag: str | None = None) -> FastAPI:
@@ -233,21 +296,30 @@ def create_app(model_dir: Path | None = None, *, image_tag: str | None = None) -
 
     ``image_tag`` (default ``$FIONE_IMAGE_TAG``, else ``dev``) is the running image's tag.
     Raises ``ModelLoadError`` if the model cannot be served. Limits come from
-    ``FIONE_SERVING_MAX_BODY`` (bytes) and ``FIONE_SERVING_MAX_INSTANCES``, read here.
+    ``FIONE_SERVING_MAX_BODY`` (bytes), ``FIONE_SERVING_MAX_INSTANCES``,
+    ``FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES`` and ``FIONE_SERVING_MAX_CONTRIBUTION_REQUESTS``
+    (in flight), read here.
     """
     model_dir = Path(model_dir or os.environ.get("FIONE_MODEL_DIR") or "/model")
     image_tag = image_tag or os.environ.get("FIONE_IMAGE_TAG") or "dev"
     max_body = _env_int("FIONE_SERVING_MAX_BODY", DEFAULT_MAX_BODY)
     max_instances = _env_int("FIONE_SERVING_MAX_INSTANCES", DEFAULT_MAX_INSTANCES)
+    max_contribution_instances = _env_int(
+        "FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES", DEFAULT_MAX_CONTRIBUTION_INSTANCES
+    )
+    max_contribution_requests = _env_int(
+        "FIONE_SERVING_MAX_CONTRIBUTION_REQUESTS", DEFAULT_MAX_CONTRIBUTION_REQUESTS
+    )
     loaded = load(model_dir, image_tag)
     predictor = Predictor(loaded)
 
     app = FastAPI(title="Fione Serving", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.loaded = loaded
+    app.state.contribution_requests = threading.BoundedSemaphore(max_contribution_requests)
 
     @app.exception_handler(Rejected)
     async def _rejected(request: Request, e: Rejected) -> JSONResponse:
-        return JSONResponse({"error": e.message}, status_code=e.status)
+        return JSONResponse({"error": e.message}, status_code=e.status, headers=e.headers)
 
     @app.get("/")
     @app.get("/ping")
@@ -260,8 +332,20 @@ def create_app(model_dir: Path | None = None, *, image_tag: str | None = None) -
 
     @app.post("/invocations")
     async def invocations(request: Request) -> JSONResponse:
-        instances = _instances(await _read_body(request, max_body), max_instances)
-        predictions = await run_in_threadpool(predictor.predict, instances)
-        return JSONResponse({"predictions": predictions})
+        body = await _read_body(request, max_body)
+        instances, contributions = _request(body, max_instances, max_contribution_instances)
+        if not contributions:
+            predictions = await run_in_threadpool(predictor.predict, instances)
+            return JSONResponse({"predictions": predictions})
+        _check_width(predictor, len(instances))
+        slots = app.state.contribution_requests
+        if not slots.acquire(blocking=False):  # never wait: a flood gets 503s at once
+            raise Rejected(
+                503, "too many contribution requests at once; retry shortly", {"Retry-After": "1"}
+            )
+        try:  # the threadpool call returns only when the thread is done, even if cancelled
+            return await run_in_threadpool(_explained, predictor, instances)
+        finally:
+            slots.release()
 
     return app

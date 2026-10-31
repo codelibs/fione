@@ -1,0 +1,31 @@
+{% from "_macros.html" import chart %}
+{# The partial dependence of one column: on the model page, or swapped in by the column
+   picker. Its chart carries its data in an attribute (HTMX drops script elements). A swapped
+   one (``announce``) also says what it shows in the page's status region. #}
+{% if announce %}<span id="pd-status" hx-swap-oob="innerHTML">{{ t(pd.message) if pd.message else t('explain.pd.status', column=pd.column) }}</span>{% endif %}
+<div class="stack-tight" id="pd-panel">
+  {% if pd.message %}
+  <p class="empty-line text-muted">{{ t(pd.message) }}</p>
+  {% if pd.detail %}<p class="text-muted text-sm">{{ pd.detail }}</p>{% endif %}
+  {% else %}
+  {% if pd.outputs %}
+  <form class="filters" method="get" action="{{ pd.url }}" hx-get="{{ pd.url }}" hx-trigger="change, submit" hx-target="#pd-panel" hx-swap="outerHTML">
+    <input type="hidden" name="column" value="{{ pd.column }}">
+    <div class="field">
+      <label class="field__label" for="pd-class">{{ t('explain.pd.class') }}</label>
+      <select class="input input-md input-limited" id="pd-class" name="class">
+        {% for label in pd.outputs %}<option value="{{ loop.index0 }}"{% if loop.index0 == pd.output %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-secondary">{{ t('explain.pd.show') }}</button>
+  </form>
+  {% endif %}
+  {{ chart(t, "pd-chart", pd.chart, swapped=True) }}
+  {% if pd.source == "stored" %}
+  <p class="text-muted text-sm">{{ t('explain.pd.stored', n="{:,}".format(pd.n_rows) if pd.n_rows else "—") }}</p>
+  {% else %}
+  <p class="text-muted text-sm">{{ t('explain.pd.live', n="{:,}".format(pd.n_rows), dataset=pd.dataset) }}</p>
+  {% endif %}
+  {% if pd.no_ice %}<p class="text-muted text-sm">{{ t('explain.pd.no_ice', label=pd.ice_label) }}</p>{% endif %}
+  {% endif %}
+</div>

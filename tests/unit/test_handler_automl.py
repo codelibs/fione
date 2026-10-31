@@ -5,7 +5,9 @@ import sqlite3
 import subprocess
 import sys
 import time
+import zipfile
 
+import pandas as pd
 import pytest
 from sklearn.datasets import load_iris
 
@@ -19,10 +21,12 @@ from fione.jobs import automl_handler, store, worker
 from fione.jobs.runner import JobRunner
 from fione.jobs.store import JobStatus
 from fione.models import service as models
+from fione.models.bundle import make_serving_bundle
 from fione.projects import service as projects
 from fione.projects.ingest import ingest_csv
 from fione.projects.service import DatasetType
 from fione.storage import LocalStorage, open_storage
+from fione_serving import loader
 
 TERMINAL = {JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELLED}
 CONFIG = {"target": "species", "max_runtime_secs": 20, "max_models": 4, "nfolds": 3}
@@ -118,7 +122,15 @@ def test_a_training_job_runs_end_to_end(conn, runner, owner, project, dataset, s
     done = wait_done(conn, job.id)
     assert done.status is JobStatus.DONE, done.message
 
-    assert set(done.result) == {"model_id", "stop_reason", "best_model", "metrics", "elapsed"}
+    assert set(done.result) == {
+        "model_id",
+        "stop_reason",
+        "best_model",
+        "metrics",
+        "elapsed",
+        "explain_job_id",
+    }
+    assert done.result["explain_job_id"] is None  # off in the tests (conftest)
     record = models.get_model(conn, done.result["model_id"])
     assert (record.project_id, record.dataset_id, record.job_id) == (project.id, dataset.id, job.id)
     assert record.name.startswith("species model ")
@@ -254,6 +266,33 @@ def test_a_degraded_run_still_records_the_model(
     assert record.name == "quick" and "XGBoost" not in {r["family"] for r in record.leaderboard}
     notices = [e for _, e in store.events_since(conn, job.id) if e.type == "notice"]
     assert any(e.data.get("kind") == "family_error" for e in notices)
+
+
+def test_diagnostics_go_to_the_record_not_the_artifact_or_its_serving_bundle(
+    conn, run_job, quick_job, storage, settings, monkeypatch, tmp_path
+):
+    added = []
+    real_add = models.add_model
+
+    def spy(conn, **kwargs):
+        added.append(kwargs["model"])
+        return real_add(conn, **kwargs)
+
+    monkeypatch.setattr(models, "add_model", spy)
+    done = run_job(quick_job)
+    assert done.status is JobStatus.DONE, done.message
+    (model,) = added
+    record = models.get_model(conn, done.result["model_id"])
+    assert model.diagnostics is not None and record.diagnostics == model.diagnostics
+    assert models.load_trained(storage, record, load_secret(settings)).diagnostics is None
+
+    bundle = make_serving_bundle(storage, record, settings, tmp_dir=tmp_path)
+    with zipfile.ZipFile(io.BytesIO(b"".join(bundle.open()))) as zf:
+        zf.extractall(tmp_path / "bundle")
+    served = loader.load(tmp_path / "bundle" / "model", settings.image_tag).model
+    assert served.diagnostics is None
+    frame = iris_frame().drop(columns=["species"])
+    pd.testing.assert_frame_equal(served.predict_proba(frame), model.predict_proba(frame))
 
 
 def test_a_job_abort_during_training_passes_through_the_handler(

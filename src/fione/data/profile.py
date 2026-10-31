@@ -27,6 +27,8 @@ Correlations need at least ``_CORR_MIN_PERIODS`` rows where both columns are pre
 columns that overlap on a couple of rows cannot report a spurious ``r = +-1``.
 """
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -35,6 +37,7 @@ import pandas as pd
 from pandas.api import types as pdt
 
 from fione.data.frames import parse_datetimes
+from fione.engine.prep import Task, infer_task
 
 Kind = Literal["numeric", "categorical", "text", "datetime", "id", "constant"]
 
@@ -56,6 +59,21 @@ _DATE_SIGNAL = (
 _CORR_MIN_PERIODS = 10
 _LEAK_CORRELATION = 0.99
 _LEAK_MIN_ROWS = 20
+_SCORE_BINS = 64
+_SCORE_SMOOTHING = 10.0
+_SCORE_MARGIN = 0.10
+_SCORE_MAX_CLASSES = 100  # the one-vs-rest AUCs cost one pass per class
+# score -> (threshold, chance)
+_SCORE_THRESHOLDS = {"classification": (0.95, 0.5), "regression": (0.90, 0.0)}
+
+IDENTICAL = "identical to target"
+DETERMINES = "value determines target"
+CORRELATED = "near-perfect correlation with target"
+PREDICTS_ALONE = "predicts the target on its own"
+ORDERED_BY_TARGET = "row order follows the target"
+# reasons that only warn: a legitimate strong column can score as high as a leak
+SCORE_REASONS = frozenset({CORRELATED, PREDICTS_ALONE, ORDERED_BY_TARGET})
+LEAK_STRONG = 0.99
 
 
 @dataclass
@@ -84,6 +102,13 @@ class DatasetProfile:
     columns: list[ColumnProfile]
     correlations: list[tuple[str, str, float]]
     leak_suspects: list[LeakSuspect]
+    leak_partial: bool = False  # the leak check's time budget ran out before every column
+
+
+@dataclass
+class LeakCheck:
+    suspects: list[LeakSuspect]
+    partial: bool
 
 
 def _is_plain_numeric(dtype) -> bool:
@@ -223,7 +248,7 @@ def _leak_reason(
         return None
     sp, tp = s[paired], t[paired]
     if _same_values(sp, tp):
-        return "identical to target", 1.0
+        return IDENTICAL, 1.0
     if t_float is not None and _is_plain_numeric(s.dtype):
         x, y = _as_float(sp), t_float[paired]
         ok = ~np.isnan(x) & ~np.isnan(y)
@@ -231,17 +256,19 @@ def _leak_reason(
         if x.size >= 3 and x.std() > 0 and y.std() > 0:
             r = abs(float(np.corrcoef(x, y)[0, 1]))
             if r >= _LEAK_CORRELATION:
-                return "near-perfect correlation with target", r
+                return CORRELATED, r
     n_values = int(s.notna().sum())
     if n_values >= _LEAK_MIN_ROWS and 2 <= col.n_unique <= 0.5 * n_values and tp.nunique() >= 2:
         pairs = pd.DataFrame({"value": sp.to_numpy(), "target": tp.to_numpy()}).drop_duplicates()
         if pairs["value"].is_unique:
-            return "value determines target", 1.0
+            return DETERMINES, 1.0
     return None
 
 
-def leak_suspects(df: pd.DataFrame, columns: list[ColumnProfile], target: str) -> list[LeakSuspect]:
-    """Columns of ``df`` (profiled as ``columns``) that may reveal ``target``."""
+def _value_suspects(
+    df: pd.DataFrame, columns: list[ColumnProfile], target: str
+) -> list[LeakSuspect]:
+    """The checks on the values: identical, determines and the Pearson correlation."""
     t = df[target]
     t_float = _as_float(t) if _is_plain_numeric(t.dtype) else None
     suspects = []
@@ -251,8 +278,202 @@ def leak_suspects(df: pd.DataFrame, columns: list[ColumnProfile], target: str) -
         found = _leak_reason(col, df[col.name], t, t_float)
         if found:
             suspects.append(LeakSuspect(col.name, found[0], found[1]))
-    suspects.sort(key=lambda s: (-s.score, s.column))
     return suspects
+
+
+def _ordered_values(s: pd.Series, kind: Kind) -> np.ndarray | None:
+    """Float values of ``s`` (NaN where missing) when it is ordered, else ``None``. Strings
+    that all parse as numbers count as numbers."""
+    if kind == "datetime":
+        parsed = s if pdt.is_datetime64_any_dtype(s.dtype) else parse_datetimes(s)
+        if isinstance(parsed.dtype, pd.DatetimeTZDtype):
+            parsed = parsed.dt.tz_convert(None)
+        values = parsed.to_numpy().view("int64").astype("float64")  # in the column's own unit
+        return np.where(parsed.isna().to_numpy(), np.nan, values)
+    if pdt.is_bool_dtype(s.dtype) or isinstance(s.dtype, pd.CategoricalDtype):
+        return None
+    if _is_plain_numeric(s.dtype):
+        return None if kind == "categorical" else _as_float(s)
+    numbers = pd.to_numeric(s, errors="coerce")
+    if numbers.notna().sum() < s.notna().sum():
+        return None
+    return _as_float(numbers)
+
+
+def _value_bins(s: pd.Series) -> np.ndarray:
+    """One bin per distinct value; missing values share a bin of their own."""
+    codes, uniques = pd.factorize(s)
+    return np.where(codes < 0, len(uniques), codes)
+
+
+def _quantile_bins(values: np.ndarray) -> np.ndarray:
+    """At most ``_SCORE_BINS`` quantile bins; NaN values share a bin of their own."""
+    ok = ~np.isnan(values)
+    bins = np.full(len(values), _SCORE_BINS, dtype=np.int64)
+    if ok.any():
+        edges = np.unique(np.quantile(values[ok], np.linspace(0, 1, _SCORE_BINS + 1)[1:-1]))
+        bins[ok] = np.searchsorted(edges, values[ok], side="right")
+    return bins
+
+
+def _score_binnings(s: pd.Series, kind: Kind) -> list[np.ndarray]:
+    """The ways ``s`` is binned for the score: quantile bins for ordered values, one bin per
+    value otherwise. Whole numbers get both, since they may be codes rather than quantities."""
+    values = _ordered_values(s, kind)
+    if values is None:
+        return [_value_bins(s)]
+    binnings = [_quantile_bins(values)]
+    present = values[~np.isnan(values)]
+    if kind != "datetime" and np.array_equal(present, np.round(present)):
+        binnings.append(_value_bins(s))
+    return binnings
+
+
+def _out_of_fold_means(bins: np.ndarray, y: np.ndarray, folds: np.ndarray) -> np.ndarray:
+    """Each row's prediction: the smoothed mean of ``y`` in its bin over the other fold."""
+    n_bins = int(bins.max()) + 1
+    out = np.empty(len(y))
+    for fold in (0, 1):
+        fit, held = folds != fold, folds == fold
+        prior = y[fit].mean()
+        sums = np.bincount(bins[fit], weights=y[fit], minlength=n_bins)
+        counts = np.bincount(bins[fit], minlength=n_bins)
+        # a bin unseen in the other fold gets the prior
+        out[held] = ((sums + _SCORE_SMOOTHING * prior) / (counts + _SCORE_SMOOTHING))[bins[held]]
+    return out
+
+
+def _auc(pred: np.ndarray, positive: np.ndarray) -> float | None:
+    n_pos = int(positive.sum())
+    n_neg = len(positive) - n_pos
+    if n_pos == 0 or n_neg == 0:
+        return None
+    _, inverse, counts = np.unique(pred, return_inverse=True, return_counts=True)
+    ranks = (np.cumsum(counts) - (counts - 1) / 2)[inverse]  # ties share their mean rank
+    return float((ranks[positive].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg))
+
+
+def single_column_score(
+    s: pd.Series, kind: Kind, t: pd.Series, task: Task, *, seed: int = 0
+) -> float | None:
+    """How well ``s`` alone predicts ``t``, out of fold: the column is binned, each row is
+    predicted by its bin's target mean over the other of two folds, and the predictions are
+    scored by AUC (classification; the mean one-vs-rest AUC for more than two classes) or R^2.
+    A whole-number column is binned both ways and keeps the better score. ``None`` when the
+    target leaves nothing to score, and for targets with more than ``_SCORE_MAX_CLASSES``
+    classes (one pass per class would not fit the budget).
+
+    Known limitation: the smoothing pulls small bins towards the mean, which costs R^2 but not
+    AUC. Regression leaks in fewer than roughly 5,000 rows therefore mostly score below the
+    threshold (a noisy log of the target: about 0.87 at 3,000 rows, 0.6 at 1,000)."""
+    if task == "regression":
+        y = _as_float(t)
+        keep = ~np.isnan(y)
+    else:
+        keep = t.notna().to_numpy()
+        codes, _ = pd.factorize(t[keep])
+    n = int(keep.sum())
+    if n < 2:
+        return None
+    folds = np.empty(n, dtype=np.int64)
+    folds[np.random.default_rng(seed).permutation(n)] = np.arange(n) % 2
+    if task == "regression":
+        y = y[keep]
+        total = float(((y - y.mean()) ** 2).sum())
+        if total == 0:
+            return None
+
+        def score(bins: np.ndarray) -> float | None:
+            pred = _out_of_fold_means(bins, y, folds)
+            return 1 - float(((y - pred) ** 2).sum()) / total
+
+    else:
+        n_classes = int(codes.max()) + 1
+        if n_classes < 2 or n_classes > _SCORE_MAX_CLASSES:
+            return None
+        # both AUCs are symmetric in the labels, so which label is "positive" does not matter
+        positives = [codes == k for k in ([1] if n_classes == 2 else range(n_classes))]
+
+        def score(bins: np.ndarray) -> float | None:
+            aucs = [
+                _auc(_out_of_fold_means(bins, positive.astype("float64"), folds), positive)
+                for positive in positives
+            ]
+            aucs = [a for a in aucs if a is not None]
+            return float(np.mean(aucs)) if aucs else None
+
+    found = [v for v in map(score, _score_binnings(s[keep], kind)) if v is not None]
+    return max(found, default=None)
+
+
+def flag_scores(scores: dict[str, float], task: Task) -> set[str]:
+    """Columns whose score is suspiciously high: at least ``LEAK_STRONG``, or at least the
+    threshold and clearly above the best column below it (chance when there is none).
+
+    Known limitation: a legitimate column just below the threshold raises the bar for every
+    other column. Once the best column below the threshold scores 0.89 or more, only scores of
+    ``LEAK_STRONG`` are flagged, so a dataset that one column already predicts well gets no
+    warning for a leak that scores, say, 0.98. A leak beside a column at 0.949 needs 0.99,
+    beside one at 0.95 it needs 0.95: the rule is not continuous."""
+    threshold, chance = _SCORE_THRESHOLDS[task]
+    baseline = max((v for v in scores.values() if v < threshold), default=chance)
+    # rounded so that 0.99 - 0.89 counts as the full margin
+    return {
+        c
+        for c, v in scores.items()
+        if v >= LEAK_STRONG or (v >= threshold and round(v - baseline, 9) >= _SCORE_MARGIN)
+    }
+
+
+def leak_check(
+    df: pd.DataFrame,
+    columns: list[ColumnProfile],
+    target: str,
+    *,
+    time_budget: float = 3.0,
+    max_rows: int = 10_000,
+    min_rows: int = 200,
+    clock: Callable[[], float] = time.monotonic,
+) -> LeakCheck:
+    """Columns of ``df`` (profiled as ``columns``) that may reveal ``target``.
+
+    The checks on the values run first: identical values, a value that determines the target,
+    and a Pearson correlation of at least 0.99. Every other non-constant column then gets
+    ``single_column_score`` on a deterministic sample of at most ``max_rows`` rows with a
+    target (no score below ``min_rows``), and ``flag_scores`` picks the suspects. Columns are
+    scored in profile order until ``time_budget`` seconds have passed; ``partial`` is then
+    true. Each column is listed at most once, with its first reason."""
+    start = clock()
+    suspects = _value_suspects(df, columns, target)
+    listed = {s.column for s in suspects}
+    todo = [
+        c for c in columns if c.name not in listed and c.name != target and c.kind != "constant"
+    ]
+    rows = np.flatnonzero(df[target].notna().to_numpy())
+    if len(rows) > max_rows:
+        rows = np.sort(np.random.default_rng(0).choice(rows, max_rows, replace=False))
+    partial = False
+    if todo and len(rows) >= min_rows:
+        t = df[target].iloc[rows]
+        task = infer_task(t)
+        scores, kinds = {}, {}
+        for col in todo:
+            if clock() - start > time_budget:
+                partial = True
+                break
+            score = single_column_score(df[col.name].iloc[rows], col.kind, t, task)
+            if score is not None:
+                scores[col.name], kinds[col.name] = score, col.kind
+        for name in flag_scores(scores, task):
+            reason = ORDERED_BY_TARGET if kinds[name] in ("id", "datetime") else PREDICTS_ALONE
+            suspects.append(LeakSuspect(name, reason, scores[name]))
+    suspects.sort(key=lambda s: (-s.score, s.column))
+    return LeakCheck(suspects, partial)
+
+
+def leak_suspects(df: pd.DataFrame, columns: list[ColumnProfile], target: str) -> list[LeakSuspect]:
+    """``leak_check(...).suspects`` with the default budget."""
+    return leak_check(df, columns, target).suspects
 
 
 def profile_dataset(
@@ -263,10 +484,12 @@ def profile_dataset(
         raise ValueError(f"target column '{target}' not found")
     work = df.sample(sample_rows, random_state=0) if len(df) > sample_rows else df
     columns = [_profile_column(name, work[name]) for name in work.columns]
+    check = leak_check(work, columns, target) if target is not None else LeakCheck([], False)
     return DatasetProfile(
         n_rows=len(df),
         n_cols=df.shape[1],
         columns=columns,
         correlations=_correlations(work, columns),
-        leak_suspects=leak_suspects(work, columns, target) if target is not None else [],
+        leak_suspects=check.suspects,
+        leak_partial=check.partial,
     )

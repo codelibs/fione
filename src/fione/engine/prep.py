@@ -92,6 +92,10 @@ class Prep:
         """The input columns the views need, in order."""
         return [column for column, _ in self._plan]
 
+    def kind_of(self, column: str) -> Literal["numeric", "datetime", "category", "frequency"]:
+        """How the model reads ``column``; ``KeyError`` for a column it does not use."""
+        return dict(self._plan)[column]
+
     @property
     def numeric_columns(self) -> list[str]:
         """The input columns the model reads as numbers."""

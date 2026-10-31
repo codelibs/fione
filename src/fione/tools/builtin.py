@@ -3,29 +3,52 @@ propose a training configuration. None of them writes anything or starts a job.
 
 Privacy matrix, ``allow_samples=False`` (the default) / ``True``:
 
-==================  ====================================  ================================
-what                 off                                   on
-==================  ====================================  ================================
-category top values  removed (``top_values_hidden``)        up to 10, each cut to 50 chars
-class labels         only ``n_classes``                     up to 50, each cut to 50 chars
-event/job messages   removed (kind/family/exception kept)   kept, cut to 200 chars
-numeric statistics   kept (min, max, quantiles are stats)   kept
-names                cleaned (``clean_text``)               cleaned
-==================  ====================================  ================================
+=====================  ====================================  ================================
+what                    off                                   on
+=====================  ====================================  ================================
+category top values     removed (``top_values_hidden``)        up to 10, each cut to 50 chars
+class labels            only ``n_classes``                     up to 50, each cut to 50 chars
+diagnostics labels      only ``n_classes`` (``labels_hidden``) up to 50, each cut to 50 chars
+regression points       removed (``points_hidden``)            up to 200 pairs
+PD category levels      positions (``grid_hidden``)            each cut to 50 chars
+PD numeric/time grids   kept (quantile points, like stats)     kept
+PD class outputs        only ``n_outputs`` (``outputs_hidden``) each cut to 50 chars
+event/job messages      removed (kind/family/exception kept)   kept, cut to 200 chars
+numeric statistics      kept (min, max, quantiles are stats)   kept
+names                   cleaned (``clean_text``)               cleaned
+=====================  ====================================  ================================
 
 Fields that do not apply to a column (no statistics for text, no outlier rate for anything but
 numeric columns, no top values for numbers) are omitted rather than null.
+
+Stored diagnostics and explanations are read as untrusted: an import checks little of their
+inside. Each part is rebuilt from the fields it should have, numbers where numbers belong
+(anything else becomes null), lists cut to the engine's own caps. These tools only read what
+training and the explain job stored; none of them loads a model or computes anything.
 """
 
 import dataclasses
+import math
+from datetime import datetime
 
 import pandas as pd
 
 from fione.auth.roles import Role, can_access_project
-from fione.data.profile import ColumnProfile, DatasetProfile, leak_suspects, profile_dataset
+from fione.data.profile import (
+    SCORE_REASONS,
+    ColumnProfile,
+    DatasetProfile,
+    LeakCheck,
+    leak_check,
+    profile_dataset,
+)
+from fione.engine import diagnostics as diag
 from fione.engine.config import ConfigError, TrainConfig
+from fione.engine.explain import PD_GRID
 from fione.engine.prep import infer_task
 from fione.jobs import store
+from fione.jobs.store import JobStatus
+from fione.models import explanations
 from fione.models import service as models
 from fione.projects import ingest
 from fione.projects import service as projects
@@ -39,6 +62,8 @@ _TOP_VALUES = 10
 _VALUE_CHARS = 50
 _MAX_CLASS_LABELS = 50
 _MAX_IMPORTANCE = 30
+_MAX_POINTS = 200  # regression (actual, predicted) pairs, with allow_samples
+_MAX_OUTPUTS = 20  # the explain job keeps at most 20 classes per curve
 _MESSAGE_CHARS = 200
 _RATIONALE_CHARS = 500
 _EVENT_DEPTH = 3
@@ -110,14 +135,14 @@ def _dataset(ctx: ToolContext, dataset_id: int) -> Dataset:
     return dataset
 
 
-def _resolve_column(names: list[str], given: str) -> str:
+def _resolve_column(names: list[str], given: str, where: str = "dataset") -> str:
     """The schema column called ``given``, or the only one whose cleaned name is ``given``
     (the model sees cleaned names)."""
     if given in names:
         return given
     matches = [n for n in names if clean_text(n) == given]
     if len(matches) != 1:
-        raise ToolError("column not found in the dataset")
+        raise ToolError(f"column not found in the {where}")
     return matches[0]
 
 
@@ -197,9 +222,15 @@ def _describe_dataset(ctx: ToolContext, args: dict) -> dict:
             for a, b, r in profile.correlations[:_TOP_CORRELATIONS]
         ],
         "leak_suspects": [
-            {"column": clean_text(s.column), "reason": clean_text(s.reason), "score": _r(s.score)}
+            {
+                "column": clean_text(s.column),
+                "reason": clean_text(s.reason),
+                "score": _r(s.score),
+                "kind": "score" if s.reason in SCORE_REASONS else "exact",
+            }
             for s in profile.leak_suspects
         ],
+        "leak_check_partial": profile.leak_partial,
     }
     _fit_columns(result, len(names))
     return result
@@ -267,15 +298,217 @@ def _get_leaderboard(ctx: ToolContext, args: dict) -> dict:
 
 def _get_feature_importance(ctx: ToolContext, args: dict) -> dict:
     record = _model(ctx, args["model_id"])
+    if args["source"] == "contributions":
+        return _contribution_importance(ctx, record)
     ranked = sorted(record.importance.items(), key=lambda kv: (-(kv[1] or 0.0), kv[0]))
     return {
         "model_id": record.id,
+        "source": "gain",
         "n_features": len(ranked),
         "importance": [
             {"column": clean_text(column), "importance": _r(value or 0.0)}
             for column, value in ranked[:_MAX_IMPORTANCE]
         ],
     }
+
+
+# --- stored diagnostics and explanations (untrusted: rebuilt field by field) --------------
+
+
+def _num(value):
+    """``value`` if it is a finite number (never a bool), else None."""
+    if type(value) is int or (type(value) is float and math.isfinite(value)):
+        return value
+    return None
+
+
+def _nums(value, limit: int) -> list:
+    return [_num(v) for v in value[:limit]] if isinstance(value, list) else []
+
+
+def _flag(value) -> bool | None:
+    return value if type(value) is bool else None
+
+
+def _rows(value, keys: tuple, limit: int) -> list:
+    """The first ``limit`` dicts of ``value``, each with only ``keys``, numbers only."""
+    if not isinstance(value, list):
+        return []
+    return [
+        {key: _num(row.get(key)) for key in keys} for row in value[:limit] if isinstance(row, dict)
+    ]
+
+
+def _arrays(value, keys: tuple, limit: int) -> dict | None:
+    """``{key: numbers}`` for each of ``keys``, all cut to the shortest stored length (the
+    arrays run in parallel), or None when ``value`` is not such a dict."""
+    if not isinstance(value, dict) or not all(isinstance(value.get(k), list) for k in keys):
+        return None
+    n = min(limit, *(len(value[k]) for k in keys))
+    return {key: _nums(value[key], n) for key in keys}
+
+
+def _diagnostics_out(record: models.ModelRecord, allow_samples: bool) -> dict:
+    found = record.diagnostics
+    out = {"model_id": record.id, "task": record.task, "available": False}
+    if not isinstance(found, dict) or type(found.get("version")) is not int:
+        return out
+    if found["version"] != diag.VERSION:
+        return out
+    out.update(
+        available=True, n_rows=_num(found.get("n_rows")), sampled=_flag(found.get("sampled"))
+    )
+    parts: dict = {}
+    if record.task == "classification":
+        labels = found.get("labels")
+        labels = labels if isinstance(labels, list) else None
+        out["n_classes"] = None if labels is None else len(labels)
+        if not allow_samples:
+            out["labels_hidden"] = True
+        elif labels is not None:
+            out["labels"] = [clean_text(v, _VALUE_CHARS) for v in labels[:_MAX_CLASS_LABELS]]
+            out["labels_truncated"] = len(labels) > _MAX_CLASS_LABELS
+        confusion = found.get("confusion")
+        if isinstance(confusion, dict):
+            size = diag.MAX_CONFUSION + 1
+            matrix = confusion.get("matrix")
+            parts["confusion"] = {
+                "classes": _nums(confusion.get("classes"), size),
+                "matrix": [_nums(row, size) for row in matrix[:size]]
+                if isinstance(matrix, list)
+                else [],
+            }
+        keys = ("class", "precision", "recall", "f1", "support")
+        parts["per_class"] = _rows(found.get("per_class"), keys, diag.MAX_PER_CLASS)
+        parts["per_class_truncated"] = _flag(found.get("per_class_truncated"))
+        if "auc" in found:  # binary only; null when the stored value is no number
+            out["auc"] = _num(found["auc"])
+        curves = {"roc": ("fpr", "tpr", "threshold"), "pr": ("precision", "recall", "threshold")}
+        for name, keys in curves.items():
+            parts[name] = _arrays(found.get(name), keys, diag.MAX_CURVE_POINTS)
+        keys = ("predicted", "observed", "count")
+        if "calibration" in found:
+            parts["calibration"] = _rows(found["calibration"], keys, diag.CALIBRATION_BINS)
+    else:
+        residuals = found.get("residuals")
+        if isinstance(residuals, dict):
+            parts["residuals"] = {
+                "edges": _nums(residuals.get("edges"), diag.RESIDUAL_BINS + 1),
+                "counts": _nums(residuals.get("counts"), diag.RESIDUAL_BINS),
+            }
+        keys = ("predicted_mean", "residual_mean", "residual_std", "count")
+        parts["by_decile"] = _rows(found.get("by_decile"), keys, diag.DECILES)
+        if not allow_samples:
+            out["points_hidden"] = True
+        else:
+            points = _arrays(found.get("points"), ("actual", "predicted"), _MAX_POINTS)
+            if points is not None:
+                out["points"] = points
+                out["points_truncated"] = len(found["points"]["actual"]) > len(points["actual"])
+    out.update({k: v for k, v in parts.items() if v is not None})
+    return out
+
+
+def _get_model_diagnostics(ctx: ToolContext, args: dict) -> dict:
+    return _diagnostics_out(_model(ctx, args["model_id"]), ctx.allow_samples)
+
+
+def _explanation_status(ctx: ToolContext, record: models.ModelRecord):
+    """``(status, stored explanation)``, by the rule of the API's explanations route."""
+    stored = explanations.get_explanation(ctx.conn, record.id)
+    job = explanations.latest_explain_job(ctx.conn, record.id)
+    active = job is not None and job.status in (JobStatus.QUEUED, JobStatus.RUNNING)
+    if stored is not None and not active:
+        return "done", stored
+    return (job.status.value if job is not None else "none"), stored
+
+
+def _contribution_importance(ctx: ToolContext, record: models.ModelRecord) -> dict:
+    stored = explanations.get_explanation(ctx.conn, record.id)
+    entries = stored.payload.get("importance") if stored is not None else None
+    if not isinstance(entries, list):
+        raise ToolError("contribution importance is not computed yet; run the explain job")
+    names = set(explanations.model_columns(record))  # only the model's own columns
+    rows = [
+        e
+        for e in entries
+        if isinstance(e, dict) and isinstance(e.get("column"), str) and e["column"] in names
+    ]
+    rows.sort(key=lambda e: -(_num(e.get("share")) or 0.0))  # stable: stored order on ties
+    return {
+        "model_id": record.id,
+        "source": "contributions",
+        "n_features": len(rows),
+        "n_rows": _num(stored.payload.get("n_rows")),
+        "computed_at": stored.created_at,
+        "importance": [
+            {
+                "column": clean_text(e["column"]),
+                "share": _num(e.get("share")),
+                "mean_abs": _num(e.get("mean_abs")),
+            }
+            for e in rows[:_MAX_IMPORTANCE]
+        ],
+    }
+
+
+def _iso(value) -> str | None:
+    """A stored datetime grid point, re-rendered from its parsed value (never stored text)."""
+    try:
+        return datetime.fromisoformat(value).isoformat() if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
+def _curve_out(curve: dict, task: str, allow_samples: bool) -> dict:
+    kind = curve.get("kind")
+    grid = curve.get("grid") if isinstance(curve.get("grid"), list) else []
+    grid = grid[:PD_GRID]
+    out: dict = {"kind": kind if kind in ("numeric", "datetime", "category") else None}
+    if kind == "numeric":
+        out["grid"] = [_num(v) for v in grid]
+    elif kind == "datetime":
+        out["grid"] = [_iso(v) for v in grid]
+    elif allow_samples:
+        out["grid"] = [None if v is None else clean_text(v, _VALUE_CHARS) for v in grid]
+    else:  # a level's position stands for it; the missing point stays null
+        out["grid"] = [None if v is None else i for i, v in enumerate(grid)]
+        out["grid_hidden"] = True
+    outputs = curve.get("outputs") if isinstance(curve.get("outputs"), list) else []
+    outputs = outputs[:_MAX_OUTPUTS]
+    if task != "classification":  # the target's name
+        out["outputs"] = [clean_text(v) for v in outputs]
+    elif allow_samples:
+        out["outputs"] = [clean_text(v, _VALUE_CHARS) for v in outputs]
+    else:
+        out["n_outputs"] = len(outputs)
+        out["outputs_hidden"] = True
+    average = curve.get("average") if isinstance(curve.get("average"), list) else []
+    out["average"] = [_nums(row, len(outputs)) for row in average[: len(grid)]]
+    out["n_rows"] = _num(curve.get("n_rows"))
+    return out
+
+
+def _get_partial_dependence(ctx: ToolContext, args: dict) -> dict:
+    record = _model(ctx, args["model_id"])
+    names = explanations.model_columns(record)
+    column = _resolve_column(names, args["column"], "model")
+    status, stored = _explanation_status(ctx, record)
+    out = {"model_id": record.id, "column": clean_text(column), "status": status}
+    curves = stored.payload.get("partial_dependence") if stored is not None else None
+    curves = [
+        c
+        for c in (curves if isinstance(curves, list) else [])
+        if isinstance(c, dict) and c.get("column") in names
+    ]
+    curve = next((c for c in curves if c["column"] == column), None)
+    if curve is None:
+        out["available"] = False
+        if stored is not None:
+            out["computed_columns"] = sorted({clean_text(c["column"]) for c in curves})
+        return out
+    out.update(available=True, computed_at=stored.created_at)
+    return {**out, **_curve_out(curve, record.task, ctx.allow_samples)}
 
 
 # --- jobs -----------------------------------------------------------------
@@ -378,23 +611,31 @@ def propose(
     sample_rows: int = _SAMPLE_ROWS,
     *,
     profile: DatasetProfile | None = None,
+    check: LeakCheck | None = None,
+    task: str | None = None,
 ) -> Proposal:
     """Profile ``columns`` (and ``target``) of ``dataset`` and infer the task: the rules the
     assistant's ``propose_training_config`` and the EasyML analysis screen share.
 
     ``profile``: a profile without target of the same sample (``sample_profile``), so only
-    the target's leak suspects are computed here.
+    the target's leak suspects are computed here. ``check`` and ``task``: this target's leak
+    check and task from an earlier proposal with that profile; then neither is recomputed.
     """
     read = columns if target in columns else [*columns, target]
-    frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
     if profile is None:
+        frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
         profile = profile_dataset(frame, target, sample_rows=sample_rows)
     else:
-        suspects = leak_suspects(frame, profile.columns, target)
-        profile = dataclasses.replace(profile, leak_suspects=suspects)
+        if check is None:  # the sample is read only for the leak check
+            frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
+            check = leak_check(frame, profile.columns, target)
+        profile = dataclasses.replace(
+            profile, leak_suspects=check.suspects, leak_partial=check.partial
+        )
     # the whole target column (one column) decides the task, not just the head of the file
     y = ingest.read_dataset(storage, dataset, [target])[target]
-    task = infer_task(y)
+    if task is None:
+        task = infer_task(y)
     listed = set(columns)
     ignore = [
         col
@@ -445,9 +686,18 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                     f"column '{clean_text(col.name)}' is not plain text; ignore it by hand"
                 )
     for suspect in profile.leak_suspects:
-        reason = f"possible target leak: {clean_text(suspect.reason)}"
-        suggestions.append({"column": clean_text(suspect.column), "reason": reason})
-        warnings.append(f"column '{clean_text(suspect.column)}': {reason}")
+        name, reason = clean_text(suspect.column), clean_text(suspect.reason)
+        if suspect.reason in SCORE_REASONS:  # a strong legitimate column can score as high
+            warnings.append(
+                f"column '{name}': {reason} (score {_r(suspect.score)}); it may be a target "
+                "leak, so check that it is known at prediction time"
+            )
+            continue
+        reason = f"possible target leak: {reason}"
+        suggestions.append({"column": name, "reason": reason})
+        warnings.append(f"column '{name}': {reason}")
+    if profile.leak_partial:
+        warnings.append("the leak check ran out of time; some columns were not scored")
     try:
         config = TrainConfig(
             target=target,
@@ -486,7 +736,10 @@ for _tool in (
     Tool(
         "describe_dataset",
         "Describe a dataset: per-column kind, missing rate, statistics, the strongest "
-        "correlations and, when a target is given, columns that may leak it.",
+        "correlations and, when a target is given, columns that may leak it (exact matches, "
+        "and columns that predict it suspiciously well on their own). A score-based suspect "
+        "may be a legitimate strong column; no score is computed for a target with more than "
+        "100 classes.",
         _schema(
             {"dataset_id": _ID, "target": {**_COLUMN, "description": "optional target column"}},
             ["dataset_id"],
@@ -510,10 +763,39 @@ for _tool in (
     ),
     Tool(
         "get_feature_importance",
-        "The most important input columns of a trained model.",
-        _schema({"model_id": _ID}, ["model_id"]),
+        "The most important input columns of a trained model: by the trees' own split "
+        "importance, recorded at training (source 'gain'), or by each column's mean absolute "
+        "contribution to the predictions (source 'contributions'), which the explain job "
+        "computes.",
+        _schema(
+            {
+                "model_id": _ID,
+                "source": {"type": "string", "enum": ["gain", "contributions"], "default": "gain"},
+            },
+            ["model_id"],
+        ),
         True,
         _get_feature_importance,
+    ),
+    Tool(
+        "get_model_diagnostics",
+        "A model's training-time diagnostics, from its cross-validation predictions (so "
+        "slightly optimistic): for classification the confusion matrix and per-class "
+        "precision, recall and F1, and with two classes the AUC, ROC and precision-recall "
+        "curves and calibration; for regression the residual histogram and residuals by decile "
+        "of the prediction. Classes are referred to by index.",
+        _schema({"model_id": _ID}, ["model_id"]),
+        True,
+        _get_model_diagnostics,
+    ),
+    Tool(
+        "get_partial_dependence",
+        "How a model's average prediction changes with one input column (partial dependence), "
+        "as stored by the explain job for the most important columns; nothing is computed "
+        "here. For classification the values are probabilities of each output class.",
+        _schema({"model_id": _ID, "column": _COLUMN}, ["model_id", "column"]),
+        True,
+        _get_partial_dependence,
     ),
     Tool(
         "get_training_events",

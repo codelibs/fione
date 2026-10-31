@@ -11,6 +11,7 @@ import zipfile
 from types import SimpleNamespace
 
 import joblib
+import numpy as np
 import pandas as pd
 import pytest
 from predict_models import classifier, features, regressor
@@ -19,6 +20,7 @@ from fione import db
 from fione.auth import service as auth
 from fione.auth.roles import Role
 from fione.config import Settings, load_secret
+from fione.engine import diagnostics as engine_diagnostics
 from fione.engine.artifact import (
     MODEL_FILE,
     UntrustedArtifactError,
@@ -27,6 +29,7 @@ from fione.engine.artifact import (
     save_model,
     verify_artifact,
 )
+from fione.engine.diagnostics import diagnostics
 from fione.models import service as models
 from fione.models import transfer
 from fione.models.transfer import ModelImportError, export_model, import_model
@@ -223,6 +226,27 @@ def test_a_regression_model_round_trips(tmp_path, dest):
     rec = do_import(dest, exported(env, record), secret=env.secret)
     assert rec.task == "regression" and rec.trusted == 1
     assert rec.metrics == record.metrics
+    assert rec.diagnostics["task"] == "regression" and rec.diagnostics == record.diagnostics
+
+
+@pytest.mark.parametrize(
+    ("secret", "trusted"), [(None, 1), (FOREIGN_SECRET, 0)], ids=["signed", "trust-foreign"]
+)
+def test_export_import_keeps_diagnostics(dest, source, secret, trusted):
+    assert source.record.diagnostics["task"] == "classification"
+    assert json.loads(source.parts["record.json"])["diagnostics"] == source.record.diagnostics
+    rec = do_import(dest, source.zip, secret=secret or dest.secret, trust_foreign=True)
+    assert rec.trusted == trusted
+    assert rec.diagnostics == source.record.diagnostics
+    assert models.get_model(dest.conn, rec.id).diagnostics == source.record.diagnostics
+
+
+def test_import_of_export_without_diagnostics(dest, source):
+    """A Phase 1 export has no ``diagnostics`` key; it imports, and exports again without one."""
+    rec = do_import(dest, rebuilt(source.parts, record=without(source, "diagnostics")))
+    assert rec.diagnostics is None and rec.trusted == 1
+    body = json.loads(parts(exported(dest, rec))["record.json"])
+    assert set(body) == set(transfer.RECORD_FIELDS)
 
 
 def test_importing_twice_makes_two_independent_models(dest, source):
@@ -463,6 +487,11 @@ def test_model_import_error_is_a_value_error():
 # --- hostile record.json ----------------------------------------------------------------------
 
 
+NESTED: list = []
+for _ in range(500):
+    NESTED = [NESTED]
+
+
 def record_with(source, **changes):
     record = json.loads(source.parts["record.json"])
     record.update(changes)
@@ -536,6 +565,122 @@ def test_a_non_finite_number_in_the_record_is_refused(dest, source):
     assert_nothing_left(dest)
 
 
+@pytest.mark.parametrize(
+    "diagnostics",
+    [
+        [],
+        "x",
+        None,
+        {"version": 2, "task": "classification"},
+        {"version": True, "task": "classification"},
+        {"version": 1.0, "task": "classification"},
+        {"task": "classification"},
+        {"version": 1, "task": "regression"},
+        {"version": 1},
+        {"version": 1, "task": "classification", "labels": ["\ud800"]},
+        {"version": 1, "task": "classification", "labels": ["a" * models.MAX_DIAGNOSTICS_BYTES]},
+        {"version": 1, "task": "classification", "pad": 1},
+        {"version": 1, "task": "classification", "labels": NESTED},
+        {"version": 1, "task": "classification", "confusion": {"matrix": [[[0]]]}},
+    ],
+    ids=[
+        "list",
+        "text",
+        "null",
+        "version-2",
+        "version-true",
+        "version-float",
+        "no-version",
+        "other-task",
+        "no-task",
+        "surrogate",
+        "too-large",
+        "unknown-key",
+        "nested-500",
+        "deeper-than-the-schema",
+    ],
+)
+def test_import_rejects_bad_diagnostics(dest, source, diagnostics):
+    with pytest.raises(ModelImportError, match="diagnostics"):
+        do_import(dest, rebuilt(source.parts, record=record_with(source, diagnostics=diagnostics)))
+    assert_nothing_left(dest)
+
+
+def test_every_diagnostics_layout_imports(dest, source):
+    """Binary, multiclass and regression diagnostics as the engine writes them pass the
+    import's key and depth checks."""
+    rng = np.random.default_rng(0)
+    y2, y3, yr = rng.integers(0, 2, 300), rng.integers(0, 3, 300), rng.normal(0, 1, 300)
+    binary = diagnostics("classification", y2, rng.dirichlet([1, 1], 300), ["no", "yes"])
+    for found in (
+        binary,
+        diagnostics("classification", y3, rng.dirichlet([1, 1, 1], 300), ["a", "b", "c"]),
+        diagnostics("regression", yr, yr * 0.5, None),
+    ):
+        assert set(found) <= engine_diagnostics.KEYS
+        transfer._check_diagnostics(found, SimpleNamespace(task=found["task"]))
+    rec = do_import(dest, rebuilt(source.parts, record=record_with(source, diagnostics=binary)))
+    assert rec.diagnostics == binary
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"metrics": {"accuracy": 10**400}},
+        {"importance": {"x": -(10**400)}},
+        {"leaderboard": [{"model": "x", "cv_score": 10**400}]},
+        {"trials": [{"family": "x", "score": 10**400}]},
+        {"diagnostics": {"version": 1, "task": "classification", "auc": 10**400}},
+        {"diagnostics": {"version": 1, "task": "classification", "roc": {"fpr": [10**400]}}},
+    ],
+    ids=["metrics", "importance", "leaderboard", "trials", "auc", "roc"],
+)
+def test_numbers_that_do_not_fit_a_float_are_refused(dest, source, changes):
+    """An integer beyond the float range would break every page that formats it."""
+    with pytest.raises(ModelImportError, match="number"):
+        do_import(dest, rebuilt(source.parts, record=record_with(source, **changes)))
+    assert_nothing_left(dest)
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"auc": 10**400},
+        {"n_rows": -(10**400)},
+        {"roc": {"fpr": [0.0, 10**400]}},
+        {"confusion": {"classes": [0, 1], "matrix": [[1, 10**400], [0, 1]]}},
+        {"roc": {"fpr": [float("nan")]}},
+        {"confusion": {"classes": [0], "matrix": [[float("inf")]]}},
+        {"calibration": [{"predicted": float("-inf"), "observed": 0.5, "count": 1}]},
+    ],
+    ids=["auc", "n_rows", "roc", "confusion", "nan", "inf", "-inf"],
+)
+def test_diagnostics_check_refuses_numbers_beyond_a_float_on_its_own(part):
+    """Every number inside the diagnostics, as the import's check sees them, whatever ran
+    before it."""
+    found = {"version": 1, "task": "classification", **part}
+    with pytest.raises(ModelImportError, match="diagnostics hold a number"):
+        transfer._check_diagnostics(found, SimpleNamespace(task="classification"))
+
+
+def test_an_overflowing_float_literal_inside_diagnostics_is_refused(dest, source):
+    diag = {"version": 1, "task": source.record.task, "auc": 0.5}
+    text = record_with(source, diagnostics=diag).decode().replace('"auc": 0.5', '"auc": 1e400')
+    assert "1e400" in text
+    with pytest.raises(ModelImportError):
+        do_import(dest, rebuilt(source.parts, record=text.encode()))
+    assert_nothing_left(dest)
+
+
+def test_an_overflowing_float_literal_is_refused(dest, source):
+    text = (
+        source.parts["record.json"].decode().replace('"metrics": {', '"metrics": {"x": 1e400, ', 1)
+    )
+    with pytest.raises(ModelImportError):
+        do_import(dest, rebuilt(source.parts, record=text.encode()))
+    assert_nothing_left(dest)
+
+
 def test_a_failing_insert_removes_the_objects(dest, source, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("database is gone")
@@ -591,7 +736,7 @@ def test_the_export_is_a_zip_of_manifest_model_and_record(source):
     assert source.parts["manifest.json"] == env.storage.get(record.storage_prefix + "manifest.json")
     assert source.parts["model.joblib"] == env.storage.get(record.storage_prefix + MODEL_FILE)
     body = json.loads(source.parts["record.json"])
-    assert set(body) == {"name", *COPIED, "metrics", "importance", "trusted"}
+    assert set(body) == {"name", *COPIED, "metrics", "importance", "trusted", "diagnostics"}
     assert body["trusted"] is True
     assert body["name"] == "日本語モデル" and body["leaderboard"] == record.leaderboard
     assert "日本語モデル".encode() in source.parts["record.json"]  # not \u-escaped

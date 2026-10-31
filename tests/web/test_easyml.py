@@ -3,6 +3,7 @@ runner in process, and the refusals (bad files, bad settings, CSRF, other projec
 escaping, polling, cancelling, error pages and upload limits."""
 
 import csv
+import dataclasses
 import io
 import re
 import time
@@ -23,7 +24,9 @@ from fione.engine.config import TrainConfig
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import service as models
+from fione.predict import batch
 from fione.projects import service as projects
+from fione.tools import builtin
 from fione.web import easyml, uploads
 from fione.web.headers import CONTENT_SECURITY_POLICY
 from web_helpers import FAST, iris_test_csv, make_world
@@ -329,6 +332,29 @@ def test_extra_columns_of_a_prediction_file_are_noted(make_client):
     assert 'value="note" checked' in page and "Not used by the model" in page
 
 
+def test_the_predict_form_checkbox_sets_the_payload(make_client, monkeypatch):
+    world = make_world(make_client())
+    csrf = world.login("ed")
+    page = world.client.get(world.path("/projects/{p}/models/{model}/predict?dataset={test}")).text
+    assert '<input class="checkbox" type="checkbox" id="contributions" name="contributions"' in page
+    assert "Explain each prediction" in page and "Up to 100,000 rows" in page
+    assert 'name="contributions" value="true" checked' not in page  # off unless asked for
+    url = world.path("/projects/{p}/models/{model}/predict/run")
+    form = {"csrf_token": csrf, "dataset_id": world.path("{test}"), "include": [INPUTS[0]]}
+    payloads = []
+    for extra in ({}, {"contributions": "true"}):
+        r = world.client.post(url, data={**form, **extra}, follow_redirects=False)
+        job_id = int(location(r).rsplit("/", 1)[1])
+        with closing(connect(world.client)) as conn:
+            payloads.append(store.get_job(conn, job_id).payload)
+    assert [p["include_contributions"] for p in payloads] == [False, True]
+    monkeypatch.setattr(batch, "MAX_CONTRIBUTION_ROWS", 1)
+    before = job_count(world.client)
+    r = world.client.post(url, data={**form, "contributions": "true"})
+    assert r.status_code == 422 and "contributions are limited to 1 rows" in r.text
+    assert job_count(world.client) == before
+
+
 @pytest.mark.parametrize(
     ("method", "template", "form"),
     [
@@ -450,6 +476,141 @@ def test_a_running_job_shows_what_the_engine_does(make_client):
     assert "Trying LightGBM models" in fragment and 'hx-trigger="every 2s"' in fragment
     assert re.search(r"Models tried</dt><dd>2<", fragment) and "0.25" in fragment
     assert re.search(r'<progress class="progress" max="100" value="\d+"', fragment)
+
+
+# --- leak warnings ------------------------------------------------------------------------
+
+
+def leak_frame(noise: float, name: str = "noisy", n: int = 300) -> pd.DataFrame:
+    """``name`` is a noisy copy of the target ``label``, ``copy`` an identical one."""
+    rng = np.random.default_rng(0)
+    label = rng.choice(["no", "yes"], n)
+    return pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "z": rng.normal(size=n),
+            name: (label == "yes") + rng.normal(0, noise, n),
+            "copy": label,
+            "label": label,
+        }
+    )
+
+
+def alerts(page: str) -> dict[str, str]:
+    """The text of each note above the columns -> its level."""
+    found = re.findall(
+        r'<div class="alert alert-(\w+)" role="note">.*?<span>(.*?)</span>', page, re.S
+    )
+    return {text: level for level, text in found}
+
+
+def test_score_suspect_stays_selected(owner):
+    client, pid, csrf = owner
+    content = leak_frame(0.1, XSS[0]).to_csv(index=False).encode()  # scores 0.995
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    assert f'name="inputs" value="{escape(XSS[0])}" checked' in page
+    assert "Predicts the answer suspiciously well on its own" in page
+    assert "check that it is known at prediction time" in page
+    notes = alerts(page)
+    scores = next(text for text in notes if "suspiciously well" in text)
+    assert notes[scores] == "warning" and scores.startswith("1 columns predict")
+    assert "They stay checked" in scores
+    leaks = next(text for text in notes if "might give the answer away" in text)
+    assert notes[leaks] == "info" and leaks.startswith("1 columns")  # only the exact copy
+    assert XSS[0] not in page
+
+
+def test_a_weaker_score_suspect_is_an_info_note(owner):
+    client, pid, csrf = owner
+    content = leak_frame(0.3).to_csv(index=False).encode()  # scores 0.96
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    assert 'name="inputs" value="noisy" checked' in page
+    notes = alerts(page)
+    assert notes[next(text for text in notes if "suspiciously well" in text)] == "info"
+
+
+def test_exact_suspect_is_still_deselected(owner):
+    client, pid, csrf = owner
+    content = leak_frame(0.1).to_csv(index=False).encode()
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    assert 'name="inputs" value="copy"' in page and 'value="copy" checked' not in page
+    assert "Is identical to the column to predict" in page
+
+
+def test_iris_keeps_all_four_inputs_selected(owner):
+    """Twice the rows, so the score runs: both petal columns then score as high as a leak."""
+    client, pid, csrf = owner
+    content = pd.concat([iris_frame()] * 2).to_csv(index=False).encode()
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    for name in INPUTS:
+        assert f'name="inputs" value="{name}" checked' in page
+    assert "Predicts the answer suspiciously well on its own" in page
+
+
+def test_an_id_in_the_order_of_the_target_stays_unchecked_with_both_notes(owner):
+    client, pid, csrf = owner
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"row": range(300), "x": rng.normal(size=300)})
+    frame["label"] = np.where(frame["row"] < 150, "no", "yes")
+    content = frame.to_csv(index=False).encode()
+    page = client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+    assert 'value="row" aria-describedby="col-1-why col-1-warn"' in page
+    assert "Looks like an ID" in page and "or where they are missing, follow the answer" in page
+    assert not any("They stay checked" in text for text in alerts(page))  # it is not
+
+
+def spy_leak_check(monkeypatch, partial=False) -> list[str]:
+    """The targets ``leak_check`` runs for; with ``partial``, every check ran out of time."""
+    calls, original = [], builtin.leak_check
+
+    def spy(df, columns, target, **kwargs):
+        calls.append(target)
+        check = original(df, columns, target, **kwargs)
+        return dataclasses.replace(check, partial=True) if partial else check
+
+    monkeypatch.setattr(builtin, "leak_check", spy)
+    return calls
+
+
+def test_the_leak_check_runs_once_per_dataset_and_target(owner, monkeypatch):
+    client, pid, csrf = owner
+    calls = spy_leak_check(monkeypatch)
+    content = leak_frame(0.1).to_csv(index=False).encode()
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, content))
+    base = url.removesuffix("/analyze")
+    hx = {"HX-Request": "true"}
+    for target in ("label", "label", "x", "label", "x"):  # the HTMX target switch
+        assert client.get(url, params={"target": target}, headers=hx).status_code == 200
+    assert client.get(url).status_code == 200
+    r = client.post(base + "/run", data=run_form(csrf, "label", ["x"], runtime="7"))
+    assert r.status_code == 422  # re-rendered
+    for path in ("", "?tab=columns", "/columns/noisy", "/train"):
+        assert client.get(base + path).status_code == 200
+    r = client.post(base + "/train", data={"csrf_token": csrf, "target": "label"})
+    assert r.status_code == 422
+    assert calls == ["label", "x"]
+
+
+def test_a_partial_leak_check_is_noted_and_checked_again(owner, monkeypatch):
+    client, pid, csrf = owner
+    calls = spy_leak_check(monkeypatch, partial=True)
+    content = leak_frame(0.1).to_csv(index=False).encode()
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, content))
+    page = client.get(url).text
+    assert any("some columns were not checked" in text for text in alerts(page))
+    client.get(url)
+    assert calls == ["label", "label"]  # not kept
+
+
+def test_a_re_rendered_form_counts_the_posted_checkboxes(owner):
+    client, pid, csrf = owner
+    content = leak_frame(0.1).to_csv(index=False).encode()
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, content))
+    form = run_form(csrf, "label", ["x", "copy"], runtime="7")  # copy back on, noisy off
+    page = client.post(url.replace("/analyze", "/run"), data=form).text
+    assert 'value="copy" checked' in page and 'value="noisy" checked' not in page
+    texts = list(alerts(page))
+    assert not any("They stay checked" in t or "They are unchecked" in t for t in texts)
 
 
 # --- what viewers see ---------------------------------------------------------------------
@@ -893,3 +1054,364 @@ def test_training_on_a_dataset_whose_data_is_gone_is_404(make_client):
     r = world.client.post(world.path("/projects/{p}/datasets/{train}/run"), data=run_form(csrf))
     assert r.status_code == 404 and "text/html" in r.headers["content-type"]
     assert job_count(world.client) == 4
+
+
+# --- explain jobs -------------------------------------------------------------------------
+
+
+def explain_job(world, status=None, *, message=None, events=()) -> int:
+    """An explain job of project p's model: queued, or claimed with ``events`` and finished
+    with ``status``."""
+    with closing(connect(world.client)) as conn:
+        owner = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        payload = {"model_id": world.ids[world.p]["model"], "dataset_id": None}
+        job = store.enqueue(conn, "explain", world.p, owner, payload)
+        if status is not None or events:
+            store.claim_job(conn, job.id, "token")
+        for event in events:
+            store.append_event(conn, job.id, event)
+        if status is not None and status != JobStatus.RUNNING:
+            store.finish_job(conn, job.id, status, message=message)
+        return job.id
+
+
+def test_an_explain_job_has_its_own_page_texts(make_client):
+    from fione.engine.events import Event
+
+    world = make_world(make_client())
+    world.login("co")
+    model_tab = world.path("/projects/{p}/models/{model}") + "?tab=explain"
+    notice = Event("notice", data={"message": "m", "columns_done": 2, "columns_total": 5})
+    running = explain_job(world, JobStatus.RUNNING, events=[Event("started"), notice])
+    page = world.client.get(world.path("/projects/{p}/jobs/") + str(running)).text
+    assert '<h1 class="page-header__title">Explaining the model</h1>' in page
+    assert "Stop explaining" in page and "2 of 5 columns" in page
+    assert ">explain<" not in page
+    done = explain_job(world, JobStatus.DONE)
+    r = world.client.get(
+        world.path("/projects/{p}/jobs/") + f"{done}/status", headers={"HX-Request": "true"}
+    )
+    assert r.headers["HX-Redirect"] == model_tab
+    assert "The explanation is ready." in r.text
+    failed = explain_job(world, JobStatus.FAILED, message="the dataset no longer exists")
+    page = world.client.get(world.path("/projects/{p}/jobs/") + str(failed)).text
+    assert "the dataset no longer exists" in page
+    assert f'href="{model_tab}"' in page and "Back to the model" in page
+    world.client.cookies.set("fione_lang", "ja")
+    page = world.client.get(world.path("/projects/{p}/jobs/") + str(running)).text
+    assert "モデルを説明中" in page and "5 列中 2 列" in page
+
+
+def test_the_dashboard_lists_no_explain_jobs(make_client):
+    """Every training queues an explain job: the recent list and the running-training
+    lookup must not fill up with them."""
+    world = make_world(make_client())
+    world.login("ed")
+    explains = [explain_job(world) for _ in range(easyml.RECENT_JOBS + 2)]
+    page = world.client.get(world.path("/projects/{p}")).text
+    ids = world.ids[world.p]
+    assert f"#{ids['job']}<" in page and f"#{ids['predict_job']}<" in page
+    assert not any(f"#{job}<" in page for job in explains)
+    assert world.path('href="/projects/{p}/jobs/{job}"') in page  # the training in progress
+
+
+# --- the per-row "why" on the prediction result -------------------------------------------
+
+
+def why_fragment(world, job=None) -> str:
+    job = world.ids[world.p]["predict_job"] if job is None else job
+    r = world.client.get(
+        world.path("/projects/{p}/jobs/") + f"{job}/result/why", headers={"HX-Request": "true"}
+    )
+    assert r.status_code == 200, r.text
+    assert "<html" not in r.text and 'id="why"' in r.text
+    return r.text
+
+
+def amount(text: str) -> float:
+    return float(text.replace("−", "-").replace(",", "").removesuffix("%"))
+
+
+class UseSpy:
+    def __init__(self, live):
+        self.calls, self.real = 0, live.use
+
+    def __call__(self, record):
+        self.calls += 1
+        return self.real(record)
+
+
+def test_the_result_page_asks_for_the_reasons(make_client):
+    world = make_world(make_client())
+    world.login("vi")
+    page = world.client.get(world.path("/projects/{p}/jobs/{predict_job}/result")).text
+    url = world.path("/projects/{p}/jobs/{predict_job}/result/why")
+    assert f'hx-get="{url}" hx-trigger="load"' in page
+    assert "Working out why" in page
+
+
+def test_why_rows_add_up(make_client):
+    """Per row: the average prediction plus the shown effects (and the other columns) give
+    the shown prediction, to the displayed rounding."""
+    world = make_world(make_client())
+    world.login("vi")
+    html = why_fragment(world)
+    rows = re.findall(
+        r'<section class="card card-padded stack-tight why-row".*?</section>', html, re.S
+    )
+    assert len(rows) == easyml.WHY_ROWS
+    for row in rows:
+        total = amount(re.search(r'<strong class="why-total">([^<]+)</strong>', row).group(1))
+        start = amount(re.search(r'<span class="why-start">([^<]+)</span>', row).group(1))
+        steps = [amount(a) for a in re.findall(r'<span class="why-amount">([^<]+)</span>', row)]
+        assert 1 <= len(steps) <= easyml.WHY_TOP + 1
+        assert abs(start + sum(steps) - total) <= 0.05 * (len(steps) + 2) + 1e-9, row
+        assert "<meter" in row and ("contrib-up" in row or "contrib-down" in row)
+    assert "Predicted setosa" in html  # iris_test starts with setosa rows
+    assert "percentage points" in html
+
+
+def test_why_row_keeps_the_rest_as_other_columns():
+    columns = [f"c{i}" for i in range(8)]
+    values = np.array([0.01, -0.3, 0.2, 0.0, -0.05, 0.4, 0.02, -0.02])
+    row = easyml._why_row(
+        columns, values, 0.25, 0.25 + values.sum(), [1.5, None, "x", 2, 3, 4, 5, 6], True
+    )
+    assert [item["column"] for item in row["items"]] == ["c5", "c1", "c2", "c4", "c6"]
+    assert [item["up"] for item in row["items"]] == [True, False, True, False, True]
+    assert row["items"][1]["input"] is None and row["items"][1]["text"] == "−30.0"
+    assert row["other"] == {"n": 3, "text": "−1.0", "up": False, "meter": 25}
+    assert row["start"] == "25.0%" and row["total"] == "51.0%"
+    assert row["items"][0]["meter"] == 1000
+    regression = easyml._why_row(["a"], np.array([-1234.5]), 200000.0, 198765.5, [7], False)
+    assert regression["total"] == "198,766" and regression["items"][0]["text"] == "−1,234"
+    assert regression["other"] is None
+
+
+def test_why_with_deleted_source_dataset(make_client):
+    world = make_world(make_client())
+    world.login("vi")
+    with closing(connect(world.client)) as conn:
+        projects.delete_dataset(conn, world.client.app.state.storage, world.ids[world.p]["test"])
+    html = why_fragment(world)
+    assert "The data these predictions were made from is no longer available." in html
+    page = world.client.get(world.path("/projects/{p}/jobs/{predict_job}/result"))
+    assert page.status_code == 200
+
+
+def test_why_messages_instead_of_errors(make_client):
+    world = make_world(make_client())
+    world.login("vi")
+    live = world.client.app.state.live_models
+    live.wait_secs = 0.05
+    assert live.slot.acquire(timeout=1)
+    try:
+        html = why_fragment(world)
+    finally:
+        live.slot.release()
+    assert "Another explanation is being computed right now" in html
+    url = world.path("/projects/{p}/jobs/{predict_job}/result/why")
+    assert f'hx-get="{url}"' in html and "Try again" in html  # a button, not polling
+    assert "hx-trigger" not in html
+    with closing(connect(world.client)) as conn:
+        models.delete_model(conn, world.client.app.state.storage, world.ids[world.p]["model"])
+    assert "The model of these predictions no longer exists." in why_fragment(world)
+
+
+def test_why_does_not_load_an_untrusted_model(make_client):
+    world = make_world(make_client())
+    world.login("ed")
+    with closing(connect(world.client)) as conn:
+        conn.execute("UPDATE models SET trusted = 0 WHERE id = ?", (world.ids[world.p]["model"],))
+    live = world.client.app.state.live_models
+    spy = live.use = UseSpy(live)
+    html = why_fragment(world)
+    assert "imported without this server&#39;s signature" in html
+    assert spy.calls == 0
+
+
+@pytest.fixture(scope="module")
+def hostile_model():
+    frame = iris_frame().rename(columns={"petal width (cm)": XSS[0]})
+    config = TrainConfig(target="species", max_runtime_secs=10, max_models=1, nfolds=2)
+    return AutoML(config, lambda event: None).fit(frame), frame
+
+
+def test_why_escapes_hostile_column_names(make_client, hostile_model):
+    from api_helpers import store_model
+    from fione.projects.ingest import ingest_csv
+    from fione.projects.service import DatasetType
+
+    model, frame = hostile_model
+    world = make_world(make_client())
+    with closing(connect(world.client)) as conn:
+        storage = world.client.app.state.storage
+        record = store_model(conn, storage, world.client.app.state.secret, world.p, model=model)
+        data = io.BytesIO(frame.drop(columns=["species"]).to_csv(index=False).encode())
+        source = ingest_csv(storage, conn, world.p, "hostile", DatasetType.TEST, data)
+        owner = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        job = store.enqueue(
+            conn, "batch_predict", world.p, owner, {"model_id": record.id, "dataset_id": source.id}
+        )
+        store.claim_job(conn, job.id, "t")
+        store.finish_job(conn, job.id, JobStatus.DONE, result={"dataset_id": source.id})
+    world.login("vi")
+    html = why_fragment(world, job.id)
+    assert "<script>alert" not in html and escape(XSS[0]) in html
+
+
+def test_the_result_keeps_contribution_columns_apart(make_client):
+    from fione.projects.ingest import ingest_csv
+    from fione.projects.service import DatasetType
+
+    world = make_world(make_client())
+    names = [f"contrib_c{i}" for i in range(easyml.RESULT_CONTRIB_COLUMNS + 5)]
+    header = ["predict", "p_a", *names, "contrib_bias", "x", "input_contrib_c0"]
+    line = ["a", "0.5", *["0.1"] * len(names), "0.2", "1", "2"]
+    data = io.BytesIO(("\n".join([",".join(header), ",".join(line)]) + "\n").encode())
+    with closing(connect(world.client)) as conn:
+        storage = world.client.app.state.storage
+        result = ingest_csv(storage, conn, world.p, "out", DatasetType.PREDICT, data)
+        owner = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        payload = {
+            "model_id": world.ids[world.p]["model"],
+            "dataset_id": world.ids[world.p]["test"],
+            "include_contributions": True,
+        }
+        job = store.enqueue(conn, "batch_predict", world.p, owner, payload)
+        store.claim_job(conn, job.id, "t")
+        store.finish_job(conn, job.id, JobStatus.DONE, result={"dataset_id": result.id})
+    world.login("vi")
+    page = world.client.get(world.path("/projects/{p}/jobs/") + f"{job.id}/result").text
+    main, details = page.split('<details class="details', 1)
+    heads = re.findall(r'<th scope="col"[^>]*>([^<]+)</th>', main)
+    assert heads == ["predict", "p_a", "x", "input_contrib_c0"]
+    shown = re.findall(r'<th scope="col"[^>]*>([^<]+)</th>', details)
+    assert shown == names[: easyml.RESULT_CONTRIB_COLUMNS]
+    assert f"and {len(names) + 1 - easyml.RESULT_CONTRIB_COLUMNS} more" in details
+    plain = world.client.get(world.path("/projects/{p}/jobs/{predict_job}/result")).text
+    assert '<details class="details' not in plain
+
+
+def test_the_summary_uses_contribution_shares_once_explained(make_client):
+    from fione.models import explanations
+
+    world = make_world(make_client())
+    world.login("vi")
+    url = world.path("/projects/{p}/models/{model}/summary")
+    assert "relied on most, as a share of all it used" in world.client.get(url).text
+    importance = [
+        {"column": "sepal length (cm)", "mean_abs": 0.01, "share": 0.1},
+        {"column": "petal width (cm)", "mean_abs": 0.09, "share": 0.9},
+        {"column": 7, "share": 0.5},  # unreadable entries are left out
+    ]
+    payload = {"version": 1, "importance": importance, "partial_dependence": []}
+    with closing(connect(world.client)) as conn:
+        explanations.save_explanation(conn, world.ids[world.p]["model"], None, None, payload)
+    page = world.client.get(url).text
+    assert "moved the predictions most" in page
+    names = re.findall(r'<span class="importance__name">([^<]+)</span>', page)
+    values = re.findall(r'<span class="importance__value">([^<]+)</span>', page)
+    assert names == ["petal width (cm)", "sepal length (cm)"] and values == ["90%", "10%"]
+    with closing(connect(world.client)) as conn:
+        bad = {"version": 1, "importance": "x", "partial_dependence": []}
+        explanations.save_explanation(conn, world.ids[world.p]["model"], None, None, bad)
+    assert "relied on most, as a share of all it used" in world.client.get(url).text
+
+
+def predict_job(world, payload: dict) -> int:
+    """A finished prediction job of project p with ``payload`` (its result: p's test set)."""
+    with closing(connect(world.client)) as conn:
+        owner = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        job = store.enqueue(conn, "batch_predict", world.p, owner, payload)
+        store.claim_job(conn, job.id, "t")
+        result = {"dataset_id": world.ids[world.p]["test"]}
+        store.finish_job(conn, job.id, JobStatus.DONE, result=result)
+        return job.id
+
+
+def test_why_never_uses_objects_of_another_project(make_client):
+    world = make_world(make_client())
+    world.login("ed")  # owns both projects
+    p, q = world.ids[world.p], world.ids[world.q]
+    cases = (
+        ({"model_id": q["model"], "dataset_id": p["test"]}, "no longer exists"),
+        ({"model_id": p["model"], "dataset_id": q["test"]}, "is no longer available"),
+        ({"model_id": p["model"], "dataset_id": str(p["test"])}, "is no longer available"),
+        ({"model_id": True, "dataset_id": p["test"]}, "no longer exists"),
+    )
+    for payload, text in cases:
+        assert text in why_fragment(world, predict_job(world, payload)), payload
+
+
+def test_an_unexpected_error_in_why_is_a_message_with_a_retry(make_client, monkeypatch):
+    world = make_world(make_client())
+    world.login("vi")
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(easyml.explain, "contributions", broken)
+    html = why_fragment(world)
+    assert "This could not be computed." in html and "boom" not in html
+    assert "Try again" in html and 'hx-get="' in html
+    assert '<span id="why-status" hx-swap-oob="innerHTML">This could not be computed.' in html
+
+
+def test_non_finite_contributions_are_refused():
+    with pytest.raises(ValueError):
+        easyml._why_row(["a"], np.array([np.inf]), 0.5, 0.5, [1], True)
+    with pytest.raises(ValueError):
+        easyml._why_row(["a"], np.array([1e307]), 0.5, 0.5, [1], True)  # x100 overflows
+
+
+def test_the_reasons_wait_or_say_why_instead_of_loading(make_client, monkeypatch):
+    world = make_world(make_client())
+    world.login("vi")
+    url = world.path("/projects/{p}/jobs/{predict_job}/result")
+    why = world.path("/projects/{p}/jobs/{predict_job}/result/why")
+    page = world.client.get(url).text
+    assert f'hx-get="{why}" hx-trigger="load"' in page
+    assert '<p class="visually-hidden" role="status" id="why-status"></p>' in page
+    # iris: 3 classes x 4 columns = 12 cells a row; 5 rows x 10 = 600
+    monkeypatch.setattr(easyml.explain, "CELLS", 599)
+    page = world.client.get(url).text
+    assert 'hx-trigger="load"' not in page and f'hx-get="{why}"' in page
+    assert "Show why" in page
+    monkeypatch.setattr(easyml.explain, "CELLS", 11)
+    page = world.client.get(url).text
+    assert f'hx-get="{why}"' not in page and "too many columns and classes" in page
+    monkeypatch.undo()
+    world.client.app.state.live_models.max_bytes = 1
+    page = world.client.get(url).text
+    assert f'hx-get="{why}"' not in page and "too large to explain here" in page
+    with closing(connect(world.client)) as conn:
+        conn.execute("UPDATE models SET trusted = 0 WHERE id = ?", (world.ids[world.p]["model"],))
+    page = world.client.get(url).text
+    assert f'hx-get="{why}"' not in page and "without this server&#39;s signature" in page
+
+
+def test_the_reasons_say_what_they_add_up_to(make_client):
+    world = make_world(make_client())
+    world.login("vi")
+    with closing(connect(world.client)) as conn:
+        ensemble = models.get_model(conn, world.ids[world.p]["model"]).best_model == "Ensemble"
+    html = why_fragment(world)
+    assert "Before rounding, they add up to the prediction." in html
+    assert ("combines several models" in html) is ensemble
+    assert "The reasons for 5 rows are shown." in html
+
+
+def test_contribution_shares_keep_one_entry_per_column():
+    shares, partial = easyml.contribution_shares(
+        {
+            "importance": [
+                {"column": "a", "share": 0.6},
+                {"column": "b", "share": 0.3},
+                {"column": "a", "share": 0.1},
+                {"column": "c", "share": 1.5},  # not a share
+                {"column": "d", "share": True},
+            ]
+        }
+    )
+    assert shares == [("a", 0.6), ("b", 0.3)] and partial

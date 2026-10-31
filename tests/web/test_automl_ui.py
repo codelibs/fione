@@ -15,6 +15,7 @@ import pytest
 
 from api_helpers import connect, iris_csv
 from fione.auth import service as auth
+from fione.data.profile import profile_dataset
 from fione.engine.config import TrainConfig
 from fione.jobs import store
 from fione.jobs.store import JobStatus
@@ -195,11 +196,63 @@ def test_a_regression_dataset_detail(world):
     frame["price"] = 3 * frame["size"] + rng.normal(0, 5, 80)
     did = add_dataset(world, frame, "houses")
     page = world.client.get(world.path("/projects/{p}/datasets/") + f"{did}").text
-    assert "80 rows × 3 columns" in page and "May give the answer away" in page  # size ~ price
+    assert "80 rows × 3 columns" in page
+    assert "Check: moves with the answer (|r| 1.00)" in page  # size ~ price: only a warning
+    assert "May give the answer away" not in page and "predicts the answer alone" not in page
+    size = world.client.get(world.path("/projects/{p}/datasets/") + f"{did}/columns/size").text
+    assert "Its correlation with “price”, the column to predict, is |r| = 1.00" in size
     assert (
         world.client.get(world.path("/projects/{p}/datasets/") + f"{did}/columns/price").status_code
         == 200
     )
+
+
+def leak_frame(name: str, n: int = 300) -> pd.DataFrame:
+    """``name`` is a noisy copy of the target ``label`` (scores 0.96), ``copy`` an identical
+    one."""
+    rng = np.random.default_rng(0)
+    label = rng.choice(["no", "yes"], n)
+    return pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "z": rng.normal(size=n),
+            name: (label == "yes") + rng.normal(0, 0.3, n),
+            "copy": label,
+            "label": label,
+        }
+    )
+
+
+def test_columns_tab_shows_the_score_badge(world):
+    world.login("vi")  # viewers see the warnings too
+    frame = leak_frame(XSS)
+    did = add_dataset(world, frame, "leaky")
+    stored = pd.read_csv(io.StringIO(frame.to_csv(index=False)))
+    suspects = {s.column: s.score for s in profile_dataset(stored, "label").leak_suspects}
+    score = f"{suspects[XSS]:.2f}"
+    assert score == "0.96"
+    base = world.path("/projects/{p}/datasets/") + str(did)
+    page = world.client.get(base + "?tab=columns").text
+    assert f"Check: predicts the answer alone ({score})" in page
+    assert page.count("Check: predicts the answer alone") == 1
+    assert page.count(">May give the answer away<") == 1  # the identical copy
+    column = world.client.get(base + "/columns/" + automl.quote(XSS, safe="")).text
+    assert f"with a score of {score}" in column and "known at prediction time" in column
+    analysis = world.client.get(base + "/analyze").text
+    assert 'id="run-form"' not in analysis
+    assert "Predicts the answer suspiciously well on its own" in analysis
+    assert "Is identical to the column to predict" in analysis
+    for html in (page, column, analysis):
+        assert XSS not in html and escape(XSS) in html
+
+
+def test_the_training_form_keeps_score_suspects_checked(world):
+    world.login("ed")
+    did = add_dataset(world, leak_frame("noisy"), "leaky")
+    page = world.client.get(world.path("/projects/{p}/datasets/") + f"{did}/train").text
+    assert 'value="noisy" checked aria-describedby="col-3-warn"' in page
+    assert "Predicts the answer suspiciously well on its own" in page
+    assert 'value="copy" aria-describedby="col-4-why"' in page  # unchecked
 
 
 def test_the_data_tab_pages_through_rows_and_columns(world):
@@ -547,6 +600,21 @@ def test_the_job_list_with_filters(world):
     kind = world.client.get(world.path("/projects/{p}/jobs") + "?kind=batch_predict").text
     assert f"#{world.ids[world.p]['predict_job']}<" in kind and f"#{failed}<" not in kind
     assert world.path("/projects/{p}/jobs/{predict_job}/result") in kind
+
+
+def test_explain_jobs_are_named_filtered_and_linked(world):
+    world.login("vi")
+    with closing(connect(world.client)) as conn:
+        user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        payload = {"model_id": world.ids[world.p]["model"], "dataset_id": None}
+        job = store.enqueue(conn, "explain", world.p, user, payload)
+        store.claim_job(conn, job.id, "t")
+        store.finish_job(conn, job.id, JobStatus.DONE)
+    page = world.client.get(world.path("/projects/{p}/jobs") + "?kind=explain").text
+    assert '<option value="explain" selected>Explanation</option>' in page
+    model_tab = world.path("/projects/{p}/models/{model}") + "?tab=explain"
+    assert f'<a href="{model_tab}">Explanation #{job.id}</a>' in page
+    assert f"#{world.ids[world.p]['predict_job']}<" not in page
 
 
 def test_the_list_polls_fast_while_a_job_is_active_and_slowly_otherwise(world):

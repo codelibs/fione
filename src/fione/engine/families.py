@@ -185,11 +185,16 @@ class FamilySpec:
         """
         raise NotImplementedError
 
+    def _predict_options(self) -> dict:
+        """Keyword arguments for the library's predict calls."""
+        return {}
+
     def predict(self, model, X: pd.DataFrame) -> np.ndarray:
         """Class probabilities of shape (n, n_classes), or values of shape (n,) for regression."""
+        options = self._predict_options()
         if not self.classification:
-            return np.asarray(model.predict(X), dtype=float)
-        proba = np.asarray(model.predict_proba(X), dtype=float)
+            return np.asarray(model.predict(X, **options), dtype=float)
+        proba = np.asarray(model.predict_proba(X, **options), dtype=float)
         if proba.shape[1] == self.n_classes:
             return proba
         full = np.zeros((len(X), self.n_classes))  # a class missing from the training fold
@@ -399,6 +404,10 @@ class CatBoost(FamilySpec):
             callbacks=[_CatBoostDeadline(deadline)],
         )
         return model
+
+    def _predict_options(self) -> dict:
+        # CatBoost takes its threads per call; its default (-1) is every core.
+        return {"thread_count": self.n_jobs}
 
     def rounds(self, model) -> int:
         return int(model.tree_count_)  # shrunk to the best iteration after early stopping

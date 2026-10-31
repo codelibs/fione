@@ -11,10 +11,14 @@ the session's CSRF token in ``csrf_token``. Uploads check the session, write acc
 import logging
 import math
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Annotated
 from urllib.parse import urlencode
 
+import numpy as np
+import pyarrow as pa
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
 from starlette.datastructures import FormData
@@ -25,21 +29,35 @@ from fione.api.deps import Conn
 from fione.api.routes_datasets import cell
 from fione.api.routes_jobs import cancel
 from fione.api.routes_models import serving_bundle_of
-from fione.api.schemas import event_out, job_out
+from fione.api.schemas import MAX_ID, event_out, job_out
 from fione.auth.roles import ProjectAccess, Role
-from fione.engine.artifact import UntrustedArtifactError, read_manifest
+from fione.data.profile import (
+    CORRELATED,
+    DETERMINES,
+    IDENTICAL,
+    LEAK_STRONG,
+    ORDERED_BY_TARGET,
+    PREDICTS_ALONE,
+    SCORE_REASONS,
+    LeakCheck,
+)
+from fione.engine import explain
+from fione.engine.artifact import MODEL_FILE, UntrustedArtifactError, read_manifest
 from fione.engine.config import TargetError, TrainConfig
 from fione.engine.prep import validate_target
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
+from fione.models import explanations
 from fione.models import service as models
 from fione.models.bundle import BundleError
+from fione.models.explanations import model_columns
+from fione.models.live import Busy, TooLarge, Untrusted
 from fione.models.rating import Baseline, Rating, star_rating, target_baseline
 from fione.models.service import ModelNotFound, ModelRecord
 from fione.modules.registry import redact
-from fione.predict.batch import PREDICT
+from fione.predict.batch import PREDICT, check_inputs
 from fione.projects import service as projects
-from fione.projects.ingest import read_dataset_sample
+from fione.projects.ingest import read_dataset_rows, read_dataset_sample
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.tools.builtin import propose, sample_profile
 from fione.web.access import Ctx
@@ -65,6 +83,12 @@ MAX_RUNTIME_DIGITS = 6  # custom minutes: a whole number of 1 or more, at most 6
 TASKS = ("classification", "regression")
 PREVIEW_ROWS = 10
 RESULT_PREVIEW_ROWS = 20
+RESULT_CONTRIB_COLUMNS = 20  # contribution columns previewed (all are in the download)
+WHY_ROWS = 5  # rows of the prediction result explained
+WHY_TOP = 5  # columns shown per row; the rest are summed as "other columns"
+# The reasons load only when asked for (a button) for a model whose 5 rows would take more
+# than a tenth of the explanation cell cap: costly to compute while the page opens.
+WHY_HEAVY = 10
 RECENT_JOBS = 10
 TOP_INPUTS = 5
 EVENT_DETAILS = 20
@@ -77,11 +101,14 @@ PROFILE_MIN_ROWS = 500
 # stays under the 1 MiB limit of non-upload requests.
 MAX_FORM_FIELDS = 20_000
 STOP_POLLING = 286  # the HTMX status that ends hx-trigger polling
-# A leak suspect's reason (data.profile) -> the key of its explanation.
+# A leak suspect's reason (data.profile) -> the key of its explanation. Reasons in
+# SCORE_REASONS only warn: a legitimate strong column can score as high as a leak.
 LEAK_REASONS = {
-    "identical to target": "identical",
-    "near-perfect correlation with target": "correlated",
-    "value determines target": "determines",
+    IDENTICAL: "identical",
+    CORRELATED: "correlated",
+    DETERMINES: "determines",
+    PREDICTS_ALONE: "predicts_alone",
+    ORDERED_BY_TARGET: "ordered",
 }
 
 
@@ -134,7 +161,8 @@ def dashboard(request: Request, conn: Conn, pid: str) -> Response:
     records = models.list_models(conn, pid)
     ratings = _ratings(request, conn, records)
     ranked = sorted(records, key=lambda r: (-ratings[r.id].stars, -r.created_at, -r.id))
-    jobs = store.list_jobs(conn, pid, limit=RECENT_JOBS)
+    # Each training queues an explain job: listed with the jobs, not among the recent runs.
+    jobs = store.list_jobs(conn, pid, limit=RECENT_JOBS, exclude_kinds=("explain",))
     training = next((j for j in jobs if j.kind == "automl" and j.status not in TERMINAL), None)
     train_sets = [d for d in datasets if d.type == DatasetType.TRAIN]
     members = projects.list_members(conn, pid) if ctx.access == ProjectAccess.OWNER else None
@@ -217,24 +245,78 @@ def _profile(request: Request, dataset: Dataset):
     )
 
 
+def _chosen(request: Request, dataset: Dataset, target: str | None) -> str:
+    """``target`` if it is a column of ``dataset``, else the default target."""
+    names = _names(dataset)
+    if target in names:
+        return target
+    return _default_target(names, {c.name: c.kind for c in _profile(request, dataset).columns})
+
+
+def _leak_check(request: Request, dataset: Dataset, target: str):
+    """``(proposal or None, (LeakCheck, task))`` for a column ``target`` of ``dataset``.
+
+    The leak check and the task are cached per dataset and target; the proposal is returned
+    only when it had to be made for them. A partial check (its time budget ran out) is not
+    kept, so the next request checks again."""
+    made = []
+
+    def compute():
+        found = propose(
+            _storage(request),
+            dataset,
+            target,
+            _names(dataset),
+            _profile_rows(dataset),
+            profile=_profile(request, dataset),
+        )
+        made.append(found)
+        return LeakCheck(found.profile.leak_suspects, found.profile.leak_partial), found.task
+
+    entry = request.app.state.ui_leaks.get(
+        (dataset.id, target), compute, keep=lambda e: not e[0].partial
+    )
+    return (made[0] if made else None), entry
+
+
 def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | None):
     """The analysis of ``dataset`` for ``target`` (or the default one) and the defaults."""
     names = _names(dataset)
     profile = _profile(request, dataset)
-    if target in names:
-        chosen = target
-    else:
-        chosen = _default_target(names, {col.name: col.kind for col in profile.columns})
-    found = propose(
-        _storage(request), dataset, chosen, names, _profile_rows(dataset), profile=profile
-    )
-    reasons = {col.name: col.kind for col in found.ignore}  # id, constant
+    chosen = _chosen(request, dataset, target)
+    found, (check, task) = _leak_check(request, dataset, chosen)
+    if found is None:  # from the cache: only the target column is read
+        found = propose(
+            _storage(request),
+            dataset,
+            chosen,
+            names,
+            _profile_rows(dataset),
+            profile=profile,
+            check=check,
+            task=task,
+        )
+    reasons = {col.name: col.kind for col in found.ignore}  # id, constant: unchecked
+    warnings = {}  # score-based leak suspects: they stay checked
     for suspect in found.profile.leak_suspects:
-        reasons.setdefault(suspect.column, "leak_" + LEAK_REASONS.get(suspect.reason, "other"))
-    columns = [
-        {"index": i, "profile": col, "reason": reasons.get(col.name), "target": col.name == chosen}
-        for i, col in enumerate(found.profile.columns, start=1)
-    ]
+        key = "leak_" + LEAK_REASONS.get(suspect.reason, "other")
+        if suspect.reason in SCORE_REASONS:
+            warnings[suspect.column] = (key, suspect.score)
+        else:
+            reasons.setdefault(suspect.column, key)
+    columns = []
+    for i, col in enumerate(found.profile.columns, start=1):
+        warning, score = warnings.get(col.name, (None, None))
+        columns.append(
+            {
+                "index": i,
+                "profile": col,
+                "reason": reasons.get(col.name),
+                "warning": warning,
+                "score": score,
+                "target": col.name == chosen,
+            }
+        )
     defaults = RunForm(
         target=chosen,
         inputs={n for n in names if n != chosen and n not in reasons},
@@ -244,9 +326,10 @@ def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | 
     return found, columns, defaults
 
 
-def _warnings(dataset: Dataset, found, task: str) -> list[tuple[str, str, dict]]:
-    """``(level, key, vars)`` for what training will refuse or should be checked. The whole
-    target column goes through the engine's own check, as ``submit_training`` does."""
+def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tuple[str, str, dict]]:
+    """``(level, key, vars)`` for what training will refuse or should be checked, the leak
+    notes counted over the checked ``inputs``. The whole target column goes through the
+    engine's own check, as ``submit_training`` does."""
     out = []
     if dataset.type != DatasetType.TRAIN:
         out.append(("danger", "analysis.warn.not_train", {}))
@@ -258,8 +341,17 @@ def _warnings(dataset: Dataset, found, task: str) -> list[tuple[str, str, dict]]
         out.append(("danger", f"analysis.target_error.{e.code}", e.details))
     if found.target.kind == "id":
         out.append(("warning", "analysis.warn.target_id", {}))
-    if found.profile.leak_suspects:
-        out.append(("info", "analysis.warn.leaks", {"n": len(found.profile.leak_suspects)}))
+    suspects = found.profile.leak_suspects
+    exact = [s for s in suspects if s.reason not in SCORE_REASONS and s.column not in inputs]
+    if exact:
+        out.append(("info", "analysis.warn.leaks", {"n": len(exact)}))
+    # by default every score suspect is checked, except an id or constant column
+    scored = [s for s in suspects if s.reason in SCORE_REASONS and s.column in inputs]
+    if scored:
+        level = "warning" if max(s.score for s in scored) >= LEAK_STRONG else "info"
+        out.append((level, "analysis.warn.leak_scores", {"n": len(scored)}))
+    if found.profile.leak_partial:
+        out.append(("info", "analysis.warn.leak_partial", {}))
     return out
 
 
@@ -273,8 +365,8 @@ def _pct(rate: float) -> str:
     return f"{value:.1f}".removesuffix(".0") if value < 10 else f"{value:.0f}"
 
 
-def _preview(request: Request, dataset: Dataset, rows: int) -> dict:
-    frame = read_dataset_sample(_storage(request), dataset, max_rows=rows)
+def _preview(request: Request, dataset: Dataset, rows: int, columns=None) -> dict:
+    frame = read_dataset_sample(_storage(request), dataset, max_rows=rows, columns=columns)
     cells = [
         [cell(v) for v in row] for row in frame.astype(object).itertuples(index=False, name=None)
     ]
@@ -318,7 +410,7 @@ def _analysis_view(
         columns=columns,
         form=form,
         detected=defaults.task,
-        warnings=_warnings(dataset, found, form.task),
+        warnings=_warnings(dataset, found, form.task, form.inputs),
         target_missing=float(found.y.isna().mean()) if len(found.y) else 0.0,
         target_values=int(found.y.nunique()),
         missing_pct=_pct(sum(missing) / len(missing)) if missing else "0",
@@ -447,9 +539,49 @@ def _clock(seconds: float | None) -> str | None:
     return f"{hours}:{rest // 60:02d}:{rest % 60:02d}" if hours else f"{rest // 60}:{rest % 60:02d}"
 
 
+def _share(value) -> float:
+    """A stored importance share as a float: 0.0 when missing, not a finite number, or too
+    large to show in percent (a hand-made record)."""
+    number = finite(value)
+    return number if number is not None and math.isfinite(number * 100) else 0.0
+
+
+def contribution_shares(payload: dict) -> tuple[list[tuple[str, float]], bool]:
+    """A stored explanation's importance as ``(column, share)`` by share, and whether an
+    entry could not be read (and was left out). The payload is untrusted and may have been
+    trimmed: the shares need not add up to 1. A column listed again is left out."""
+    entries = payload.get("importance")
+    if not isinstance(entries, list):
+        return [], entries is not None
+    shares, seen, partial = [], set(), False
+    for entry in entries:
+        share = finite(entry.get("share")) if isinstance(entry, dict) else None
+        if share is None or not 0 <= share <= 1 or not isinstance(entry.get("column"), str):
+            partial = True
+            continue
+        if entry["column"] not in seen:
+            seen.add(entry["column"])
+            shares.append((entry["column"], share))
+    shares.sort(key=lambda kv: -kv[1])
+    return shares, partial
+
+
+def finite(value) -> float | None:
+    """A stored number as a float; None when it is not a finite number within float range."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    try:
+        return float(value) if math.isfinite(value) else None
+    except OverflowError:  # an int beyond the float range
+        return None
+
+
 def _number(value) -> str:
     """A metric for people: three significant digits, thousands separated."""
-    if value is None or not math.isfinite(value):
+    try:
+        if value is None or not math.isfinite(value):
+            return "—"
+    except OverflowError:  # an int beyond the float range (a hand-made record)
         return "—"
     return f"{value:,.0f}" if abs(value) >= 1000 else f"{value:.3g}"
 
@@ -472,6 +604,15 @@ def _stage(job: Job, events: list) -> tuple[str, dict]:
         if isinstance(done, int) and isinstance(total, int):
             return "job.stage.predicting", {"done": f"{done:,}", "total": f"{total:,}"}
         return "job.stage.reading", {}
+    if job.kind == "explain":
+        if last is None:
+            return "job.stage.reading", {}
+        if last.type == "finished":
+            return "job.stage.saving", {}
+        done, total = last.data.get("columns_done"), last.data.get("columns_total")
+        if type(done) is int and type(total) is int and 0 <= done <= total:
+            return "job.stage.explaining", {"done": f"{done:,}", "total": f"{total:,}"}
+        return "job.stage.importance", {}
     if last is None or last.type == "started":
         return "job.stage.preparing", {}
     if last.type in ("ensemble", "stopped") and "family" not in last.data:
@@ -518,6 +659,11 @@ def _job_view(request: Request, conn, ctx: Ctx, job: Job) -> dict:
             next_url = f"/projects/{pid}/jobs/{job.id}/result"
         if job.payload.get("model_id"):
             back_url = f"/projects/{pid}/models/{job.payload['model_id']}/predict"
+    elif job.kind == "explain" and isinstance(job.payload.get("model_id"), int):
+        # Both ways lead to the model's Explain tab (it says what a failure left there).
+        back_url = f"/projects/{pid}/models/{job.payload['model_id']}?tab=explain"
+        if job.status == JobStatus.DONE:
+            next_url = back_url
     elif job.kind == "export_models" and job.status == JobStatus.DONE:
         next_url = f"/projects/{pid}/models#export"  # the download is offered there
     elif job.kind == "module" and job.status == JobStatus.DONE:
@@ -641,8 +787,13 @@ def summary(request: Request, conn: Conn, pid: str, mid: str) -> Response:
             elapsed = result.get("elapsed")
         except KeyError:  # the job was deleted
             pass
-    ranked = sorted(record.importance.items(), key=lambda kv: (-(kv[1] or 0.0), kv[0]))
-    top = [(name, value or 0.0) for name, value in ranked[:TOP_INPUTS]]
+    # The contribution shares once the model is explained, else the gain importance.
+    stored = explanations.get_explanation(conn, record.id)
+    top = contribution_shares(stored.payload)[0][:TOP_INPUTS] if stored is not None else []
+    hint = "summary.top_inputs_hint_contrib" if top else "summary.top_inputs_hint"
+    if not top:
+        shares = ((name, _share(value)) for name, value in record.importance.items())
+        top = sorted(shares, key=lambda kv: (-kv[1], kv[0]))[:TOP_INPUTS]
     try:
         bundle = serving_bundle_of(request, record)
     except (BundleError, ModelNotFound):  # an unsafe image name, or the manifest is gone
@@ -657,6 +808,7 @@ def summary(request: Request, conn: Conn, pid: str, mid: str) -> Response:
         elapsed=_clock(elapsed) if isinstance(elapsed, int | float) else None,
         n_trials=len(record.trials),
         top=top,
+        top_hint=hint,
         top_max=max([v for _, v in top] + [1e-12]),
         bundle=bundle,
         members=sum(1 for row in record.leaderboard if (row.get("weight") or 0) > 0),
@@ -752,7 +904,13 @@ def predict_run(request: Request, conn: Conn, pid: str, mid: str, form: Posted) 
     dataset = _dataset(conn, ctx, _text(form, "dataset_id"))
     try:
         job = models.submit_batch_predict(
-            conn, ctx.auth.user, pid, record.id, dataset.id, include_columns=_texts(form, "include")
+            conn,
+            ctx.auth.user,
+            pid,
+            record.id,
+            dataset.id,
+            include_columns=_texts(form, "include"),
+            include_contributions=_text(form, "contributions") == "true",
         )
     except (ValueError, PermissionError) as e:
         return _predict_view(
@@ -770,12 +928,236 @@ def prediction_result(request: Request, conn: Conn, pid: str, jid: str) -> Respo
     if job.status != JobStatus.DONE:
         return RedirectResponse(f"/projects/{pid}/jobs/{job.id}", 303)
     dataset = _dataset(conn, ctx, str((job.result or {}).get("dataset_id", "")))
+    names = _names(dataset)
+    contributions = None
+    if job.payload.get("include_contributions") is True:
+        # contrib_* columns come after the predictions (colliding inputs were renamed):
+        # previewed apart, behind a disclosure, so the predictions stay in view
+        found = [n for n in names if n.startswith("contrib_")]
+        names = [n for n in names if not n.startswith("contrib_")]
+        shown = found[:RESULT_CONTRIB_COLUMNS]
+        contributions = {
+            "preview": _preview(request, dataset, RESULT_PREVIEW_ROWS, shown),
+            "total": len(found),
+            "more": len(found) - len(shown),
+        }
     return _view(
         request,
         "result.html",
         ctx,
         job=job,
         dataset=dataset,
-        preview=_preview(request, dataset, RESULT_PREVIEW_ROWS),
+        preview=_preview(request, dataset, RESULT_PREVIEW_ROWS, names),
+        contributions=contributions,
         model_id=job.payload.get("model_id"),
+        why_gate=_why_gate(request, conn, job),
     )
+
+
+# --- why: each row's reasons ----------------------------------------------------------------
+
+
+class Refused(Exception):
+    """Why an explanation cannot be computed here: the i18n key shown, and a detail."""
+
+    def __init__(self, key: str, detail: str | None = None):
+        super().__init__(key)
+        self.key, self.detail = key, detail
+
+
+@contextmanager
+def refusals() -> Iterator[None]:
+    """``LiveModels``' and the engine's refusals of an explanation request as ``Refused``,
+    as the API maps them to its error codes."""
+    try:
+        yield
+    except Untrusted:
+        raise Refused("explain.untrusted") from None
+    except Busy:
+        raise Refused("explain.busy") from None
+    except TooLarge:
+        raise Refused("explain.too_large") from None
+    except ModelNotFound:
+        raise Refused("explain.model_gone") from None
+    except UntrustedArtifactError:
+        raise Refused("explain.broken") from None
+    except ValueError as e:  # PredictInputError, ConfigError and the engine's limits
+        if isinstance(e, pa.ArrowException | UnicodeError):
+            raise
+        raise Refused("explain.failed", redact(str(e))) from None
+
+
+def _signed(value: float, decimals: int) -> str:
+    return f"{value:+,.{decimals}f}".replace("-", "−")
+
+
+def _why_row(columns, values, bias: float, prediction: float, inputs, percent: bool) -> dict:
+    """One row's reasons, from the average prediction (``bias``) to ``prediction``: the
+    ``WHY_TOP`` columns with the largest effect (``values``), then the rest summed as other
+    columns. Classification in percent and percentage points, regression in target units,
+    all with one number of decimals per row; ``meter`` is the effect's size out of 1,000."""
+    scale = 100.0 if percent else 1.0
+    with np.errstate(over="ignore", invalid="ignore"):  # checked just below
+        values = np.asarray(values, dtype=float) * scale
+    bias, prediction = bias * scale, prediction * scale
+    if not (np.isfinite(values).all() and math.isfinite(bias) and math.isfinite(prediction)):
+        raise ValueError("the contributions are not finite numbers")
+    if percent:
+        decimals = 1
+    else:
+        largest = max(abs(prediction), abs(bias), float(np.abs(values).max(initial=0.0)))
+        decimals = min(6, max(0, 2 - math.floor(math.log10(largest)))) if largest > 0 else 2
+    order = np.argsort(-np.abs(values), kind="stable")
+    top, rest = order[:WHY_TOP], order[WHY_TOP:]
+    other = float(values[rest].sum()) if len(rest) else None
+    biggest = max([abs(float(values[i])) for i in top] + [abs(other or 0.0)])
+
+    def meter(value: float) -> int:
+        return round(abs(value) / biggest * 1000) if biggest > 0 else 0
+
+    unit = "%" if percent else ""
+    return {
+        "start": f"{bias:,.{decimals}f}{unit}",
+        "total": f"{prediction:,.{decimals}f}{unit}",
+        "items": [
+            {
+                "column": columns[i],
+                "input": inputs[i],
+                "text": _signed(float(values[i]), decimals),
+                "up": values[i] >= 0,
+                "meter": meter(float(values[i])),
+            }
+            for i in top
+        ],
+        "other": None
+        if other is None
+        else {
+            "n": len(rest),
+            "text": _signed(other, decimals),
+            "up": other >= 0,
+            "meter": meter(other),
+        },
+    }
+
+
+def _why_view(request: Request, conn, job: Job, lang: str) -> dict:
+    """The first ``WHY_ROWS`` rows of the prediction's source data with their reasons, or a
+    ``message`` saying why there are none."""
+    url = f"/projects/{job.project_id}/jobs/{job.id}/result/why"
+    view: dict = {"url": url}
+    record = _job_model(conn, job)
+    if record is None:
+        return view | {"message": "why.no_model"}
+    dataset = None
+    if (dataset_id := _payload_id(job.payload.get("dataset_id"))) is not None:
+        try:
+            dataset = projects.get_dataset(conn, dataset_id)
+        except DatasetNotFound:
+            pass
+    live = request.app.state.live_models
+    try:
+        with refusals():
+            live.check(record)
+            columns = model_columns(record)
+            if (
+                dataset is None
+                or dataset.project_id != job.project_id
+                or not set(columns) <= set(_names(dataset))
+            ):
+                raise Refused("why.no_dataset")
+            with live.use(record) as model:
+                rows = explain.contribution_rows(model, WHY_ROWS)
+                if rows == 0:
+                    raise Refused("why.too_wide")
+                try:
+                    frame = read_dataset_rows(_storage(request), dataset, 0, rows, columns)
+                except KeyError:  # storage: the file is gone (its message would name the key)
+                    raise Refused("why.no_dataset") from None
+                check_inputs(model, frame)
+                c = explain.contributions(model, frame)
+    except Refused as e:
+        return view | {"message": e.key, "detail": e.detail, "retry": e.key == "explain.busy"}
+    percent = record.task == "classification"
+    binary = percent and len(c.outputs) == 1
+    out = []
+    for i, slot in enumerate(c.slots().tolist()):
+        inputs = [cell(frame[n].iloc[i]) if n in frame.columns else None for n in c.columns]
+        try:
+            row = _why_row(
+                c.columns,
+                c.values[i, slot],
+                float(c.bias[i, slot]),
+                float(c.prediction[i, slot]),
+                inputs,
+                percent,
+            )
+        except ValueError as e:
+            return view | {"message": "explain.failed", "detail": str(e), "retry": True}
+        row["label"] = str(c.outputs[slot])
+        out.append(row)
+    kind = "positive" if binary else ("class" if percent else "value")
+    return view | {
+        "rows": out,
+        "kind": kind,
+        "target": record.target,
+        "ensemble": record.best_model == "Ensemble",
+    }
+
+
+def _payload_id(value) -> int | None:
+    """An id as a job payload holds it: a positive int, else None."""
+    return value if type(value) is int and 1 <= value <= MAX_ID else None
+
+
+def _job_model(conn, job: Job) -> ModelRecord | None:
+    """The model a job names in its payload, when it still exists in the job's project."""
+    model_id = _payload_id(job.payload.get("model_id"))
+    if model_id is None:
+        return None
+    try:
+        record = models.get_model(conn, model_id)
+    except ModelNotFound:
+        return None
+    return record if record.project_id == job.project_id else None
+
+
+def _why_gate(request: Request, conn, job: Job) -> str | None:
+    """Whether the result page loads the reasons by itself (None), shows why it cannot
+    instead (an i18n key: the request would only be refused), or waits for a click
+    (``"click"``: a model costly to explain here). Read from the record and the manifest;
+    nothing is loaded. The fragment still makes its own checks."""
+    record = _job_model(conn, job)
+    if record is None:
+        return None
+    if not record.trusted:
+        return "explain.untrusted"
+    live = request.app.state.live_models
+    try:
+        if _storage(request).size(record.storage_prefix + MODEL_FILE) > live.max_bytes:
+            return "explain.too_large"
+        manifest = read_manifest(_storage(request), record.storage_prefix)
+    except (KeyError, UntrustedArtifactError):  # gone or broken: the fragment says so
+        return None
+    classes = len(manifest.classes or [])
+    width = (classes if classes > 2 else 1) * max(1, len(manifest.columns))
+    if width > explain.CELLS:
+        return "why.too_wide"
+    return "click" if width * WHY_ROWS * WHY_HEAVY > explain.CELLS else None
+
+
+@router.get("/projects/{pid}/jobs/{jid}/result/why")
+def prediction_why(request: Request, conn: Conn, pid: str, jid: str) -> Response:
+    """The fragment of the result page explaining its first rows (computed when asked for:
+    the result page loads it once, never polling). Whatever goes wrong is a message with a
+    retry button, at status 200, so HTMX swaps it in."""
+    ctx = _page(request, conn, pid)
+    job = _job(conn, ctx, jid)
+    if job.kind != "batch_predict":
+        raise UiError(404, "error.not_found")
+    try:
+        view = _why_view(request, conn, job, language(request))
+    except Exception:
+        log.exception("the reasons of job %s could not be shown", job.id)
+        url = f"/projects/{job.project_id}/jobs/{job.id}/result/why"
+        view = {"url": url, "message": "explain.failed", "retry": True}
+    return render(request, "_why.html", ctx.auth, ctx=ctx, why=view)

@@ -19,6 +19,7 @@ from fione import db
 from fione.api import (
     routes_auth,
     routes_datasets,
+    routes_explain,
     routes_jobs,
     routes_models,
     routes_modules,
@@ -32,6 +33,7 @@ from fione.api.security import LoginThrottle, SessionSigner, ensure_setup_token
 from fione.auth import service as auth_service
 from fione.config import Settings, get_settings, load_secret
 from fione.jobs.runner import JobRunner
+from fione.models.live import LiveModels
 from fione.storage import open_storage
 from fione.version import __version__
 from fione.web import views as web
@@ -49,6 +51,7 @@ ROUTERS = [
     routes_datasets.router,
     routes_jobs.router,
     routes_models.router,
+    routes_explain.router,
     routes_modules.router,
 ]
 UPLOAD_PATHS = [
@@ -166,6 +169,8 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.db_path = db_path
     app.state.storage = open_storage(settings)
     app.state.secret = secret
+    # Models loaded for synchronous explanation requests (one at a time, at most two kept).
+    app.state.live_models = LiveModels(app.state.storage, secret)
     app.state.runner = None
     app.state.started_at = time.monotonic()  # the system page's uptime
     app.state.signer = SessionSigner(secret, settings.session_max_age_secs)

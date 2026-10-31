@@ -17,13 +17,19 @@ import pytest
 from sklearn.datasets import load_iris
 
 from fione.config import Settings
+from fione.engine import explain
 from fione.engine.artifact import MODEL_FILE, read_manifest, save_model
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
 from fione.models.bundle import BundleError, make_serving_bundle
 from fione.models.service import ModelNotFound, ModelRecord
 from fione.storage import LocalStorage
-from fione_serving.app import create_app
+from fione_serving.app import (
+    DEFAULT_MAX_CONTRIBUTION_INSTANCES,
+    DEFAULT_MAX_CONTRIBUTION_REQUESTS,
+    Predictor,
+    create_app,
+)
 from fione_serving.loader import ModelLoadError, load
 
 with warnings.catch_warnings():
@@ -80,6 +86,16 @@ def reg_model():
 
 
 @pytest.fixture(scope="module")
+def bin_model():
+    """A yes/no model whose inputs are named ``bias`` and ``BiasTerm`` (and ``color``)."""
+    frame = (
+        _japanese_frame().drop(columns=["value"]).rename(columns={"x": "bias", "幅": "BiasTerm"})
+    )
+    frame["判定"] = np.where(frame["判定"] == LABELS[0], "yes", "no")
+    return _fit(frame, "判定")
+
+
+@pytest.fixture(scope="module")
 def stored(tmp_path_factory):
     """``stored(model)`` -> (storage, model dir) with the artifact saved under ``PREFIX``."""
     base = tmp_path_factory.mktemp("stored")
@@ -114,8 +130,14 @@ def reg(reg_model, stored):
     return client_for(stored(reg_model)[1])
 
 
+@pytest.fixture(scope="module")
+def binary(bin_model, stored):
+    return client_for(stored(bin_model)[1])
+
+
 SETOSA = {"SepalLength": 5.1, "SepalWidth": 3.5, "PetalLength": 1.4, "PetalWidth": 0.2}
 JP_ROW = {"x": 0.3, "幅": -0.2, "color": "red"}
+BIN_ROW = {"bias": 0.3, "BiasTerm": -0.2, "color": "red"}
 
 
 def strict(text: str):
@@ -125,8 +147,8 @@ def strict(text: str):
     return json.loads(text, parse_constant=refuse)
 
 
-def invoke(client, instances):
-    return client.post("/invocations", json={"instances": instances})
+def invoke(client, instances, **fields):
+    return client.post("/invocations", json={"instances": instances, **fields})
 
 
 # --- /invocations: the predictions ------------------------------------------------------------
@@ -439,6 +461,288 @@ def test_a_body_at_the_cap_still_works(iris_model, stored, monkeypatch):
     client = client_for(stored(iris_model)[1])
     assert client.post("/invocations", content=body).status_code == 200
     assert client.post("/invocations", content=body + b" ").status_code == 413
+
+
+# --- /invocations: contributions, on request ---------------------------------------------------
+
+CLASSIFIER_KEYS = ["label", "index", "class_probabilities"]
+CLIENT_ROWS = {"iris": SETOSA, "jp": JP_ROW, "reg": JP_ROW, "binary": BIN_ROW}
+
+
+def _mixed_rows(row: dict) -> list:
+    first = next(iter(row))
+    return [row, dict(row, **{first: "abc"}), 5, {}, dict(row, **{first: None}), row]
+
+
+def _without_contributions(rows: list[dict]) -> list[dict]:
+    return [{k: v for k, v in row.items() if k != "contributions"} for row in rows]
+
+
+@pytest.mark.parametrize("name", ["iris", "reg", "binary"])
+def test_default_bytes_are_unchanged(request, name):
+    client = request.getfixturevalue(name)
+    rows = _mixed_rows(CLIENT_ROWS[name])
+    plain = invoke(client, rows)
+    assert plain.status_code == 200
+    for flag in (False, None):  # null counts as no key (typed clients send unset fields so)
+        off = invoke(client, rows, contributions=flag)
+        assert off.status_code == 200
+        assert off.content == plain.content and dict(off.headers) == dict(plain.headers)
+    on = invoke(client, rows, contributions=True)
+    assert on.status_code == 200
+    assert (
+        _without_contributions(strict(on.text)["predictions"]) == strict(plain.text)["predictions"]
+    )
+
+
+def test_whole_request_errors_are_unchanged_by_the_flag(iris):
+    for fields in ({}, {"contributions": False}, {"contributions": None}):
+        r = iris.post("/invocations", json={"instance": [SETOSA], **fields})
+        assert r.status_code == 400 and r.json() == {
+            "error": '"instances" must be a list of objects'
+        }
+        assert "retry-after" not in r.headers
+
+
+def test_contributions_key_order(iris, reg):
+    columns = list(iris.app.state.loaded.model.columns)
+    (row,) = strict(invoke(iris, [SETOSA], contributions=True).text)["predictions"]
+    assert list(row) == [*CLASSIFIER_KEYS, "contributions"]
+    assert list(row["contributions"]) == ["bias", "columns"]
+    assert list(row["contributions"]["columns"]) == columns
+    (row,) = strict(invoke(reg, [JP_ROW], contributions=True).text)["predictions"]
+    assert list(row) == ["value", "contributions"]
+    assert list(row["contributions"]["columns"]) == list(reg.app.state.loaded.model.columns)
+
+
+def _explained(row: dict, task: str) -> float:
+    if task == "regression":
+        return row["value"]
+    return row["class_probabilities"][1 if task == "binary" else row["index"]]
+
+
+@pytest.mark.parametrize(
+    ("name", "task"),
+    [("binary", "binary"), ("iris", "multiclass"), ("jp", "multiclass"), ("reg", "regression")],
+)
+def test_contributions_are_additive(request, name, task):
+    client = request.getfixturevalue(name)
+    if name == "iris":
+        data = load_iris(as_frame=True).data
+        rows = [dict(zip(SETOSA, map(float, r), strict=True)) for r in data.to_numpy()[::10]]
+    else:
+        frame = _japanese_frame(20)
+        if name == "binary":
+            frame = frame.rename(columns={"x": "bias", "幅": "BiasTerm"})
+        rows = frame[list(CLIENT_ROWS[name])].to_dict("records")
+        first = next(iter(CLIENT_ROWS[name]))
+        rows += [dict(rows[0], color="purple"), dict(rows[1], **{first: None})]
+    out = strict(invoke(client, rows, contributions=True).text)["predictions"]
+    assert len(out) == len(rows)
+    for row in out:
+        c = row["contributions"]
+        assert c["bias"] + sum(c["columns"].values()) == pytest.approx(
+            _explained(row, task), abs=1e-6
+        )
+    assert any(v != 0 for row in out for v in row["contributions"]["columns"].values())
+
+
+@pytest.mark.parametrize("flag", ["yes", "true", "null", 1, 0, [], {}])
+def test_non_bool_contributions_is_400(iris, flag):
+    r = invoke(iris, [SETOSA], contributions=flag)
+    assert r.status_code == 400 and list(r.json()) == ["error"]
+    assert "contributions" in r.json()["error"]
+
+
+def test_too_many_contribution_instances_is_413(iris_model, stored, monkeypatch):
+    monkeypatch.setenv("FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES", "3")
+    client = client_for(stored(iris_model)[1])
+    assert invoke(client, [SETOSA] * 3, contributions=True).status_code == 200
+    r = invoke(client, [SETOSA] * 4, contributions=True)
+    assert r.status_code == 413 and list(r.json()) == ["error"] and "3" in r.json()["error"]
+    assert invoke(client, [SETOSA] * 4).status_code == 200
+    assert invoke(client, [SETOSA] * 4, contributions=False).status_code == 200
+
+
+def test_the_contribution_limits_default_to_100_and_2():
+    assert DEFAULT_MAX_CONTRIBUTION_INSTANCES == 100
+    assert DEFAULT_MAX_CONTRIBUTION_REQUESTS == 2
+
+
+def test_101_contribution_instances_need_a_raised_setting(iris, iris_model, stored, monkeypatch):
+    rows = [SETOSA] * 101
+    r = invoke(iris, rows, contributions=True)
+    assert r.status_code == 413 and "at most 100" in r.json()["error"]
+    assert invoke(iris, rows).status_code == 200
+    monkeypatch.setenv("FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES", "101")
+    raised = client_for(stored(iris_model)[1])
+    out = strict(invoke(raised, rows, contributions=True).text)["predictions"]
+    assert len(out) == 101 and all("contributions" in row for row in out)
+
+
+@pytest.fixture
+def spied(iris, monkeypatch):
+    """The model calls made by ``iris`` requests: ``contributions`` and ``predict_proba``."""
+    calls: list[str] = []
+    model = iris.app.state.loaded.model
+    real_proba, real_contributions = type(model).predict_proba, explain.contributions
+
+    def proba(self, df):
+        calls.append("predict_proba")
+        return real_proba(self, df)
+
+    def contributions(model, df):
+        calls.append("contributions")
+        return real_contributions(model, df)
+
+    monkeypatch.setattr(type(model), "predict_proba", proba)
+    monkeypatch.setattr(explain, "contributions", contributions)
+    return calls
+
+
+def test_the_contribution_cap_is_checked_before_any_work(iris, spied):
+    r = invoke(iris, [SETOSA] * (DEFAULT_MAX_CONTRIBUTION_INSTANCES + 1), contributions=True)
+    assert r.status_code == 413 and spied == []
+    assert invoke(iris, [SETOSA], contributions=True).status_code == 200
+    assert spied == ["predict_proba", "contributions"]
+
+
+def test_a_model_too_wide_for_the_rows_is_422(iris, spied, monkeypatch):
+    model = iris.app.state.loaded.model
+    monkeypatch.setattr(explain, "CELLS", 2 * len(model.classes_) * len(model.prep.sources))
+    assert invoke(iris, [SETOSA] * 2, contributions=True).status_code == 200
+    spied.clear()
+    r = invoke(iris, [SETOSA] * 3, contributions=True)
+    assert r.status_code == 422 and list(r.json()) == ["error"] and "2" in r.json()["error"]
+    monkeypatch.setattr(explain, "CELLS", 1)
+    r = invoke(iris, [SETOSA], contributions=True)
+    assert r.status_code == 422 and "too many" in r.json()["error"]
+    assert spied == []
+    assert invoke(iris, [SETOSA] * 3).status_code == 200  # plain predictions are not limited
+
+
+def test_failing_row_has_no_contributions(iris):
+    rows = strict(invoke(iris, _mixed_rows(SETOSA), contributions=True).text)["predictions"]
+    assert [list(row) for row in rows] == [
+        [*CLASSIFIER_KEYS, "contributions"],
+        ["exception"],
+        ["exception"],
+        ["exception"],
+        [*CLASSIFIER_KEYS, "contributions"],
+        [*CLASSIFIER_KEYS, "contributions"],
+    ]
+
+
+def test_a_failing_batch_is_bisected_with_contributions(counted):
+    client, calls = counted
+    hundred = thousand({61})[:DEFAULT_MAX_CONTRIBUTION_INSTANCES]
+    rows = strict(invoke(client, hundred, contributions=True).text)["predictions"]
+    assert [i for i, row in enumerate(rows) if "exception" in row] == [61]
+    assert list(rows[61]) == ["exception"] and "secret" not in rows[61]["exception"]
+    assert all(list(row) == [*CLASSIFIER_KEYS, "contributions"] for row in rows[:61])
+    assert len(calls) <= 2 * 7 + 3
+
+
+def test_a_row_whose_contributions_fail_is_an_exception(jp, monkeypatch):
+    real = explain.contributions
+
+    def flaky(model, df):
+        if (df["x"] > 100).any():
+            raise RuntimeError("secret internal detail")
+        return real(model, df)
+
+    monkeypatch.setattr(explain, "contributions", flaky)
+    rows = [JP_ROW, dict(JP_ROW, x=1000.0), JP_ROW]
+    out = strict(invoke(jp, rows, contributions=True).text)["predictions"]
+    assert [list(row) for row in out] == [
+        [*CLASSIFIER_KEYS, "contributions"],
+        ["exception"],
+        [*CLASSIFIER_KEYS, "contributions"],
+    ]
+    assert "secret" not in out[1]["exception"]
+    assert all("label" in row for row in strict(invoke(jp, rows).text)["predictions"])
+
+
+def _hold_every_slot(app) -> int:
+    held = 0
+    while app.state.contribution_requests.acquire(blocking=False):
+        held += 1
+    return held
+
+
+def _free(app, held: int) -> None:
+    for _ in range(held):
+        app.state.contribution_requests.release()
+
+
+def test_in_flight_cap_returns_503(iris):
+    held = _hold_every_slot(iris.app)
+    try:
+        assert held == DEFAULT_MAX_CONTRIBUTION_REQUESTS
+        r = invoke(iris, [SETOSA], contributions=True)
+        assert r.status_code == 503 and r.headers["retry-after"] == "1"
+        assert list(r.json()) == ["error"]
+        assert invoke(iris, [SETOSA]).status_code == 200
+        assert invoke(iris, [SETOSA], contributions=False).status_code == 200
+    finally:
+        _free(iris.app, held)
+    assert invoke(iris, [SETOSA], contributions=True).status_code == 200
+
+
+def test_rejected_and_failed_contribution_requests_free_their_slot(iris_model, stored, monkeypatch):
+    monkeypatch.setenv("FIONE_SERVING_MAX_CONTRIBUTION_REQUESTS", "1")
+    monkeypatch.setenv("FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES", "2")
+    app = create_app(stored(iris_model)[1], image_tag=TAG)
+    client = TestClient(app, raise_server_exceptions=False)
+    assert invoke(client, [SETOSA], contributions="yes").status_code == 400
+    assert invoke(client, [SETOSA] * 3, contributions=True).status_code == 413
+    with monkeypatch.context() as m:
+        m.setattr(explain, "CELLS", 1)
+        assert invoke(client, [SETOSA], contributions=True).status_code == 422
+    with monkeypatch.context() as m:
+        m.setattr(Predictor, "predict", lambda *a, **k: 1 / 0)
+        assert invoke(client, [SETOSA], contributions=True).status_code == 500
+    held = _hold_every_slot(app)
+    _free(app, held)
+    assert held == 1
+    assert invoke(client, [SETOSA], contributions=True).status_code == 200
+    assert _hold_every_slot(app) == 1
+
+
+@pytest.mark.parametrize(
+    "name", ["FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES", "FIONE_SERVING_MAX_CONTRIBUTION_REQUESTS"]
+)
+def test_a_bad_contribution_limit_setting_is_refused(iris_model, stored, monkeypatch, name):
+    _, model_dir = stored(iris_model)
+    for raw in ("0", "lots"):
+        monkeypatch.setenv(name, raw)
+        with pytest.raises(ValueError, match=name):
+            create_app(model_dir, image_tag=TAG)
+
+
+def test_model_description_is_unchanged(iris, reg, binary):
+    phase1 = [
+        "names", "domains", "responseColumn", "category", "nclasses", "nfeatures",
+        "uuid", "instance", "engine", "fioneVersion",
+    ]  # fmt: skip
+    for client in (iris, reg, binary):
+        assert list(strict(client.get("/model").text)) == phase1
+
+
+def test_a_column_named_BiasTerm_or_bias_stays_in_columns(binary, bin_model):
+    r = invoke(binary, [BIN_ROW], contributions=True)
+    (row,) = strict(r.text)["predictions"]
+    assert list(row) == [*CLASSIFIER_KEYS, "contributions"]
+    contributions = row["contributions"]
+    assert list(contributions) == ["bias", "columns"]
+    assert list(contributions["columns"]) == list(bin_model.columns)
+    assert {"bias", "BiasTerm"} <= set(contributions["columns"])
+    assert isinstance(contributions["bias"], float)
+
+
+def test_japanese_column_names_are_not_escaped_in_contributions(jp):
+    r = invoke(jp, [JP_ROW], contributions=True)
+    assert '"幅":' in r.text
 
 
 # --- the other endpoints ----------------------------------------------------------------------

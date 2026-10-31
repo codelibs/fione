@@ -126,6 +126,18 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX module_models_project_id ON module_models(project_id);
     """,
+    """
+    ALTER TABLE models ADD COLUMN diagnostics_json TEXT;
+    """,
+    """
+    CREATE TABLE model_explanations (
+        model_id INTEGER PRIMARY KEY REFERENCES models(id) ON DELETE CASCADE,
+        job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+        dataset_id INTEGER REFERENCES datasets(id) ON DELETE SET NULL,
+        payload_json TEXT NOT NULL,
+        created_at REAL NOT NULL
+    );
+    """,
 ]
 
 

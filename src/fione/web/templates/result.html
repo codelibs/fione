@@ -22,6 +22,37 @@
     <h2 class="section-header__title" id="result-preview-title">{{ t('result.preview', n=preview.rows|length) }}</h2>
     {{ preview_table(t, preview, t('result.preview', n=preview.rows|length)) }}
     <p class="text-muted text-sm">{{ t('result.columns_explain') }}</p>
+    {% if contributions %}
+    <details class="details card card-padded">
+      <summary>{{ t('result.contributions', n="{:,}".format(contributions.total)) }}</summary>
+      <div class="stack-tight">
+        <p class="text-muted text-sm">{{ t('result.contributions_explain') }}</p>
+        {{ preview_table(t, contributions.preview, t('result.contributions', n="{:,}".format(contributions.total))) }}
+        {% if contributions.more %}<p class="text-muted text-sm">{{ t('result.contributions_more', n="{:,}".format(contributions.more)) }}</p>{% endif %}
+      </div>
+    </details>
+    {% endif %}
   </section>
+  {% if model_id %}
+  {% set why_url = "/projects/" ~ pid ~ "/jobs/" ~ job.id ~ "/result/why" %}
+  <p class="visually-hidden" role="status" id="why-status"></p>
+  {% if why_gate and why_gate != "click" %}
+  <section class="stack-tight" id="why" aria-labelledby="why-title">
+    <h2 class="section-header__title" id="why-title">{{ t('why.title') }}</h2>
+    <p class="text-muted">{{ t(why_gate) }}</p>
+  </section>
+  {% elif why_gate == "click" %}
+  <section class="stack-tight" id="why" aria-labelledby="why-title">
+    <h2 class="section-header__title" id="why-title">{{ t('why.title') }}</h2>
+    <p class="text-muted">{{ t('why.click_hint') }}</p>
+    <p><button type="button" class="btn btn-secondary" hx-get="{{ why_url }}" hx-target="#why" hx-swap="outerHTML">{{ t('why.show') }}</button></p>
+  </section>
+  {% else %}
+  <section class="stack-tight" id="why" aria-labelledby="why-title" hx-get="{{ why_url }}" hx-trigger="load" hx-swap="outerHTML">
+    <h2 class="section-header__title" id="why-title">{{ t('why.title') }}</h2>
+    <p class="text-muted">{{ t('why.loading') }}</p>
+  </section>
+  {% endif %}
+  {% endif %}
 </div>
 {% endblock %}

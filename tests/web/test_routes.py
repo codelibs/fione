@@ -60,6 +60,7 @@ EASYML_ROUTES = {
     ("GET", P + "/jobs/{job}/status"): (303, 200, 200, 200, 404),
     ("POST", P + "/jobs/{job}/cancel"): (401, 303, 303, 403, 404),
     ("GET", P + "/jobs/{predict_job}/result"): (303, 200, 200, 200, 404),
+    ("GET", P + "/jobs/{predict_job}/result/why"): (303, 200, 200, 200, 404),
     ("GET", P + "/models/{model}/summary"): (303, 200, 200, 200, 404),
     ("GET", P + "/models/{model}/predict"): (303, 200, 200, 403, 404),
     ("POST", P + "/models/{model}/predict"): (401, 303, 303, 403, 404),
@@ -75,6 +76,7 @@ ROUTE_PATHS = {  # the router's path -> the table's template
     "/projects/{pid}/jobs/{jid}/status": P + "/jobs/{job}/status",
     "/projects/{pid}/jobs/{jid}/cancel": P + "/jobs/{job}/cancel",
     "/projects/{pid}/jobs/{jid}/result": P + "/jobs/{predict_job}/result",
+    "/projects/{pid}/jobs/{jid}/result/why": P + "/jobs/{predict_job}/result/why",
     "/projects/{pid}/models/{mid}/summary": P + "/models/{model}/summary",
     "/projects/{pid}/models/{mid}/predict": P + "/models/{model}/predict",
     "/projects/{pid}/models/{mid}/predict/run": P + "/models/{model}/predict/run",
@@ -178,6 +180,8 @@ MODEL_ROUTES = {
     ("GET", P + "/models/{model}"): READ,
     ("GET", P + "/models/{model}/export"): (303, 200, 200, 200, 404, 200),
     ("POST", P + "/models/{model}/delete"): WRITE_POST,
+    ("GET", P + "/models/{model}/explain/pd"): READ,
+    ("POST", P + "/models/{model}/explain"): WRITE_POST,
 }
 MODEL_PATHS = {
     "/projects/{pid}/models": P + "/models",
@@ -186,6 +190,8 @@ MODEL_PATHS = {
     "/projects/{pid}/models/{mid}": P + "/models/{model}",
     "/projects/{pid}/models/{mid}/export": P + "/models/{model}/export",
     "/projects/{pid}/models/{mid}/delete": P + "/models/{model}/delete",
+    "/projects/{pid}/models/{mid}/explain/pd": P + "/models/{model}/explain/pd",
+    "/projects/{pid}/models/{mid}/explain": P + "/models/{model}/explain",
 }
 # The global modules screens x anonymous and the global roles.
 MODULE_PERSONAS = {"anonymous": None, "viewer": "gv", "editor": "ed", "admin": "admin"}
@@ -272,8 +278,15 @@ def sharing_request(world, method, template, csrf):
 def model_request(world, method, template, csrf, objects=None):
     client, path = world.client, world.path(template, None, objects)
     if method == "GET":
-        return client.get(path, follow_redirects=False)
+        # the fragment computes for a column (the model has no training data: a message)
+        params = {"column": "petal width (cm)"} if path.endswith("/explain/pd") else None
+        return client.get(path, params=params, follow_redirects=False)
     token = {"csrf_token": csrf or ""}
+    if path.endswith("/explain"):  # the model has no training data: a dataset is chosen
+        ids = world.ids[objects or world.p]
+        return client.post(
+            path, data=token | {"dataset_id": str(ids["train"])}, follow_redirects=False
+        )
     if path.endswith("/import"):
         with closing(connect(client)) as conn:
             record = models_service.get_model(conn, world.ids[world.q]["model"])

@@ -1,9 +1,12 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
-from predict_models import LABELS, classifier, features, regressor
+from predict_models import LABELS, binary, classifier, features, regressor
 
-from fione.predict import PredictInputError, batch_predict, predict_chunks
+from fione.engine import explain
+from fione.predict import PredictInputError, batch, batch_predict, predict_chunks
 
 PROBA = [f"p_{label}" for label in sorted(LABELS)]
 
@@ -245,3 +248,136 @@ def test_predictions_are_the_same_for_nullable_integer_and_float_input(cls):
     pd.testing.assert_frame_equal(
         batch_predict(cls, as_int, ["幅"]), batch_predict(cls, as_float, ["幅"])
     )
+
+
+# --- contributions --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def bin_():
+    return binary()
+
+
+def contributions_of(out: pd.DataFrame, model) -> pd.DataFrame:
+    return out[batch.contribution_columns(model)]
+
+
+def test_contribution_columns_name_each_model_column_then_the_bias(cls):
+    assert batch.contribution_columns(cls) == [
+        "contrib_x",
+        "contrib_幅",
+        "contrib_color",
+        "contrib_bias",
+    ]
+
+
+def test_a_model_column_named_bias_keeps_the_bias_column_apart():
+    model = SimpleNamespace(columns=["bias", "x", "contrib_bias_2"])
+    assert batch.contribution_columns(model) == [
+        "contrib_bias",
+        "contrib_x",
+        "contrib_contrib_bias_2",
+        "contrib_bias_2",
+    ]
+    taken = SimpleNamespace(columns=["bias", "bias_2"])
+    assert batch.contribution_columns(taken) == ["contrib_bias", "contrib_bias_2", "contrib_bias_3"]
+
+
+@pytest.mark.parametrize("kind", ["binary", "multiclass", "regression"])
+def test_contributions_sum_to_the_prediction(kind, cls, bin_, reg):
+    model = {"binary": bin_, "multiclass": cls, "regression": reg}[kind]
+    df = features(60).astype({"x": object})
+    df.loc[2, "x"] = None
+    df.loc[3, "color"] = "unseen"
+    out = batch_predict(model, df, contributions=True)
+    total = contributions_of(out, model).sum(axis=1).to_numpy()
+    if kind == "regression":
+        explained = out["predict"].to_numpy()
+    elif kind == "binary":
+        explained = out[f"p_{model.classes_[1]}"].to_numpy()
+    else:
+        explained = np.array([out.at[i, f"p_{label}"] for i, label in enumerate(out["predict"])])
+    np.testing.assert_allclose(total, explained, atol=1e-5)
+    assert np.abs(contributions_of(out, model).drop(columns="contrib_bias").to_numpy()).sum() > 0
+
+
+def test_contribution_columns_come_after_the_predictions_and_before_the_inputs(cls, reg):
+    df = features(10)
+    out = batch_predict(cls, df, contributions=True)
+    assert list(out.columns) == ["predict", *PROBA, *batch.contribution_columns(cls), *df.columns]
+    out = batch_predict(reg, df, ["color"], contributions=True)
+    assert list(out.columns) == ["predict", *batch.contribution_columns(reg), "color"]
+    assert all(out[c].dtype == float for c in batch.contribution_columns(reg))
+    pd.testing.assert_frame_equal(
+        out.drop(columns=batch.contribution_columns(reg)), batch_predict(reg, df, ["color"])
+    )
+
+
+def test_colliding_input_columns_are_renamed(cls):
+    df = features(10).assign(contrib_x="mine", contrib_bias=7, bias="b")
+    out = batch_predict(cls, df, contributions=True)
+    assert list(out.columns) == [
+        "predict",
+        *PROBA,
+        *batch.contribution_columns(cls),
+        "x",
+        "幅",
+        "color",
+        "input_contrib_x",
+        "input_contrib_bias",
+        "bias",
+    ]
+    assert (out["input_contrib_x"] == "mine").all() and (out["input_contrib_bias"] == 7).all()
+    assert (out["bias"] == "b").all() and out["contrib_x"].dtype == float
+    plain = batch_predict(cls, df)  # without contributions nothing is renamed
+    assert list(plain.columns)[-3:] == ["contrib_x", "contrib_bias", "bias"]
+
+
+def test_without_contributions_the_output_is_unchanged(cls):
+    df = features(30)
+    pd.testing.assert_frame_equal(
+        batch_predict(cls, df, contributions=False), batch_predict(cls, df)
+    )
+    assert not [c for c in batch_predict(cls, df).columns if c.startswith("contrib_")]
+    assert batch.included_columns(cls, ["contrib_x"]) == {"contrib_x": "contrib_x"}
+
+
+def test_contributions_go_in_smaller_chunks(cls, monkeypatch):
+    df = features(20)
+    whole = batch_predict(cls, df, contributions=True)
+    monkeypatch.setattr(batch, "CONTRIBUTION_CHUNK_ROWS", 6)
+    pieces = list(predict_chunks(cls, df, contributions=True))
+    assert [len(p) for p in pieces] == [6, 6, 6, 2]
+    pd.testing.assert_frame_equal(pd.concat(pieces, ignore_index=True), whole)
+    assert [len(p) for p in predict_chunks(cls, df, chunk_rows=4, contributions=True)] == [4] * 5
+    assert [len(p) for p in predict_chunks(cls, df)] == [20]  # the plain chunk size is unchanged
+    # rows x classes x columns stay within the explanations' cell cap
+    monkeypatch.setattr(explain, "CELLS", 3 * 3 * len(cls.prep.sources))
+    assert [len(p) for p in predict_chunks(cls, df, contributions=True)] == [3] * 6 + [2]
+
+
+def test_a_model_too_wide_for_one_row_is_refused(cls, monkeypatch):
+    monkeypatch.setattr(explain, "CELLS", 1)
+    with pytest.raises(PredictInputError, match="too wide"):
+        predict_chunks(cls, features(5), contributions=True)
+    assert len(batch_predict(cls, features(5))) == 5
+
+
+def test_contributions_are_limited_in_rows(cls, monkeypatch):
+    assert batch.MAX_CONTRIBUTION_ROWS == 100_000 and batch.CONTRIBUTION_CHUNK_ROWS == 5_000
+    with pytest.raises(PredictInputError) as e:
+        batch.check_contribution_rows(100_001)
+    assert str(e.value) == "contributions are limited to 100,000 rows"
+    batch.check_contribution_rows(100_000)
+    monkeypatch.setattr(batch, "MAX_CONTRIBUTION_ROWS", 10)
+    assert len(batch_predict(cls, features(10), contributions=True)) == 10
+    with pytest.raises(PredictInputError, match="limited to 10 rows"):
+        predict_chunks(cls, features(11), contributions=True)
+    assert len(batch_predict(cls, features(11))) == 11
+
+
+def test_an_empty_frame_with_contributions_has_the_columns(cls):
+    df = features().iloc[:0]
+    out = batch_predict(cls, df, contributions=True)
+    assert len(out) == 0
+    assert list(out.columns) == ["predict", *PROBA, *batch.contribution_columns(cls), *df.columns]

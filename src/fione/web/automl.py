@@ -24,6 +24,7 @@ from fione.api.deps import Conn
 from fione.api.routes_datasets import cell
 from fione.api.routes_jobs import delete_finished_job, delete_finished_jobs_of
 from fione.api.schemas import job_out
+from fione.data.profile import SCORE_REASONS
 from fione.engine import metrics
 from fione.engine.config import ConfigError, TargetError, TrainConfig
 from fione.jobs import store
@@ -39,8 +40,10 @@ from fione.web.easyml import (
     MAX_FORM_FIELDS,
     STOP_POLLING,
     _analysis,
+    _chosen,
     _clock,
     _default_target,
+    _leak_check,
     _names,
     _pct,
     _profile,
@@ -59,7 +62,7 @@ DATA_MAX_COLUMNS = 50  # and columns per page
 TOP_PAIRS = 20  # correlations: what the profile keeps
 JOBS_PER_PAGE = 50
 POLL_ACTIVE, POLL_IDLE = "5s", "30s"  # job-list refresh
-JOB_KINDS = ("automl", "batch_predict", "module", "export_models")
+JOB_KINDS = ("automl", "batch_predict", "module", "export_models", "explain")
 TASKS = ("auto", "classification", "regression")
 MAX_RUNTIME_DIGITS = 6  # minutes, as in the wizard
 SEED_MAX = 2**32 - 1  # numpy's RandomState (the folds) takes 0..2**32-1
@@ -130,14 +133,18 @@ def _size(request: Request, dataset: Dataset) -> int | None:
     return request.app.state.ui_sizes.get(dataset.id, read)
 
 
-def _leaks(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str) -> dict:
-    """Column name -> leak reason key for ``target`` (cached per dataset and target)."""
-
-    def compute():
-        found, _, _ = _analysis(request, conn, ctx, dataset, target)
-        return {s.column: LEAK_REASONS.get(s.reason, "other") for s in found.profile.leak_suspects}
-
-    return request.app.state.ui_leaks.get((dataset.id, target), compute)
+def _leaks(request: Request, dataset: Dataset, target: str) -> dict:
+    """Column name -> ``{"key", "score", "exact"}`` of its leak reason for the column
+    ``target`` (the check is cached). Only exact reasons are certain; the others only warn."""
+    _, (check, _) = _leak_check(request, dataset, target)
+    return {
+        s.column: {
+            "key": LEAK_REASONS.get(s.reason, "other"),
+            "score": s.score,
+            "exact": s.reason not in SCORE_REASONS,
+        }
+        for s in check.suspects
+    }
 
 
 # --- datasets -------------------------------------------------------------------------------
@@ -284,7 +291,7 @@ def dataset_detail(request: Request, conn: Conn, pid: str, did: str) -> Response
     if dataset.type == DatasetType.TRAIN and names:
         kinds = {c.name: c.kind for c in profile.columns}
         target = q.get("target") if q.get("target") in names else _default_target(names, kinds)
-        leaks = _leaks(request, conn, ctx, dataset, target)
+        leaks = _leaks(request, dataset, target)
     cpages = max(1, math.ceil(len(profile.columns) / COLUMNS_PER_PAGE))
     cpage = _int_param(q.get("cpage"), 1, 1, cpages)
     columns = profile.columns[(cpage - 1) * COLUMNS_PER_PAGE : cpage * COLUMNS_PER_PAGE]
@@ -376,7 +383,7 @@ def column_detail(request: Request, conn: Conn, pid: str, did: str, name: str) -
         q = request.query_params
         target = q.get("target") if q.get("target") in names else _default_target(names, kinds)
         if target != col.name:
-            leak = _leaks(request, conn, ctx, dataset, target).get(col.name)
+            leak = _leaks(request, dataset, target).get(col.name)
     return _view(
         request,
         "column.html",
@@ -565,8 +572,8 @@ def train(request: Request, conn: Conn, pid: str, did: str, form: Posted) -> Res
     dataset = dataset_in(conn, ctx, did)
     names = _names(dataset)
     target = _text(form, "target")
-    found, _, _ = _analysis(request, conn, ctx, dataset, target if target in names else None)
-    config, inputs, values, errors = _parse_train(form, names, found.task)
+    _, (_, task) = _leak_check(request, dataset, _chosen(request, dataset, target))
+    config, inputs, values, errors = _parse_train(form, names, task)
 
     def again(errors: dict, detail: str | None = None) -> Response:
         return _train_view(
@@ -612,6 +619,10 @@ def _job_row(ctx: Ctx, job: Job, now: float) -> dict:
         link = f"/projects/{pid}/models/{result['model_id']}"  # the model page
     elif job.status == JobStatus.DONE and job.kind == "batch_predict":
         link = f"/projects/{pid}/jobs/{job.id}/result"
+    elif job.status == JobStatus.DONE and job.kind == "explain":
+        model_id = job.payload.get("model_id")
+        if isinstance(model_id, int):
+            link = f"/projects/{pid}/models/{model_id}?tab=explain"
     info = job_out(job, admin=ctx.admin)  # the message as the API shows it to this user
     return {
         "job": job,

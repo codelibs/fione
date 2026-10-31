@@ -298,11 +298,14 @@ def shoot_all(
     langs=("en",),
     username: str = ADMIN,
     charts: bool = False,
+    ready: str | None = None,
 ) -> None:
     for lang, scheme, viewport in s.variants(langs):
         page = s.page(scheme, viewport, lang)
         sign_in(page, base, username)
         page.goto(base + url)
+        if ready:  # a fragment the page loads by itself has been swapped in
+            page.locator(ready).first.wait_for(timeout=60_000)
         wait_settled(page)
         if charts:
             charts_drawn(s, page, name)
@@ -312,7 +315,7 @@ def shoot_all(
 
 def charts_drawn(s: "Shooter", page: Page, name: str) -> None:
     """Every visible chart has been drawn: a canvas of non-zero size."""
-    visible = page.locator("[data-chart]:visible")
+    visible = page.locator("[data-chart]:visible, [data-chart-spec]:visible")
     if not visible.count():
         s.errors.append(f"{name}: no chart shown")
     for index in range(visible.count()):
@@ -428,7 +431,7 @@ def easyml(s: "Shooter", base: str) -> None:
         assert response.ok and "predict_iris_test.csv" in response.headers["content-disposition"]
         page.context.close()
         shoot_all(s, base, columns, "predict-columns")
-        shoot_all(s, base, result, "result")
+        shoot_all(s, base, result, "result", ("en", "ja"), ready="#why .why-row")
 
         # A run the engine would refuse (gaps in the column to predict) is refused inline;
         # one that fails in the worker (only a constant input), and one that is cancelled.
@@ -576,6 +579,13 @@ def model_screens(s: "Shooter", base: str, project: str) -> None:
     sign_in(page, base)
     page.goto(base + project + "/models")
     model = page.locator("table th.cell-name a").first.get_attribute("href")
+    # The explain job queued after training: its result is what the Explain tab shows.
+    explained = f"{base}/api/v1/models/{model.rsplit('/', 1)[1]}/explanations"
+    deadline = time.monotonic() + 180
+    while (status := page.request.get(explained).json()["status"]) != "done":
+        if status in ("failed", "cancelled") or time.monotonic() > deadline:
+            raise SystemExit(f"the explanation was not computed ({status})")
+        time.sleep(1)
     page.context.close()
     shoot_all(s, base, project + "/models", "models", charts=True)
     shoot_all(s, base, model, "model-overview", ("en", "ja"))
@@ -587,6 +597,7 @@ def model_screens(s: "Shooter", base: str, project: str) -> None:
     ):
         shoot_all(s, base, f"{model}?tab={tab}", f"model-{tab}", charts=charts)
     shoot_all(s, base, f"{model}?tab=history", "model-history", ("ja",), charts=True)
+    shoot_all(s, base, f"{model}?tab=explain", "model-explain", ("en", "ja"), charts=True)
     shoot_all(s, base, project + "/models/import", "import", ("en", "ja"))
     shoot_all(s, base, "/modules", "modules", ("en", "ja"))
     shoot_all(s, base, "/modules/upload", "module-upload", ("en", "ja"))
