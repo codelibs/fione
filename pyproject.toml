@@ -33,6 +33,7 @@ dev = [
     "pytest-cov",
     "ruff",
     "playwright",
+    "pytest-xdist>=3.8.0",
 ]
 # What the notebook image installs (src/fione_notebook runs inside it); the notebook tests
 # need it too. Plotting and scikit-learn are here because without egress the image is the
