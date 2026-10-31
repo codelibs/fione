@@ -1,0 +1,87 @@
+{% from "_macros.html" import icon, logo, theme_toggle, lang_switch, toast %}
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"attributesToSettle":["class"],"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"...","swap":false,"error":true}]}'>
+  {% if csrf %}<meta name="csrf-token" content="{{ csrf }}">{% endif %}
+  <title>{% block title %}{% endblock %} · Fione</title>
+  <script src="{{ static('js/theme-init.js') }}"></script>
+  <link rel="stylesheet" href="{{ static('css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ static('css/app.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ static('img/favicon.svg') }}">
+  <script src="{{ static('vendor/htmx/htmx.min.js') }}" defer></script>
+  <script src="{{ static('js/app.js') }}" defer></script>
+  {% block scripts %}{% endblock %}
+</head>
+<body{% if csrf %} hx-headers='{{ {"X-CSRF-Token": csrf}|tojson }}'{% endif %} data-msg-error="{{ t('error.generic') }}" data-msg-network="{{ t('error.network') }}">
+  <a class="skip-link" href="#main">{{ t('nav.skip') }}</a>
+  <header class="app-header">
+    <div class="app-header__inner container">
+      <a class="brand" href="/">{{ logo() }}<span class="brand__name">Fione</span></a>
+      {% if user %}
+      <button type="button" class="btn btn-ghost btn-icon nav-toggle" aria-controls="app-nav" aria-expanded="false">
+        {{ icon("menu") }}<span class="visually-hidden">{{ t('nav.menu') }}</span>
+      </button>
+      <div class="app-nav" id="app-nav">
+        <nav class="app-nav__links" aria-label="{{ t('nav.main') }}">
+          <a href="/"{% if nav == "projects" %} aria-current="page"{% endif %}>{{ icon("folder") }}{{ t('nav.projects') }}</a>
+        </nav>
+        <div class="app-nav__tools">
+          {{ lang_switch(t, lang, here) }}
+          {{ theme_toggle(t) }}
+          <details class="menu">
+            <summary class="btn btn-ghost menu__trigger">
+              <span class="avatar" aria-hidden="true">{{ user.username[:1]|upper }}</span>
+              <span class="menu__name">{{ user.username }}</span>
+              <span class="visually-hidden">{{ t('user.menu') }}</span>
+              {{ icon("chevron", "icon icon-sm") }}
+            </summary>
+            <div class="menu__panel">
+              <p class="menu__who">{{ t('user.signed_in_as', username=user.username) }}</p>
+              <p><span class="badge badge-neutral">{{ t('role.' ~ user.role.value) }}</span></p>
+              <form class="stack-tight" method="post" action="/ui/mode" aria-labelledby="mode-label">
+                <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                <input type="hidden" name="next" value="{{ here }}">
+                <p class="menu__label" id="mode-label">{{ t('mode.label') }}</p>
+                <div class="segmented">
+                  <button type="submit" name="mode" value="simple" aria-pressed="{{ 'true' if mode == 'simple' else 'false' }}">{{ t('mode.simple') }}</button>
+                  <button type="submit" name="mode" value="detailed" aria-pressed="{{ 'true' if mode == 'detailed' else 'false' }}">{{ t('mode.detailed') }}</button>
+                </div>
+                <p class="text-muted text-xs">{{ t('mode.hint') }}</p>
+              </form>
+              <a class="menu__link" href="/account"{% if nav == "account" %} aria-current="page"{% endif %}>{{ icon("key", "icon icon-sm") }}{{ t('account.title') }}</a>
+              {% if user.role.value == "admin" %}
+              <a class="menu__link" href="/admin/users"{% if nav == "users" %} aria-current="page"{% endif %}>{{ icon("users", "icon icon-sm") }}{{ t('users.title') }}</a>
+              <a class="menu__link" href="/admin/system"{% if nav == "system" %} aria-current="page"{% endif %}>{{ icon("chart", "icon icon-sm") }}{{ t('system.title') }}</a>
+              {% endif %}
+              {% if user.role.value == "admin" or mode == "detailed" %}
+              <a class="menu__link" href="/modules">{{ icon("terminal", "icon icon-sm") }}{{ t('modules.title') }}</a>
+              {% endif %}
+              <form method="post" action="/logout">
+                <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                <button type="submit" class="btn btn-secondary btn-block">{{ t('auth.logout') }}</button>
+              </form>
+            </div>
+          </details>
+        </div>
+      </div>
+      {% else %}
+      <div class="app-header__tools">
+        {{ lang_switch(t, lang, here) }}
+        {{ theme_toggle(t) }}
+      </div>
+      {% endif %}
+    </div>
+  </header>
+  <main id="main" class="app-main" tabindex="-1">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="app-footer container">Fione {{ version }}</footer>
+  <div id="toasts" class="toasts" role="region" aria-label="{{ t('toast.region') }}" aria-live="polite"></div>
+  <template data-toast-template="success">{{ toast(t, "", "success") }}</template>
+  <template data-toast-template="danger">{{ toast(t, "", "danger") }}</template>
+</body>
+</html>

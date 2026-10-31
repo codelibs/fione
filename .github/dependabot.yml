@@ -1,0 +1,8 @@
+# Keeps the actions in .github/workflows current: the third-party ones are pinned to commit
+# SHAs (the version as a comment), which Dependabot updates together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

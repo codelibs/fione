@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, breadcrumb, kind_badge with context %}
+{% block title %}{{ t('train.title') }} · {{ dataset.name }}{% endblock %}
+{% block scripts %}
+<script src="{{ static('js/easyml.js') }}" defer></script>
+<script src="{{ static('js/automl.js') }}" defer></script>
+{% endblock %}
+
+{% macro error(field) %}{% if errors[field] %}<p class="field__error" id="{{ field }}-error">{{ icon("alert", "icon icon-sm") }}{{ t(errors[field]) }}</p>{% endif %}{% endmacro %}
+{% macro described(field, hint=True) %} aria-describedby="{% if hint %}{{ field }}-hint{% endif %}{% if errors[field] %} {{ field }}-error{% endif %}"{% if errors[field] %} aria-invalid="true"{% endif %}{% endmacro %}
+{% macro number(field, min=None, max=None, optional=False, step="1") %}
+<div class="field">
+  <label class="field__label" for="f-{{ field }}">{{ t('train.f.' ~ field) }}{% if optional %} <span class="text-muted">({{ t('train.optional') }})</span>{% endif %}</label>
+  <input class="input input-md" type="number" id="f-{{ field }}" name="{{ field }}" value="{{ values[field] }}" inputmode="{{ 'decimal' if step != '1' else 'numeric' }}" step="{{ step }}"{% if min is not none %} min="{{ min }}"{% endif %}{% if max is not none %} max="{{ max }}"{% endif %}{% if not optional %} required{% endif %}{{ described(field) }}>
+  <p class="field__hint" id="{{ field }}-hint">{{ t('train.h.' ~ field) }}</p>
+  {{ error(field) }}
+</div>
+{% endmacro %}
+{% macro metric(field) %}
+<div class="field">
+  <label class="field__label" for="f-{{ field }}">{{ t('train.f.' ~ field) }}</label>
+  <select class="input input-md" id="f-{{ field }}" name="{{ field }}" data-metric-select{{ described(field) }}>
+    <option value="auto"{% if values[field] == "auto" %} selected{% endif %}>{{ t('train.metric.auto') }}</option>
+    {% for name, task in metric_options %}
+    <option value="{{ name }}" data-task="{{ task }}"{% if values[field] == name %} selected{% endif %}>{{ t('train.metric.' ~ name) }}</option>
+    {% endfor %}
+  </select>
+  <p class="field__hint" id="{{ field }}-hint">{{ t('train.h.' ~ field) }}</p>
+  {{ error(field) }}
+</div>
+{% endmacro %}
+{% macro flag(field) %}
+<div class="check-field">
+  <input class="checkbox" type="checkbox" id="f-{{ field }}" name="{{ field }}"{% if values[field] %} checked{% endif %} aria-describedby="{{ field }}-hint">
+  <div>
+    <label class="field__label" for="f-{{ field }}">{{ t('train.f.' ~ field) }}</label>
+    <p class="field__hint" id="{{ field }}-hint">{{ t('train.h.' ~ field) }}</p>
+  </div>
+</div>
+{% endmacro %}
+
+{% block content %}
+{% set pid = ctx.project.id %}
+{% set base = "/projects/" ~ pid ~ "/datasets/" ~ dataset.id %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, t('train.title'), section="datasets") }}
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('train.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('train.lead', name=dataset.name) }}</p>
+    <p><a href="{{ base }}/analyze?target={{ target|urlencode }}">{{ icon("back", "icon icon-sm") }} {{ t('train.guided') }}</a></p>
+  </header>
+
+  <section class="card card-padded stack" aria-labelledby="target-title">
+    <h2 class="section-header__title" id="target-title">{{ t('analysis.target_label') }}</h2>
+    <form class="target-form" method="get" action="{{ base }}/train" hx-get="{{ base }}/train" hx-trigger="change" hx-target="#train-body" hx-select="#train-body" hx-swap="outerHTML" hx-push-url="true">
+      <div class="field">
+        <label class="visually-hidden" for="target-select">{{ t('analysis.target_label') }}</label>
+        <div class="target-form__row">
+          <select class="input" id="target-select" name="target" aria-describedby="target-hint{% if errors.target %} target-error{% endif %}"{% if errors.target %} aria-invalid="true"{% endif %}>
+            {% for col in columns %}<option value="{{ col.profile.name }}"{% if col.target %} selected{% endif %}>{{ col.profile.name }}</option>{% endfor %}
+          </select>
+          <button type="submit" class="btn btn-secondary js-hidden">{{ t('analysis.target_apply') }}</button>
+        </div>
+        <p class="field__hint" id="target-hint">{{ t('analysis.target_hint') }}</p>
+        {% if errors.target %}<p class="field__error" id="target-error" role="alert">{{ icon("alert", "icon icon-sm") }}{{ t(errors.target) }}</p>{% endif %}
+      </div>
+    </form>
+  </section>
+
+  <div id="train-body" class="stack-lg">
+    {% if dataset.type.value != "train" %}
+    <div class="alert alert-danger" role="note">{{ icon("alert") }}<span>{{ t('analysis.warn.not_train') }}</span></div>
+    {% endif %}
+    <form class="stack-lg" id="train-form" method="post" action="{{ base }}/train" data-run-form data-detected-task="{{ detected }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="target" value="{{ target }}">
+      {% if errors %}
+      <div class="alert alert-danger" role="alert" id="run-errors" tabindex="-1" autofocus>
+        {{ icon("alert") }}
+        <div class="stack-tight">
+          <p><strong>{{ t('analysis.error.summary') }}</strong></p>
+          <ul class="error-list">{% for field, key in errors.items() %}<li>{% if field != "form" %}{{ t('train.f.' ~ field) if field not in ("target", "inputs") else (t('analysis.target_label') if field == "target" else t('analysis.inputs')) }}: {% endif %}{{ t(key) }}</li>{% endfor %}</ul>
+          {% if detail %}<p class="alert__detail">{{ t('upload.error.detail', detail=detail) }}</p>{% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <fieldset class="card card-padded fieldset">
+        <legend class="fieldset__legend">{{ t('train.g.task') }}</legend>
+        <div class="field">
+          <label class="field__label" for="f-task">{{ t('train.f.task') }}</label>
+          <select class="input input-md input-limited" id="f-task" name="task" data-task-select{{ described("task") }}>
+            {% for task in tasks %}<option value="{{ task }}"{% if values.task == task %} selected{% endif %}>{{ t('train.task.' ~ task) }}</option>{% endfor %}
+          </select>
+          <p class="field__hint" id="task-hint">{{ t('train.h.task', detected=t('task.' ~ detected)) }}</p>
+          {{ error("task") }}
+        </div>
+        <div class="field">
+          <p class="field__label" id="inputs-label">{{ t('analysis.inputs') }}</p>
+          <p class="field__hint" id="inputs-hint">{{ t('train.h.inputs') }}</p>
+          {{ error("inputs") }}
+          <div class="cluster cluster-tight">
+            <button type="button" class="btn btn-ghost btn-sm" data-check-all="inputs" hidden>{{ t('analysis.inputs_all') }}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-check-none="inputs" hidden>{{ t('analysis.inputs_none') }}</button>
+          </div>
+          <ul class="column-list" role="group" aria-labelledby="inputs-label">
+            {% for col in columns %}
+            {% set p = col.profile %}
+            <li class="column-list__item{% if col.target %} is-target{% endif %}">
+              {% if col.target %}
+              <span class="column-list__check" aria-hidden="true">{{ icon("check", "icon icon-sm") }}</span>
+              <span class="column-list__name">{{ p.name }} <span class="badge badge-info">{{ t('analysis.is_target') }}</span></span>
+              {% else %}
+              <input class="checkbox" type="checkbox" id="col-{{ col.index }}" name="inputs" value="{{ p.name }}"{% if p.name in inputs %} checked{% endif %}{% if col.reason %} aria-describedby="col-{{ col.index }}-why"{% endif %}>
+              <label class="column-list__name" for="col-{{ col.index }}">{{ p.name }}</label>
+              {% endif %}
+              <span class="column-list__kind">{{ kind_badge(t, p.kind) }}</span>
+              <span class="column-list__missing"><span class="visually-hidden">{{ t('analysis.col.missing') }}: </span>{{ pct(p.missing_rate) }}%</span>
+              {% if col.reason %}<p class="column-list__why" id="col-{{ col.index }}-why">{{ icon("info", "icon icon-sm") }}{{ t('analysis.reason.' ~ col.reason) }}</p>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </fieldset>
+
+      <fieldset class="card card-padded fieldset">
+        <legend class="fieldset__legend">{{ t('train.g.time') }}</legend>
+        <div class="form-grid">
+          {{ number("max_runtime_minutes", 1) }}
+          {{ number("max_runtime_secs_per_model", 1, optional=True) }}
+          {{ number("max_models", 1, optional=True) }}
+        </div>
+      </fieldset>
+
+      <fieldset class="card card-padded fieldset">
+        <legend class="fieldset__legend">{{ t('train.g.validation') }}</legend>
+        <div class="form-grid">
+          {{ number("nfolds", 2) }}
+          {{ number("seed", 0, seed_max) }}
+        </div>
+        {{ flag("balance_classes") }}
+      </fieldset>
+
+      <fieldset class="card card-padded fieldset">
+        <legend class="fieldset__legend">{{ t('train.g.stopping') }}</legend>
+        <div class="form-grid">
+          {{ number("stopping_rounds", 0) }}
+          {{ metric("stopping_metric") }}
+          {{ number("stopping_tolerance", 0, step="any") }}
+          {{ metric("sort_metric") }}
+        </div>
+      </fieldset>
+
+      <fieldset class="card card-padded fieldset">
+        <legend class="fieldset__legend">{{ t('train.g.keep') }}</legend>
+        {{ flag("keep_cv_predictions") }}
+        {{ flag("keep_cv_models") }}
+        {{ flag("keep_cv_fold_assignment") }}
+      </fieldset>
+
+      <div class="form-actions">
+        <a class="btn btn-ghost" href="/projects/{{ pid }}/datasets/{{ dataset.id }}">{{ icon("back") }}{{ t('train.back') }}</a>
+        <button type="submit" class="btn btn-primary btn-lg" id="run-button"><span class="spinner" aria-hidden="true"></span>{{ icon("play") }}{{ t('train.submit') }}</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

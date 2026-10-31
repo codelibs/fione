@@ -1,0 +1,24 @@
+{# The polled status card (every poll_secs seconds); a final 286 card ends the polling. #}
+{% set s = info %}
+<section id="system-status" class="stack" aria-labelledby="status-title" hx-get="/admin/system" hx-trigger="every {{ poll_secs }}s" hx-swap="outerHTML">
+  <div class="section-header">
+    <h2 class="section-header__title" id="status-title">{{ t('system.status_title') }}</h2>
+    <span class="text-muted text-sm" data-announce>{{ t('system.summary', runner=t('system.runner.' ~ s.runner), queued=s.jobs.queued, running=s.jobs.running) }}</span>
+  </div>
+  <dl class="stats">
+    <div class="stat"><dt>{{ t('system.runner') }}</dt><dd><span class="badge badge-{{ 'success' if s.runner == 'running' else 'warning' }}">{{ t('system.runner.' ~ s.runner) }}</span></dd></div>
+    <div class="stat"><dt>{{ t('system.queued') }}</dt><dd>{{ s.jobs.queued }}</dd></div>
+    <div class="stat"><dt>{{ t('system.running') }}</dt><dd>{{ s.jobs.running }}</dd></div>
+    <div class="stat"><dt>{{ t('system.failed_day') }}</dt><dd>{{ failed_day }}</dd></div>
+    <div class="stat"><dt>{{ t('system.workers') }}</dt><dd>{{ workers }}</dd></div>
+    <div class="stat"><dt>{{ t('system.uptime') }}</dt><dd>{{ t(uptime[0], **uptime[1]) }}</dd></div>
+  </dl>
+  <dl class="facts facts-stacked card card-padded">
+    <div><dt>{{ t('system.version') }}</dt><dd>{{ s.version }}</dd></div>
+    <div><dt>{{ t('system.image_tag') }}</dt><dd><code>{{ s.image_tag }}</code></dd></div>
+    <div><dt>{{ t('system.storage') }}</dt><dd>{{ t('system.storage.' ~ s.storage) }}</dd></div>
+    <div><dt>{{ t('system.limits') }}</dt><dd>{{ t('system.limits_value', train=train_limit, short=short_limit) }}</dd></div>
+  </dl>
+  <p class="text-muted text-sm"><time datetime="{{ checked|iso }}">{{ t('system.checked', time=checked|utc) }}</time> · {{ t('system.refresh', n=poll_secs) }}</p>
+  <p class="text-muted text-sm">{{ t('system.disk_note') }}</p>
+</section>

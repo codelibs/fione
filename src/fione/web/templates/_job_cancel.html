@@ -1,0 +1,20 @@
+{% from "_macros.html" import icon %}
+<div id="job-cancel">
+  {% if not terminal and ctx.can_write %}
+  <details class="confirm" data-confirm-panel>
+    <summary class="btn btn-secondary">{{ t('job.cancel.' ~ job.kind) if job.kind in ("automl", "batch_predict", "export_models", "module") else t('job.cancel.other') }}</summary>
+    <div class="confirm__panel" role="group" aria-labelledby="cancel-question">
+      <p id="cancel-question"><strong>{{ t('job.cancel_question') }}</strong></p>
+      <p class="text-muted text-sm">{{ t('job.cancel_effect.' ~ job.kind) if job.kind in ("automl", "batch_predict", "export_models", "module") else t('job.cancel_effect.other') }}</p>
+      <form class="cluster" method="post" action="/projects/{{ ctx.project.id }}/jobs/{{ job.id }}/cancel" data-busy-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn btn-danger"><span class="spinner" aria-hidden="true"></span>{{ t('job.cancel_yes') }}</button>
+        <button type="button" class="btn btn-ghost" data-confirm-close>{{ t('job.cancel_no') }}</button>
+      </form>
+    </div>
+  </details>
+  {% endif %}
+  {% if not terminal %}
+  <p class="text-muted text-sm">{{ t('job.leave_note') }}</p>
+  {% endif %}
+</div>

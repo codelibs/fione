@@ -1,0 +1,263 @@
+{# Shared macros: icons (inline SVG, decorative unless labelled) and small components. #}
+{% macro icon(name, cls="icon") %}
+<svg class="{{ cls }}" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+{% if name == "sun" %}<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+{% elif name == "moon" %}<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/>
+{% elif name == "menu" %}<path d="M4 6h16M4 12h16M4 18h16"/>
+{% elif name == "close" %}<path d="M6 6l12 12M18 6L6 18"/>
+{% elif name == "folder" %}<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+{% elif name == "plus" %}<path d="M12 5v14M5 12h14"/>
+{% elif name == "check" %}<path d="M5 12.5l4.5 4.5L19 7.5"/>
+{% elif name == "info" %}<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>
+{% elif name == "alert" %}<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17h.01"/>
+{% elif name == "chevron" %}<path d="M6 9l6 6 6-6"/>
+{% elif name == "globe" %}<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+{% elif name == "key" %}<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M16 7l3 3M14 9l2 2"/>
+{% elif name == "upload" %}<path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>
+{% elif name == "download" %}<path d="M12 4v12M7 11l5 5 5-5M4 20h16"/>
+{% elif name == "play" %}<path d="M7 5v14l11-7z"/>
+{% elif name == "arrow" %}<path d="M5 12h14M13 6l6 6-6 6"/>
+{% elif name == "back" %}<path d="M19 12H5M11 6l-6 6 6 6"/>
+{% elif name == "copy" %}<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>
+{% elif name == "chart" %}<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>
+{% elif name == "users" %}<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>
+{% elif name == "clock" %}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+{% elif name == "terminal" %}<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>
+{% endif %}
+</svg>
+{% endmacro %}
+
+{% macro logo(cls="logo") %}
+<svg class="{{ cls }}" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false">
+<rect width="32" height="32" rx="8" class="logo__bg"/>
+<path d="M10 23V9h12M10 16h9" class="logo__mark" fill="none" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="22.5" cy="22" r="2.4" class="logo__dot"/>
+</svg>
+{% endmacro %}
+
+{% macro theme_toggle(t) %}
+<button type="button" class="btn btn-ghost btn-icon" data-theme-toggle aria-pressed="false" title="{{ t('theme.toggle') }}">
+  {{ icon("moon", "icon icon-moon") }}{{ icon("sun", "icon icon-sun") }}
+  <span class="visually-hidden">{{ t('theme.toggle') }}</span>
+</button>
+{% endmacro %}
+
+{% macro lang_switch(t, lang, here) %}
+<form class="segmented" method="post" action="/ui/lang" aria-label="{{ t('lang.label') }}">
+  <input type="hidden" name="next" value="{{ here }}">
+  <button type="submit" name="lang" value="en" lang="en" aria-pressed="{{ 'true' if lang == 'en' else 'false' }}">{{ t('lang.en') }}</button>
+  <button type="submit" name="lang" value="ja" lang="ja" aria-pressed="{{ 'true' if lang == 'ja' else 'false' }}">{{ t('lang.ja') }}</button>
+</form>
+{% endmacro %}
+
+{% macro toast(t, message, kind="success") %}
+<div class="toast toast-{{ kind }}" role="{{ 'alert' if kind == 'danger' else 'status' }}">
+  {{ icon("check" if kind == "success" else "info") }}
+  <p class="toast__text">{{ message }}</p>
+  <button type="button" class="btn btn-ghost btn-icon btn-sm" data-toast-close>
+    {{ icon("close") }}<span class="visually-hidden">{{ t('toast.close') }}</span>
+  </button>
+</div>
+{% endmacro %}
+
+{% macro access_badge(t, access) %}
+{% set kind = {"owner": "info", "editor": "success", "viewer": "neutral"}[access.value] %}
+<span class="badge badge-{{ kind }}">{{ t('access.' ~ access.value) }}</span>
+{% endmacro %}
+
+{% macro steps(t, current) %}
+{# The EasyML step indicator; ``current`` is the 1-based step shown as the current one. #}
+<ol class="steps" aria-label="{{ t('wizard.steps') }}">
+  {% for key in ["upload", "analysis", "run", "summary", "predict"] %}
+  {% set state = "done" if loop.index < current else ("current" if loop.index == current else "todo") %}
+  <li class="steps__item steps__item-{{ state }}"{% if state == "current" %} aria-current="step"{% endif %}>
+    <span class="steps__marker" aria-hidden="true">{% if state == "done" %}{{ icon("check", "icon icon-sm") }}{% else %}{{ loop.index }}{% endif %}</span>
+    <span class="steps__label">{{ t('wizard.step.' ~ key) }}{% if state != "todo" %}<span class="visually-hidden"> ({{ t('wizard.step_state.' ~ state) }})</span>{% endif %}</span>
+  </li>
+  {% endfor %}
+</ol>
+{% endmacro %}
+
+{% macro status_pill(t, status) %}
+{% set kind = {"queued": "neutral", "running": "info", "done": "success", "failed": "danger", "cancelled": "warning"}[status] %}
+<span class="badge badge-{{ kind }}">{% if status == "running" %}<span class="dot dot-pulse" aria-hidden="true"></span>{% endif %}{{ t('status.' ~ status) }}</span>
+{% endmacro %}
+
+{% macro stars(t, rating, cls="") %}
+{# Five stars, ``rating.stars`` of them filled; one accessible text for the whole group. #}
+<span class="stars {{ cls }}" role="img" aria-label="{{ t('rating.alt', n=rating.stars) }}" data-stars="{{ rating.stars }}">
+  {% for i in range(1, 6) %}
+  <svg class="star {{ 'star-on' if i <= rating.stars else 'star-off' }}" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>
+  {% endfor %}
+</span>
+{% endmacro %}
+
+{% macro mascot(mood="happy", cls="mascot") %}
+{# Fione-kun, the guide: a friendly round face (decorative; the speech bubble says it all). #}
+<svg class="{{ cls }} mascot-{{ mood }}" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true" focusable="false">
+  <path class="mascot__antenna" d="M32 10V4" fill="none" stroke-width="2.5" stroke-linecap="round"/>
+  <circle class="mascot__tip" cx="32" cy="4" r="3"/>
+  <rect class="mascot__head" x="8" y="10" width="48" height="44" rx="20"/>
+  <rect class="mascot__face" x="14" y="17" width="36" height="30" rx="14"/>
+  <circle class="mascot__eye" cx="25" cy="30" r="3.2"/>
+  <circle class="mascot__eye" cx="39" cy="30" r="3.2"/>
+  {% if mood == "happy" %}
+  <path class="mascot__mouth" d="M24 37q8 7 16 0" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+  {% elif mood == "calm" %}
+  <path class="mascot__mouth" d="M25 39h14" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+  {% else %}
+  <path class="mascot__mouth" d="M25 41q7-5 14 0" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+  {% endif %}
+  <circle class="mascot__cheek" cx="19" cy="37" r="2.6"/>
+  <circle class="mascot__cheek" cx="45" cy="37" r="2.6"/>
+</svg>
+{% endmacro %}
+
+{% macro guide(t, text, mood="happy") %}
+{# Fione-kun saying ``text``. #}
+<div class="guide">
+  {{ mascot(mood) }}
+  <div class="guide__bubble">
+    <p class="guide__name">{{ t('fione.name') }}</p>
+    <p class="guide__text">{{ text }}</p>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro kind_badge(t, kind) %}
+<span class="badge badge-neutral kind kind-{{ kind }}">{{ t('kind.' ~ kind) }}</span>
+{% endmacro %}
+
+{% macro dataset_type(t, type) %}
+{% set kind = {"train": "info", "test": "neutral", "predict": "success"}[type] %}
+<span class="badge badge-{{ kind }}">{{ t('dataset.type.' ~ type) }}</span>
+{% endmacro %}
+
+{% macro project_nav(t, project, section=None) %}
+{# The project's sections. The simple view (``mode``, from the context) leaves out the
+   detailed sections, except the one being shown; Sharing is for the owner (and admins:
+   ``ctx.access``, from the context) only. #}
+{% set owner = ctx is defined and ctx.access.value == "owner" %}
+<nav class="subnav" aria-label="{{ t('nav.project') }}">
+  <ul role="list">
+    {% for key, path, detailed in [("overview", "", False), ("datasets", "/datasets", False), ("models", "/models", True), ("jobs", "/jobs", True), ("members", "/members", True)] %}
+    {% if (not detailed or mode == "detailed" or section == key) and (key != "members" or owner) %}
+    <li><a href="/projects/{{ project.id }}{{ path }}"{% if section == key %} aria-current="page"{% endif %}>{{ t('nav.section.' ~ key) }}</a></li>
+    {% endif %}
+    {% endfor %}
+  </ul>
+</nav>
+{% endmacro %}
+
+{% macro breadcrumb(t, project, here=None, section=None) %}
+{{ project_nav(t, project, section) }}
+<nav class="breadcrumb" aria-label="{{ t('nav.breadcrumb') }}">
+  <ol>
+    <li><a href="/">{{ t('nav.projects') }}</a></li>
+    {% if here %}
+    <li><a href="/projects/{{ project.id }}">{{ project.name }}</a></li>
+    <li><span aria-current="page">{{ here }}</span></li>
+    {% else %}
+    <li><span aria-current="page">{{ project.name }}</span></li>
+    {% endif %}
+  </ol>
+</nav>
+{% endmacro %}
+
+{% macro preview_table(t, preview, caption) %}
+<div class="table-wrap" tabindex="0" role="region" aria-label="{{ caption }}">
+  <table class="table table-compact table-data">
+    <caption class="visually-hidden">{{ caption }}</caption>
+    <thead><tr>{% for name in preview.columns %}<th scope="col"{% if preview.numeric[loop.index0] %} class="num"{% endif %}>{{ name }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for row in preview.rows %}
+      <tr>{% for value in row %}{% if value is none %}<td class="cell-missing"><span aria-hidden="true">—</span><span class="visually-hidden">{{ t('preview.missing') }}</span></td>{% elif value is number %}<td class="num">{{ value|cellnum }}</td>{% else %}<td>{{ value }}</td>{% endif %}{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro upload_field(t, limit, describedby="") %}
+<div class="dropzone" data-dropzone>
+  <input class="dropzone__input" type="file" id="upload-file" name="file" accept=".csv,text/csv" required aria-describedby="upload-help{% if describedby %} {{ describedby }}{% endif %}">
+  <label class="dropzone__label" for="upload-file">
+    <span class="dropzone__icon" aria-hidden="true">{{ icon("upload") }}</span>
+    <span class="dropzone__title">{{ t('upload.drop') }}</span>
+    <span class="dropzone__or text-muted">{{ t('upload.or') }}</span>
+    <span class="btn btn-secondary dropzone__button" aria-hidden="true">{{ t('upload.choose') }}</span>
+    <span class="dropzone__file" data-dropzone-file hidden></span>
+  </label>
+</div>
+<ul class="upload-rules text-muted text-sm" id="upload-help">
+  <li>{{ t('upload.rule_format') }}</li>
+  <li>{{ t('upload.rule_size', size=limit) }}</li>
+  <li>{{ t('upload.rule_encoding') }}</li>
+  <li>{{ t('upload.rule_header') }}</li>
+</ul>
+{% endmacro %}
+
+{% macro upload_problem(t, problem) %}
+{% if problem %}
+<div class="alert alert-danger" role="alert" id="upload-error" tabindex="-1" autofocus>
+  {{ icon("alert") }}
+  <div class="stack-tight">
+    <p><strong>{{ t(problem.key, **problem.vars) }}</strong></p>
+    {% if problem.detail %}<p class="alert__detail">{{ t('upload.error.detail', detail=problem.detail) }}</p>{% endif %}
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro chart(t, id, spec, cls="") %}
+{# An ECharts chart drawn by charts.js from a JSON block (|tojson escapes <, > and &, so no
+   value can end the script element). The table below is its text alternative. #}
+<figure class="chart-figure {{ cls }}">
+  <div class="chart" id="{{ id }}" data-chart="{{ id }}-data" role="img" aria-label="{{ spec.label }}"></div>
+  <script type="application/json" id="{{ id }}-data">{{ spec|tojson }}</script>
+  <figcaption class="visually-hidden">
+    <table>
+      <caption>{{ spec.label }}</caption>
+      <thead><tr><th scope="col">{{ spec.x_name or t('chart.label') }}</th><th scope="col">{{ spec.y_name or t('chart.value') }}</th></tr></thead>
+      <tbody>{% for label in spec.labels %}<tr><th scope="row">{{ label }}</th><td>{{ spec["values"][loop.index0] }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </figcaption>
+  <span class="chart-probe chart-probe-text" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-muted" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-primary" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-grid" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-axis" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-surface" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-c2" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-c3" aria-hidden="true"></span>
+  <span class="chart-probe chart-probe-c4" aria-hidden="true"></span>
+</figure>
+{% endmacro %}
+
+{% macro pager(t, prev_url, next_url, label) %}
+{% if prev_url is not none or next_url is not none %}
+<nav class="pager" aria-label="{{ label }}">
+  {% if prev_url is not none %}<a class="btn btn-secondary btn-sm" href="{{ prev_url }}">{{ icon("back", "icon icon-sm") }}{{ t('pager.prev') }}</a>{% endif %}
+  {% if next_url is not none %}<a class="btn btn-secondary btn-sm" href="{{ next_url }}">{{ t('pager.next') }}{{ icon("arrow", "icon icon-sm") }}</a>{% endif %}
+</nav>
+{% endif %}
+{% endmacro %}
+
+{% macro field_error(t, id, key) %}
+{% if key %}<p class="field__error" id="{{ id }}" role="alert">{{ icon("alert", "icon icon-sm") }}{{ t(key, **kwargs) }}</p>{% endif %}
+{% endmacro %}
+
+{% macro secret_panel(t, id, title, secret, heading="h2", focus=True) %}
+{# A secret shown once (a new API token): selectable text, a Copy button with JS. Focused on
+   arrival (``focus``) so it is seen and read first. #}
+<section class="secret-panel" data-secret-panel aria-labelledby="{{ id }}-title" tabindex="-1"{% if focus %} autofocus{% endif %}>
+  <{{ heading }} class="secret-panel__title" id="{{ id }}-title">{{ icon("key") }}{{ title }}</{{ heading }}>
+  <p><strong>{{ t('secret.once') }}</strong></p>
+  <div class="copy-box">
+    <p class="field__label" id="{{ id }}-label">{{ t('secret.label') }}</p>
+    <pre class="code-block secret-panel__value" id="{{ id }}" aria-labelledby="{{ id }}-label">{{ secret }}</pre>
+    <button type="button" class="btn btn-secondary btn-sm" data-copy="{{ id }}" data-copied="{{ t('summary.copied') }}" hidden>{{ icon("copy", "icon icon-sm") }}{{ t('summary.copy') }}</button>
+  </div>
+  <p class="text-muted text-sm">{{ t('secret.keep') }}</p>
+</section>
+{% endmacro %}

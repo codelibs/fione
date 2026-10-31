@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "fione-test",
+      "credentials": [{ "accessKey": "fione-test", "secretKey": "fione-test-secret" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

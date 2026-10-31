@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, steps, breadcrumb with context %}
+{% set predicting = job.kind == "batch_predict" %}
+{% set wizard = job.kind in ("automl", "batch_predict") %}
+{% block title %}{{ t('job.title.' ~ job.kind) if job.kind in ("automl", "batch_predict", "export_models", "module") else job.kind }} · {{ ctx.project.name }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="container page page-narrow">
+  {{ breadcrumb(t, ctx.project, t('job.crumb', id=job.id)) }}
+  {% if wizard %}{{ steps(t, 5 if predicting else 3) }}{% endif %}
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('job.title.' ~ job.kind) if job.kind in ("automl", "batch_predict", "export_models", "module") else job.kind }}</h1>
+    <p class="page-header__lead text-muted">{{ t('job.lead.' ~ job.kind) if job.kind in ("automl", "batch_predict", "export_models", "module") else "" }}</p>
+  </header>
+  <p class="visually-hidden" id="job-announce" aria-live="polite" aria-atomic="true"></p>
+  {% include "_job_status.html" %}
+  {% include "_job_cancel.html" %}
+</div>
+{% endblock %}

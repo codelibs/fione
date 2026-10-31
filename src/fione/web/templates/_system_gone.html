@@ -1,0 +1,6 @@
+{% from "_macros.html" import icon %}
+{# The poller's last card when the status can no longer be shown (no hx-trigger: polling ends). #}
+<section class="card card-padded stack" id="system-status">
+  <div class="alert alert-danger" role="alert">{{ icon("alert") }}<span data-announce>{{ message }}</span></div>
+  <p class="cluster"><a class="btn btn-primary" href="">{{ t('job.reload') }}</a><a class="btn btn-secondary" href="/">{{ t('nav.projects') }}</a></p>
+</section>

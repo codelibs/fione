@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, breadcrumb, dataset_type, kind_badge, chart, pager with context %}
+{% block title %}{{ dataset.name }} · {{ t('datasets.title') }}{% endblock %}
+{% block scripts %}
+<script src="{{ static('vendor/echarts/echarts.min.js') }}" defer></script>
+<script src="{{ static('js/charts.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+{% set base = "/projects/" ~ pid ~ "/datasets/" ~ dataset.id %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, dataset.name, section="datasets") }}
+  <header class="page-header page-header-row">
+    <div class="page-header__main">
+      <h1 class="page-header__title page-header__title-wrap">{{ dataset.name }}</h1>
+      <p class="page-header__lead text-muted">{{ t('project.dataset_size', rows="{:,}".format(dataset.n_rows), cols="{:,}".format(dataset.n_cols)) }} · <time datetime="{{ dataset.created_at|iso }}">{{ t('time.uploaded', time=dataset.created_at|utc) }}</time></p>
+    </div>
+    {{ dataset_type(t, dataset.type.value) }}
+  </header>
+  <div class="cluster">
+    {% if ctx.can_write and dataset.type.value == "train" %}
+    {% if mode == "detailed" %}<a class="btn btn-primary" href="{{ base }}/train">{{ icon("play") }}{{ t('dataset.train') }}</a>{% endif %}
+    <a class="btn {{ 'btn-secondary' if mode == 'detailed' else 'btn-primary' }}" href="{{ base }}/analyze">{{ t('dataset.guided') }}</a>
+    {% endif %}
+    <a class="btn btn-ghost" href="/api/v1/projects/{{ pid }}/datasets/{{ dataset.id }}/download" download>{{ icon("download") }}{{ t('dataset.download') }}</a>
+  </div>
+
+  <div class="tabs" data-tabs>
+    <div class="tabs__list" role="tablist" aria-label="{{ t('dataset.tabs') }}">
+      {% for key in ["summary", "columns", "data", "correlation"] %}
+      <button type="button" class="tabs__tab" role="tab" id="tab-{{ key }}" aria-controls="panel-{{ key }}" aria-selected="{{ 'true' if tab == key else 'false' }}" tabindex="{{ '0' if tab == key else '-1' }}">{{ t('dataset.tab.' ~ key) }}</button>
+      {% endfor %}
+    </div>
+
+    <div class="tabs__panel stack" role="tabpanel" id="panel-summary" aria-labelledby="tab-summary" tabindex="0"{% if tab != "summary" %} hidden{% endif %}>
+      <dl class="stats">
+        <div class="stat"><dt>{{ t('analysis.stat.rows') }}</dt><dd>{{ "{:,}".format(dataset.n_rows) }}</dd></div>
+        <div class="stat"><dt>{{ t('analysis.stat.columns') }}</dt><dd>{{ "{:,}".format(dataset.n_cols) }}</dd></div>
+        <div class="stat"><dt>{{ t('analysis.stat.missing') }}</dt><dd>{{ missing_pct }}%</dd></div>
+        <div class="stat"><dt>{{ t('dataset.size') }}</dt><dd>{{ size or "—" }}</dd></div>
+      </dl>
+      <ul class="kind-counts" role="list">
+        {% for kind in ["numeric", "categorical", "text", "datetime", "id", "constant"] %}
+        {% set n = profile.columns|selectattr("kind", "equalto", kind)|list|length %}
+        {% if n %}<li>{{ kind_badge(t, kind) }} <span>{{ t('dataset.kind_count', n=n) }}</span></li>{% endif %}
+        {% endfor %}
+      </ul>
+      {% if sample_rows < dataset.n_rows %}<p class="text-muted text-sm">{{ t('analysis.sampled', n="{:,}".format(sample_rows)) }}</p>{% endif %}
+      {% if target %}<p class="text-muted text-sm">{{ t('dataset.leak_target', target=target) }}</p>{% endif %}
+    </div>
+
+    <div class="tabs__panel stack-tight" role="tabpanel" id="panel-columns" aria-labelledby="tab-columns" tabindex="0"{% if tab != "columns" %} hidden{% endif %}>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="{{ t('dataset.tab.columns') }}">
+        <table class="table table-compact table-data">
+          <thead>
+            <tr>
+              <th scope="col">{{ t('analysis.col.name') }}</th>
+              <th scope="col">{{ t('analysis.col.kind') }}</th>
+              <th scope="col" class="num">{{ t('analysis.col.missing') }}</th>
+              <th scope="col" class="num">{{ t('dataset.col.unique') }}</th>
+              <th scope="col" class="num">{{ t('dataset.col.min') }}</th>
+              <th scope="col" class="num">{{ t('dataset.col.mean') }}</th>
+              <th scope="col" class="num">{{ t('dataset.col.max') }}</th>
+              <th scope="col">{{ t('dataset.col.top') }}</th>
+              <th scope="col">{{ t('dataset.col.notes') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in columns %}
+            <tr>
+              <th scope="row" class="cell-name"><a href="{{ column_url(c.name) }}">{{ c.name }}</a></th>
+              <td>{{ kind_badge(t, c.kind) }}</td>
+              <td class="num">{{ pct(c.missing_rate) }}%</td>
+              <td class="num">{{ "{:,}".format(c.n_unique) }}</td>
+              {% if c.stats %}
+              <td class="num">{{ c.stats.min|cellnum }}</td><td class="num">{{ c.stats.mean|cellnum }}</td><td class="num">{{ c.stats.max|cellnum }}</td>
+              {% else %}
+              <td class="num">—</td><td class="num">—</td><td class="num">—</td>
+              {% endif %}
+              <td class="cell-value">{% if c.top_values %}{{ c.top_values[0][0] }} <span class="text-muted">({{ "{:,}".format(c.top_values[0][1]) }})</span>{% else %}—{% endif %}</td>
+              <td>
+                {% if c.name == target %}<span class="badge badge-info">{{ t('analysis.is_target') }}</span>{% endif %}
+                {% if c.name in leaks %}<span class="badge badge-warning">{{ t('dataset.badge.leak') }}</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {{ pager(t, (base ~ "?tab=columns&cpage=" ~ (cpage - 1)) if cpage > 1 else none, (base ~ "?tab=columns&cpage=" ~ (cpage + 1)) if cpage < cpages else none, t('dataset.column_pages')) }}
+      <p class="text-muted text-sm">{{ t('dataset.columns_note') }}</p>
+    </div>
+
+    <div class="tabs__panel stack-tight" role="tabpanel" id="panel-data" aria-labelledby="tab-data" tabindex="0"{% if tab != "data" %} hidden{% endif %}>
+      {% set q = "?tab=data&limit=" ~ data.limit %}
+      <p class="text-muted text-sm">{{ t('dataset.data_window', first="{:,}".format(data.first_row), last="{:,}".format(data.last_row), total="{:,}".format(dataset.n_rows), cfirst=data.col + 1, clast=data.col + data.columns|length, ctotal=data.n_cols) }}</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="{{ t('dataset.tab.data') }}">
+        <table class="table table-compact table-data">
+          <thead><tr><th scope="col" class="num">#</th>{% for name in data.columns %}<th scope="col"{% if data.numeric[loop.index0] %} class="num"{% endif %}>{{ name }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for row in data.rows %}
+            <tr><th scope="row" class="num text-muted">{{ data.offset + loop.index }}</th>{% for value in row %}{% if value is none %}<td class="cell-missing"><span aria-hidden="true">—</span><span class="visually-hidden">{{ t('preview.missing') }}</span></td>{% elif value is number %}<td class="num">{{ value|cellnum }}</td>{% else %}<td class="cell-value">{{ value }}</td>{% endif %}{% endfor %}</tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <nav class="pager" aria-label="{{ t('dataset.row_pages') }}">
+        {% if data.prev is not none %}
+        <a class="btn btn-secondary btn-sm" href="{{ base }}{{ q }}&offset=0&col={{ data.col }}">{{ t('pager.first') }}</a>
+        <a class="btn btn-secondary btn-sm" href="{{ base }}{{ q }}&offset={{ data.prev }}&col={{ data.col }}">{{ icon("back", "icon icon-sm") }}{{ t('pager.prev') }}</a>
+        {% endif %}
+        {% if data.next is not none %}
+        <a class="btn btn-secondary btn-sm" href="{{ base }}{{ q }}&offset={{ data.next }}&col={{ data.col }}">{{ t('pager.next') }}{{ icon("arrow", "icon icon-sm") }}</a>
+        <a class="btn btn-secondary btn-sm" href="{{ base }}{{ q }}&offset={{ data.last_page }}&col={{ data.col }}">{{ t('pager.last') }}</a>
+        {% endif %}
+        {% if data.prev_col is not none %}<a class="btn btn-ghost btn-sm" href="{{ base }}{{ q }}&offset={{ data.offset }}&col={{ data.prev_col }}">{{ t('dataset.prev_columns') }}</a>{% endif %}
+        {% if data.next_col is not none %}<a class="btn btn-ghost btn-sm" href="{{ base }}{{ q }}&offset={{ data.offset }}&col={{ data.next_col }}">{{ t('dataset.next_columns') }}</a>{% endif %}
+      </nav>
+      <p class="text-muted text-sm">{{ t('dataset.data_note') }}</p>
+    </div>
+
+    <div class="tabs__panel stack" role="tabpanel" id="panel-correlation" aria-labelledby="tab-correlation" tabindex="0"{% if tab != "correlation" %} hidden{% endif %}>
+      <p class="text-muted text-sm">{{ t('dataset.corr_hint') }}</p>
+      {% if pairs %}
+      {{ chart(t, "corr-chart", chart_spec, "chart-tall") }}
+      <div class="table-wrap" tabindex="0" role="region" aria-label="{{ t('dataset.tab.correlation') }}">
+        <table class="table table-compact table-data">
+          <thead><tr><th scope="col">{{ t('dataset.corr_a') }}</th><th scope="col">{{ t('dataset.corr_b') }}</th><th scope="col" class="num">{{ t('dataset.corr_r') }}</th></tr></thead>
+          <tbody>
+            {% for a, b, r in pairs %}
+            <tr><td class="cell-name"><a href="{{ column_url(a) }}">{{ a }}</a></td><td class="cell-name"><a href="{{ column_url(b) }}">{{ b }}</a></td><td class="num">{{ "%.3f"|format(r) }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="empty-line text-muted">{{ t('dataset.corr_none') }}</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

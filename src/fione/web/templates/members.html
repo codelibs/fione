@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, access_badge, breadcrumb, field_error with context %}
+{% block title %}{{ t('members.title') }} · {{ ctx.project.name }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, t('members.title'), section="members") }}
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('members.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('members.lead') }}</p>
+  </header>
+  {% if done %}
+  <div class="alert alert-success" role="status">{{ icon("check") }}<span>{{ t('members.done.' ~ done) }}</span></div>
+  {% endif %}
+  {% if error %}
+  <div class="alert alert-danger" role="alert" id="members-error" tabindex="-1" autofocus>{{ icon("alert") }}<span>{{ t(error, **error_params) }}</span></div>
+  {% endif %}
+
+  <section class="card card-padded stack" aria-labelledby="add-title">
+    <h2 class="section-header__title" id="add-title">{{ t('members.add') }}</h2>
+    <form class="stack" method="post" action="/projects/{{ pid }}/members" data-busy-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="form-grid">
+        <div class="field">
+          <label class="field__label" for="member-username">{{ t('members.username') }}</label>
+          <input class="input input-md" type="text" id="member-username" name="username" value="{{ new.username }}" required maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="member-username-hint">
+          <p class="field__hint" id="member-username-hint">{{ t('members.username_hint') }}</p>
+        </div>
+        <fieldset class="fieldset">
+          <legend class="field__label">{{ t('members.access') }}</legend>
+          <div class="segmented-choice">
+            {% for level in access_levels %}
+            <label class="pill-choice" for="access-{{ level }}">
+              <input class="radio" type="radio" id="access-{{ level }}" name="access" value="{{ level }}"{% if level == new.access %} checked{% endif %}>
+              <span>{{ t('access.' ~ level) }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <p class="field__hint">{{ t('members.access_hint') }}</p>
+        </fieldset>
+      </div>
+      <div class="form-actions form-actions-end">
+        <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span>{{ icon("users") }}{{ t('members.add_submit') }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="stack-tight" aria-labelledby="members-list-title">
+    <h2 class="section-header__title" id="members-list-title">{{ t('members.list') }}</h2>
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="members-list-title">
+      <table class="table table-stack">
+        <thead>
+          <tr>
+            <th scope="col">{{ t('members.username') }}</th>
+            <th scope="col">{{ t('members.access') }}</th>
+            <th scope="col">{{ t('datasets.col.actions') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" class="cell-value">{{ owner or "—" }}</th>
+            <td data-label="{{ t('members.access') }}"><span class="badge badge-info">{{ t('access.owner') }}</span></td>
+            <td class="text-muted text-sm cell-note" data-label="{{ t('datasets.col.actions') }}">{{ t('members.owner_note') }}</td>
+          </tr>
+          {% for username, access in members %}
+          <tr>
+            <th scope="row" class="cell-value">{{ username }}</th>
+            <td data-label="{{ t('members.access') }}">{{ access_badge(t, access) }}</td>
+            <td data-label="{{ t('datasets.col.actions') }}">
+              <div class="row-actions">
+                <form class="cluster-tight" method="post" action="/projects/{{ pid }}/members" data-busy-form>
+                  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                  <input type="hidden" name="username" value="{{ username }}">
+                  <label class="visually-hidden" for="access-of-{{ loop.index }}">{{ t('members.access_of', username=username) }}</label>
+                  <select class="input input-sm" id="access-of-{{ loop.index }}" name="access">
+                    {% for level in access_levels %}<option value="{{ level }}"{% if level == access.value %} selected{% endif %}>{{ t('access.' ~ level) }}</option>{% endfor %}
+                  </select>
+                  <button type="submit" class="btn btn-secondary btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('users.role_save') }}<span class="visually-hidden">: {{ username }}</span></button>
+                </form>
+                <details class="confirm confirm-inline" data-confirm-panel>
+                  <summary class="btn btn-ghost btn-sm">{{ t('members.remove') }}<span class="visually-hidden">: {{ username }}</span></summary>
+                  <div class="confirm__panel" role="group" aria-labelledby="remove-q-{{ loop.index }}">
+                    <p id="remove-q-{{ loop.index }}"><strong>{{ t('members.remove_question', username=username) }}</strong></p>
+                    <p class="text-muted text-sm">{{ t('members.remove_effect') }}</p>
+                    <form class="cluster" method="post" action="/projects/{{ pid }}/members/remove" data-busy-form>
+                      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                      <input type="hidden" name="username" value="{{ username }}">
+                      <button type="submit" class="btn btn-danger btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('members.remove_yes') }}</button>
+                      <button type="button" class="btn btn-ghost btn-sm" data-confirm-close>{{ t('action.keep') }}</button>
+                    </form>
+                  </div>
+                </details>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not members %}<p class="empty-line text-muted">{{ t('project.sharing_none') }}</p>{% endif %}
+    <p class="text-muted text-sm">{{ t('members.levels') }}</p>
+  </section>
+</div>
+{% endblock %}

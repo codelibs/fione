@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}{{ message }}{% endblock %}
+{% block content %}
+<div class="container page">
+  <div class="empty-state">
+    <div class="empty-state__icon">{{ icon("alert") }}</div>
+    <h1 class="empty-state__title">{{ message }}</h1>
+    {% if hint %}<p class="empty-state__text text-muted">{{ t(hint) }}</p>{% endif %}
+    <p><a class="btn btn-secondary" href="/">{{ t('nav.projects') }}</a></p>
+  </div>
+</div>
+{% endblock %}

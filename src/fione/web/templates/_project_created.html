@@ -1,0 +1,4 @@
+{% from "_macros.html" import toast %}
+{% include "_project_form.html" %}
+{% with oob = true %}{% include "_project_list.html" %}{% endwith %}
+<div hx-swap-oob="beforeend:#toasts">{{ toast(t, t('home.created', name=created)) }}</div>

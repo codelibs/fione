@@ -1,0 +1,27 @@
+# The end-to-end test stack (tests/e2e, scripts/docker-smoke.sh): an override
+# of compose.yaml with its own project name, host ports 18080/18081 and the test-only values
+# of docker/e2e.env, which are public in this repository. Never use them for a real
+# deployment.
+#
+#   docker compose --env-file docker/e2e.env -f docker/compose.yaml -f docker/compose.e2e.yaml \
+#       up -d --build --wait
+#   ... tests against http://127.0.0.1:18080 (setup token: see docker/e2e.env) ...
+#   docker compose --env-file docker/e2e.env -f docker/compose.yaml -f docker/compose.e2e.yaml \
+#       down -v
+name: fione-e2e
+
+services:
+  fione:
+    environment:
+      # The tests sign in with wrong passwords on purpose.
+      FIONE_LOGIN_MAX_FAILURES: "1000"
+      FIONE_LOGIN_MAX_FAILURES_PER_IP: "10000"
+    restart: "no"
+    healthcheck:
+      interval: 3s
+      start_period: 20s
+
+  seaweedfs:
+    restart: "no"
+    healthcheck:
+      interval: 2s

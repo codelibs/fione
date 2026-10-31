@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}{{ t('system.title') }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/system.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="container page">
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('system.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('system.lead') }}</p>
+  </header>
+  <p class="visually-hidden" id="system-announce" aria-live="polite" aria-atomic="true"></p>
+  {% include "_system_status.html" %}
+  <section class="card card-padded stack-tight" aria-labelledby="llm-title">
+    <h2 class="section-header__title section-header__title-icon" id="llm-title">{{ icon("info") }}{{ t('system.llm_title') }}</h2>
+    <p><span class="badge badge-neutral">{{ t('system.llm_state') }}</span></p>
+    <p class="text-muted text-sm">{{ t('system.llm_text') }}</p>
+  </section>
+</div>
+{% endblock %}

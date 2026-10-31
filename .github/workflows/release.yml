@@ -1,0 +1,57 @@
+name: Release images
+
+# Pushes the images of a version tag (v1.2.3, v1.2.3-rc.1). Tag only commits CI has passed:
+# this workflow does not run the tests again.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    # The only job that may write packages: it pushes the two images of the tag.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false # the token is only for the registry login below
+      - name: Image names and tag
+        id: names
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          lower=$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          # A Docker tag allows [A-Za-z0-9_.-] only (no "+" build metadata).
+          if ! printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "::error::$GITHUB_REF_NAME is not a version tag like v1.2.3 or v1.2.3-rc.1"
+            exit 1
+          fi
+          echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "registry=ghcr.io/$lower" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Both images carry the same FIONE_IMAGE_TAG: models record it, and the serving image
+      # only loads models of its own tag.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: FIONE_IMAGE_TAG=${{ steps.names.outputs.tag }}
+          tags: ${{ steps.names.outputs.registry }}/fione:${{ steps.names.outputs.tag }}
+          push: true
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile.serving
+          build-args: FIONE_IMAGE_TAG=${{ steps.names.outputs.tag }}
+          tags: ${{ steps.names.outputs.registry }}/fione-serving:${{ steps.names.outputs.tag }}
+          push: true

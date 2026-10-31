@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [v2, master]
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request or branch makes the running one pointless (pull
+# requests); pushes to the main branches still finish, one after the other.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - run: uv run python scripts/check_licenses.py
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      # Unit, API, web and contract tests (acceptance and e2e are deselected by default).
+      - run: uv run pytest -q
+
+  e2e:
+    # Pushes to the main branches only: the browser suite against the Compose stack.
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
+      - name: Build the fione and fione-serving images
+        run: >
+          docker compose --env-file docker/e2e.env
+          -f docker/compose.yaml -f docker/compose.e2e.yaml --profile serving build
+      - name: End-to-end tests
+        env:
+          FIONE_IMAGE_TAG: e2e # the images built above
+        run: uv run pytest tests/e2e -m e2e -v
+      - name: Smoke test of the Compose stack
+        env:
+          FIONE_IMAGE_TAG: e2e
+        run: scripts/docker-smoke.sh
+      - name: Keep the traces, screenshots and Compose logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: test-results/e2e
+          if-no-files-found: ignore

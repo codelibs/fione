@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, logo %}
+{% block title %}{{ t('setup.title') }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/auth-form.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="auth-layout">
+  <section class="card auth-card auth-card-wide" aria-labelledby="setup-heading">
+    {{ logo("logo logo-lg") }}
+    <h1 id="setup-heading" class="auth-card__title">{{ t('setup.heading') }}</h1>
+    <p class="text-muted">{{ t('setup.intro') }}</p>
+
+    <div class="callout" aria-labelledby="token-where">
+      <h2 id="token-where" class="callout__title">{{ icon("key") }}{{ t('setup.token_where') }}</h2>
+      <p>{{ t('setup.token_log') }}</p>
+      <pre class="code-block"><code>docker compose logs fione | grep "Setup token"</code></pre>
+      <p>{{ t('setup.token_env') }}</p>
+    </div>
+
+    <div class="alert alert-danger" role="alert" data-form-error hidden></div>
+    <noscript><p class="alert alert-danger">{{ t('auth.noscript') }}</p></noscript>
+    <form class="stack" method="post" action="/first-admin" data-json-form
+          data-endpoint="/api/v1/auth/first-admin"
+          data-next="/"
+          data-error-invalid_setup_token="{{ t('setup.error.token') }}"
+          data-error-already_set_up="{{ t('setup.error.done') }}"
+          data-error-invalid="{{ t('setup.error.invalid') }}"
+          data-error-mismatch="{{ t('setup.error.mismatch') }}"
+          data-error-throttled="{{ t('error.throttled') }}"
+          data-error-default="{{ t('error.generic') }}"
+          data-error-network="{{ t('error.network') }}">
+      <div class="field">
+        <label class="field__label" for="setup-token">{{ t('setup.token') }}</label>
+        <input class="input input-mono" id="setup-token" name="setup_token" type="text" required maxlength="256"
+               autocomplete="off" autocapitalize="none" spellcheck="false" autofocus>
+      </div>
+      <div class="field">
+        <label class="field__label" for="setup-username">{{ t('setup.username') }}</label>
+        <input class="input" id="setup-username" name="username" type="text" required maxlength="64"
+               pattern="[A-Za-z0-9._\-]{1,64}" autocomplete="username" autocapitalize="none" spellcheck="false"
+               aria-describedby="setup-username-hint">
+        <p class="field__hint" id="setup-username-hint">{{ t('setup.username_hint') }}</p>
+      </div>
+      <div class="field">
+        <label class="field__label" for="setup-password">{{ t('setup.password') }}</label>
+        <input class="input" id="setup-password" name="password" type="password" required
+               minlength="{{ min_password }}" maxlength="1024" autocomplete="new-password"
+               aria-describedby="setup-password-hint">
+        <p class="field__hint" id="setup-password-hint">{{ t('setup.password_hint', min=min_password) }}</p>
+      </div>
+      <div class="field">
+        <label class="field__label" for="setup-password2">{{ t('setup.password_confirm') }}</label>
+        <input class="input" id="setup-password2" type="password" required maxlength="1024"
+               autocomplete="new-password" data-confirm="password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block btn-lg" disabled>
+        <span class="spinner" aria-hidden="true"></span>{{ t('setup.submit') }}
+      </button>
+    </form>
+  </section>
+</div>
+{% endblock %}

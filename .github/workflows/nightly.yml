@@ -1,0 +1,69 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # every day, 18:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One nightly run at a time (a manual run waits for the scheduled one).
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    # Accuracy, size and latency targets on real datasets (downloaded from the network).
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - run: uv run pytest -m acceptance -v --junitxml=test-results/acceptance/junit.xml
+      # Wall-clock budget checks (time budgets, prediction latency): kept out of the PR runs.
+      - if: ${{ !cancelled() }}
+        run: uv run pytest -m timing -v --junitxml=test-results/acceptance/timing.xml
+      - name: Keep the test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-failure
+          path: test-results/acceptance
+          if-no-files-found: ignore
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
+      - name: Build the fione and fione-serving images
+        run: >
+          docker compose --env-file docker/e2e.env
+          -f docker/compose.yaml -f docker/compose.e2e.yaml --profile serving build
+      - name: End-to-end tests
+        env:
+          FIONE_IMAGE_TAG: e2e
+        run: uv run pytest tests/e2e -m e2e -v
+      - name: Keep the traces, screenshots and Compose logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: test-results/e2e
+          if-no-files-found: ignore

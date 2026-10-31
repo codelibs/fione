@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, breadcrumb, upload_problem with context %}
+{% block title %}{{ t('import.title') }} · {{ ctx.project.name }}{% endblock %}
+{% block scripts %}<script src="{{ static('js/easyml.js') }}" defer></script>{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+<div class="container page page-narrow">
+  {{ breadcrumb(t, ctx.project, t('import.title'), section="models") }}
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('import.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('import.lead') }}</p>
+  </header>
+  <div class="alert alert-warning" role="note">{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('import.warning_title') }}</strong></p><p>{{ t('import.warning') }}</p></div></div>
+  {{ upload_problem(t, problem) }}
+  <form class="card card-padded stack" method="post" action="/projects/{{ pid }}/models/import" enctype="multipart/form-data" data-upload-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <div class="field">
+      <label class="field__label" for="import-file">{{ t('import.file') }}</label>
+      <input class="input" type="file" id="import-file" name="file" accept=".zip,application/zip" required aria-describedby="import-file-hint{% if problem %} upload-error{% endif %}">
+      <p class="field__hint" id="import-file-hint">{{ t('import.file_hint', mb=limit_mb) }}</p>
+    </div>
+    <div class="check-field">
+      <input class="checkbox" type="checkbox" id="trust-foreign" name="trust_foreign" value="true" aria-describedby="trust-foreign-hint">
+      <div>
+        <label class="field__label" for="trust-foreign">{{ t('import.trust') }}</label>
+        <p class="field__hint" id="trust-foreign-hint">{{ t('import.trust_hint') }}</p>
+      </div>
+    </div>
+    <div class="form-actions">
+      <a class="btn btn-ghost" href="/projects/{{ pid }}/models">{{ icon("back") }}{{ t('import.back') }}</a>
+      <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span>{{ icon("upload") }}{{ t('import.submit') }}</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

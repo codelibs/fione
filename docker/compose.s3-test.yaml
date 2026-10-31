@@ -1,0 +1,24 @@
+# Throwaway SeaweedFS (Apache-2.0) with an S3 API for `pytest -m s3`. Test credentials only.
+#
+#   docker compose -f docker/compose.s3-test.yaml up -d
+#   FIONE_TEST_S3_ENDPOINT=http://localhost:18333 FIONE_TEST_S3_BUCKET=fione-test \
+#   FIONE_TEST_S3_ACCESS_KEY=fione-test FIONE_TEST_S3_SECRET_KEY=fione-test-secret \
+#   uv run pytest -m s3 -q
+#   docker compose -f docker/compose.s3-test.yaml down -v
+name: fione-s3-test
+services:
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    container_name: fione-test-seaweedfs
+    # Single container: master + volume + filer + S3 gateway on one data dir.
+    command: >
+      server -dir=/data -ip.bind=0.0.0.0 -s3 -s3.port=8333
+      -s3.config=/etc/seaweedfs/s3.json
+      -master.volumeSizeLimitMB=64 -volume.max=20
+    ports:
+      - "127.0.0.1:18333:8333"
+    volumes:
+      - ./s3-test.json:/etc/seaweedfs/s3.json:ro
+      - seaweedfs-data:/data
+volumes:
+  seaweedfs-data:

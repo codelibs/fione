@@ -1,0 +1,56 @@
+[project]
+name = "fione"
+dynamic = ["version"]
+description = "Fione: AutoML server"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "boto3>=1.43.118",
+    "catboost>=1.2.10",
+    "fastapi>=0.162.0",
+    "jinja2>=3.1.6",
+    "joblib>=1.6.0",
+    "lightgbm>=4.7.0",
+    "optuna>=5.0.0",
+    "pandas>=3.1.0",
+    "pyarrow>=26.0.0",
+    "pydantic-settings>=2.16.1",
+    "python-multipart>=0.0.32",
+    "scikit-learn>=1.9.1",
+    # fione/web/uploads.py subclasses Starlette's multipart parser and uses its internals:
+    # check that file (and its test) before allowing a newer minor version.
+    "starlette>=1.9.0,<1.10",
+    "uvicorn>=0.54.0",
+    "xgboost>=3.4.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "playwright",
+    "httpx>=0.28.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/fione/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fione", "src/fione_serving"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "scripts"]
+markers = [
+    "s3: needs an S3-compatible server (set FIONE_TEST_S3_ENDPOINT, _BUCKET, _ACCESS_KEY, _SECRET_KEY)",
+    "timing: wall-clock time budget checks (select with -m timing)",
+    "acceptance: slow end-to-end accuracy and size targets on real datasets (select with -m acceptance)",
+    "e2e: browser tests against the Docker Compose stack (select with -m e2e; needs Docker)",
+]
+addopts = "-m 'not acceptance and not e2e and not timing'"

@@ -1,0 +1,8 @@
+{% from "_macros.html" import icon %}
+{# The poller's last fragment when the job can no longer be shown (no hx-trigger: polling ends). #}
+<section class="card card-padded stack job-status" id="{{ target_id or 'job-status' }}" data-job-status="gone">
+  <div class="alert alert-danger" role="alert">{{ icon("alert") }}<span data-announce>{{ message }}</span></div>
+  <p class="text-muted text-sm">{{ t(hint) }}</p>
+  <p class="cluster">{% if hint in ("job.reload_hint", "jobs.reload_hint") %}<a class="btn btn-primary" href="">{{ t('job.reload') }}</a>{% endif %}<a class="btn btn-secondary" href="/">{{ t('nav.projects') }}</a></p>
+</section>
+{% if not target_id %}<div id="job-cancel" hx-swap-oob="true"></div>{% endif %}

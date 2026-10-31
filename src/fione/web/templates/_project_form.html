@@ -1,0 +1,19 @@
+{% from "_macros.html" import icon %}
+<form class="card new-project" id="new-project" hx-post="/ui/projects" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find button">
+  <div class="field new-project__field">
+    <label class="field__label" for="project-name">{{ t('home.new') }}</label>
+    <div class="new-project__row">
+      <input class="input" id="project-name" name="name" type="text" required maxlength="100"
+             value="{{ name or '' }}" placeholder="{{ t('home.name') }}" autocomplete="off"
+             aria-describedby="project-name-{{ 'error' if error else 'hint' }}"{% if error %} aria-invalid="true" autofocus{% endif %}>
+      <button type="submit" class="btn btn-primary">
+        <span class="spinner" aria-hidden="true"></span>{{ icon("plus") }}{{ t('home.create') }}
+      </button>
+    </div>
+    {% if error %}
+    <p class="field__error" id="project-name-error" role="alert">{{ icon("alert", "icon icon-sm") }}{{ t(error) }}</p>
+    {% else %}
+    <p class="field__hint" id="project-name-hint">{{ t('home.name_hint') }}</p>
+    {% endif %}
+  </div>
+</form>

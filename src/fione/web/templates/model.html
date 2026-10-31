@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, breadcrumb, stars, mascot, chart with context %}
+{% block title %}{{ record.name }} · {{ t('models.title') }}{% endblock %}
+{% block scripts %}
+<script src="{{ static('vendor/echarts/echarts.min.js') }}" defer></script>
+<script src="{{ static('js/charts.js') }}" defer></script>
+<script src="{{ static('js/easyml.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+{% set pid = ctx.project.id %}
+{% set base = "/projects/" ~ pid ~ "/models/" ~ record.id %}
+{% set mood = "happy" if rating.stars >= 4 else ("calm" if rating.stars >= 2 else "worried") %}
+<div class="container page">
+  {{ breadcrumb(t, ctx.project, record.name, section="models") }}
+  <header class="page-header page-header-row">
+    <div class="page-header__main">
+      <p class="eyebrow">{{ t('model.eyebrow') }}</p>
+      <h1 class="page-header__title page-header__title-wrap">{{ record.name }}</h1>
+      <p class="page-header__lead text-muted">{{ t('model.lead', target=record.target, task=t('task.' ~ record.task) if record.task in ("classification", "regression") else record.task) }} · <time datetime="{{ record.created_at|iso }}">{{ t('time.utc', time=record.created_at|utc) }}</time></p>
+    </div>
+    {{ stars(t, rating) }}
+  </header>
+  <div class="cluster">
+    {% if ctx.can_write %}<a class="btn btn-primary" href="{{ base }}/predict">{{ icon("play") }}{{ t('summary.predict') }}</a>{% endif %}
+    <a class="btn btn-secondary" href="{{ base }}/summary">{{ t('summary.title') }}</a>
+    <a class="btn btn-ghost" href="{{ base }}/export">{{ icon("download") }}{{ t('model.export') }}</a>
+  </div>
+  {% if not record.trusted %}<div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('model.untrusted') }}</span></div>{% endif %}
+  {% if record.stop_reason == "error" %}<div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('summary.degraded') }}</span></div>{% endif %}
+
+  <div class="tabs" data-tabs>
+    <div class="tabs__list" role="tablist" aria-label="{{ t('model.tabs') }}">
+      {% for key in ["overview", "leaderboard", "importance", "history", "metrics"] %}
+      <button type="button" class="tabs__tab" role="tab" id="tab-{{ key }}" aria-controls="panel-{{ key }}" aria-selected="{{ 'true' if tab == key else 'false' }}" tabindex="{{ '0' if tab == key else '-1' }}">{{ t('model.tab.' ~ key) }}</button>
+      {% endfor %}
+    </div>
+
+    <div class="tabs__panel stack" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" tabindex="0"{% if tab != "overview" %} hidden{% endif %}>
+      <section class="card summary-hero" aria-labelledby="rating-title">
+        <div class="summary-hero__rating">
+          <h2 class="eyebrow" id="rating-title">{{ t('summary.rating') }}</h2>
+          <p class="summary-hero__score">{{ t('rating.text', n=rating.stars) }}</p>
+          {% if sentence %}<p class="summary-hero__sentence">{{ t(sentence[0], **sentence[1]) }}</p>{% endif %}
+          <p class="text-muted text-sm">{{ t('model.rating_rule') }}</p>
+        </div>
+        <div class="summary-hero__guide">
+          {{ mascot(mood, "mascot mascot-lg") }}
+          <div class="guide__bubble">
+            <p class="guide__name">{{ t('fione.name') }}</p>
+            <p class="guide__text">{{ t('fione.message.' ~ rating.stars) }}</p>
+          </div>
+        </div>
+      </section>
+      <div class="summary-grid">
+        <section class="card card-padded stack" aria-labelledby="facts-title">
+          <h2 class="section-header__title" id="facts-title">{{ t('summary.facts') }}</h2>
+          <dl class="facts facts-stacked">
+            <div><dt>{{ t('summary.best_model') }}</dt><dd>{{ record.best_model }}</dd></div>
+            <div><dt>{{ t('model.data') }}</dt><dd>{% if dataset %}<a href="/projects/{{ pid }}/datasets/{{ dataset.id }}">{{ dataset.name }}</a> ({{ t('project.dataset_size', rows="{:,}".format(dataset.n_rows), cols="{:,}".format(dataset.n_cols)) }}){% else %}{{ t('model.data_gone') }}{% endif %}</dd></div>
+            <div><dt>{{ t('summary.models_tried') }}</dt><dd>{{ n_trials }}</dd></div>
+            {% if elapsed %}<div><dt>{{ t('summary.training_time') }}</dt><dd>{{ elapsed }}</dd></div>{% endif %}
+            <div><dt>{{ t('summary.stop_reason') }}</dt><dd>{{ t('stop_reason.' ~ record.stop_reason) if record.stop_reason in ("time", "max_models", "no_improvement", "cancelled", "error") else record.stop_reason }}</dd></div>
+            {% if record.job_id %}<div><dt>{{ t('model.job') }}</dt><dd><a href="/projects/{{ pid }}/jobs/{{ record.job_id }}">#{{ record.job_id }}</a></dd></div>{% endif %}
+          </dl>
+        </section>
+        <section class="card card-padded stack" aria-labelledby="config-title">
+          <h2 class="section-header__title" id="config-title">{{ t('model.config') }}</h2>
+          {% if config %}
+          <dl class="facts facts-stacked">
+            {% for name, value in config %}
+            <div><dt>{{ t('train.f.' ~ name) if name not in ("target", "max_runtime_secs", "ignored_columns") else t('model.cfg.' ~ name) }}</dt><dd class="cell-value">{{ t(value[1]) if value[1] else value[0] }}</dd></div>
+            {% endfor %}
+          </dl>
+          {% else %}
+          <p class="text-muted">{{ t('model.not_stored') }}</p>
+          {% endif %}
+        </section>
+      </div>
+      <section class="card card-padded stack" aria-labelledby="use-title">
+        <h2 class="section-header__title" id="use-title">{{ t('model.serving') }}</h2>
+        {% include "_serving.html" %}
+      </section>
+    </div>
+
+    <div class="tabs__panel stack-tight" role="tabpanel" id="panel-leaderboard" aria-labelledby="tab-leaderboard" tabindex="0"{% if tab != "leaderboard" %} hidden{% endif %}>
+      {% if leaderboard %}
+      <p class="text-muted text-sm">{{ t('model.board_hint', metric=t('metric.' ~ sort_metric) if sort_metric else "—") }}</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="{{ t('model.tab.leaderboard') }}">
+        <table class="table table-compact table-data">
+          <thead><tr>
+            <th scope="col">{{ t('model.col.model') }}</th>
+            <th scope="col" class="num">{{ t('model.col.score') }}</th>
+            <th scope="col" class="num">{{ t('model.col.spread') }}</th>
+            <th scope="col" class="num">{{ t('model.col.weight') }}</th>
+            <th scope="col" class="num">{{ t('model.col.time') }}</th>
+            <th scope="col">{{ t('model.col.params') }}</th>
+          </tr></thead>
+          <tbody>
+            {% for row in leaderboard %}
+            <tr>
+              <th scope="row" class="cell-name">{{ row.model }}</th>
+              <td class="num">{{ row.cv_score|cellnum if row.cv_score is not none else "—" }}</td>
+              <td class="num">{{ row.cv_std|cellnum if row.cv_std is not none else "—" }}</td>
+              <td class="num">{{ "%.2f"|format(row.weight) if row.weight is not none else "—" }}</td>
+              <td class="num">{{ "%.1f s"|format(row.train_secs) if row.train_secs is not none else "—" }}</td>
+              <td class="cell-value cell-wide text-sm">{{ row.params or "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="text-muted text-sm">{{ t('model.board_note') }}</p>
+      {% else %}
+      <p class="empty-line text-muted">{{ t('model.not_stored') }}</p>
+      {% endif %}
+    </div>
+
+    <div class="tabs__panel stack" role="tabpanel" id="panel-importance" aria-labelledby="tab-importance" tabindex="0"{% if tab != "importance" %} hidden{% endif %}>
+      {% if importance_chart %}
+      <p class="text-muted text-sm">{{ t('summary.top_inputs_hint') }}</p>
+      {{ chart(t, "importance-chart", importance_chart, "chart-tall") }}
+      {% else %}
+      <p class="empty-line text-muted">{{ t('model.not_stored') }}</p>
+      {% endif %}
+    </div>
+
+    <div class="tabs__panel stack" role="tabpanel" id="panel-history" aria-labelledby="tab-history" tabindex="0"{% if tab != "history" %} hidden{% endif %}>
+      {% if history %}
+      <p class="text-muted text-sm">{{ t('model.history.hint') }}</p>
+      {{ chart(t, "history-chart", history, "chart-tall") }}
+      {% else %}
+      <p class="empty-line text-muted">{{ t('model.not_stored') }}</p>
+      {% endif %}
+    </div>
+
+    <div class="tabs__panel stack" role="tabpanel" id="panel-metrics" aria-labelledby="tab-metrics" tabindex="0"{% if tab != "metrics" %} hidden{% endif %}>
+      {% if metric_rows %}
+      <div class="table-wrap" tabindex="0" role="region" aria-label="{{ t('model.tab.metrics') }}">
+        <table class="table">
+          <thead><tr><th scope="col">{{ t('model.col.metric') }}</th><th scope="col" class="num">{{ t('model.col.value') }}</th><th scope="col">{{ t('model.col.meaning') }}</th></tr></thead>
+          <tbody>
+            {% for name, value in metric_rows %}
+            <tr>
+              <th scope="row">{{ t('metric.' ~ name) if name in ("logloss", "accuracy", "auc", "rmse", "mae", "r2") else name }}</th>
+              <td class="num">{{ value|cellnum if value is not none else "—" }}</td>
+              <td class="text-sm cell-value">{{ t('metric.' ~ name ~ '.explain') if name in ("logloss", "accuracy", "auc", "rmse", "mae", "r2") else "" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+      <p class="text-muted text-sm">{{ t('model.metrics_note') }}</p>
+      <p class="text-muted text-sm">{{ t('model.metrics_missing') }}</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
