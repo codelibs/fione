@@ -27,6 +27,8 @@ This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinI
   API tokens and a REST API (`/api/v1`) for scripts.
 - **Python modules** for data operations (built-in frame operations, k-means, low-rank
   factorization; administrators can upload their own).
+- **Notebooks** (opt-in): JupyterLab in a container per user, inside Fione, with the Python
+  client `fione-sdk`.
 - **Storage** on SeaweedFS or any S3-compatible service; metadata in SQLite.
 - English and Japanese, light and dark themes, usable on phones.
 
@@ -42,9 +44,19 @@ docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "
 
 The full walk-through, with a sample dataset: [Quick start](docs/quickstart.md).
 
+## Notebooks
+
+Fione can open JupyterLab in a container of your own, inside its web UI, with no second
+sign-in. It is opt-in (the Compose profile `notebook`) and needs two more addresses and a secret in
+`docker/.env`; see [Notebooks](docs/notebook.md). The same notebooks, a script or your own
+Jupyter can drive Fione with `fione-sdk` (`sdk/`, `pip install ./sdk`): datasets, data
+profiles, AutoML training, leaderboards, predictions and Python modules, as pandas frames, with
+an API token. See [sdk/README.md](sdk/README.md).
+
 ## Documentation
 
 - [Quick start](docs/quickstart.md)
+- [Notebooks](docs/notebook.md): JupyterLab and `fione-sdk`
 - [Configuration](docs/configuration.md): every setting, reverse proxy, backups of the secret key
 - [Fione Serving](docs/serving.md): running a model as a prediction API
 - [Moving from v1](docs/migrating-from-v1.md)
@@ -53,10 +65,11 @@ The full walk-through, with a sample dataset: [Quick start](docs/quickstart.md).
 ## Status
 
 This release covers the core: data, analysis, AutoML, models and their explanations,
-predictions, serving, jobs, users and sharing. **Planned, not in this release**: Notebook
-integration (JupyterLab and a Python SDK), an LLM assistant (Ollama, by default with
+predictions, serving, jobs, users and sharing, and the opt-in notebooks (JupyterLab and a
+Python SDK). **Planned, not in this release**: an LLM assistant (Ollama, by default with
 `gemma4:12b-mlx` on a Mac), an MCP server and ONNX export. No images are published yet;
-you build them from the repository.
+you build them from the repository (a version tag publishes the `fione`, `fione-serving`,
+`fione-notebook` and `fione-notebook-launcher` images).
 
 The Java v1 (a Fess plugin) is preserved in this repository's history, before the merge of v2.
 

@@ -6,7 +6,8 @@ import pytest
 
 from fione import db
 from fione.auth import passwords, roles, service
-from fione.auth.roles import Role, User
+from fione.auth.roles import NotebookPermission, Role, User
+from fione.auth.tokens import TokenScope
 
 PW = "correct horse"
 
@@ -207,6 +208,49 @@ def test_deleting_user_removes_tokens(conn):
     conn.execute("DELETE FROM users WHERE id=?", (user.id,))
     assert service.user_from_token(conn, token) is None
     assert conn.execute("SELECT COUNT(*) FROM api_tokens").fetchone()[0] == 0
+
+
+def test_migration_keeps_existing_tokens_full_and_unexpiring(conn, tmp_path):
+    before = next(i for i, sql in enumerate(db.MIGRATIONS) if "api_tokens ADD COLUMN" in sql)
+    old = db.connect(tmp_path / "old.db")
+    try:
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:before])
+            db.migrate(old)
+        user = service.create_user(old, "alice", PW, Role.EDITOR)
+        old.execute(
+            "INSERT INTO api_tokens (user_id, name, token_sha256) VALUES (?, 'old', 'h')",
+            (user.id,),
+        )
+        assert db.migrate(old) == len(db.MIGRATIONS)
+        (record,) = service.list_tokens(old, user.id)
+        assert record.scope == "full" and record.expires_at is None
+    finally:
+        old.close()
+
+
+def test_create_token_rejects_iso_t_format(conn):
+    user = service.create_user(conn, "alice", PW, Role.EDITOR)
+    with pytest.raises(ValueError):
+        service.create_token(conn, user.id, "t", expires_at="2026-01-01T00:00:00")
+
+
+def test_create_token_rejects_an_impossible_date(conn):
+    user = service.create_user(conn, "alice", PW, Role.EDITOR)
+    with pytest.raises(ValueError):
+        service.create_token(conn, user.id, "t", expires_at="2026-19-99 99:99:99")
+
+
+def test_token_identity_carries_scope_and_expiry(conn):
+    user = service.create_user(conn, "alice", PW, Role.EDITOR)
+    expires = service.expiry_after(60)
+    record, token = service.create_token(
+        conn, user.id, "nb", scope=TokenScope.NOTEBOOK, expires_at=expires
+    )
+    assert record.scope is TokenScope.NOTEBOOK and record.expires_at == expires
+    found, meta = service.token_identity(conn, token)
+    assert found == user and meta == record
+    assert service.user_from_token(conn, token) == user
 
 
 # --- roles -------------------------------------------------------------------
@@ -481,3 +525,46 @@ def test_create_first_admin_validates(conn):
     with pytest.raises(ValueError, match="exists"):
         service.create_first_admin(conn, "root", PW)
     assert service.needs_first_admin(conn)
+
+
+# --- notebook permission -----------------------------------------------------
+
+
+def test_notebook_permission_defaults_to_none_for_editors_and_viewers(conn):
+    editor = service.create_user(conn, "ed", PW, Role.EDITOR)
+    viewer = service.create_user(conn, "vi", PW, Role.VIEWER)
+    for user in (editor, viewer):
+        assert service.get_notebook_permission(conn, user.id) == NotebookPermission.NONE
+        assert service.can_use_notebook(conn, user) is False
+    assert service.notebook_permissions(conn) == {
+        editor.id: NotebookPermission.NONE,
+        viewer.id: NotebookPermission.NONE,
+    }
+
+
+def test_setting_the_notebook_permission_is_read_fresh(conn):
+    editor = service.create_user(conn, "ed", PW, Role.EDITOR)
+    service.set_notebook_permission(conn, editor.id, NotebookPermission.RUN)
+    assert service.get_notebook_permission(conn, editor.id) == NotebookPermission.RUN
+    assert service.can_use_notebook(conn, editor) is True
+    service.set_notebook_permission(conn, editor.id, NotebookPermission.NONE)
+    assert service.can_use_notebook(conn, editor) is False  # the same User object
+
+
+def test_admins_can_always_use_notebooks(conn):
+    admin = service.create_user(conn, "root", PW, Role.ADMIN)
+    assert service.get_notebook_permission(conn, admin.id) == NotebookPermission.NONE
+    assert service.can_use_notebook(conn, admin) is True
+
+
+def test_notebook_permission_of_an_unknown_user(conn):
+    with pytest.raises(service.UserNotFound):
+        service.get_notebook_permission(conn, 999)
+    with pytest.raises(service.UserNotFound):
+        service.set_notebook_permission(conn, 999, NotebookPermission.RUN)
+
+
+def test_notebook_permission_column_refuses_other_values(conn):
+    user = service.create_user(conn, "ed", PW, Role.EDITOR)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE users SET notebook = 'admin' WHERE id = ?", (user.id,))

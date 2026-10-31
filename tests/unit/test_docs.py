@@ -45,13 +45,29 @@ def test_docs_list_every_compose_and_serving_variable():
     assert _table_names(_section(text, "Fione Serving")) == serving
 
 
+def test_docs_list_every_launcher_variable():
+    launcher = set()
+    for source in (ROOT / "src" / "fione_launcher").glob("*.py"):
+        launcher |= _names_in(source, r"\"(FIONE_[A-Z0-9_]+)\"")
+    assert _table_names(_section(CONFIG_DOC.read_text(), "Notebook launcher")) == launcher
+
+
+def test_docs_list_every_sdk_variable():
+    sdk = set()
+    for source in (ROOT / "sdk" / "src" / "fione_sdk").glob("*.py"):
+        sdk |= _names_in(source, r"\"(FIONE_[A-Z0-9_]+)\"")
+    assert _table_names(_section(CONFIG_DOC.read_text(), "fione-sdk")) == sdk
+
+
 def test_docs_name_no_setting_that_does_not_exist():
     known = {f"FIONE_{name.upper()}" for name in Settings.model_fields}
     known |= _names_in(ROOT / "docker" / "compose.yaml", r"\$\{(FIONE_[A-Z0-9_]+)")
     known |= _names_in(ROOT / "docker" / ".env.example", r"(FIONE_[A-Z0-9_]+)=")
     for source in [
         *(ROOT / "src" / "fione_serving").glob("*.py"),
+        *(ROOT / "src" / "fione_launcher").glob("*.py"),
         *(ROOT / "src" / "fione" / "jobs").glob("*.py"),
+        *(ROOT / "sdk" / "src" / "fione_sdk").glob("*.py"),
     ]:
         known |= _names_in(source, r"\"(FIONE_[A-Z0-9_]+)\"")
     for page in PAGES:

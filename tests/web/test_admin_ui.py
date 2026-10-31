@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from api_helpers import PW, add_user, connect, login
 from fione import i18n
 from fione.auth import service as auth_service
-from fione.auth.roles import Role
+from fione.auth.roles import NotebookPermission, Role
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.projects import service as projects
@@ -42,6 +42,18 @@ def user_id(client, username) -> int | None:
 def role_of(client, username) -> str:
     with closing(connect(client)) as conn:
         return conn.execute("SELECT role FROM users WHERE username = ?", (username,)).fetchone()[0]
+
+
+def notebook_of(client, username) -> str:
+    with closing(connect(client)) as conn:
+        row = conn.execute("SELECT notebook FROM users WHERE username = ?", (username,)).fetchone()
+    return row[0]
+
+
+def row_of(page: str, username: str) -> str:
+    """The users table row of ``username``."""
+    (row,) = [r for r in page.split("<tr>")[1:] if f'class="cell-value">{username}' in r]
+    return row
 
 
 def second(client, username, password=PW) -> TestClient:
@@ -202,25 +214,28 @@ def test_the_refusal_is_said_in_japanese(client):
 
 
 @pytest.mark.parametrize("uid", ["999999", "abc", "0", str(2**63)])
-@pytest.mark.parametrize("path", ["role", "password", "delete"])
+@pytest.mark.parametrize("path", ["role", "password", "delete", "notebook"])
 def test_unknown_users_are_not_found(client, uid, path):
     csrf = login(client, "admin")
-    form = {"csrf_token": csrf, "role": "viewer", "password": NEW_PW}
+    form = {"csrf_token": csrf, "role": "viewer", "password": NEW_PW, "notebook": "run"}
     r = client.post(f"/admin/users/{uid}/{path}", data=form)
     assert r.status_code == 404 and "text/html" in r.headers["content-type"]
 
 
-@pytest.mark.parametrize("path", ["", "/{uid}/role", "/{uid}/password", "/{uid}/delete"])
+@pytest.mark.parametrize(
+    "path", ["", "/{uid}/role", "/{uid}/password", "/{uid}/delete", "/{uid}/notebook"]
+)
 @pytest.mark.parametrize("refusal", ["no_csrf", "cross_site"])
 def test_user_posts_need_the_token_and_this_site(client, path, refusal):
     csrf = login(client, "admin")
     uid = user_id(client, "ed")
     data = {"csrf_token": "" if refusal == "no_csrf" else csrf}
-    data |= {"username": "newbie", "password": NEW_PW, "role": "viewer"}
+    data |= {"username": "newbie", "password": NEW_PW, "role": "viewer", "notebook": "run"}
     headers = EVIL if refusal == "cross_site" else {}
     r = client.post("/admin/users" + path.replace("{uid}", str(uid)), data=data, headers=headers)
     assert r.status_code == 403 and "text/html" in r.headers["content-type"]
     assert user_id(client, "newbie") is None and role_of(client, "ed") == "editor"
+    assert notebook_of(client, "ed") == "none"
     login(TestClient(client.app), "ed")  # the password is unchanged
 
 
@@ -366,3 +381,71 @@ def test_polling_returns_the_card_and_stops_when_it_cannot_be_shown(client, monk
     client.cookies.clear()
     r = client.get("/admin/system", headers=poll)
     assert r.status_code == 401 and r.headers["hx-redirect"].startswith("/login?next=")
+
+
+def test_users_page_shows_the_notebook_column(client):
+    login(client, "admin")
+    allowed = user_id(client, "gv")
+    with closing(connect(client)) as conn:
+        auth_service.set_notebook_permission(conn, allowed, NotebookPermission.RUN)
+    page = client.get("/admin/users").text
+    assert page.count('data-label="Notebook"') == 3
+    assert i18n.t("users.notebook_run", "en") in row_of(page, "gv")
+    assert i18n.t("users.notebook_none", "en") in row_of(page, "ed")
+    assert i18n.t("users.notebook_none", "en") not in row_of(page, "gv")
+    assert i18n.t("users.notebook_admin", "en") in row_of(page, "admin")
+    assert f"/admin/users/{allowed}/notebook" in row_of(page, "gv")
+    assert f"/admin/users/{user_id(client, 'ed')}/notebook" in row_of(page, "ed")
+    assert "/notebook" not in row_of(page, "admin")  # an admin always may: no control
+
+
+def test_users_page_shows_no_control_for_another_admin(client):
+    add_user(client, "boss", Role.ADMIN)
+    login(client, "admin")
+    row = row_of(client.get("/admin/users").text, "boss")
+    assert i18n.t("users.notebook_admin", "en") in row
+    assert f"/admin/users/{user_id(client, 'boss')}/notebook" not in row
+
+
+def test_admin_ui_toggles_permission(client):
+    csrf = login(client, "admin")
+    uid = user_id(client, "ed")
+    url = f"/admin/users/{uid}/notebook"
+    data = {"csrf_token": csrf, "notebook": "run", "page": "1"}
+    r = client.post(url, data=data, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/admin/users?done=notebook&page=1"
+    assert notebook_of(client, "ed") == "run"
+    assert i18n.t("users.done.notebook", "en") in client.get(r.headers["location"]).text
+    r = client.post(url, data={"csrf_token": csrf, "notebook": "none"}, follow_redirects=False)
+    assert r.status_code == 303 and notebook_of(client, "ed") == "none"
+
+
+@pytest.mark.parametrize("value", ["", "admin", "RUN", "yes"])
+def test_admin_ui_refuses_other_notebook_values(client, value):
+    csrf = login(client, "admin")
+    uid = user_id(client, "ed")
+    r = client.post(f"/admin/users/{uid}/notebook", data={"csrf_token": csrf, "notebook": value})
+    assert r.status_code == 422 and "text/html" in r.headers["content-type"]
+    assert notebook_of(client, "ed") == "none"
+
+
+@pytest.mark.parametrize("who", ["ed", "gv"])
+def test_others_cannot_toggle_the_notebook_permission(client, who):
+    csrf = login(client, who)
+    uid = user_id(client, who)
+    r = client.post(f"/admin/users/{uid}/notebook", data={"csrf_token": csrf, "notebook": "run"})
+    assert r.status_code == 403 and notebook_of(client, who) == "none"
+
+
+def test_the_notebook_column_is_said_in_japanese(client):
+    login(client, "admin")
+    client.cookies.set("fione_lang", "ja")
+    page = client.get("/admin/users").text
+    assert i18n.t("users.notebook_none", "ja") in page
+
+
+def test_the_users_page_survives_a_user_created_meanwhile(client, monkeypatch):
+    monkeypatch.setattr(auth_service, "notebook_permissions", lambda conn: {})
+    login(client, "admin")
+    r = client.get("/admin/users")
+    assert r.status_code == 200 and i18n.t("users.notebook_none", "en") in row_of(r.text, "ed")

@@ -24,8 +24,9 @@ implementation.
   retrain.
 - **Users are not migrated.** Create them again (an administrator does so on the Users page).
 - **Python modules need a rewrite** for the new API.
-- **H2O Flow, Rapids and MOJO/genmodel downloads are gone.** Notebook integration is planned
-  as Flow's successor; data operations are pandas-based modules.
+- **H2O Flow, Rapids and MOJO/genmodel downloads are gone.** Notebooks (JupyterLab with
+  a Python SDK, see [Notebooks](notebook.md)) are Flow's successor; data operations are
+  pandas-based modules.
 
 ## Terms
 
@@ -62,7 +63,7 @@ The Japanese screen terms are kept.
 | Prediction summary (best model, star rating, Fione-kun) | Shipped |
 | Serving zip | Replaced by the serving bundle and the shared image |
 | MOJO / genmodel download | Removed. ONNX export is planned where possible |
-| H2O Flow | Removed. Notebook integration (JupyterLab) is **planned** |
+| H2O Flow | Removed. Replaced by [Notebooks](notebook.md): JupyterLab in a container per user, with the Python `fione-sdk` (opt-in) |
 | Rapids | Removed (pandas-based modules) |
 | Python modules: frame operations (cbind, concat, cor, cslice, fillna, floor, pivot, rbind, replace, rslice, sort, split, tokenize) | Shipped as built-in modules |
 | Python modules: kmeans training and prediction | Shipped (scikit-learn KMeans) |
@@ -73,8 +74,8 @@ The Japanese screen terms are kept.
 | Three roles and per-user sessions | Rebuilt: admin / editor / viewer and project sharing |
 | English and Japanese | Shipped |
 
-Planned, **not in this release**: Notebook integration (JupyterLab and a Python SDK), the LLM
-assistant (Ollama, by default with `gemma4:12b-mlx` on a Mac), an MCP server and ONNX export.
+Planned, **not in this release**: the LLM assistant (Ollama, by default with `gemma4:12b-mlx`
+on a Mac), an MCP server and ONNX export.
 
 ## Python modules
 

@@ -125,6 +125,9 @@ their leaderboard, variable importance and score history, model export and impor
 project sharing. Administrators also manage users, Python modules and the system status from
 that menu.
 
+To work with your data in JupyterLab, with Python and `fione-sdk`, enable
+[Notebooks](notebook.md) (opt-in).
+
 ## Stop, back up, upgrade
 
 Stop (the data stays in the Docker volumes `fione_fione-data` and `fione_seaweed-data`):

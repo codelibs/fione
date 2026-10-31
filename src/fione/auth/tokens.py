@@ -1,7 +1,16 @@
 import hashlib
 import secrets
+from enum import StrEnum
 
 TOKEN_PREFIX = "fione_"
+
+
+class TokenScope(StrEnum):
+    """What a token may be used for: ``notebook`` tokens are refused on routes that change
+    accounts, credentials or the host (see ``NOTEBOOK_SCOPE_ROUTES``)."""
+
+    FULL = "full"
+    NOTEBOOK = "notebook"
 
 
 def new_token() -> str:

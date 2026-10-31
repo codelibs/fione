@@ -28,6 +28,9 @@
       <div class="app-nav" id="app-nav">
         <nav class="app-nav__links" aria-label="{{ t('nav.main') }}">
           <a href="/"{% if nav == "projects" %} aria-current="page"{% endif %}>{{ icon("folder") }}{{ t('nav.projects') }}</a>
+          {% if notebook_link() %}
+          <a href="/notebook"{% if nav == "notebook" %} aria-current="page"{% endif %}>{{ icon("terminal") }}{{ t('nav.notebook') }}</a>
+          {% endif %}
         </nav>
         <div class="app-nav__tools">
           {{ lang_switch(t, lang, here) }}

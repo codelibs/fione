@@ -11,6 +11,9 @@
   {% if done %}
   <div class="alert alert-success" role="status">{{ icon("check") }}<span>{{ t('users.done.' ~ done) }}</span></div>
   {% endif %}
+  {% if notebook_pending %}
+  <div class="alert alert-warning" role="status">{{ icon("alert") }}<span>{{ t('users.notebook_pending') }}</span></div>
+  {% endif %}
   {% if problem %}
   <div class="alert alert-danger" role="alert" id="users-problem" tabindex="-1" autofocus>{{ icon("alert") }}<div class="stack-tight"><p><strong>{{ t('users.refused', username=problem.username) }}</strong></p><p>{{ t(problem.key, **problem.params) }}</p>{% if problem.key == "users.refused.self_password" %}<p><a href="/account">{{ t('users.your_account') }}</a></p>{% endif %}</div></div>
   {% endif %}
@@ -57,6 +60,7 @@
           <tr>
             <th scope="col">{{ t('users.username') }}</th>
             <th scope="col">{{ t('users.role') }}</th>
+            <th scope="col">{{ t('users.notebook') }}</th>
             <th scope="col">{{ t('users.created') }}</th>
             <th scope="col">{{ t('datasets.col.actions') }}</th>
           </tr>
@@ -67,6 +71,22 @@
           <tr>
             <th scope="row" class="cell-value">{{ person.username }}{% if self %} <span class="badge badge-info">{{ t('users.you') }}</span>{% endif %}</th>
             <td data-label="{{ t('users.role') }}"><span class="badge badge-{{ 'info' if person.role.value == 'admin' else 'neutral' }}">{{ t('role.' ~ person.role.value) }}</span></td>
+            <td data-label="{{ t('users.notebook') }}">
+              {% if person.role.value == 'admin' %}
+              <span class="badge badge-info">{{ t('users.notebook_admin') }}</span>
+              {% else %}
+              {% set allowed = notebooks.get(person.id) == 'run' %}
+              <div class="cluster-tight">
+                <span class="badge badge-{{ 'success' if allowed else 'neutral' }}">{{ t('users.notebook_run' if allowed else 'users.notebook_none') }}</span>
+                <form method="post" action="/admin/users/{{ person.id }}/notebook" data-busy-form>
+                  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                  <input type="hidden" name="page" value="{{ page_number }}">
+                  <input type="hidden" name="notebook" value="{{ 'none' if allowed else 'run' }}">
+                  <button type="submit" class="btn btn-ghost btn-sm"><span class="spinner" aria-hidden="true"></span>{{ t('users.notebook_revoke' if allowed else 'users.notebook_allow') }}<span class="visually-hidden">: {{ person.username }}</span></button>
+                </form>
+              </div>
+              {% endif %}
+            </td>
             <td data-label="{{ t('users.created') }}"><time datetime="{{ created|iso }}">{{ t('time.utc', time=created|utc) }}</time></td>
             <td data-label="{{ t('datasets.col.actions') }}">
               {% if self %}

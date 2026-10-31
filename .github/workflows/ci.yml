@@ -25,12 +25,15 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install 3.12
-      - run: uv sync --frozen
+      - run: uv sync --frozen --group notebook
       - run: uv run python scripts/check_licenses.py
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      # Unit, API, web and contract tests (acceptance and e2e are deselected by default).
+      # Unit, API, web and contract tests (acceptance, e2e, docker and notebook are deselected
+      # by default).
       - run: uv run pytest -q
+      # The notebook image's Jupyter extension, against a real Jupyter server.
+      - run: uv run pytest -m notebook -q
 
   e2e:
     # Pushes to the main branches only: the browser suite against the Compose stack.
@@ -48,10 +51,13 @@ jobs:
       - run: uv python install 3.12
       - run: uv sync --frozen
       - run: uv run playwright install --with-deps chromium
-      - name: Build the fione and fione-serving images
+      - name: Build the images (fione, serving, notebook launcher and notebook)
         run: >
           docker compose --env-file docker/e2e.env
-          -f docker/compose.yaml -f docker/compose.e2e.yaml --profile serving build
+          -f docker/compose.yaml -f docker/compose.e2e.yaml
+          --profile serving --profile notebook build
+      # The notebook image, the launcher and the gateway against a real Docker daemon.
+      - run: uv run pytest -m docker -q
       - name: End-to-end tests
         env:
           FIONE_IMAGE_TAG: e2e # the images built above

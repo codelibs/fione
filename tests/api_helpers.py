@@ -14,6 +14,7 @@ from fione.engine.artifact import save_model
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
 from fione.models import service as models
+from fione.notebooks.launcher import LauncherError
 
 PW = "password-123"
 CSV = b"a,b,label\n1,x,yes\n2,y,no\n3,x,yes\n4,z,no\n"
@@ -116,3 +117,57 @@ def wait_job(client, job_id, headers, timeout=60.0) -> dict:
         if time.monotonic() > deadline:
             raise AssertionError(f"job {job_id} still {job['status']}")
         time.sleep(0.1)
+
+
+# The notebook settings of the notebook tests: the launcher is replaced by a FakeLauncher.
+NOTEBOOK_SETTINGS = {
+    "notebook_url": "http://127.0.0.1:8888",
+    "public_url": "http://127.0.0.1:8080",
+    "notebook_launcher_url": "http://launcher",
+    "notebook_launcher_secret": "x" * 32,
+}
+
+
+class FakeLauncher:
+    """Stands in for ``HttpLauncher``: ``calls`` records ``(method, user_id[, body])``,
+    ``states`` holds each user's container state, and ``fail`` (a ``LauncherError``) is
+    raised by every call while set."""
+
+    def __init__(self):
+        self.calls: list[tuple] = []
+        self.states: dict[int, str] = {}
+        self.fail = None
+
+    def _call(self, *call):
+        self.calls.append(call)
+        if self.fail is not None:
+            raise self.fail
+
+    def ensure(self, user_id, body):
+        self._call("ensure", user_id, body)
+        if self.states.get(user_id, "absent") != "absent":
+            raise LauncherError("exists")
+        self.states[user_id] = "starting"
+        return "starting"
+
+    def status(self, user_id):
+        self._call("status", user_id)
+        return self.states.get(user_id, "absent")
+
+    def stop(self, user_id):
+        self._call("stop", user_id)
+        self.states.pop(user_id, None)
+
+    def purge(self, user_id):
+        self._call("purge", user_id)
+        self.states.pop(user_id, None)
+
+    def bodies(self) -> list[dict]:
+        return [c[2] for c in self.calls if c[0] == "ensure"]
+
+
+def notebook_client(make_client, **overrides):
+    """A client of an install with notebooks, whose launcher is a FakeLauncher."""
+    client = make_client(**NOTEBOOK_SETTINGS, **overrides)
+    client.app.state.notebook_launcher = FakeLauncher()
+    return client

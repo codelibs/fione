@@ -6,10 +6,10 @@ from contextlib import closing
 
 import pytest
 
-from api_helpers import PW, add_user, connect, iris_csv, login, make_settings
+from api_helpers import PW, add_user, connect, iris_csv, login, make_settings, notebook_client
 from fione.api.app import create_app
 from fione.auth import service as auth_service
-from fione.auth.roles import Role
+from fione.auth.roles import NotebookPermission, Role
 from fione.models import service as models_service
 from fione.models.transfer import export_model
 from fione.modules import service as modules_service
@@ -20,6 +20,7 @@ from fione.web import (
     easyml,
     models_ui,
     modules_ui,
+    notebook_ui,
     sharing_ui,
     views,
 )
@@ -225,6 +226,7 @@ ADMIN_ROUTES = {
     ("POST", "/admin/users"): (401, 403, 403, 303),
     ("POST", "/admin/users/{uid}/role"): (401, 403, 403, 303),
     ("POST", "/admin/users/{uid}/password"): (401, 403, 403, 303),
+    ("POST", "/admin/users/{uid}/notebook"): (401, 403, 403, 303),
     ("POST", "/admin/users/{uid}/delete"): (401, 403, 403, 303),
     ("GET", "/admin/system"): (303, 403, 403, 200),
 }
@@ -234,6 +236,7 @@ GLOBAL_FORMS = {
     "/account/tokens": {"name": "script"},
     "/admin/users": {"username": "newbie", "password": PW, "role": "viewer"},
     "/role": {"role": "viewer"},
+    "/notebook": {"notebook": "run"},
     "/password": {"password": "a-new-password-1"},
 }
 # Project sharing x the AutoML personas: the owner's (and admins') only, 403 for the
@@ -250,6 +253,16 @@ SHARING_PATHS = {
     "/projects/{pid}/members": P + "/members",
     "/projects/{pid}/members/remove": P + "/members/remove",
     "/projects/{pid}/delete": P + "/delete",
+}
+
+# The notebook page x anonymous, a user without the permission, one with it and an admin
+# (always allowed), on an install with notebooks; with notebooks off, every one gets 404.
+NOTEBOOK_PERSONAS = {"anonymous": None, "editor": "ed", "allowed": "nb", "admin": "admin"}
+NOTEBOOK_ROUTES = {
+    ("GET", "/notebook"): (303, 403, 200, 200),
+    ("GET", "/notebook/status"): (303, 403, 200, 200),
+    ("POST", "/notebook/start"): (401, 403, 303, 303),
+    ("POST", "/notebook/stop"): (401, 403, 303, 303),
 }
 
 
@@ -318,6 +331,33 @@ def test_table_covers_every_ui_route():
         (m, SHARING_PATHS[r.path]) for r in sharing_ui.router.routes for m in r.methods - {"HEAD"}
     }
     assert routes == set(SHARING_ROUTES)
+    routes = {(m, r.path) for r in notebook_ui.router.routes for m in r.methods - {"HEAD"}}
+    assert routes == set(NOTEBOOK_ROUTES)
+
+
+@pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+@pytest.mark.parametrize("persona", list(NOTEBOOK_PERSONAS))
+@pytest.mark.parametrize("route", sorted(NOTEBOOK_ROUTES))
+def test_notebook_route(make_client, route, persona, enabled):
+    client = notebook_client(make_client) if enabled else make_client()
+    add_user(client, "ed", Role.EDITOR)
+    allowed = add_user(client, "nb", Role.VIEWER)  # a viewer granted notebooks
+    add_user(client, "admin", Role.ADMIN)
+    with closing(connect(client)) as conn:
+        auth_service.set_notebook_permission(conn, allowed.id, NotebookPermission.RUN)
+    username = NOTEBOOK_PERSONAS[persona]
+    csrf = login(client, username) if username else None
+    method, path = route
+    if method == "GET":
+        r = client.get(path, follow_redirects=False)
+    else:
+        r = client.post(path, data={"csrf_token": csrf or ""}, follow_redirects=False)
+    expected = NOTEBOOK_ROUTES[route][list(NOTEBOOK_PERSONAS).index(persona)] if enabled else 404
+    assert r.status_code == expected, r.text
+    if expected == 303 and persona == "anonymous":
+        assert r.headers["location"].startswith("/login?next=")
+    if expected in (401, 403, 404):
+        assert "text/html" in r.headers["content-type"]
 
 
 @pytest.mark.parametrize("persona", list(GLOBAL_PERSONAS))

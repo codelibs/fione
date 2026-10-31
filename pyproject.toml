@@ -34,6 +34,20 @@ dev = [
     "playwright",
     "httpx>=0.28.1",
 ]
+# What the notebook image installs (src/fione_notebook runs inside it); the notebook tests
+# need it too. Plotting and scikit-learn are here because without egress the image is the
+# whole library set.
+notebook = [
+    "jupyter_server==2.21.1",
+    "jupyterlab==4.6.4",
+    "ipykernel==7.4.0",
+    "tornado>=6.5,<6.6",
+    "pandas",
+    "pyarrow",
+    "httpx>=0.28.1",
+    "scikit-learn",
+    "matplotlib",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -47,11 +61,13 @@ packages = ["src/fione", "src/fione_serving"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "scripts"]
+pythonpath = ["src", "sdk/src", "scripts"]
 markers = [
     "s3: needs an S3-compatible server (set FIONE_TEST_S3_ENDPOINT, _BUCKET, _ACCESS_KEY, _SECRET_KEY)",
     "timing: wall-clock time budget checks (select with -m timing)",
     "acceptance: slow end-to-end accuracy and size targets on real datasets (select with -m acceptance)",
     "e2e: browser tests against the Docker Compose stack (select with -m e2e; needs Docker)",
+    "docker: needs a Docker daemon (select with -m docker)",
+    "notebook: needs the notebook dependency group (select with -m notebook)",
 ]
-addopts = "-m 'not acceptance and not e2e and not timing'"
+addopts = "-m 'not acceptance and not e2e and not timing and not docker and not notebook'"

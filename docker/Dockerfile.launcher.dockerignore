@@ -1,0 +1,8 @@
+# The build context of docker/Dockerfile.launcher: nothing but the launcher package.
+*
+!src/fione_launcher
+
+# Never in the image, even inside the path above.
+**/__pycache__
+**/*.pyc
+**/.DS_Store

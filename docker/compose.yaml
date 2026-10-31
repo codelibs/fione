@@ -45,11 +45,19 @@ services:
       FIONE_SETUP_TOKEN: ${FIONE_SETUP_TOKEN:-}
       # FIONE_TRUST_PROXY: "true"
       # FIONE_COOKIE_SECURE: "true"
+      # Notebooks (profile `notebook`): off while FIONE_NOTEBOOK_URL is empty. `:-` only, never
+      # `:?`: a required value would stop the stack without the profile too.
+      FIONE_PUBLIC_URL: ${FIONE_PUBLIC_URL:-}
+      FIONE_NOTEBOOK_URL: ${FIONE_NOTEBOOK_URL:-}
+      FIONE_NOTEBOOK_LAUNCHER_URL: http://notebook-launcher:8000
+      FIONE_NOTEBOOK_LAUNCHER_SECRET: ${FIONE_NOTEBOOK_LAUNCHER_SECRET:-}
+      FIONE_NOTEBOOK_MAX_LIFETIME_SECS: ${FIONE_NOTEBOOK_MAX_LIFETIME_SECS:-43200}
     ports:
       - "127.0.0.1:${FIONE_PORT:-8080}:8080"
     volumes:
       - fione-data:/data
-    networks: [backend]
+    # Never on `notebooks`: a notebook reaches Fione only through the gateway's relay.
+    networks: [backend, gateway, launcher]
     restart: unless-stopped
 
   seaweedfs:
@@ -115,6 +123,65 @@ services:
       - ${FIONE_MODEL_DIR:-./model}:/model:ro
     networks: [serving]  # its own: a served model cannot reach the storage
 
+  # Notebooks: one JupyterLab container per user, embedded in Fione's notebook page. Not
+  # started by default; set the notebook values of docker/.env, then
+  #   docker compose -f docker/compose.yaml --env-file docker/.env --profile notebook build
+  #   docker compose -f docker/compose.yaml --env-file docker/.env --profile notebook up -d
+  # The gateway: browsers to the notebook containers on its own origin (port 8888), and the
+  # containers' API calls to Fione (the relay, port 8081, not published).
+  notebook-gateway:
+    profiles: ["notebook"]
+    # The newest nginx-unprivileged release at least two weeks old when pinned
+    # (1.31.6-alpine, pushed 2026-10-12).
+    image: nginxinc/nginx-unprivileged:1.31.6-alpine
+    ports:
+      - "127.0.0.1:${FIONE_NOTEBOOK_PORT:-8888}:8080"
+    volumes:
+      - ./notebook-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [gateway, notebooks]
+    restart: unless-stopped
+
+  # The launcher: the only service with the Docker socket (root-equivalent on the host). It
+  # starts the notebook containers on `notebooks`, which it finds by its project's labels: so
+  # no `hostname:` here (it finds its own container by the default one). No ports; its
+  # healthcheck (/health) is the image's.
+  notebook-launcher:
+    profiles: ["notebook"]
+    image: ghcr.io/codelibs/fione-notebook-launcher:${FIONE_IMAGE_TAG:-dev}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.launcher
+      args:
+        FIONE_IMAGE_TAG: *image-tag
+    environment:
+      FIONE_LAUNCHER_SECRET: ${FIONE_NOTEBOOK_LAUNCHER_SECRET:-}
+      FIONE_NOTEBOOK_IMAGE: ghcr.io/codelibs/fione-notebook:${FIONE_IMAGE_TAG:-dev}
+      FIONE_NOTEBOOK_MAX_RUNNING: ${FIONE_NOTEBOOK_MAX_RUNNING:-4}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    networks: [launcher]
+    restart: unless-stopped
+
+  # The notebook image, for `--profile notebook build` only: the launcher starts its
+  # containers, Compose never does (scale 0).
+  notebook-image:
+    profiles: ["notebook"]
+    image: ghcr.io/codelibs/fione-notebook:${FIONE_IMAGE_TAG:-dev}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.notebook
+      args:
+        FIONE_IMAGE_TAG: *image-tag
+    network_mode: none
+    scale: 0
+
 volumes:
   fione-data:
   seaweed-data:
@@ -122,3 +189,11 @@ volumes:
 networks:
   backend:
   serving:
+  # Not internal: the gateway's published port needs it. Fione and the gateway only.
+  gateway:
+  # Fione and the launcher only.
+  launcher:
+    internal: true
+  # The gateway and the notebook containers: no egress, and no Fione.
+  notebooks:
+    internal: true

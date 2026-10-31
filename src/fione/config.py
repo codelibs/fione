@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
@@ -7,6 +8,20 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_SETUP_TOKEN_LENGTH = 16
+MIN_LAUNCHER_SECRET_LENGTH = 32  # as the launcher requires
+_LAUNCHER_SECRET = re.compile(r"[\x21-\x7e]+")  # visible ASCII: it travels in an HTTP header
+# scheme://host[:port] with dot-separated labels: what the launcher accepts as Fione's origin.
+_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+_ORIGIN = re.compile(
+    rf"(?P<scheme>https?)://(?P<host>{_LABEL}(?:\.{_LABEL})*)(?::(?P<port>[0-9]{{1,5}}))?"
+)
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+_NOTEBOOK_FIELDS = (
+    "public_url",
+    "notebook_url",
+    "notebook_launcher_url",
+    "notebook_launcher_secret",
+)
 
 
 class Settings(BaseSettings):
@@ -42,6 +57,14 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 2**30
     # First-admin setup token; when unset, one is generated into <data_dir>/setup-token.
     setup_token: str | None = None
+    # Notebooks (off unless notebook_url is set): Fione's origin as browsers reach it (behind
+    # a TLS proxy Fione cannot know its scheme), the notebook gateway's origin, and the
+    # launcher that starts the per-user containers.
+    public_url: str | None = None
+    notebook_url: str | None = None
+    notebook_launcher_url: str | None = None
+    notebook_launcher_secret: str | None = None
+    notebook_max_lifetime_secs: int = Field(43200, ge=600, le=604800)  # the launcher's bound
 
     @model_validator(mode="after")
     def _derive_defaults(self) -> "Settings":
@@ -55,7 +78,46 @@ class Settings(BaseSettings):
             self.storage_url = (self.data_dir / "objects").as_uri()
         if self.secret_key_path is None:
             self.secret_key_path = self.data_dir / "secret.key"
+        self._check_notebooks()
         return self
+
+    def _check_notebooks(self) -> None:
+        """Empty values are unset; with ``notebook_url`` set, every notebook value is required,
+        both origins are bare (kept in their normal form) and they differ."""
+        for name in _NOTEBOOK_FIELDS:
+            if not getattr(self, name):
+                setattr(self, name, None)
+        if self.notebook_url is None:
+            return
+        for name in _NOTEBOOK_FIELDS:
+            if getattr(self, name) is None:
+                raise ValueError(f"FIONE_{name.upper()} is required with FIONE_NOTEBOOK_URL")
+        for name in ("public_url", "notebook_url"):
+            setattr(self, name, _normal_origin(name, getattr(self, name)))
+        if self.public_url == self.notebook_url:
+            raise ValueError("FIONE_NOTEBOOK_URL must not be Fione's own origin")
+        if not self.notebook_launcher_url.startswith(("http://", "https://")):
+            raise ValueError("FIONE_NOTEBOOK_LAUNCHER_URL must be an http(s) URL")
+        secret = self.notebook_launcher_secret
+        if len(secret) < MIN_LAUNCHER_SECRET_LENGTH or not _LAUNCHER_SECRET.fullmatch(secret):
+            raise ValueError(
+                f"FIONE_NOTEBOOK_LAUNCHER_SECRET must be at least {MIN_LAUNCHER_SECRET_LENGTH}"
+                " visible ASCII characters"
+            )
+
+    @property
+    def notebooks_enabled(self) -> bool:
+        return self.notebook_url is not None
+
+
+def _normal_origin(name: str, value: str) -> str:
+    """``value`` as browsers compare origins: the host in lower case, no default port."""
+    match = _ORIGIN.fullmatch(value)
+    if match is None or (match["port"] and int(match["port"]) > 65535):
+        raise ValueError(f"FIONE_{name.upper()} must be scheme://host[:port], no path")
+    scheme, host = match["scheme"], match["host"].lower()
+    port = int(match["port"]) if match["port"] else _DEFAULT_PORTS[scheme]
+    return f"{scheme}://{host}" + ("" if port == _DEFAULT_PORTS[scheme] else f":{port}")
 
 
 @lru_cache

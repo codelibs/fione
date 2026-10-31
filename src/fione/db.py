@@ -138,6 +138,31 @@ MIGRATIONS: list[str] = [
         created_at REAL NOT NULL
     );
     """,
+    """
+    ALTER TABLE api_tokens ADD COLUMN expires_at TEXT;
+    ALTER TABLE api_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'full'
+        CHECK (scope IN ('full', 'notebook'));
+    """,
+    """
+    ALTER TABLE users ADD COLUMN notebook TEXT NOT NULL DEFAULT 'none'
+        CHECK (notebook IN ('none', 'run'));
+    """,
+    """
+    CREATE TABLE notebook_sessions (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        nonce TEXT NOT NULL,
+        token_id INTEGER NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE notebook_pending_stops (
+        user_id INTEGER PRIMARY KEY,
+        purge INTEGER NOT NULL DEFAULT 0,
+        since TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 

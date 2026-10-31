@@ -26,8 +26,10 @@ What this release does not do, or does with a catch. Japanese summary at the end
   you set `FIONE_SETUP_TOKEN`).
 - **The S3 credentials are visible** in the containers' environment (`docker inspect`,
   `docker exec`) to anyone who can use Docker on the host.
-- **API tokens never expire**, and Fione does not record when one was last used. Revoke tokens
-  you no longer need on the Account page.
+- **API tokens you create never expire**, and Fione does not record when one was last used.
+  Revoke tokens you no longer need on the Account page. Notebook tokens (made for the notebook
+  container) expire with it, act at most as an editor, and cannot manage accounts, tokens,
+  modules, imports or sharing.
 - **Fione Serving has no authentication** and no rate or concurrency limit for predictions
   (only the request size limits). Requests for contributions are capped (2 at once by default,
   then 503), but each one holds the model while it runs, so plain predictions wait for it, and
@@ -152,15 +154,126 @@ What this release does not do, or does with a catch. Japanese summary at the end
   the exact checks run. Scores use at most 10,000 rows, datasets under 200 rows are not
   scored, and after 3 s the check stops and says that some columns were not scored.
 
+## Notebooks
+
+Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.md).
+
+- **The launcher holds the Docker socket**, which is root-equivalent on the host. Only the
+  `notebook-launcher` service has it, with all capabilities dropped and a read-only
+  filesystem, and it starts containers from one fixed spec; Fione never touches the socket.
+  A flaw in the launcher would be a flaw in the host's security. It answers only on a
+  network that Fione alone shares, checks a shared secret, and accepts nothing but
+  fixed-format values; keep notebooks off unless you need them.
+- **A notebook container sees its owner's API token and keys.** The container's environment
+  holds `FIONE_TOKEN` (which code in the notebook reads, by design) and the sign-in keys, and
+  anyone who can use Docker on the host can read them (`docker inspect`). The token expires
+  with the notebook, acts at most as an editor, and cannot manage accounts, tokens, modules,
+  imports or sharing.
+- **A viewer who is granted notebooks still runs code**, with a token that can only read the
+  data they may read. Granting notebooks gives a user a container with 2 CPUs, 4 GiB of memory,
+  512 processes and no capabilities, on an internal network with no egress.
+- **The Docker host answers on the `notebooks` network.** The network is internal (no route
+  out), but the host's own address on its bridge (the subnet's first address) accepts
+  connections from notebook code: every host service bound to all interfaces (`0.0.0.0`),
+  such as SSH, is reachable from every notebook through that address. The mitigation is a
+  host firewall: `INPUT` rules that drop traffic from the `notebooks` bridge to the host
+  (`DOCKER-USER` sees only forwarded traffic, so it covers other destinations, not the host
+  itself), or binding host services to the addresses they serve. Fione does not ship such
+  rules; whether to is an open decision for the maintainer. The end-to-end tests record what
+  answers on ports 22 and 80 there, without asserting it.
+- **The notebooks of different users share one network.** Another user's container is
+  reachable at TCP level on the internal network `notebooks`; each JupyterLab refuses everyone
+  but its owner.
+- **Notebook users share one browser origin.** Every user's JupyterLab is served from the
+  gateway's origin (`/user/<id>/`), and trusted notebook output (HTML and JavaScript that a
+  user's own cells produced) runs there unsandboxed: it is content a user can write, on the
+  origin all users share. Script there could reach the JupyterLab of another user whose
+  browser is signed in to it. The way to that is a sign-in of the victim's browser into the
+  attacker's notebook; JupyterLab accepts a sign-in only from a same-site navigation whose
+  `Referer` is Fione's origin, which closes it from other sites and from other pages on the
+  same site. Until per-user subdomains are adopted (`u<id>.nb.example.com`, which needs
+  wildcard DNS and TLS; an open decision for the maintainer), treat notebook users as trusting
+  each other.
+- **The site is the trust boundary.** Every origin on the gateway's registrable domain, and
+  every port on the same local host name, is same-site with it, and browsers send cookies to
+  the gateway from those pages' requests. Give the gateway a registrable domain used for
+  nothing but Fione (see [The same-site rule](notebook.md#the-same-site-rule)).
+- **Code in a notebook runs as the same operating-system user as the Jupyter server of that
+  container.** A user can therefore in principle inspect that server's process (`ptrace`,
+  `/proc`), and with it the container's launch key and cookie secret. Reading the key needs
+  less: the owner can read their container's own launch key from the server's process
+  environment and mint launch tokens (with any role claim) for their own container. Both stay
+  inside the user's own container and identity: what they can do to Fione is limited by their
+  token, and other containers have other keys. A seccomp profile that denies `ptrace` and
+  `process_vm_writev` would close the first; that is an open decision too.
+- **Notebook trust signatures are kept in memory** (the data directory is read-only) and are
+  lost when the container restarts: outputs of notebooks saved earlier show as untrusted until
+  the cells are run again.
+- **JupyterLab's settings and layout are not saved.** The gateway refuses writes to its
+  settings and workspaces.
+- **Notebooks end.** A kernel idle for 30 minutes is stopped when no JupyterLab tab has it
+  open; a notebook with no kernel and no activity for 1 hour shuts down; and every notebook
+  ends after
+  `FIONE_NOTEBOOK_MAX_LIFETIME_SECS` (12 hours by default), together with its token. Running
+  kernels are lost whenever the container goes: on stop, on shutdown and when the launcher
+  restarts or `docker compose down` stops it. The files in the user's volume stay.
+- **An open JupyterLab tab keeps its notebook running.** Idle culling skips kernels that a tab
+  has open, and a notebook with a running kernel does not shut down, so a forgotten tab keeps
+  the container until its lifetime ends and holds one of the `FIONE_NOTEBOOK_MAX_RUNNING`
+  places.
+- **At most `FIONE_NOTEBOOK_MAX_RUNNING` notebooks run at once** (4 by default), whatever the
+  host can carry. Each may use 2 CPUs and 4 GiB, so four use up to 8 CPUs and 16 GiB beside
+  Fione's own jobs.
+- **Notebook disk use has no limit.** Neither the users' volumes nor the containers' own files
+  have a quota: one user can fill the Docker host's disk, which Fione's database and storage
+  volumes share.
+- **There is no egress.** Code in a notebook cannot install packages or fetch data; the
+  libraries are the image's (JupyterLab, pandas, pyarrow, scikit-learn, matplotlib, httpx and
+  `fione-sdk`).
+- **The gateway's relay refuses raw paths with a `.` or `..` segment.** For a column named
+  exactly `.` or `..`, a notebook cannot fetch the column's profile (`column_profile` puts the
+  name in the path); reading the whole dataset still works.
+- **The gateway also sits on a network with a route out**, because its port is published, so
+  Docker's DNS may pass a lookup of an unknown `nb-<digits>` name on to the host's resolvers.
+  Docker's DNS answers for the aliases of running notebooks; the gateway re-asks every 10 s, so
+  a notebook that was replaced may still be reachable at its old address for up to 10 s.
+- **JupyterLab's `_xsrf` cookie is not marked `Secure`** behind HTTPS. It guards form posts and
+  is not a credential; the sign-in cookie is `Secure` when `FIONE_PUBLIC_URL` is `https`.
+- **Deleting a user removes their notebook and its files** (the volume). If the launcher cannot
+  be reached at that moment, Fione deletes the user anyway, and the removal is pending (see the
+  next item); no notebook starts for that user id (Fione reuses ids) until it is done. The
+  volumes also outlive `docker compose down -v`, and a reset install starts its user ids
+  again, so remove them by label before creating users on one, as
+  [Notebooks](notebook.md#files-and-persistence) shows.
+- **Stopping a notebook can be pending.** Revoking the permission, a new password, taking the
+  administrator role away and deleting the user end the notebook's token at once, but the
+  container is removed by the launcher. If the launcher cannot be reached, the change is made
+  anyway, the **Users** page (or the API's `notebook_stop_pending` notice) says so, and Fione
+  retries every minute and before every notebook start, stop and status check. Until a retry succeeds, a browser
+  already signed in to that JupyterLab keeps using it (the sign-in cookie lasts as long as
+  the container). Pending stops are kept in Fione's database, so a restart keeps retrying.
+- **The launcher and Fione keep notebook state in the process**: the per-user start and stop
+  locks of Fione, and the launcher's start lock, are in memory, so run one of each (see
+  *One process only* below).
+- **Stopping a notebook while JupyterLab is open** can leave errors in the browser's console
+  (502, "Failed to fetch"); and the first Shift+Enter in a fresh notebook is sometimes ignored
+  (stock JupyterLab does it too).
+- **Untested:** Firefox and Safari for the notebook page (the tests use Chromium), rootless
+  Docker and Podman as the container runtime.
+- **The notebook image is large**: about 950 MB (947 MB measured on arm64), mostly Python,
+  JupyterLab and the data libraries.
+
 ## Deployment
 
 - **One process only.** Run the `fione` service with one worker and do not scale it (see
-  [Configuration](configuration.md#one-worker-process)).
+  [Configuration](configuration.md#one-worker-process)); the same goes for the
+  `notebook-launcher` service.
 - **The images are large**: about 1.65 GB (`fione`) and 1.7 GB (`fione-serving`), mostly the
   machine-learning libraries.
-- **No images are published yet.** You build them from the repository. The release workflow
-  publishes amd64 images only, and it does not wait for the tests of the tagged commit: tag
-  only commits whose CI has passed.
+- **No images are published yet.** You build them from the repository. On a version tag the
+  release workflow publishes the `fione`, `fione-serving`, `fione-notebook` and
+  `fione-notebook-launcher` images, for amd64 only, and it does not wait for the tests of the
+  tagged commit: tag only commits whose CI has passed.
 - **On Linux, XGBoost brings NVIDIA's NCCL library** (`nvidia-nccl-cu13`, about 350 MB of the
   `fione` and `fione-serving` images), although Fione trains on CPUs only. Its package metadata
   declares the licence `LicenseRef-NVIDIA-Proprietary`, while the licence file inside the
@@ -188,7 +301,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 ## 日本語の要約
 
 - サーバー側でセッションを無効にできません（ログアウトはそのブラウザの Cookie を消すだけ。パスワード変更で全セッションが終了）。
-- 管理者がパスワードを再設定しても、そのユーザーの API トークンは残ります。管理者用のトークン管理画面はありません。
+- 管理者がパスワードを再設定しても、そのユーザーの API トークンは残ります。管理者用のトークン管理画面はありません。自分で作ったトークンは期限切れになりません（ノートブック用のトークンはノートブックと一緒に期限切れになり、編集者の権限までで、アカウント・トークン・モジュール・インポート・共有は操作できません）。
 - アップロードした Python モジュールはサンドボックスなしで、サーバーと同じ権限で動きます（アップロードは管理者のみ）。待機中のジョブは、実行時点のモジュールのソースで動きます。
 - 管理者以外に見せるエラーメッセージからファイルのパスは消えますが、URL やホスト名は残ります。
 - CSV のダウンロードは数式インジェクション対策をしていません。
@@ -214,4 +327,11 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - Linux では XGBoost が NVIDIA の NCCL ライブラリ（`nvidia-nccl-cu13`、イメージ内で約 350 MB）を取り込みます。パッケージのメタデータはライセンスを `LicenseRef-NVIDIA-Proprietary` としており、ホイール内のライセンス文は BSD-3-Clause 型です。イメージを再配布する前に確認してください（CPU 専用の `xgboost-cpu` は macOS 用のホイールがないため使っていません）。
 - 1 プロセス・1 ワーカーで動かしてください。イメージは約 1.65 GB / 1.7 GB で、まだ公開していません（リリースは amd64 のみ、タグは CI が通ったコミットにだけ付けてください）。ベースイメージはタグ固定で、ダイジェスト固定ではありません。
 - モデルはイメージのタグに結び付いています。古い版のモデルが新しい版で読み込める保証はありません。
+- ノートブックは任意の機能です（Compose のプロファイル `notebook`）。ランチャーは Docker ソケットを持ち、これはホストの root と同等です。ノートブックのコンテナには、所有者の API トークン（`FIONE_TOKEN`）と鍵が環境変数に入り、ホストで Docker を使える人には `docker inspect` で見えます。ノートブックを許可された閲覧者もコードを実行できます（トークンは読み取り専用）。コンテナの上限は CPU 2、メモリ 4 GiB、プロセス 512、ケーパビリティなし、外部通信なしで、同時に動くノートブックは既定で 4 つまで（`FIONE_NOTEBOOK_MAX_RUNNING`）です。
+- 他のユーザーのコンテナとは、内部ネットワーク上で TCP としては到達できます（各 JupyterLab は所有者以外を拒否します）。`notebooks` は外へ出られない内部ネットワークですが、そのブリッジ上のホスト自身のアドレス（サブネットの最初のアドレス）には接続できるため、すべてのアドレス（`0.0.0.0`）で待ち受けるホストのサービス（SSH など）にはノートブックから届きます。対策はホストのファイアウォールです（`notebooks` のブリッジからホストへの通信を落とす `INPUT` のルール。`DOCKER-USER` は転送される通信しか見ないため、ホスト自身は守れません）。または、ホストのサービスを必要なアドレスだけで待ち受けるようにします。Fione はそのルールを同梱していません（同梱するかは未決事項）。全ユーザーの JupyterLab は 1 つのオリジンを共有し、信頼済みのノートブックの出力（ユーザーが書ける内容）はそこでサンドボックスなしに動きます。ログインは、同一サイトからで `Referer` が Fione のオリジンのものだけを受け付けるため、他のサイトや同じサイトの他のページから被害者のブラウザを攻撃者のノートブックにログインさせることはできません。ユーザーごとのサブドメインを採用するまで（未決事項）、ノートブックのユーザー同士は信頼し合うものとして扱ってください。同じ登録可能ドメインのすべてのオリジン（ローカルでは同じホスト名のすべてのポート）がゲートウェイと同一サイトになるため、ゲートウェイには Fione 専用の登録可能ドメインを使ってください。ノートブックのコードは、コンテナ内の Jupyter サーバーと同じ OS ユーザーで動くため、ユーザーは自分のコンテナのサーバーのプロセスを調べられます（対策は seccomp で `ptrace` と `process_vm_writev` を拒否すること。これも未決事項）。所有者は自分のコンテナの起動用の鍵をサーバーのプロセスの環境変数から読んで、自分のコンテナ用の起動トークンを作れます（他のコンテナには影響しません）。
+- ノートブックの信頼の署名はメモリにだけあり、再起動で失われます。JupyterLab の設定とレイアウトは保存されません。実行中のカーネルは、停止時、ランチャーの再起動時、`docker compose down` で失われます。JupyterLab のタブで開かれていない、30 分使われないカーネルは停止し（開いたままのタブはノートブックを寿命まで動かし続け、同時実行の枠を 1 つ使います）、実行中のカーネルがなく 1 時間操作がないノートブックは終了し、`FIONE_NOTEBOOK_MAX_LIFETIME_SECS`（既定 12 時間）でも必ず終了します。
+- ゲートウェイの中継は、`.` や `..` の区間を含む生のパスを拒否するため、名前がちょうど `.` または `..` の列は、ノートブックから列ごとの概要（`column_profile`）を取得できません（データセット全体の読み込みはできます）。ゲートウェイは外へ出られるネットワークにも属するため、未知の `nb-<数字>` の名前の問い合わせがホストの DNS に渡ることがあり、入れ替えたノートブックに古いアドレスで最大 10 秒届くことがあります。HTTPS でも JupyterLab の `_xsrf` Cookie には `Secure` が付きません（認証情報ではありません）。
+- ユーザーを削除するとノートブックとそのファイルも削除されます。`docker compose down -v` でもボリュームは残り、初期化したインストールではユーザー ID が最初からになるため、その場合もユーザーを作る前にラベルを指定して削除してください。そのときランチャーに届かないと削除は保留になり、成功するまでその ID のノートブックは起動しません。Fione とランチャーは 1 プロセスで動かしてください。
+- 権限の取り消し、新しいパスワード、管理者のロールを外すこと、ユーザーの削除では、ノートブックのトークンはすぐに無効になりますが、コンテナを削除するのはランチャーです。ランチャーに届かないと停止は保留になり、「ユーザー」画面（API では `notebook_stop_pending`）に表示され、Fione が 1 分ごとと、ノートブックの起動・停止・状態確認のたびに再試行します。成功するまで、すでにその JupyterLab にログインしているブラウザは使い続けられます。保留中の停止はデータベースに残るため、再起動しても再試行が続きます。
+- JupyterLab を開いたまま停止すると、ブラウザのコンソールにエラーが出ることがあります。新しいノートブックの最初の Shift+Enter が無視されることがあります（標準の JupyterLab でも起こります）。Firefox と Safari、rootless Docker、Podman は検証していません。ノートブックのイメージは約 950 MB（arm64 で 947 MB を測定）です。ノートブックのボリュームとコンテナのファイルには容量の上限がなく、1 人のユーザーがホストのディスクを使い切ることがあります。
 - ダークモードは Chrome / Edge 123 以降、Firefox 120 以降、Safari 17.5 以降が必要です。ログインには JavaScript が必要です。簡易・詳細の表示はブラウザごとに記憶されます。

@@ -1252,7 +1252,9 @@ def test_sentinel_never_leaks_from_new_tools(env):
     assert pd_color["available"] is True and pd_color["kind"] == "category"
     assert pd_color["grid"] == [0, 1, None] and pd_color["grid_hidden"] is True
     assert pd_color["outputs_hidden"] is True and pd_color["n_outputs"] == 2
-    assert "outputs" not in pd_color and "ice" not in pd_color and "0.5" not in dump(pd_color)
+    assert "outputs" not in pd_color and "ice" not in pd_color
+    # The stored ICE values (0.5) are not shown; the time (a float) may hold "0.5" by chance.
+    assert pd_color["computed_at"] and "0.5" not in dump(pd_color | {"computed_at": None})
     assert pd_color["average"] == [[0.25, 0.25]] * 3 and pd_color["n_rows"] == 40
     pd_num = call(env, "get_partial_dependence", {"model_id": explained.id, "column": "num"})
     assert pd_num["grid"] == [1, 2.5, None] and "grid_hidden" not in pd_num
