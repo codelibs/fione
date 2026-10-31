@@ -68,10 +68,12 @@ def _claim(user_id) -> str:
         "v2.e30.AAAA",
         "v1.!!!.AAAA",
         "v1." + "A" * 5000 + ".A",
-        _claim(0),
-        _claim(-1),
-        _claim(2**63),
-        _claim(2**64),
+        # Fixed ids: the claims carry the time, and pytest-xdist needs every worker to
+        # collect the same test ids.
+        pytest.param(_claim(0), id="claim-0"),
+        pytest.param(_claim(-1), id="claim-minus-1"),
+        pytest.param(_claim(2**63), id="claim-2**63"),
+        pytest.param(_claim(2**64), id="claim-2**64"),
     ],
 )
 def test_session_rejects_garbage(value):
