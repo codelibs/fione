@@ -33,7 +33,7 @@ jobs:
         run: uv run pytest -m timing -v --junitxml=test-results/acceptance/timing.xml
       - name: Keep the test report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: acceptance-failure
           path: test-results/acceptance
@@ -62,7 +62,7 @@ jobs:
         run: uv run pytest tests/e2e -m e2e -v
       - name: Keep the traces, screenshots and Compose logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-failure
           path: test-results/e2e
