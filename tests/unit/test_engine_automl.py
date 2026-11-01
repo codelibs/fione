@@ -679,3 +679,20 @@ def test_deep_learning_is_not_refit_but_averages_its_fold_models():
     (member,) = model.members
     assert member.spec.name == "DeepLearning" and len(member.models) == 3  # the fold models
     assert model.leaderboard.set_index("family").loc["DeepLearning", "train_secs"] > 0
+
+
+def test_a_too_wide_linear_view_leaves_those_families_out(monkeypatch):
+    monkeypatch.setattr(automl_module, "LINEAR_MAX_CELLS", 100)
+    events = []
+    model = _fit(
+        _binary(300),
+        events,
+        families=["LightGBM", "DeepLearning", "Linear"],
+        target="y",
+        max_models=3,
+    )
+    assert [m.spec.name for m in model.members] == ["LightGBM"]
+    notices = [e.data for e in events if e.type == "notice"]
+    assert any(n.get("kind") == "families_left_out" for n in notices)
+    only = _fit(_binary(300), families=["Linear"], target="y", max_models=1)  # nothing else to run
+    assert [m.spec.name for m in only.members] == ["Linear"]

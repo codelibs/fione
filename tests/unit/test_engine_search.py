@@ -1,4 +1,5 @@
 import json
+import pickle
 import time
 
 import joblib
@@ -824,3 +825,15 @@ def test_linear_regression_and_classification_fit():
         model = spec.fit(spec.defaults, view, y, view, y, Deadline(30))
         assert spec.predict(model, view).shape == ((300, 2) if n_classes else (300,))
         assert spec.importance(model).shape == (5,)
+
+
+def test_deep_learning_size_estimate_matches_its_pickle():
+    X, y = _classification(600, 6)
+    prep, y, _ = _setup(X, y)
+    spec = FAMILIES["DeepLearning"]("classification", 2)
+    view = prep.linear(X)
+    model = spec.fit(
+        spec.defaults, view.iloc[:400], y[:400], view.iloc[400:], y[400:], Deadline(30)
+    )
+    # The optimiser's moments and the best weights are training state: they must not be kept.
+    assert len(pickle.dumps(model)) < 1.3 * spec.size_bytes(model)

@@ -67,15 +67,17 @@ def contribution_rows(model: TrainedModel, limit: int) -> int:
     network on arrays as wide as its hidden layers, so the widest of those counts as the
     features."""
     classes = len(model.classes_) if model.task == "classification" else 1
-    return max(0, min(limit, CELLS // (classes * _width(model))))
+    return max(0, min(limit, CELLS // (classes * _width(model, len(model.prep.sources)))))
 
 
-def _width(model: TrainedModel) -> int:
-    widths = [len(model.prep.sources)]
+def _width(model: TrainedModel, features: int, hidden: bool = True) -> int:
+    """``features`` or, if a member works on more columns (the linear view; with ``hidden``, a
+    network's hidden layers too), those."""
+    widths = [features]
     for member in model.members:
         for one in member.models:
             if isinstance(member.spec, DeepLearning):
-                widths.append(max(one.coefs_[0].shape))
+                widths.append(max(one.coefs_[0].shape) if hidden else one.coefs_[0].shape[0])
             elif isinstance(member.spec, Linear):
                 widths.append(np.atleast_2d(one.coef_).shape[1])
     return max(1, *widths)
@@ -84,7 +86,7 @@ def _width(model: TrainedModel) -> int:
 def pd_rows(model: TrainedModel, rows: int, grid_size: int) -> int:
     """``rows``, lowered so that the rows x ``grid_size`` copies of the model's columns that
     ``partial_dependence`` predicts on stay within ``CELLS`` (at least 1)."""
-    return max(1, min(rows, CELLS // (grid_size * max(1, len(model.columns)))))
+    return max(1, min(rows, CELLS // (grid_size * _width(model, len(model.columns), False))))
 
 
 def cap_threads(model: TrainedModel, threads: int = THREADS) -> TrainedModel:

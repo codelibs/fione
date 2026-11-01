@@ -68,7 +68,10 @@ What this release does not do, or does with a catch. Japanese summary at the end
   (there is no out-of-core processing). Measured on a 16-core Mac, a training job peaked at about
   1.9 GB of memory for a 150 MB CSV (200,000 rows × 42 columns) and 2.5 GB for a 750 MB CSV
   (1,000,000 × 42); roughly 1.5–1.7 GB of that does not grow with the data (the libraries). Plan
-  for at least 4 GB of RAM, and more for wider data or larger files.
+  for at least 4 GB of RAM, and more for wider data or larger files. Linear and DeepLearning
+  work on a one-hot encoded copy (up to 15 columns per text column, 8 bytes each, copied again
+  per fold); when that copy would pass 100 million cells they are left out of the run, with a
+  notice.
 - **Cross-validation scores are slightly optimistic.** Boosting models stop early on their
   validation fold, and the ensemble's weights are chosen on the same out-of-fold predictions it
   is scored on. The leaderboard's ensemble row and the star rating inherit this; test data held
@@ -133,8 +136,9 @@ What this release does not do, or does with a catch. Japanese summary at the end
   then `contrib_bias` (`contrib_bias_2` when an input is named `bias`); an input column whose
   name is taken is kept as `input_<name>`. Each row gains
   one float64 column per input plus one, so 100,000 rows of a 2,000-column model make about
-  1.6 GB of output. At most 100,000 rows; the work runs on at most 4 threads, in chunks of at
-  most 5,000 rows, and is much slower than a plain prediction.
+  1.6 GB of output. At most 100,000 rows; the work runs on at most 4 threads (not Linear and
+  DeepLearning, which use the numerical library's own), in chunks of at most 5,000 rows, and is
+  much slower than a plain prediction.
 - **Diagnostics** (the Metrics tab) come from the ensemble's out-of-fold predictions, so they
   are slightly optimistic, like the cross-validation scores. Above 200,000 rows they come from
   a random sample. A model has none when it was trained before they existed or imported
@@ -345,7 +349,7 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - 説明には学習データが必要です。インポートしたモデルや学習データを削除したモデルは、「説明」タブの「説明を計算」で、列のそろったデータセットを選んでください。説明ジョブが保存するのは、最大 1,000 行の寄与度による重要度と、上位 10 列の部分依存です。曲線のグリッドは 1 万行のサンプルから作り、そのうち 300 行（列の多いモデルではもっと少なく）で平均します。1 MiB を超える結果は、目印なしで削られます。
 - 部分依存のグリッドは 2〜98 パーセンタイルまでで、数値の列には欠損値の点がありません。時刻は UTC です。学習で見なかったカテゴリもグリッドに入ることがあります。その場で計算する曲線はグリッドも平均も最大 300 行から作るので、保存した曲線と点が少し違うことがあります。
 - Web プロセスがモデルを読み込むようになりました（閲覧者の操作でも）。結果画面での先頭 5 行の理由、最大 100 行の寄与度、1 列の部分依存を、サーバー全体で 1 件ずつ計算します。待てるのは 4 件まで、最大 15 秒で、それ以外はすぐに「混雑」（HTTP 503）になります。読み込んだままにするのは 2 モデル・512 MiB までです。ファイルが 512 MiB を超えるモデル、信頼を確認していないインポート、行 × クラス × 列が多すぎるモデルはそこでは断り、書き込み権限が必要な説明ジョブでだけ説明します。列が数千あるデータセットでは、部分依存 1 回の読み込みだけで数百 MiB 使うことがあります。説明ジョブはジョブ一覧に出ますが、ダッシュボードの最近のジョブには出ません。
-- バッチ予測で「各予測の内訳を含める」を選ぶと付く列は `contrib_<列>` と `contrib_bias`（入力に `bias` という列があると `contrib_bias_2`）で、名前がぶつかる入力列は `input_<名前>` になります。1 行あたり入力の列数 + 1 個の float64 の列が増え（2,000 列のモデルで 10 万行なら約 1.6 GB）、最大 10 万行、4 スレッドまでで計算するので、通常の予測よりかなり遅くなります。
+- バッチ予測で「各予測の内訳を含める」を選ぶと付く列は `contrib_<列>` と `contrib_bias`（入力に `bias` という列があると `contrib_bias_2`）で、名前がぶつかる入力列は `input_<名前>` になります。1 行あたり入力の列数 + 1 個の float64 の列が増え（2,000 列のモデルで 10 万行なら約 1.6 GB）、最大 10 万行、4 スレッドまで（Linear と DeepLearning は数値ライブラリ任せ）で計算するので、通常の予測よりかなり遅くなります。
 - 診断（指標タブ）は学習時の out-of-fold 予測から作るため、CV のスコアと同じくやや楽観的です。20 万行を超えるとランダムサンプルから作ります。
 - モデルの診断には学習データの値が含まれます（クラスのラベルと、回帰では学習行から抜き出した最大 2,000 件の実際の値とその予測値）。プロジェクトを読めるすべての人に見え、モデルのエクスポートにも入り、学習データを削除しても残ります。保存した説明も、カテゴリやクラスのラベルをデータセット削除後も保持します（エクスポートはされません）。モデルファイルとサービング用ファイルには診断は入りません。
 - 診断を持つエクスポートは、診断の機能より前のインストールでは読み込めません（どちらもバージョン 20.0.0 で区別できません）。インポートは、有限でない数や float の範囲を超える整数（診断の中も含め、どこにあっても）、未知の項目や深すぎる入れ子を持つ診断を拒否するようになりました。
@@ -354,7 +358,7 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - 負荷の高いマシンでは、同じ時間予算で学習できるブースティングの回数が減ります。いちばん影響を受けるのは CatBoost です。
 - API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。
 - Fione Serving には認証も、予測のリクエスト数・同時実行数の制限もありません。寄与度を求めるリクエストだけは同時に 2 件まで（それ以上は 503）ですが、計算中はモデルを占有するので、通常の予測はその間待たされます。最大のリクエストでは約 100 MiB のメモリを使います。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
-- 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5〜1.7 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。
+- 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5〜1.7 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。Linear と DeepLearning は文字列列を最大 15 列に展開したコピー（分割ごとにさらにコピー）を使うため、そのコピーが 1 億セルを超えるときは、通知を出してこの 2 種類を実行から外します。
 - CV のスコアはやや楽観的です（早期終了とアンサンブルの重みが同じ fold の予測で決まるため）。正直な数値は、学習に使わないテストデータで確かめてください。
 - Linux では XGBoost が NVIDIA の NCCL ライブラリ（`nvidia-nccl-cu13`、イメージ内で約 350 MB）を取り込みます。パッケージのメタデータはライセンスを `LicenseRef-NVIDIA-Proprietary` としており、ホイール内のライセンス文は BSD-3-Clause 型です。イメージを再配布する前に確認してください（CPU 専用の `xgboost-cpu` は macOS 用のホイールがないため使っていません）。
 - 1 プロセス・1 ワーカーで動かしてください。イメージは約 1.65 GB / 1.7 GB で、まだ公開していません（リリースは amd64 のみ、タグは CI が通ったコミットにだけ付けてください）。ベースイメージはタグ固定で、ダイジェスト固定ではありません。

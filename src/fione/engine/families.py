@@ -656,6 +656,12 @@ class DeepLearning(FamilySpec):
         if not self.classification:  # fold the scaling into the output layer
             model.coefs_[-1] = model.coefs_[-1] * scale
             model.intercepts_[-1] = model.intercepts_[-1] * scale + centre
+        for state in (
+            "_optimizer",
+            "_best_coefs",
+            "_best_intercepts",
+        ):  # training only: 3x the size
+            model.__dict__.pop(state, None)
         model.fione_rounds_ = best_epoch if stopping else epoch
         model.baseline_ = X_tr.to_numpy(np.float64).mean(axis=0)
         return model

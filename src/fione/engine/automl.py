@@ -53,7 +53,7 @@ from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModel
 from fione.engine.diagnostics import diagnostics
 from fione.engine.ensemble import caruana
 from fione.engine.events import Event, EventSink, jsonable
-from fione.engine.families import MAX_ROUNDS
+from fione.engine.families import FAMILIES, MAX_ROUNDS
 from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep, Task, infer_task, validate_target
 from fione.engine.search import (
@@ -87,6 +87,9 @@ SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
 REFIT_ROUNDS_FACTOR = 1.1
+# The linear view (one-hot levels) of Linear and DeepLearning is built whole, and each fold copies
+# most of it again: above this many cells (800 MB as float64) those families are left out.
+LINEAR_MAX_CELLS = 100_000_000
 SIZE_CAP = 40 * 1024**2  # per member
 TOTAL_SIZE_CAP = 90 * 1024**2  # all members: the artifact target is 100 MB (spec 5.2)
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
@@ -158,11 +161,13 @@ class AutoML:
             weight = (len(y) / (len(counts) * counts))[y]
         prep = Prep().fit(X)
         folds = make_folds(y, task, nfolds, c.seed)
+        families = self._without_wide_linear_view(prep, len(X))
 
         left = deadline.remaining()
         reserve = max(MIN_RESERVE_SECS, RESERVE_SHARE * left)
         default_stopping = stopping_metric == metrics.ALLOWED[task][0]
         results, logs, reasons, finished, errors = self._search(
+            families,
             X,
             y,
             folds,
@@ -250,7 +255,24 @@ class AutoML:
         )
         return model
 
-    def _search(self, X, y, folds, task, prep, search: Deadline, stopping_score, weight):
+    def _without_wide_linear_view(self, prep: Prep, n_rows: int) -> list[str]:
+        """``self.families`` without those that read the linear view when it would be too big
+        (unless that leaves none)."""
+        if n_rows * prep.linear_width <= LINEAR_MAX_CELLS:
+            return self.families
+        kept = [name for name in self.families if FAMILIES[name].view != "linear"]
+        if not kept or kept == self.families:
+            return self.families
+        left_out = [name for name in self.families if name not in kept]
+        self._notice(
+            f"{', '.join(left_out)} left out: the one-hot encoded data "
+            f"({n_rows:,} rows x {prep.linear_width:,} columns) would take too much memory",
+            kind="families_left_out",
+            families=left_out,
+        )
+        return kept
+
+    def _search(self, families, X, y, folds, task, prep, search: Deadline, stopping_score, weight):
         """Run the families in order; returns (results with models, trial rows, end reason per
         family, finished trial count, exception per failed family)."""
         c = self.config
@@ -259,11 +281,11 @@ class AutoML:
         reasons: dict[str, str] = {}
         errors: dict[str, Exception] = {}
         finished = 0
-        for i, name in enumerate(self.families):
+        for i, name in enumerate(families):
             if self.should_stop():
                 reasons[name] = "cancelled"
                 break
-            rest = self.families[i:]
+            rest = families[i:]
             max_trials = None
             if c.max_models is not None:
                 if finished >= c.max_models:

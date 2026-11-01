@@ -314,6 +314,16 @@ def test_networks_and_wide_views_lower_the_rows_one_explanation_may_take():
     assert explain.contribution_rows(trees, 10**6) == explain.CELLS // (3 * len(fit.prep.sources))
 
 
+def test_partial_dependence_rows_account_for_the_linear_view():
+    fit = _fit("multiclass")
+    network = _with_members(fit, [("DeepLearning", 1.0, fit.cv_models["DeepLearning"][:1])])
+    trees = _with_members(fit, [("LightGBM", 1.0, fit.cv_models["LightGBM"][:1])])
+    wide = network.members[0].models[0].coefs_[0].shape[0]
+    assert wide > len(fit.columns)  # one-hot levels make the view wider than the columns
+    assert explain.pd_rows(network, 10**6, 20) == explain.CELLS // (20 * wide)
+    assert explain.pd_rows(trees, 10**6, 20) == explain.CELLS // (20 * len(fit.columns))
+
+
 def test_datetime_parts_sum_into_their_column():
     fit = _fit("multiclass")
     assert any(name.startswith("when__") for name in fit.prep.feature_names)

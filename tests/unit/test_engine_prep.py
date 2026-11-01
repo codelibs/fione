@@ -112,6 +112,12 @@ def test_linear_view_standardises_numbers_and_one_hot_encodes_the_rest():
     assert odd[["f1_0", "f1_1", "f1_2"]].to_numpy().sum() == 0
 
 
+def test_linear_width_counts_the_view_columns():
+    df = _frame()
+    prep = Prep().fit(df)
+    assert prep.linear_width == prep.linear(df).shape[1]
+
+
 def test_linear_view_keeps_the_most_frequent_levels_only():
     levels = [f"c{i}" for i in range(40)]
     df = pd.DataFrame({"cat": [level for i, level in enumerate(levels) for _ in range(40 - i)]})

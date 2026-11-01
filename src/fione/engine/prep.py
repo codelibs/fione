@@ -180,25 +180,40 @@ class Prep:
             base[position] = values.codes.astype(float)
         return base.fillna(self._medians)
 
+    @property
+    def linear_width(self) -> int:
+        """Columns of the linear view: one per number, one per kept level, one per flag."""
+        levels = sum(len(found) for found in self._levels.values())
+        return len(self._scale) + levels + len(self._flags)
+
     def linear(self, df: pd.DataFrame) -> pd.DataFrame:
         """For linear models: standardised, clipped numbers (``f3``), a 0/1 flag for each column
         that had missing values (``f3_na``) and one-hot levels of the categoricals (``f3_0``).
         The digits after ``f`` name the feature (position in ``feature_names``) a column
         derives from. Unseen and rare levels are all zeros."""
         base = self._base(df)
-        columns: dict[str, np.ndarray] = {}
+        names = []
         for position in base.columns:
             if position in self._category_at:
-                values = base[position]
+                names += [f"{position}_{i}" for i in range(len(self._levels[position]))]
+            else:
+                names.append(position)
+            if position in self._flags:
+                names.append(f"{position}_na")
+        out = np.zeros((len(base), len(names)))  # filled in place: one copy of the view
+        at = {name: i for i, name in enumerate(names)}
+        for position in base.columns:
+            values = base[position]
+            if position in self._category_at:
                 for i, level in enumerate(self._levels[position]):
-                    columns[f"{position}_{i}"] = (values == level).to_numpy(np.float64)
+                    out[:, at[f"{position}_{i}"]] = values == level
             else:
                 mean, std = self._scale[position]
-                scaled = (base[position].fillna(self._medians[position]) - mean) / std
-                columns[position] = scaled.clip(-LINEAR_CLIP, LINEAR_CLIP).to_numpy(np.float64)
+                scaled = (values.fillna(self._medians[position]) - mean) / std
+                out[:, at[position]] = scaled.clip(-LINEAR_CLIP, LINEAR_CLIP)
             if position in self._flags:
-                columns[f"{position}_na"] = base[position].isna().to_numpy(np.float64)
-        return pd.DataFrame(columns, index=df.index)
+                out[:, at[f"{position}_na"]] = values.isna()
+        return pd.DataFrame(out, index=df.index, columns=names, copy=False)
 
 
 def infer_task(y: pd.Series) -> Task:
