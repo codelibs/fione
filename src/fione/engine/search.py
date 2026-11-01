@@ -55,6 +55,9 @@ CAP_MARGIN = 1.25
 # TPE draws its first trials at random; stagnation is only judged on the trials after them, so
 # a small ``stopping_rounds`` cannot end the search before the sampler has learned anything.
 STARTUP_TRIALS = 10
+# A family hands on its best trials, not only the best one, so that the ensemble can blend
+# models of one family that make different mistakes.
+TOP_TRIALS = 3
 
 
 @dataclass
@@ -74,6 +77,7 @@ class FamilyResult:
     best_secs: float = 0.0  # wall time of the best trial
     log: list[dict] = field(default_factory=list)  # the ``trial`` event data, in order
     error: Exception | None = None  # what ended the search when ``reason == "error"``
+    runners_up: list["FamilyResult"] = field(default_factory=list)  # next best trials, best first
 
 
 def error_notice(kind: str, family: str, error: Exception) -> Event:
@@ -226,8 +230,9 @@ def run_family(
     )
     study.enqueue_trial(spec.defaults)
     best: _Outcome | None = None
-    best_params: dict = {}
-    best_trial, best_secs = -1, 0.0
+    leaders: list[
+        tuple[_Outcome, dict, int, float]
+    ] = []  # best first: outcome, params, trial, secs
     log: list[dict] = []
     stop_best, stop_history = math.inf, []  # best stopping score after each finished trial
     raised = False  # the max_trial_secs notice was sent
@@ -300,9 +305,10 @@ def run_family(
             study.tell(trial, state=optuna.trial.TrialState.PRUNED)
         else:
             study.tell(trial, outcome.score)
-            if best is None or outcome.score < best.score:
-                best, best_params = outcome, params  # drops the previous best's models
-                best_trial, best_secs = trial.number, trial_secs
+            leaders.append((outcome, params, trial.number, trial_secs))
+            leaders.sort(key=lambda leader: leader[0].score)  # stable: earlier trials first
+            del leaders[TOP_TRIALS:]  # drops the models of the trials left behind
+            best = leaders[0][0]
             value = outcome.score if stopping_score is None else stopping_score(outcome.oof)
             stop_best = min(stop_best, value)
         stop_history.append(stop_best)
@@ -329,7 +335,7 @@ def run_family(
                 "family": name,
                 "trials": finished,
                 "best_score": best.score if best is not None else None,
-                "best_params": best_params,
+                "best_params": leaders[0][1] if leaders else {},
                 "elapsed": elapsed,
             },
         )
@@ -348,17 +354,22 @@ def run_family(
             log=log,
             error=error,
         )
-    return FamilyResult(
-        best.oof,
-        best.models,
-        best_params,
-        finished,
-        best.score,
-        elapsed,
-        spec,
-        reason,
-        best_trial,
-        best_secs,
-        log,
-        error,
-    )
+
+    def result(outcome, params, trial_number, secs, runners_up=()):
+        return FamilyResult(
+            outcome.oof,
+            outcome.models,
+            params,
+            finished,
+            outcome.score,
+            elapsed,
+            spec,
+            reason,
+            trial_number,
+            secs,
+            log,
+            error,
+            list(runners_up),
+        )
+
+    return result(*leaders[0][:4], [result(*leader) for leader in leaders[1:]])

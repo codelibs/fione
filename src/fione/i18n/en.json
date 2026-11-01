@@ -665,7 +665,7 @@
   "model.cfg.ignored_columns": "Columns not used",
   "model.not_stored": "Not stored with this model.",
   "model.serving": "Serving",
-  "model.board_hint": "One row per algorithm tried, best first, scored by {metric} on rows the models did not learn from. The ensemble blends the members with a weight.",
+  "model.board_hint": "One row per model, up to three per algorithm tried, best first, scored by {metric} on rows the models did not learn from. The ensemble blends the members with a weight.",
   "model.col.model": "Model",
   "model.col.score": "CV score",
   "model.col.spread": "Spread over folds",

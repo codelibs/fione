@@ -10,6 +10,7 @@ from sklearn.metrics import r2_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from fione.engine import automl as automl_module
+from fione.engine import search
 from fione.engine.automl import FAMILY_ORDER, AutoML
 from fione.engine.config import ConfigError, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
@@ -120,11 +121,12 @@ def test_classification_labels_keep_their_values(iris):
     assert set(model.metrics) == {"logloss", "accuracy"}
 
 
-def test_leaderboard_has_one_row_per_family_plus_the_ensemble(iris):
+def test_leaderboard_has_a_row_per_candidate_plus_the_ensemble(iris):
     model, _, _, _ = iris
     board = model.leaderboard
     assert list(board.columns) == LEADERBOARD_COLUMNS
-    assert sorted(board["family"]) == sorted([*FAMILY_ORDER, "Ensemble"])
+    assert set(board["family"]) == {*FAMILY_ORDER, "Ensemble"}
+    assert board["family"].eq("Ensemble").sum() == 1 and board["model"].is_unique
     members = board[board["family"] != "Ensemble"]
     assert members["weight"].sum() == pytest.approx(1.0)
     assert (members["weight"] >= 0).all()
@@ -156,11 +158,19 @@ def test_ignored_columns_are_not_features(iris):
     assert model.target == "target" and model.config.ignored_columns == ["row_id"]
 
 
-def test_refit_members_are_single_models_without_cv_data(iris):
+def test_refit_members_hold_one_model_per_seed_without_cv_data(iris):
     model, _, _, _ = iris
     assert model.stop_reason == "max_models"
-    # A refit member is one model; one that is never refit keeps its fold models.
-    assert all(len(member.models) == (1 if member.spec.refit else 5) for member in model.members)
+    # A refit member is one model per seed (none for Linear: one fit gives one model); one that
+    # is never refit keeps its five fold models, which share one seed.
+    for member in model.members:
+        spec = member.spec
+        expected = (1 + automl_module.BAG_EXTRA if spec.seeded else 1) if spec.refit else 5
+        assert len(member.models) == expected, spec.name
+        if spec.refit and spec.seeded:
+            params = [m.get_params() for m in member.models]
+            seeds = {p.get("random_state", p.get("random_seed")) for p in params}  # CatBoost: seed
+            assert len(seeds) == len(member.models), spec.name  # bagged, not fold models
     assert model.cv_predictions is None and model.cv_models is None
     assert model.fold_assignment is None
 
@@ -311,6 +321,7 @@ def test_balance_classes_weights_every_fit_and_lifts_minority_recall(monkeypatch
         return original(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight, rounds)
 
     monkeypatch.setattr(LightGBM, "_fit", spy)
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
     recall = {}
     for balance in (False, True):
         weights.clear()
@@ -578,7 +589,8 @@ def test_predicting_no_rows_returns_empty_results_quietly(name, task, capfd):
 # --- cancellation -------------------------------------------------------------------
 
 
-def test_cancelling_after_the_first_family_returns_its_fold_models():
+def test_cancelling_after_the_first_family_returns_its_fold_models(monkeypatch):
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)
     events = []
     model = _fit(
         _binary(),
@@ -633,14 +645,15 @@ def test_adult_scale_model_is_small_and_predicts_fast(tmp_path):
 def test_adult_scale_model_with_extra_trees_is_small_and_predicts_fast(tmp_path, monkeypatch):
     # The search rarely picks ExtraTrees, the largest and (single-threaded) slowest member.
     monkeypatch.setattr(
-        automl_module, "caruana", lambda oof, *a, **k: dict.fromkeys(oof, 1 / len(oof))
+        automl_module,
+        "caruana",
+        lambda oof, *a, **k: {key: 0.5 if "#" not in key else 0.0 for key in oof},
     )
     df = _adult_like()
     model = _fit(df, families=["LightGBM", "ExtraTrees"], target="income", max_runtime_secs=30)
-    assert [(m.spec.name, len(m.models)) for m in model.members] == [
-        ("LightGBM", 1),
-        ("ExtraTrees", 1),
-    ]
+    # Each is refit once, and again with other seeds when the time and size limits allow.
+    assert [m.spec.name for m in model.members] == ["LightGBM", "ExtraTrees"]
+    assert all(1 <= len(m.models) <= 1 + automl_module.BAG_EXTRA for m in model.members)
     path = tmp_path / "model.joblib"
     joblib.dump(model, path)
     assert path.stat().st_size <= 100 * 1024**2
@@ -673,7 +686,8 @@ def test_too_small_budget_raises_promptly():
     assert time.monotonic() - start <= 2.0
 
 
-def test_deep_learning_is_not_refit_but_averages_its_fold_models():
+def test_deep_learning_is_not_refit_but_averages_its_fold_models(monkeypatch):
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)
     model = _fit(_binary(400), target="y", families=["DeepLearning"], nfolds=3, max_models=2)
     (member,) = model.members
     assert member.spec.name == "DeepLearning" and len(member.models) == 3  # the fold models
@@ -682,6 +696,7 @@ def test_deep_learning_is_not_refit_but_averages_its_fold_models():
 
 def test_a_too_wide_linear_view_leaves_those_families_out(monkeypatch):
     monkeypatch.setattr(automl_module, "LINEAR_MAX_CELLS", 100)
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)
     events = []
     model = _fit(
         _binary(300),
@@ -695,3 +710,100 @@ def test_a_too_wide_linear_view_leaves_those_families_out(monkeypatch):
     assert any(n.get("kind") == "families_left_out" for n in notices)
     only = _fit(_binary(300), families=["Linear"], target="y", max_models=1)  # nothing else to run
     assert [m.spec.name for m in only.members] == ["Linear"]
+
+
+def _bagging_data():
+    return _binary(800, seed=3)
+
+
+def test_extra_seeds_are_averaged_into_a_refit_member(monkeypatch):
+    df = _bagging_data()
+    model = _fit(df, families=["LightGBM"], target="y", max_models=3)
+    (member,) = model.members
+    assert len(member.models) == 1 + automl_module.BAG_EXTRA
+    seeds = {m.get_params()["random_state"] for m in member.models}
+    assert len(seeds) == len(member.models)  # a different seed for each
+    probas = [member.spec.predict(m, model.prep.tree(df)) for m in member.models]
+    assert not np.allclose(probas[0], probas[1])
+    assert np.allclose(model.predict_proba(df).to_numpy()[:, 1], np.mean(probas, axis=0)[:, 1])
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    (single,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
+    assert len(single.models) == 1
+
+
+def test_extra_seeds_wait_for_enough_time_left(monkeypatch):
+    monkeypatch.setattr(automl_module, "BAG_TIME_FACTOR", 1e12)
+    (member,) = _fit(_bagging_data(), families=["LightGBM"], target="y", max_models=3).members
+    assert len(member.models) == 1
+
+
+def test_extra_seeds_respect_the_size_limits(monkeypatch):
+    df = _bagging_data()
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    (member,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
+    one = member.spec.size_bytes(member.models[0])
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 4)
+    monkeypatch.setattr(automl_module, "SIZE_CAP", int(one * 2.5))
+    (capped,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
+    assert len(capped.models) == 2
+    monkeypatch.setattr(automl_module, "SIZE_CAP", 40 * 1024**2)
+    monkeypatch.setattr(automl_module, "TOTAL_SIZE_CAP", int(one * 3.5))
+    (together,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
+    assert len(together.models) == 3
+
+
+def test_a_member_without_randomness_is_not_refit_with_other_seeds():
+    model = _fit(_bagging_data(), families=["Linear"], target="y", max_models=3)
+    assert [len(member.models) for member in model.members] == [1]
+
+
+def test_runners_up_of_a_family_join_the_ensemble_candidates(monkeypatch):
+    monkeypatch.setattr(search, "TOP_TRIALS", 3)
+    events = []
+    model = _fit(_bagging_data(), events, families=["LightGBM"], target="y", max_models=6)
+    board = model.leaderboard
+    candidates = board[board["family"] == "LightGBM"]
+    assert len(candidates) == 3 and len(set(candidates["model"])) == 3
+    assert board.loc[board["family"] == "Ensemble"].shape[0] == 1
+    assert board["weight"].dropna().sum() == pytest.approx(1.0)
+    weights = [e.data["weights"] for e in events if e.type == "ensemble"][0]
+    assert set(weights) == {"LightGBM", "LightGBM#2", "LightGBM#3"}
+    keys = [m.key for m in model.members]
+    assert len(set(keys)) == len(keys) and set(keys) <= set(weights)
+    assert sum(m.weight for m in model.members) == pytest.approx(1.0)
+    assert model.predict_proba(_bagging_data()).shape == (800, 2)
+
+
+def test_an_extra_seed_that_is_bigger_than_estimated_is_not_kept(monkeypatch):
+    """A forest's size varies with its seed: the extra model is measured after it is fitted."""
+    first = []
+
+    def size(self, model):
+        if not first:
+            first.append(model)
+        return 100 if model is first[0] else 1000
+
+    monkeypatch.setattr(LightGBM, "size_bytes", size)
+    monkeypatch.setattr(automl_module, "SIZE_CAP", 1500)
+    (member,) = _fit(_bagging_data(), families=["LightGBM"], target="y", max_models=3).members
+    assert len(member.models) == 2  # the first (100) and one extra (1000) fit, not a second
+
+
+def test_a_failing_extra_seed_is_reported_and_the_member_keeps_its_models(monkeypatch):
+    original = LightGBM._fit
+    calls = []
+
+    def flaky(self, *args, **kwargs):
+        if self.seed != 0 and kwargs.get("rounds") is None and args[3] is None:  # a bagged refit
+            calls.append(self.seed)
+            raise RuntimeError("extra seed failed")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(LightGBM, "_fit", flaky)
+    events = []
+    (member,) = _fit(
+        _bagging_data(), events, families=["LightGBM"], target="y", max_models=3
+    ).members
+    assert len(member.models) == 1 and calls
+    notices = [e.data for e in events if e.type == "notice"]
+    assert any(n.get("kind") == "refit_error" and n["family"] == "LightGBM" for n in notices)
