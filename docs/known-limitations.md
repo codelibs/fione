@@ -84,8 +84,10 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - **Contributions are approximations.** Each row's contributions (on the result page, through
   the API, in batch predictions and from Fione Serving) add up to the prediction, to rounding,
   in probability for classification and in the target's units for regression, not in log-odds.
-  They start from each library's own TreeSHAP (LightGBM, XGBoost, CatBoost) and from Saabas
-  path contributions for ExtraTrees, and are then converted to probabilities and combined over
+  They start from each library's own TreeSHAP (LightGBM, XGBoost, CatBoost), from Saabas
+  path contributions for RandomForest and ExtraTrees, from the exact coefficient times the
+  distance from the training mean for Linear and from integrated gradients along the path from
+  the training mean for DeepLearning, and are then converted to probabilities and combined over
   the ensemble; exact Shapley values exist only for each booster on its own, before that
   conversion. With more than two classes the conversion is a numerical path integral whose
   small remainder is shared out so that the sum stays exact.
@@ -339,7 +341,7 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - 実行中のジョブのキャンセルには最大 10 秒かかります。プロジェクトに属さないジョブは `GET /api/v1/jobs` に出ません。削除中にストレージが失敗すると、ファイルが残ることがあります。
 - 全モデルのエクスポートは、プロジェクトごとに最新の 1 つだけ残ります。
 - エンジンは実際には最大実行時間の約 3 分の 2 を使います。学習やエンジンのメッセージは日本語画面でも英語です。
-- 寄与度は近似です。各行の寄与度は予測値（分類では確率、回帰では目的変数の単位。log-odds ではありません）に丸め誤差の範囲で一致しますが、各ライブラリの TreeSHAP（ExtraTrees は Saabas）を確率に変換してアンサンブルで合成したもので、厳密な Shapley 値ではありません。説明するのは 1 行につき 1 つの出力です（2 クラスでは 2 番目のクラス、それ以上では予測したクラス、回帰では値）。
+- 寄与度は近似です。各行の寄与度は予測値（分類では確率、回帰では目的変数の単位。log-odds ではありません）に丸め誤差の範囲で一致しますが、各ライブラリの TreeSHAP（RandomForest と ExtraTrees は Saabas、Linear は係数×平均からの差、DeepLearning は平均からの積分勾配）を確率に変換してアンサンブルで合成したもので、厳密な Shapley 値ではありません。説明するのは 1 行につき 1 つの出力です（2 クラスでは 2 番目のクラス、それ以上では予測したクラス、回帰では値）。
 - 説明には学習データが必要です。インポートしたモデルや学習データを削除したモデルは、「説明」タブの「説明を計算」で、列のそろったデータセットを選んでください。説明ジョブが保存するのは、最大 1,000 行の寄与度による重要度と、上位 10 列の部分依存です。曲線のグリッドは 1 万行のサンプルから作り、そのうち 300 行（列の多いモデルではもっと少なく）で平均します。1 MiB を超える結果は、目印なしで削られます。
 - 部分依存のグリッドは 2〜98 パーセンタイルまでで、数値の列には欠損値の点がありません。時刻は UTC です。学習で見なかったカテゴリもグリッドに入ることがあります。その場で計算する曲線はグリッドも平均も最大 300 行から作るので、保存した曲線と点が少し違うことがあります。
 - Web プロセスがモデルを読み込むようになりました（閲覧者の操作でも）。結果画面での先頭 5 行の理由、最大 100 行の寄与度、1 列の部分依存を、サーバー全体で 1 件ずつ計算します。待てるのは 4 件まで、最大 15 秒で、それ以外はすぐに「混雑」（HTTP 503）になります。読み込んだままにするのは 2 モデル・512 MiB までです。ファイルが 512 MiB を超えるモデル、信頼を確認していないインポート、行 × クラス × 列が多すぎるモデルはそこでは断り、書き込み権限が必要な説明ジョブでだけ説明します。列が数千あるデータセットでは、部分依存 1 回の読み込みだけで数百 MiB 使うことがあります。説明ジョブはジョブ一覧に出ますが、ダッシュボードの最近のジョブには出ません。

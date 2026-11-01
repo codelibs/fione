@@ -11,9 +11,10 @@ spec 5.1/5.7) and spends it in phases:
 4. Final refit: until the reserve (about 0.2 L when the search used its whole share; more when
    it ended early). Each member with weight > 0 is refit once on all rows with its best
    parameters: boosting for 1.1 x the mean best iteration of its fold models, without early
-   stopping; ExtraTrees as one full forest. The fold models are the fallback, averaged, with a
-   ``notice``, for a refit that is not expected to fit in the time left (from its best trial's
-   time) or that the deadline cuts short.
+   stopping; the forests as one full forest; Linear as one fit. DeepLearning is not refit: its
+   fold models, averaged, are its final model (``FamilySpec.refit``). The fold models are also
+   the fallback, averaged, with a ``notice``, for a refit that is not expected to fit in the
+   time left (from its best trial's time) or that the deadline cuts short.
 5. Reserve: max(0.5 s, 0.15 L), for packaging and for what deadlines cannot interrupt (the
    families' probes, first fits on small data, an iteration slower than measured). Packaging
    includes ``fione.engine.diagnostics`` on the blended OOF predictions (at most 200,000 rows).
@@ -64,8 +65,24 @@ from fione.engine.search import (
     run_family,
 )
 
-FAMILY_ORDER = ("LightGBM", "CatBoost", "XGBoost", "ExtraTrees")
-FAMILY_WEIGHTS = {"LightGBM": 0.30, "CatBoost": 0.30, "XGBoost": 0.25, "ExtraTrees": 0.15}
+FAMILY_ORDER = (
+    "LightGBM",
+    "CatBoost",
+    "XGBoost",
+    "RandomForest",
+    "ExtraTrees",
+    "DeepLearning",
+    "Linear",
+)
+FAMILY_WEIGHTS = {
+    "LightGBM": 0.22,
+    "CatBoost": 0.22,
+    "XGBoost": 0.18,
+    "RandomForest": 0.10,
+    "ExtraTrees": 0.10,
+    "DeepLearning": 0.12,
+    "Linear": 0.06,
+}
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -318,7 +335,7 @@ class AutoML:
         for name in chosen:
             result = results[name]
             models = result.models
-            if stop_reason != "cancelled" and not self.should_stop():
+            if stop_reason != "cancelled" and not self.should_stop() and result.spec.refit:
                 start = time.monotonic()
                 model, problem = _refit(result, X, y, prep, views, clock, weight)
                 refit_secs[name] = time.monotonic() - start

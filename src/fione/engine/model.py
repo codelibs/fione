@@ -82,9 +82,10 @@ def _normalised(values: np.ndarray) -> np.ndarray:
 def feature_importance(members: list[Member], prep: Prep) -> pd.Series:
     """Weight-averaged importance of the members, summed back onto the input columns.
 
-    Each model's importance (boosting: gain; ExtraTrees: impurity) is normalised to sum to 1
-    first, so families are comparable; expanded features (datetime parts) count for their
-    source column. Columns no model uses get 0; if no model uses any, all get equal shares.
+    Each model's importance (boosting: gain; forests: impurity; Linear and DeepLearning:
+    absolute weights) is normalised to sum to 1 first, so families are comparable; expanded
+    features (datetime parts) count for their source column. Columns no model uses get 0; if no
+    model uses any, all get equal shares.
     """
     total = np.zeros(len(prep.sources))
     for member in members:

@@ -10,9 +10,10 @@ from sklearn.metrics import r2_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from fione.engine import automl as automl_module
-from fione.engine.automl import AutoML
+from fione.engine.automl import FAMILY_ORDER, AutoML
 from fione.engine.config import ConfigError, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
+from fione.engine.search import STARTUP_TRIALS
 
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
 HIGHER_IS_BETTER = {"auc", "accuracy", "r2"}
@@ -60,7 +61,9 @@ def iris():
     df["row_id"] = np.arange(len(df))
     train, test = train_test_split(df, test_size=0.3, stratify=df["target"], random_state=0)
     events = []
-    model = _fit(train, events, target="target", max_models=4, ignored_columns=["row_id"])
+    model = _fit(
+        train, events, target="target", max_models=len(FAMILY_ORDER), ignored_columns=["row_id"]
+    )
     return model, train, test, events
 
 
@@ -121,9 +124,7 @@ def test_leaderboard_has_one_row_per_family_plus_the_ensemble(iris):
     model, _, _, _ = iris
     board = model.leaderboard
     assert list(board.columns) == LEADERBOARD_COLUMNS
-    assert sorted(board["family"]) == sorted(
-        ["LightGBM", "CatBoost", "XGBoost", "ExtraTrees", "Ensemble"]
-    )
+    assert sorted(board["family"]) == sorted([*FAMILY_ORDER, "Ensemble"])
     members = board[board["family"] != "Ensemble"]
     assert members["weight"].sum() == pytest.approx(1.0)
     assert (members["weight"] >= 0).all()
@@ -136,8 +137,17 @@ def test_trials_table_lists_finished_trials(iris):
     model, _, _, _ = iris
     trials = model.trials
     assert list(trials.columns) == ["family", "trial", "state", "score", "elapsed", "params"]
-    assert len(trials) == 4  # max_models
+    assert len(trials) == len(FAMILY_ORDER)  # max_models
     assert isinstance(json.loads(trials["params"].iloc[0]), dict)
+
+
+def test_every_h2o_algorithm_has_a_family():
+    # H2O AutoML: GBM, XGBoost, DRF, XRT (part of DRF), GLM, DeepLearning; StackedEnsemble is
+    # the ensemble selection. FAMILIES, FAMILY_ORDER and FAMILY_WEIGHTS must agree.
+    h2o = {"LightGBM", "XGBoost", "RandomForest", "ExtraTrees", "Linear", "DeepLearning"}
+    assert h2o <= set(FAMILY_ORDER)
+    assert set(FAMILY_ORDER) == set(FAMILIES) == set(automl_module.FAMILY_WEIGHTS)
+    assert sum(automl_module.FAMILY_WEIGHTS.values()) == pytest.approx(1.0)
 
 
 def test_ignored_columns_are_not_features(iris):
@@ -150,7 +160,8 @@ def test_ignored_columns_are_not_features(iris):
 def test_refit_members_are_single_models_without_cv_data(iris):
     model, _, _, _ = iris
     assert model.stop_reason == "max_models"
-    assert all(len(member.models) == 1 for member in model.members)
+    # A refit member is one model; one that is never refit keeps its fold models.
+    assert all(len(member.models) == (1 if member.spec.refit else 5) for member in model.members)
     assert model.cv_predictions is None and model.cv_models is None
     assert model.fold_assignment is None
 
@@ -285,7 +296,7 @@ def test_no_improvement_ends_a_family_early():
         stopping_tolerance=0.5,  # nothing improves by half: stop after the second trial
     )
     assert model.stop_reason == "no_improvement"
-    assert len(model.trials) == 2
+    assert len(model.trials) == STARTUP_TRIALS + 2  # the random startup trials do not count
     done = [e for e in events if e.type == "stopped" and e.data.get("family") == "LightGBM"]
     assert done[0].data["reason"] == "no_improvement"
 
@@ -661,3 +672,10 @@ def test_too_small_budget_raises_promptly():
     with pytest.raises(NoModelError):
         _fit(df, target="y", max_runtime_secs=1)
     assert time.monotonic() - start <= 2.0
+
+
+def test_deep_learning_is_not_refit_but_averages_its_fold_models():
+    model = _fit(_binary(400), target="y", families=["DeepLearning"], nfolds=3, max_models=2)
+    (member,) = model.members
+    assert member.spec.name == "DeepLearning" and len(member.models) == 3  # the fold models
+    assert model.leaderboard.set_index("family").loc["DeepLearning", "train_secs"] > 0

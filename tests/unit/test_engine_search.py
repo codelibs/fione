@@ -12,12 +12,12 @@ from fione.engine.families import (
     FAMILIES,
     MAX_ROUNDS,
     UNIT_SAFETY,
-    ExtraTrees,
     FamilySpec,
+    Forest,
     n_threads,
 )
 from fione.engine.prep import Prep, validate_target
-from fione.engine.search import make_folds, run_family
+from fione.engine.search import STARTUP_TRIALS, make_folds, run_family
 
 TRIAL_KEYS = {"family", "trial", "score", "params", "elapsed", "best_so_far"}
 
@@ -179,14 +179,17 @@ def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
     spec = FAMILIES[name]("classification", 2)
     view = getattr(prep, spec.view)(X)
     model = spec.fit_full(spec.defaults, view, y, Deadline(30), rounds=7)
-    assert spec.rounds(model) == (ExtraTrees.n_trees if name == "ExtraTrees" else 7)
+    one_step = {"Linear": 1}  # fitted in one go: it has no rounds
+    full = Forest.n_trees if issubclass(FAMILIES[name], Forest) else 7
+    assert spec.rounds(model) == one_step.get(name, full)
     assert spec.predict(model, view).shape == (1_000, 2)
     assert spec.size_bytes(model) > 0
     importance = spec.importance(model)
     assert importance.shape == (6,) and (importance >= 0).all() and importance.sum() > 0
 
 
-@pytest.mark.parametrize("name", list(FAMILIES))
+# Linear is excluded: its solver cannot be cut short, so a refit is never shorter than asked.
+@pytest.mark.parametrize("name", [name for name in FAMILIES if name != "Linear"])
 def test_fit_full_raises_when_it_cannot_finish(name):
     X, y = _classification(50_000, 30)
     prep, y, _ = _setup(X, y)
@@ -490,8 +493,10 @@ def test_stagnation_stops_the_search_with_no_improvement():
         stopping_tolerance=0.9,
         stopping_score=lambda oof: seen.append(oof.shape) or 1.0,
     )
-    assert result.trials == 3 and result.reason == "no_improvement"
-    assert seen == [(300, 2)] * 3  # the stopping metric sees each complete trial's OOF
+    # The random startup trials do not count towards the 2 stagnant ones.
+    assert result.trials == STARTUP_TRIALS + 3 and result.reason == "no_improvement"
+    complete = sum(row["state"] == "complete" for row in result.log)  # a pruned trial has no OOF
+    assert seen == [(300, 2)] * complete  # the stopping metric sees each complete trial's OOF
 
 
 def test_sample_weight_reaches_every_fold_fit(slow, monkeypatch):
@@ -750,3 +755,47 @@ def test_wide_data_does_not_blow_a_two_second_budget(wide, name):
 def test_wide_thirty_class_catboost_does_not_blow_a_two_second_budget(wide):
     X, prep, _, classes = wide
     _returns_or_raises_within("CatBoost", X, classes, prep, budget=2, slack=1.5)
+
+
+def test_deep_learning_stops_after_patience_and_keeps_the_best_epoch():
+    X, y = _classification(600, 6)
+    prep, y, _ = _setup(X, y)
+    spec = FAMILIES["DeepLearning"]("classification", 2)
+    view = prep.linear(X)
+    # Large, barely regularised networks overfit 400 noisy rows quickly: the validation loss
+    # turns up and the fit ends long before ``max_epochs``.
+    params = {"width": 256, "alpha": 1e-6, "learning_rate_init": 1e-2}
+    model = spec.fit(params, view.iloc[:400], y[:400], view.iloc[400:], y[400:], Deadline(30))
+    assert 1 <= spec.rounds(model) < spec.max_epochs - spec.patience
+    # The kept weights are the best epoch's, not the last one's.
+    best = spec._loss(model, view.iloc[400:], y[400:])
+    refit = spec._fit(params, view.iloc[:400], y[:400], view.iloc[400:], y[400:], Deadline(30))
+    assert best == pytest.approx(spec._loss(refit, view.iloc[400:], y[400:]))
+    assert spec.predict(model, view).shape == (600, 2)
+
+
+def test_deep_learning_stops_at_the_deadline_after_one_epoch():
+    X, y = _classification(600, 6)
+    prep, y, _ = _setup(X, y)
+    spec = FAMILIES["DeepLearning"]("classification", 2)
+    view = prep.linear(X)
+    expired = Deadline(0)
+    model = spec._fit(spec.defaults, view, y, view, y, expired)
+    assert spec.rounds(model) == 1
+
+
+def test_linear_regression_and_classification_fit():
+    for task in ("regression", "classification"):
+        X, y = (
+            make_regression(300, 5, noise=0.1, random_state=0)
+            if task == "regression"
+            else make_classification(300, 5, random_state=0)
+        )
+        X = pd.DataFrame(X, columns=[f"x{i}" for i in range(5)])
+        prep, y, _ = _setup(X, y, task)
+        n_classes = 2 if task == "classification" else 0
+        spec = FAMILIES["Linear"](task, n_classes)
+        view = prep.linear(X)
+        model = spec.fit(spec.defaults, view, y, view, y, Deadline(30))
+        assert spec.predict(model, view).shape == ((300, 2) if n_classes else (300,))
+        assert spec.importance(model).shape == (5,)

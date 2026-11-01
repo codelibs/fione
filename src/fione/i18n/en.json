@@ -533,7 +533,7 @@
   "train.h.nfolds": "Each model is checked on this many parts of the data it did not learn from. 2 or more.",
   "train.h.seed": "The same seed gives the same splits and search. 0 to 4294967295.",
   "train.h.balance_classes": "Gives rare classes more weight while learning.",
-  "train.h.stopping_rounds": "A model family stops when this many tries in a row do not improve. 0: never stop early.",
+  "train.h.stopping_rounds": "A model family stops when this many tries in a row do not improve; its first 10 tries (random starting points) are not counted. 0: never stop early.",
   "train.h.stopping_metric": "The score that decides whether a try improved.",
   "train.h.stopping_tolerance": "How much better a try must be to count as an improvement (a share, such as 0.001).",
   "train.h.sort_metric": "The score the models are ranked by in the leaderboard.",

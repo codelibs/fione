@@ -9,7 +9,7 @@ implementation.
 | | v1 | v2 |
 |---|---|---|
 | Runs as | A plugin of Fess (Java, LastaFlute) | Its own server (Python, FastAPI), no Fess or Elasticsearch |
-| AutoML engine | H2O | Fione's own: LightGBM, XGBoost, CatBoost and scikit-learn's ExtraTrees, tuned with Optuna and ensembled |
+| AutoML engine | H2O | Fione's own, with the model types of H2O AutoML ([below](#model-types)) plus CatBoost, tuned with Optuna and ensembled |
 | Storage | MinIO (JSON and files) | SeaweedFS or any S3-compatible storage for data and models; SQLite for users, projects, jobs and model records |
 | Start | Fess and H2O set up separately | `docker compose up` (Fione and SeaweedFS) |
 | Users and roles | Fess users with the roles `admin-easyml`, `admin-automl` and `admin-systemml`, which also decided the screens | Fione's own users with one role each: **admin**, **editor** or **viewer**; each project has an owner and can be shared with others as editor or viewer. The simple or detailed view is a display preference, not a permission. |
@@ -27,6 +27,25 @@ implementation.
 - **H2O Flow, Rapids and MOJO/genmodel downloads are gone.** Notebooks (JupyterLab with
   a Python SDK, see [Notebooks](notebook.md)) are Flow's successor; data operations are
   pandas-based modules.
+
+## Model types
+
+Each H2O AutoML algorithm has a counterpart, tuned with Optuna within the run time:
+
+| H2O AutoML | Fione v2 |
+|---|---|
+| GBM | LightGBM |
+| XGBoost | XGBoost |
+| DRF | RandomForest (scikit-learn) |
+| XRT (part of DRF) | ExtraTrees (scikit-learn) |
+| GLM | Linear: logistic regression, or ridge regression for a numeric target |
+| DeepLearning | DeepLearning: a two-layer neural network (scikit-learn's MLP) |
+| StackedEnsemble | One ensemble: greedy selection and weighting of the models' out-of-fold predictions (Caruana et al.), not a GLM metalearner; there is no separate "best of family" and "all models" pair |
+| (none) | CatBoost |
+
+Not carried over: H2O's `include_algos` / `exclude_algos`, `exploitation_ratio`, `modeling_plan`
+and `preprocessing` (target encoding). A run always tries every model type; Fione does not
+yet let you pick them.
 
 ## Terms
 

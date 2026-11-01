@@ -1,8 +1,10 @@
 """Per-row contributions of the input columns to a trained model's output.
 
 Each family's contributions come natively: TreeSHAP in margin space for the boosters (LightGBM
-``pred_contrib``, XGBoost ``pred_contribs``, CatBoost ``ShapValues``) and Saabas path
-contributions in probability or target units for ExtraTrees. Like the predictions, they are
+``pred_contrib``, XGBoost ``pred_contribs``, CatBoost ``ShapValues``), Saabas path
+contributions in probability or target units for the forests (RandomForest, ExtraTrees), and
+margin contributions against the training mean for the linear-view families: exact for Linear,
+integrated gradients for DeepLearning. Like the predictions, they are
 combined in the ensemble's output space: each fold model's values are converted to
 probabilities first, then averaged over the member's models and weight-summed over the
 members. Binary margins are rescaled exactly; multiclass margins are integrated along the
@@ -25,7 +27,17 @@ from scipy import sparse
 from scipy.special import expit, softmax
 from sklearn.base import is_classifier
 
-from fione.engine.families import CatBoost, ExtraTrees, FamilySpec, LightGBM, XGBoost, n_threads
+from fione.engine.families import (
+    CatBoost,
+    DeepLearning,
+    FamilySpec,
+    Forest,
+    LightGBM,
+    Linear,
+    XGBoost,
+    n_threads,
+    owners,
+)
 from fione.engine.model import TrainedModel
 from fione.engine.prep import _EPOCH, _as_str, _datetimes
 
@@ -65,7 +77,7 @@ def cap_threads(model: TrainedModel, threads: int = THREADS) -> TrainedModel:
 
     Every family predicts with the threads it was trained with, all cores on large data: the
     fold models' ``n_jobs``, or for CatBoost (which takes a count per call) the spec's. Fewer
-    stay as they are (an ExtraTrees artifact predicts on one, so that its sums are
+    stay as they are (a forest artifact predicts on one, so that its sums are
     reproducible), and an unset or negative count counts as all cores.
     """
     for member in model.members:
@@ -74,8 +86,8 @@ def cap_threads(model: TrainedModel, threads: int = THREADS) -> TrainedModel:
                 member.spec.n_jobs = threads
             continue
         for one in member.models:
-            if _lowered(one.get_params()["n_jobs"], threads):
-                one.set_params(n_jobs=threads)
+            if "n_jobs" in one.get_params() and _lowered(one.get_params()["n_jobs"], threads):
+                one.set_params(n_jobs=threads)  # not Ridge and the network, which have none
     return model
 
 
@@ -195,15 +207,72 @@ def saabas(estimator, X: np.ndarray, n_outputs: int) -> tuple[np.ndarray, np.nda
     return phi, np.tile(value[0], (len(X), 1))
 
 
+IG_STEPS = 16  # points of the path integral for DeepLearning
+
+
+def _fold_in(phi: np.ndarray, residual: np.ndarray) -> np.ndarray:
+    """``phi`` (n, k, f) with ``residual`` (n, k) shared out in proportion to the contributions'
+    sizes (evenly when all are 0), so that each row's contributions add up to it more."""
+    size = np.abs(phi)
+    sizes = size.sum(axis=-1, keepdims=True)
+    share = np.where(sizes > 0, size / np.where(sizes > 0, sizes, 1.0), 1.0 / phi.shape[-1])
+    return phi + residual[:, :, None] * share
+
+
+def _network(model, X: np.ndarray):
+    """Output of the network (n, k) and its gradient with respect to the input (n, k, f)."""
+    masks, a = [], X
+    for weights, bias in zip(model.coefs_[:-1], model.intercepts_[:-1], strict=True):
+        z = a @ weights + bias
+        masks.append(z > 0)
+        a = np.maximum(z, 0.0)
+    out = a @ model.coefs_[-1] + model.intercepts_[-1]
+    grad = np.broadcast_to(model.coefs_[-1].T, (len(X), *model.coefs_[-1].T.shape))
+    for weights, mask in zip(model.coefs_[-2::-1], masks[::-1], strict=True):
+        grad = (grad * mask[:, None, :]) @ weights.T
+    return out, grad
+
+
+def _linear_view_contributions(spec, model, view: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Contributions of the linear view's columns, summed onto the features they derive from.
+
+    The reference point is the training mean of each column (``baseline_``). Linear models are
+    exact in margin space (``coef * (x - baseline)``). A network gets the integrated gradients
+    along the straight path from the baseline to the row (ReLU: the midpoint rule), with the
+    path's integration error shared out so that the sums are exact. Both are margins, like the
+    boosters': logits, or the value for regression.
+    """
+    X, baseline = view.to_numpy(np.float64), model.baseline_
+    if isinstance(spec, Linear):
+        coef = np.atleast_2d(model.coef_)  # (k, columns)
+        phi = (X - baseline)[:, None, :] * coef[None]
+        bias = np.tile(np.atleast_1d(model.intercept_) + coef @ baseline, (len(X), 1))
+    else:
+        delta = X - baseline
+        gradient = 0.0
+        for s in range(IG_STEPS):
+            gradient = gradient + _network(model, baseline + (s + 0.5) / IG_STEPS * delta)[1]
+        phi = delta[:, None, :] * gradient / IG_STEPS
+        out, _ = _network(model, X)
+        base_out = _network(model, baseline[None])[0]
+        phi = _fold_in(phi, out - base_out - phi.sum(axis=-1))
+        bias = np.tile(base_out, (len(X), 1))
+    owner = owners(view.columns)
+    by_feature = np.zeros((*phi.shape[:2], owner.max() + 1))
+    np.add.at(by_feature, (slice(None), slice(None), owner), phi)
+    return by_feature, bias
+
+
 def native_contributions(
     spec: FamilySpec, model, view: pd.DataFrame
 ) -> tuple[np.ndarray, np.ndarray]:
     """Contributions (n, k_m, f) and bias (n, k_m) in the family's own space and class set.
 
-    Boosters give margins, ExtraTrees probabilities, regression values. k_m is 1 for binary
-    (the model's second class) and regression, else the model's number of classes.
+    Boosters and the linear-view families give margins, forests probabilities, regression
+    values. k_m is 1 for binary (the model's second class) and regression, else the model's
+    number of classes.
     """
-    if isinstance(spec, ExtraTrees):
+    if isinstance(spec, Forest):
         X = view.to_numpy(np.float32)
         k = len(model.classes_) if spec.classification else 1
         phi, bias = np.zeros((len(X), k, X.shape[1])), np.zeros((len(X), k))
@@ -220,6 +289,8 @@ def native_contributions(
         raw = model.get_booster().predict(
             matrix, pred_contribs=True, iteration_range=(0, spec.rounds(model))
         )
+    elif isinstance(spec, Linear | DeepLearning):
+        return _linear_view_contributions(spec, model, view)
     elif isinstance(spec, CatBoost):
         categorical = [i for i, dtype in enumerate(view.dtypes) if dtype is np.dtype(object)]
         raw = model.get_feature_importance(
@@ -242,7 +313,7 @@ def _probability(spec: FamilySpec, model, view: pd.DataFrame) -> tuple[np.ndarra
     phi, bias = native_contributions(spec, model, view)
     if not spec.classification:
         return phi, bias
-    if not isinstance(spec, ExtraTrees):  # margins
+    if not isinstance(spec, Forest):  # margins
         if phi.shape[1] == 1:
             phi, bias = binary_to_probability(phi[:, 0], bias[:, 0])
             phi, bias = phi[:, None], bias[:, None]

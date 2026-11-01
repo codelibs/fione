@@ -76,7 +76,7 @@ class TrainConfig:
     nfolds: int = 5
     seed: int = 0
     balance_classes: bool = False
-    stopping_rounds: int = 3
+    stopping_rounds: int = 10
     stopping_metric: str = "auto"
     stopping_tolerance: float = 0.001
     sort_metric: str = "auto"

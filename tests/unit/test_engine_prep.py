@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from fione.engine.config import ConfigError, TargetError
-from fione.engine.prep import Prep, infer_task, validate_target
+from fione.engine.prep import LINEAR_LEVELS, Prep, infer_task, validate_target
 
 RNG = np.random.default_rng(0)
 
@@ -88,6 +88,36 @@ def test_dense_view_codes_categories_and_imputes_medians():
     view = Prep().fit(df).dense(df)
     assert view["f0"].tolist() == [0.0, -1.0, 1.0, 0.0]
     assert view["f1"].tolist() == [1.0, 3.0, 3.0, 5.0]
+
+
+def test_linear_view_standardises_numbers_and_one_hot_encodes_the_rest():
+    df = pd.DataFrame(
+        {
+            "num": [1.0, 2.0, 3.0, 4.0, np.nan, 100.0],
+            "pref": ["東京", "大阪", "東京", "東京", "大阪", "名古屋"],
+        }
+    )
+    prep = Prep().fit(df)
+    view = prep.linear(df)
+    assert list(view.columns) == ["f0", "f0_na", "f1_0", "f1_1", "f1_2"]  # f1: 東京 > 大阪 > 名古屋
+    assert (view.dtypes == np.float64).all()
+    assert view["f0"].abs().max() <= 5.0  # clipped
+    assert view["f0_na"].tolist() == [0, 0, 0, 0, 1, 0]
+    assert view[["f1_0", "f1_1", "f1_2"]].to_numpy().tolist()[:3] == [
+        [1, 0, 0],
+        [0, 1, 0],
+        [1, 0, 0],
+    ]
+    odd = prep.linear(pd.DataFrame({"num": [np.inf], "pref": ["京都"]}))  # unseen level
+    assert odd[["f1_0", "f1_1", "f1_2"]].to_numpy().sum() == 0
+
+
+def test_linear_view_keeps_the_most_frequent_levels_only():
+    levels = [f"c{i}" for i in range(40)]
+    df = pd.DataFrame({"cat": [level for i, level in enumerate(levels) for _ in range(40 - i)]})
+    view = Prep().fit(df).linear(df)
+    assert view.shape[1] == LINEAR_LEVELS
+    assert view.iloc[:, 0].sum() == 40  # c0 is the most frequent
 
 
 def test_transform_tolerates_unseen_categories_and_extra_columns():

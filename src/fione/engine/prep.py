@@ -13,6 +13,8 @@ Task = Literal["classification", "regression"]
 
 HIGH_CARDINALITY = 200  # categorical columns with more categories are frequency encoded
 MIN_ROWS = 10
+LINEAR_LEVELS = 15  # categories one-hot encoded per column in the linear view (the most frequent)
+LINEAR_CLIP = 5.0  # standardised numbers are clipped to +-this many standard deviations
 # ordinal: seconds since the Unix epoch
 _DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
 _EPOCH = pd.Timestamp("1970-01-01")
@@ -84,8 +86,25 @@ class Prep:
                 self.feature_names.append(column)
                 self.sources.append(column)
         base = self._base(X)
-        self._medians = base.drop(columns=list(self._category_at)).median().fillna(0.0).to_dict()
+        numbers = base.drop(columns=list(self._category_at))
+        self._medians = numbers.median().fillna(0.0).to_dict()
+        self._fit_linear(base, numbers)
         return self
+
+    def _fit_linear(self, base: pd.DataFrame, numbers: pd.DataFrame) -> None:
+        """What the linear view needs: number scales, the missing-value flags and the one-hot
+        levels (``LINEAR_LEVELS`` most frequent, ties by name) per categorical column."""
+        filled = numbers.fillna(self._medians)
+        self._scale = {
+            position: (float(filled[position].mean()), float(filled[position].std() or 1.0))
+            for position in filled.columns
+        }
+        self._flags = [p for p in base.columns if base[p].isna().any()]
+        self._levels = {}
+        for position in self._category_at:
+            counts = base[position].value_counts()
+            ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            self._levels[position] = [level for level, _ in ranked[:LINEAR_LEVELS]]
 
     @property
     def columns(self) -> list[str]:
@@ -160,6 +179,26 @@ class Prep:
         for position, values in self._categorical(base).items():
             base[position] = values.codes.astype(float)
         return base.fillna(self._medians)
+
+    def linear(self, df: pd.DataFrame) -> pd.DataFrame:
+        """For linear models: standardised, clipped numbers (``f3``), a 0/1 flag for each column
+        that had missing values (``f3_na``) and one-hot levels of the categoricals (``f3_0``).
+        The digits after ``f`` name the feature (position in ``feature_names``) a column
+        derives from. Unseen and rare levels are all zeros."""
+        base = self._base(df)
+        columns: dict[str, np.ndarray] = {}
+        for position in base.columns:
+            if position in self._category_at:
+                values = base[position]
+                for i, level in enumerate(self._levels[position]):
+                    columns[f"{position}_{i}"] = (values == level).to_numpy(np.float64)
+            else:
+                mean, std = self._scale[position]
+                scaled = (base[position].fillna(self._medians[position]) - mean) / std
+                columns[position] = scaled.clip(-LINEAR_CLIP, LINEAR_CLIP).to_numpy(np.float64)
+            if position in self._flags:
+                columns[f"{position}_na"] = base[position].isna().to_numpy(np.float64)
+        return pd.DataFrame(columns, index=df.index)
 
 
 def infer_task(y: pd.Series) -> Task:
