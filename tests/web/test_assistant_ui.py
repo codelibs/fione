@@ -414,6 +414,6 @@ def test_unavailable_page_never_fails(make_client):
     assert r.status_code == 503 and textarea(r.text) == "hello"
 
 
-def test_navigation_shows_fione_kun_in_the_simple_view(chat):
+def test_navigation_shows_the_assistant_in_the_simple_view(chat):
     nav = chat.client.get(f"/projects/{chat.p}/datasets").text
     assert f'href="/projects/{chat.p}/assistant"' in nav

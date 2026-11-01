@@ -52,7 +52,7 @@ def jobs_of(api, pid: str) -> list[dict]:
     return api.get("/api/v1/jobs", params={"project_id": pid}).json()
 
 
-def test_fione_kun_proposes_and_the_editor_confirms(stack, admin, data, new_page):
+def test_assistant_proposes_and_the_editor_confirms(stack, admin, data, new_page):
     api = admin.api(stack)
     make_user(api, "kun-editor", "editor")
     pid = make_project(api, "Kun proposes", {"kun-editor": "editor"})
