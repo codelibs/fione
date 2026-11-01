@@ -83,6 +83,7 @@ class FamilySpec:
     ]  # Prep method producing this family's input: tree, catboost, dense or linear
     defaults: ClassVar[dict]  # the first trial's parameters, keyed like ``space``
     refit: ClassVar[bool] = True  # False: the final model is the average of the fold models
+    seeded: ClassVar[bool] = True  # False: the same fit gives the same model, whatever the seed
 
     def __init__(self, task: Task, n_classes: int, seed: int = 0, n_jobs: int = 1):
         self.task = task
@@ -534,6 +535,7 @@ class Linear(FamilySpec):
 
     name = "Linear"
     view = "linear"
+    seeded = False
     defaults = {"C": 1.0}
     max_iter = 300
 

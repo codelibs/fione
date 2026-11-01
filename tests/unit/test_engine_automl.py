@@ -159,8 +159,12 @@ def test_ignored_columns_are_not_features(iris):
 def test_refit_members_are_single_models_without_cv_data(iris):
     model, _, _, _ = iris
     assert model.stop_reason == "max_models"
-    # A refit member is one model; one that is never refit keeps its fold models.
-    assert all(len(member.models) == (1 if member.spec.refit else 5) for member in model.members)
+    # A refit member is one model per seed (none for Linear: one fit gives one model); one that
+    # is never refit keeps its fold models.
+    for member in model.members:
+        spec = member.spec
+        expected = (1 + automl_module.BAG_EXTRA if spec.seeded else 1) if spec.refit else 5
+        assert len(member.models) == expected, spec.name
     assert model.cv_predictions is None and model.cv_models is None
     assert model.fold_assignment is None
 
@@ -311,6 +315,7 @@ def test_balance_classes_weights_every_fit_and_lifts_minority_recall(monkeypatch
         return original(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight, rounds)
 
     monkeypatch.setattr(LightGBM, "_fit", spy)
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
     recall = {}
     for balance in (False, True):
         weights.clear()
@@ -695,3 +700,48 @@ def test_a_too_wide_linear_view_leaves_those_families_out(monkeypatch):
     assert any(n.get("kind") == "families_left_out" for n in notices)
     only = _fit(_binary(300), families=["Linear"], target="y", max_models=1)  # nothing else to run
     assert [m.spec.name for m in only.members] == ["Linear"]
+
+
+def _bagging_data():
+    return _binary(800, seed=3)
+
+
+def test_extra_seeds_are_averaged_into_a_refit_member(monkeypatch):
+    df = _bagging_data()
+    model = _fit(df, families=["LightGBM"], target="y", max_models=3)
+    (member,) = model.members
+    assert len(member.models) == 1 + automl_module.BAG_EXTRA
+    seeds = {m.get_params()["random_state"] for m in member.models}
+    assert len(seeds) == len(member.models)  # a different seed for each
+    probas = [member.spec.predict(m, model.prep.tree(df)) for m in member.models]
+    assert not np.allclose(probas[0], probas[1])
+    assert np.allclose(model.predict_proba(df).to_numpy()[:, 1], np.mean(probas, axis=0)[:, 1])
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    (single,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
+    assert len(single.models) == 1
+
+
+def test_extra_seeds_wait_for_enough_time_left(monkeypatch):
+    monkeypatch.setattr(automl_module, "BAG_TIME_FACTOR", 1e12)
+    (member,) = _fit(_bagging_data(), families=["LightGBM"], target="y", max_models=3).members
+    assert len(member.models) == 1
+
+
+def test_extra_seeds_respect_the_size_limits(monkeypatch):
+    df = _bagging_data()
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    (member,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
+    one = member.spec.size_bytes(member.models[0])
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 4)
+    monkeypatch.setattr(automl_module, "SIZE_CAP", int(one * 2.5))
+    (capped,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
+    assert len(capped.models) == 2
+    monkeypatch.setattr(automl_module, "SIZE_CAP", 40 * 1024**2)
+    monkeypatch.setattr(automl_module, "TOTAL_SIZE_CAP", int(one * 3.5))
+    (together,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
+    assert len(together.models) == 3
+
+
+def test_a_member_without_randomness_is_not_refit_with_other_seeds():
+    model = _fit(_bagging_data(), families=["Linear"], target="y", max_models=3)
+    assert [len(member.models) for member in model.members] == [1]

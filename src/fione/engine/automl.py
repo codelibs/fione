@@ -94,6 +94,13 @@ REFIT_ROUNDS_FACTOR = 1.1
 # The linear view (one-hot levels) of Linear and DeepLearning is built whole, and each fold copies
 # most of it again: above this many cells (800 MB as float64) those families are left out.
 LINEAR_MAX_CELLS = 100_000_000
+# Time left after the refits buys extra refits of a member with other seeds, averaged with the
+# first (variance falls with the seeds): up to ``BAG_EXTRA`` more, each only when the time left
+# is ``BAG_TIME_FACTOR`` times what the member's first refit took.
+BAG_EXTRA = 4
+BAG_TIME_FACTOR = 2.0
+BAG_SEED_STEP = 7919
+BAG_SEED_SPACE = 2**31 - 1
 SIZE_CAP = 40 * 1024**2  # per member
 TOTAL_SIZE_CAP = 90 * 1024**2  # all members: the artifact target is 100 MB (spec 5.2)
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
@@ -387,6 +394,8 @@ class AutoML:
         views: dict[str, pd.DataFrame] = {}
         chosen = sorted((n for n in results if weights[n] > 0), key=lambda n: -weights[n])
         candidates, refit_secs = [], {}
+        members_of: dict[str, list] = {}
+        refitted: set[str] = set()
         for name in chosen:
             result = results[name]
             models = result.models
@@ -396,6 +405,7 @@ class AutoML:
                 refit_secs[name] = time.monotonic() - start
                 if model is not None:
                     models = [model]
+                    refitted.add(name)
                 elif isinstance(problem, Exception):
                     self.emit(error_notice("refit_error", name, problem))
                 else:
@@ -408,6 +418,12 @@ class AutoML:
                         f"{name}: the final refit {why}; using its {len(models)} fold models",
                         family=name,
                     )
+            members_of[name] = models
+        self._bag(
+            results, chosen, members_of, refitted, refit_secs, X, y, prep, views, clock, weight
+        )
+        for name in chosen:
+            result, models = results[name], members_of[name]
             size = sum(result.spec.size_bytes(m) for m in models)
             candidates.append((Member(result.spec, weights[name], models), size))
         kept = [(member, size) for member, size in candidates if size <= SIZE_CAP]
@@ -438,14 +454,37 @@ class AutoML:
             member.models = [member.spec.serving(model) for model in member.models]
         return kept, refit_secs
 
+    def _bag(
+        self, results, chosen, members_of, refitted, refit_secs, X, y, prep, views, clock, weight
+    ):
+        """Refit the members that were refit once more, with other seeds, while the time and the
+        size limits allow it (heaviest member first, one extra model each per round)."""
+        sizes = {n: sum(results[n].spec.size_bytes(m) for m in members_of[n]) for n in chosen}
+        for extra in range(1, BAG_EXTRA + 1):
+            for name in chosen:
+                spec = results[name].spec
+                if name not in refitted or not spec.seeded:
+                    continue
+                if self.should_stop() or clock.remaining() < BAG_TIME_FACTOR * refit_secs[name]:
+                    continue
+                one = spec.size_bytes(members_of[name][0])
+                if sizes[name] + one > SIZE_CAP or sum(sizes.values()) + one > TOTAL_SIZE_CAP:
+                    continue
+                start = time.monotonic()
+                model, _ = _refit(results[name], X, y, prep, views, clock, weight, extra)
+                refit_secs[name] += time.monotonic() - start
+                if model is not None:
+                    members_of[name].append(model)
+                    sizes[name] += one
+
 
 def _mb(size: float) -> str:
     return f"{size / 2**20:.0f} MB"
 
 
-def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight):
+def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight, bag: int = 0):
     """``(model refit on all rows, None)``, or ``(None, why)`` with why ``"time"``,
-    ``"cancelled"`` or the exception the refit raised."""
+    ``"cancelled"`` or the exception the refit raised. ``bag`` > 0 refits with another seed."""
     spec = result.spec
     # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit.
     if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / (len(result.models) - 1):
@@ -455,7 +494,12 @@ def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight):
             views[spec.view] = getattr(prep, spec.view)(X)
         best = np.mean([spec.rounds(model) for model in result.models])
         rounds = min(MAX_ROUNDS, max(1, round(best * REFIT_ROUNDS_FACTOR)))
-        model = spec.fit_full(result.best_params, views[spec.view], y, clock, rounds, weight)
+        seed = spec.seed
+        spec.seed = (seed + BAG_SEED_STEP * bag) % BAG_SEED_SPACE
+        try:
+            model = spec.fit_full(result.best_params, views[spec.view], y, clock, rounds, weight)
+        finally:
+            spec.seed = seed
         return model, None
     except DeadlineExceeded:
         return None, "cancelled" if clock.should_stop() else "time"
