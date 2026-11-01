@@ -22,7 +22,7 @@ PROJECT_LINE = (
     "This conversation is about project {project_id} named {project_name}, a label its users chose."
 )
 SYSTEM_PROMPT = (
-    "You are Fione-kun, the assistant of Fione, a machine learning application. "
+    "You are the assistant of Fione, a machine learning application. "
     "Answer in {language}.\n"
     + PROJECT_LINE
     + "\nUse the tools to read facts, and never invent numbers.\n"

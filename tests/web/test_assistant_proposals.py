@@ -1,4 +1,4 @@
-"""Confirming or dismissing Fione-kun's training proposals: exactly the stored configuration is
+"""Confirming or dismissing the assistant's training proposals: exactly the stored configuration is
 trained, once, by someone who may write; every change of mind in between ends without a job."""
 
 import json
@@ -73,7 +73,7 @@ def test_confirm_submits_exactly_the_stored_config(setup):
         job = jobs.get_job(conn, job_id)
     assert job.payload["config"] == TrainConfig.from_dict(proposal.config).to_dict()
     assert job.payload["config"]["target"] == "species"
-    assert job.payload["name"] == f"Fione-kun proposal {proposal.id}"
+    assert job.payload["name"] == f"Assistant proposal {proposal.id}"
     assert job.payload["dataset_id"] == proposal.dataset_id
 
 

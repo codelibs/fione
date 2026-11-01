@@ -164,7 +164,7 @@ def render(
             "static": _static,
             "version": __version__,
             "mode": ui_mode(request),
-            # Fione-kun's place in a project's navigation and entry links: configured or not.
+            # The assistant's place in a project's navigation and entry links: configured or not.
             "assistant_link": request.app.state.settings.llm_base_url is not None,
             **context,  # may override ``here``: where the language switch returns to
         },

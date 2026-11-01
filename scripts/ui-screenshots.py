@@ -7,7 +7,7 @@ desktop and a phone viewport, plus a few Japanese ones.
 Starts Fione on a free port with a temporary data directory, creates the first admin, signs in
 and creates two projects through the UI, then walks the EasyML wizard with the iris data (a real
 training run of at most a minute, a prediction, a failed and a cancelled run) and writes PNGs to
-OUTPUT_DIR. Fione-kun's page is shown against the fake LLM of tests/fake_llm.py, run as a
+OUTPUT_DIR. The assistant's page is shown against the fake LLM of tests/fake_llm.py, run as a
 process, with a pending training proposal. Fails if a page logs a console error (a
 Content-Security-Policy violation, say), raises one, or scrolls sideways.
 """
@@ -756,7 +756,7 @@ def account_and_admin(s: "Shooter", base: str, project: str) -> None:
 
 
 def assistant_page(s: "Shooter", base: str, project: str) -> None:
-    """Fione-kun's page against the fake LLM: empty, then with a question, what it looked at
+    """The assistant's page against the fake LLM: empty, then with a question, what it looked at
     and a pending training proposal (nothing is confirmed, so no job starts)."""
     shoot_all(s, base, project + "/assistant", "assistant-empty", ("en", "ja"))
     page = s.page("light", "desktop")
@@ -777,7 +777,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     port = free_port()
     base = f"http://127.0.0.1:{port}"
-    # Fione-kun's language model: tests/fake_llm.py run as the Compose stack runs it (a
+    # The assistant's language model: tests/fake_llm.py run as the Compose stack runs it (a
     # process, not an import: tests/ is not on this script's path).
     llm_port = free_port()
     fake = subprocess.Popen(

@@ -16,10 +16,10 @@
 # Without FIONE_TRUST_PROXY every client seems to come from the proxy's address, so the
 # per-address limit of 50 failed sign-ins per 15 minutes is shared by all users.
 #
-# Fione-kun (the assistant) talks to an Ollama on the host by default (macOS: the Ollama app;
+# The assistant talks to an Ollama on the host by default (macOS: the Ollama app;
 # it cannot use the GPU from a container): http://host.docker.internal:11434/v1 with
 # gemma4:12b-mlx. An administrator downloads the model with the button on the system page.
-# Linux, or no Ollama on the host: run one in Compose, see "Fione-kun" in docker/.env.example.
+# Linux, or no Ollama on the host: run one in Compose, see "The assistant" in docker/.env.example.
 #
 # The serving image (prediction API for one downloaded model) is built only on request:
 #   docker compose -f docker/compose.yaml --env-file docker/.env --profile serving build
@@ -52,7 +52,7 @@ services:
       # FIONE_COOKIE_SECURE: "true"
       # Fione's origin as browsers reach it: the MCP endpoint accepts browser requests from it.
       FIONE_PUBLIC_URL: ${FIONE_PUBLIC_URL:-}
-      # Fione-kun: the language model server. Never `:?`; the stack runs without it.
+      # The assistant: the language model server. Never `:?`; the stack runs without it.
       FIONE_LLM_BASE_URL: ${FIONE_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
       FIONE_LLM_PROVIDER: ${FIONE_LLM_PROVIDER:-ollama}
       FIONE_LLM_MODEL: ${FIONE_LLM_MODEL:-gemma4:12b-mlx}
@@ -113,11 +113,11 @@ services:
     networks: [backend]
     restart: unless-stopped
 
-  # Ollama (MIT) for Fione-kun, for hosts without one (Linux): started only with the profile,
+  # Ollama (MIT) for the assistant, for hosts without one (Linux): started only with the profile,
   #   COMPOSE_PROFILES=ollama in docker/.env (with the FIONE_LLM_* values of the block there).
   # CPU only, and about 8 GB to download for gemma4:12b: slow, but it works. Fione is not
   # made to wait for it (no depends_on). Not published: only fione talks to it. The context
-  # length is what Fione-kun's tools need; Ollama's own default is 4096 and cuts silently.
+  # length is what the assistant's tools need; Ollama's own default is 4096 and cuts silently.
   ollama:
     profiles: ["ollama"]
     image: ollama/ollama:0.40.4

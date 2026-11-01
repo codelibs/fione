@@ -62,13 +62,13 @@ def test_slow_streams_many_slow_chunks():
 
 
 def test_anything_else_greets():
-    assert e2e_item(ask("what is this?")) == {"text": "Hello, I am Fione-kun (fake)."}
+    assert e2e_item(ask("what is this?")) == {"text": "Hello, I am the assistant (fake)."}
 
 
 def test_the_last_user_message_decides():
     earlier = [{"role": "user", "content": "describe"}, call("x", {}), result({})]
     messages = [SYSTEM, *earlier, {"role": "user", "content": "hello there"}]
-    assert e2e_item(messages) == {"text": "Hello, I am Fione-kun (fake)."}
+    assert e2e_item(messages) == {"text": "Hello, I am the assistant (fake)."}
 
 
 def test_a_gullible_call_wins_over_the_policy():

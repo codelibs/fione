@@ -93,7 +93,7 @@
 {% endmacro %}
 
 {% macro mascot(mood="happy", cls="mascot") %}
-{# Fione-kun, the guide: a friendly round face (decorative; the speech bubble says it all). #}
+{# The assistant, the guide: a friendly round face (decorative; the speech bubble says it all). #}
 <svg class="{{ cls }} mascot-{{ mood }}" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true" focusable="false">
   <path class="mascot__antenna" d="M32 10V4" fill="none" stroke-width="2.5" stroke-linecap="round"/>
   <circle class="mascot__tip" cx="32" cy="4" r="3"/>
@@ -114,7 +114,7 @@
 {% endmacro %}
 
 {% macro guide(t, text, mood="happy") %}
-{# Fione-kun saying ``text``. #}
+{# The assistant saying ``text``. #}
 <div class="guide">
   {{ mascot(mood) }}
   <div class="guide__bubble">
@@ -136,7 +136,7 @@
 {% macro project_nav(t, project, section=None) %}
 {# The project's sections. The simple view (``mode``, from the context) leaves out the
    detailed sections, except the one being shown; Sharing is for the owner (and admins:
-   ``ctx.access``, from the context) only; Fione-kun is there when it is configured
+   ``ctx.access``, from the context) only; the assistant is there when it is configured
    (``assistant_link``, from the context), in both views. #}
 {% set owner = ctx is defined and ctx.access.value == "owner" %}
 <nav class="subnav" aria-label="{{ t('nav.project') }}">

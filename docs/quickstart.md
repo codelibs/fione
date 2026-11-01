@@ -76,7 +76,7 @@ This writes `iris.csv`: 150 rows, four measurements and the `species` column.
 4. Under **Maximum run time** choose **1 min**, then press **Run**.
 5. The progress page shows what is being tried. When training ends, the
    **Prediction summary** opens: the best model, a rating from 1 to 5 stars, what the score
-   means in plain words, and Fione-kun's comment.
+   means in plain words, and the assistant's comment.
 
 ## 6. Make predictions
 
@@ -126,7 +126,7 @@ project sharing. Administrators also manage users, Python modules and the system
 that menu.
 
 To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.md)). To ask
-questions about your data and models in plain language, set up [Fione-kun](assistant.md)
+questions about your data and models in plain language, set up [the assistant](assistant.md)
 (opt-in; it needs a language model server).
 
 ## Stop, back up, upgrade
