@@ -9,7 +9,7 @@ This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinI
 
 - **EasyML wizard** for people new to machine learning: upload → data analysis (the column to
   predict, the input columns, the prediction type, the maximum run time) → run → prediction
-  summary with a 1–5 star rating and Fione-kun's comment → predictions as a CSV; the result
+  summary with a 1–5 star rating and the assistant's comment → predictions as a CSV; the result
   page also shows the reasons for the first rows.
 - **AutoML screens** for experts (the detailed view): column statistics and charts,
   correlations, leak warnings, every training setting, the job list, leaderboards, variable
@@ -53,19 +53,19 @@ Jupyter can drive Fione with `fione-sdk` (`sdk/`, `pip install ./sdk`): datasets
 profiles, AutoML training, leaderboards, predictions and Python modules, as pandas frames, with
 an API token. See [sdk/README.md](sdk/README.md).
 
-## Fione-kun, the assistant
+## The assistant
 
-Fione-kun answers questions about a project's datasets and models and suggests a training run
+The assistant answers questions about a project's datasets and models and suggests a training run
 that a person confirms; it only reads. It needs a language model server: the Ollama app on
 your Mac by default (`gemma4:12b-mlx`), an Ollama in Compose (profile `ollama`) on Linux, or any
 OpenAI-compatible server. The same read-only tools are available to MCP clients, off by
-default. See [Fione-kun](docs/assistant.md).
+default. See [The assistant](docs/assistant.md).
 
 ## Documentation
 
 - [Quick start](docs/quickstart.md)
 - [Notebooks](docs/notebook.md): JupyterLab and `fione-sdk`
-- [Fione-kun, the assistant](docs/assistant.md): the language
+- [The assistant](docs/assistant.md): the language
   model, what is sent, proposals, MCP
 - [Configuration](docs/configuration.md): every setting, reverse proxy, backups of the secret key
 - [Fione Serving](docs/serving.md): running a model as a prediction API
@@ -76,7 +76,7 @@ default. See [Fione-kun](docs/assistant.md).
 
 This release covers the core: data, analysis, AutoML, models and their explanations,
 predictions, serving, jobs, users and sharing, and the opt-in notebooks (JupyterLab and a
-Python SDK), and Fione-kun, an LLM assistant with an optional read-only MCP server.
+Python SDK), and an LLM assistant with an optional read-only MCP server.
 **Planned, not in this release**: ONNX export. No images are published yet;
 you build them from the repository (a version tag publishes the `fione`, `fione-serving`,
 `fione-notebook` and `fione-notebook-launcher` images).

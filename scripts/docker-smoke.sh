@@ -88,10 +88,10 @@ status=$(curl -fsS -b "$cookies" "$base/api/v1/system/status")
 check "system status: S3 storage" grep -q '"storage":"s3"' <<<"$status"
 check "system status: runner" grep -q '"runner":"running"' <<<"$status"
 check "system status: no credentials" bash -c '! grep -qiE "NotForRealUse|seaweedfs:8333|secret" <<<"$1"' _ "$status"
-# Fione-kun: the fake LLM downloads its model at the first probe; the state turns ready.
+# The assistant: the fake LLM downloads its model at the first probe; the state turns ready.
 llm_ready() { curl -fsS -b "$cookies" "$base/api/v1/system/status" | grep -q '"llm":{[^}]*"state":"ready"'; }
 for _ in $(seq 60); do llm_ready && break; sleep 1; done
-check "system status: Fione-kun ready" llm_ready
+check "system status: assistant ready" llm_ready
 # MCP (on in this stack): initialize answers with a full-scope API token, and without one 401.
 csrf=$(sed -n 's/.*"csrf_token":"\([^"]*\)".*/\1/p' <<<"$admin")
 api_token=$(curl -fsS -b "$cookies" -H "X-CSRF-Token: $csrf" -H "Content-Type: application/json" \

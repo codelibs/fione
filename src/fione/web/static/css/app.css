@@ -1580,7 +1580,7 @@ select.input {
   margin-bottom: var(--space-2);
 }
 
-/* ---------- Fione-kun ---------- */
+/* ---------- The assistant ---------- */
 .guide {
   display: flex;
   align-items: flex-start;
@@ -2832,7 +2832,7 @@ select.input {
   background: var(--color-surface);
 }
 
-/* ---------- Fione-kun chat ---------- */
+/* ---------- The assistant chat ---------- */
 .chat-layout {
   display: grid;
   gap: var(--space-5);

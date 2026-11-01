@@ -1,4 +1,4 @@
-"""Fione-kun end to end, in a real browser against the Compose stack with the fake LLM (its
+"""The assistant end to end, in a real browser against the Compose stack with the fake LLM (its
 deterministic ``e2e`` policy): a proposal an editor confirms, a viewer who cannot, a hostile
 column name that starts nothing, stopping a slow reply, and MCP from outside. The model never
 downloads or runs: the stack's fake LLM serves every reply."""
@@ -99,7 +99,7 @@ def test_viewer_sees_the_card_without_confirm(stack, admin, data, new_page, cons
     owner.goto(f"/projects/{pid}/assistant")
     ask(owner, "hello")
     expect(owner.locator(".chat-message-assistant")).to_contain_text(
-        "Fione-kun (fake)", timeout=60_000
+        "the assistant (fake)", timeout=60_000
     )
     theirs = owner.url
 

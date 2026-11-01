@@ -16,7 +16,7 @@ services:
       # The tests sign in with wrong passwords on purpose.
       FIONE_LOGIN_MAX_FAILURES: "1000"
       FIONE_LOGIN_MAX_FAILURES_PER_IP: "10000"
-      # Fione-kun against the fake LLM below, which downloads its model at once. These two
+      # The assistant against the fake LLM below, which downloads its model at once. These two
       # values are for the tests only: compose.yaml has both off.
       FIONE_LLM_BASE_URL: http://fake-llm:11434/v1
       FIONE_LLM_MODEL: fake-model

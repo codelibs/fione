@@ -260,7 +260,7 @@ SHARING_PATHS = {
     "/projects/{pid}/delete": P + "/delete",
 }
 
-# The Fione-kun chat x the AutoML personas, on an app with a ready LLM. Conversations are
+# The assistant chat x the AutoML personas, on an app with a ready LLM. Conversations are
 # their creator's alone, so each signed-in persona uses one of its own; anonymous visitors
 # and the stranger use the owner's. The thread of a conversation with no active turn is the
 # poller's last fragment (286). A proposal is its conversation's creator's too; the personas

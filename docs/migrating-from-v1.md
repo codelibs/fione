@@ -41,7 +41,7 @@ The Japanese screen terms are kept.
 | Maximum run time | 最大実行時間 |
 | Run | 実行 |
 | Prediction summary | 予測結果サマリー |
-| Fione-kun | Fione 君 |
+| Assistant | アシスタント |
 | Datasets: Training data / Data to predict / Predictions | 学習データ / 予測するデータ / 予測結果 |
 | Job | ジョブ |
 
@@ -60,7 +60,7 @@ The Japanese screen terms are kept.
 | Model explanations | New: diagnostics (confusion matrix, ROC and precision-recall curves, calibration, residuals), each column's contribution to a prediction, importance from those contributions, and partial dependence curves. Contributions come from the libraries' own tree explanations and are approximate for the ensemble ([Known limitations](known-limitations.md#explanations-and-leak-warnings)) |
 | Model export, import, export of all models | Shipped (import is for administrators) |
 | Batch prediction saved as a prediction dataset | Shipped |
-| Prediction summary (best model, star rating, Fione-kun) | Shipped |
+| Prediction summary (best model, star rating, assistant comment) | Shipped |
 | Serving zip | Replaced by the serving bundle and the shared image |
 | MOJO / genmodel download | Removed. ONNX export is planned where possible |
 | H2O Flow | Removed. Replaced by [Notebooks](notebook.md): JupyterLab in a container per user, with the Python `fione-sdk` (opt-in) |
@@ -74,8 +74,8 @@ The Japanese screen terms are kept.
 | Three roles and per-user sessions | Rebuilt: admin / editor / viewer and project sharing |
 | English and Japanese | Shipped |
 
-New in v2: **Fione-kun**, an LLM assistant (Ollama, by default with `gemma4:12b-mlx` on a Mac) and
-an optional read-only MCP server; see [Fione-kun](assistant.md). Planned, **not in this
+New in v2: **the assistant**, an LLM-based helper (Ollama, by default with `gemma4:12b-mlx` on a Mac) and
+an optional read-only MCP server; see [the assistant](assistant.md). Planned, **not in this
 release**: ONNX export.
 
 ## Python modules

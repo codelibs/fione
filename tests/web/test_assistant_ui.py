@@ -1,4 +1,4 @@
-"""The Fione-kun chat page against a fake LLM: sending and polling, escaping, who may see
+"""The assistant chat page against a fake LLM: sending and polling, escaping, who may see
 which conversation, the refusals of a send, the provider's state and the entry links."""
 
 import re
@@ -120,17 +120,19 @@ def textarea(html: str) -> str:
 
 
 def test_send_and_poll_until_done(chat):
-    chat.fake.script = [{"text": "\n\nHello from Fione-kun", "chunks": 3}]
+    chat.fake.script = [{"text": "\n\nHello from the assistant", "chunks": 3}]
     cid = new_conversation(chat)
     r = send(chat, cid)
     assert r.status_code == 303
     assert r.headers["location"] == f"/projects/{chat.p}/assistant?c={cid}"
     final = poll(chat, cid)
-    assert "Hello from Fione-kun" in final.text
+    assert "Hello from the assistant" in final.text
     assert "hx-trigger" not in final.text
-    assert re.search(r'class="chat-text"[^>]*>Hello from Fione-kun', final.text)  # no blank lines
+    assert re.search(
+        r'class="chat-text"[^>]*>Hello from the assistant', final.text
+    )  # no blank lines
     page = page_of(chat, f"?c={cid}").text
-    assert "Hello from Fione-kun" in page and ">hi<" in page
+    assert "Hello from the assistant" in page and ">hi<" in page
 
 
 def test_send_with_htmx_answers_with_the_thread(chat):
