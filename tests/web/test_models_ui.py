@@ -794,7 +794,7 @@ def test_regression_shows_residuals_and_scatter(world):
 
 
 def test_phase1_model_shows_the_missing_note(world):
-    page = diagnostics_page(world)  # record_like stores no diagnostics, as Phase 1 did
+    page = diagnostics_page(world)  # record_like stores no diagnostics
     assert "trained before Fione kept" in metrics_panel(page)
     assert "cannot be read" not in page
     assert not {"roc-chart", "residual-chart"} & set(chart_specs(page))

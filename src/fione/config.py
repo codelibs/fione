@@ -11,12 +11,11 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 MIN_SETUP_TOKEN_LENGTH = 16
-MIN_LAUNCHER_SECRET_LENGTH = 32  # as the launcher requires
 # The room a request needs besides the reply: the assistant's tools and longest system prompt
 # take about 2,940 tokens (at 2 bytes per token), and a short question the rest.
 MIN_PROMPT_TOKENS = 3008
 _VISIBLE_ASCII = re.compile(r"[\x21-\x7e]+")  # it travels in an HTTP header
-# scheme://host[:port] with dot-separated labels: what the launcher accepts as Fione's origin.
+# scheme://host[:port] with dot-separated labels: what Fione's own origin must look like.
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
 _ORIGIN = re.compile(
     rf"(?P<scheme>https?)://(?P<host>{_LABEL}(?:\.{_LABEL})*)(?::(?P<port>[0-9]{{1,5}}))?"
@@ -33,12 +32,6 @@ _LLM_URL = re.compile(
 _LLM_MODEL = re.compile(r"[\x21-\x7e]{1,200}")
 # The request body is Fione's; the extra body only adds to it.
 LLM_RESERVED_KEYS = ("model", "messages", "tools", "stream", "stream_options", "max_tokens")
-_NOTEBOOK_FIELDS = (
-    "public_url",
-    "notebook_url",
-    "notebook_launcher_url",
-    "notebook_launcher_secret",
-)
 
 
 class Settings(BaseSettings):
@@ -75,14 +68,9 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 2**30
     # First-admin setup token; when unset, one is generated into <data_dir>/setup-token.
     setup_token: str | None = None
-    # Notebooks (off unless notebook_url is set): Fione's origin as browsers reach it (behind
-    # a TLS proxy Fione cannot know its scheme), the notebook gateway's origin, and the
-    # launcher that starts the per-user containers.
+    # Fione's origin as browsers reach it (behind a TLS proxy Fione cannot know its scheme):
+    # the MCP endpoint accepts browser requests from it.
     public_url: str | None = None
-    notebook_url: str | None = None
-    notebook_launcher_url: str | None = None
-    notebook_launcher_secret: str | None = None
-    notebook_max_lifetime_secs: int = Field(43200, ge=600, le=604800)  # the launcher's bound
     # LLM assistant (off unless llm_base_url is set): an OpenAI-compatible server, or Ollama.
     llm_base_url: str | None = None
     llm_provider: Literal["openai", "ollama"] = "openai"
@@ -94,7 +82,7 @@ class Settings(BaseSettings):
     # ollama: pull the model when the server lacks it. Off: a host Ollama is the user's;
     # an administrator pulls on the system page.
     llm_auto_pull: bool = False
-    # The read-only tools over MCP at /mcp, for a full-scope API token; off unless set.
+    # The read-only tools over MCP at /mcp, for an API token; off unless set.
     mcp_enabled: bool = False
     llm_max_tokens: int = Field(1024, ge=64, le=8192)  # per completion
     llm_context_tokens: int = Field(16384, le=262144)  # the budget of one request
@@ -126,33 +114,16 @@ class Settings(BaseSettings):
             self.storage_url = (self.data_dir / "objects").as_uri()
         if self.secret_key_path is None:
             self.secret_key_path = self.data_dir / "secret.key"
-        self._check_notebooks()
+        self._check_public_url()
         self._check_llm()
         return self
 
-    def _check_notebooks(self) -> None:
-        """Empty values are unset; with ``notebook_url`` set, every notebook value is required,
-        both origins are bare (kept in their normal form) and they differ."""
-        for name in _NOTEBOOK_FIELDS:
-            if not getattr(self, name):
-                setattr(self, name, None)
-        if self.notebook_url is None:
-            return
-        for name in _NOTEBOOK_FIELDS:
-            if getattr(self, name) is None:
-                raise ValueError(f"FIONE_{name.upper()} is required with FIONE_NOTEBOOK_URL")
-        for name in ("public_url", "notebook_url"):
-            setattr(self, name, _normal_origin(name, getattr(self, name)))
-        if self.public_url == self.notebook_url:
-            raise ValueError("FIONE_NOTEBOOK_URL must not be Fione's own origin")
-        if not self.notebook_launcher_url.startswith(("http://", "https://")):
-            raise ValueError("FIONE_NOTEBOOK_LAUNCHER_URL must be an http(s) URL")
-        secret = self.notebook_launcher_secret
-        if len(secret) < MIN_LAUNCHER_SECRET_LENGTH or not _VISIBLE_ASCII.fullmatch(secret):
-            raise ValueError(
-                f"FIONE_NOTEBOOK_LAUNCHER_SECRET must be at least {MIN_LAUNCHER_SECRET_LENGTH}"
-                " visible ASCII characters"
-            )
+    def _check_public_url(self) -> None:
+        """An empty value is unset; a set one is a bare origin, kept in its normal form."""
+        if not self.public_url:
+            self.public_url = None
+        else:
+            self.public_url = _normal_origin("public_url", self.public_url)
 
     def _check_llm(self) -> None:
         """Empty values are unset; the base URL is kept without a trailing slash, and the
@@ -192,10 +163,6 @@ class Settings(BaseSettings):
         self.llm_base_url = (match["origin"] + match["path"]).rstrip("/")
         if self.llm_provider == "ollama" and not match["path"].rstrip("/").endswith("/v1"):
             raise ValueError("FIONE_LLM_BASE_URL must end in /v1 with FIONE_LLM_PROVIDER=ollama")
-
-    @property
-    def notebooks_enabled(self) -> bool:
-        return self.notebook_url is not None
 
 
 def _match_llm_url(value: str) -> re.Match | None:

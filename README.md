@@ -3,8 +3,6 @@
 Fione is an open-source AutoML server: upload a CSV in the browser, get a trained model, make
 predictions and serve the model as a prediction API. It runs with one `docker compose up`.
 
-This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinIO.
-
 ## Features
 
 - **EasyML wizard** for people new to machine learning: upload → data analysis (the column to
@@ -19,10 +17,9 @@ This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinI
   each column's contributions, partial dependence curves, and each prediction's contributions
   in the UI, the API, batch predictions and Fione Serving. Columns that predict the answer
   suspiciously well are flagged as possible leaks.
-- **Its own AutoML engine**: every model type H2O AutoML offers (gradient boosting with
-  LightGBM and XGBoost, random forest and extremely randomized trees, a linear model, a neural
-  network and an ensemble of them) plus CatBoost, tuned with Optuna and ensembled, within the
-  run time you set. It also builds derived features (text parts, counts, sums, group means) and
+- **Its own AutoML engine**: gradient boosting with LightGBM, XGBoost and CatBoost, random
+  forest and extremely randomized trees, a linear model and a neural network, tuned with
+  Optuna and ensembled, within the run time you set. It also builds derived features (text parts, counts, sums, group means) and
   keeps only those that clearly improve a quick test model.
 - **Fione Serving**: a small prediction API (`/invocations`, `/model`, `/ping`) for any trained
   model, as one shared Docker image and the model files.
@@ -30,8 +27,7 @@ This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinI
   API tokens and a REST API (`/api/v1`) for scripts.
 - **Python modules** for data operations (built-in frame operations, k-means, low-rank
   factorization; administrators can upload their own).
-- **Notebooks** (opt-in): JupyterLab in a container per user, inside Fione, with the Python
-  client `fione-sdk`.
+- **Python client** `fione-sdk` for scripts and notebooks of your own.
 - **Storage** on SeaweedFS or any S3-compatible service; metadata in SQLite.
 - English and Japanese, light and dark themes, usable on phones.
 
@@ -47,14 +43,11 @@ docker compose -f docker/compose.yaml --env-file docker/.env logs fione | grep "
 
 The full walk-through, with a sample dataset: [Quick start](docs/quickstart.md).
 
-## Notebooks
+## Python client
 
-Fione can open JupyterLab in a container of your own, inside its web UI, with no second
-sign-in. It is opt-in (the Compose profile `notebook`) and needs two more addresses and a secret in
-`docker/.env`; see [Notebooks](docs/notebook.md). The same notebooks, a script or your own
-Jupyter can drive Fione with `fione-sdk` (`sdk/`, `pip install ./sdk`): datasets, data
-profiles, AutoML training, leaderboards, predictions and Python modules, as pandas frames, with
-an API token. See [sdk/README.md](sdk/README.md).
+A script or your own Jupyter can drive Fione with `fione-sdk` (`sdk/`, `pip install ./sdk`):
+datasets, data profiles, AutoML training, leaderboards, predictions and Python modules, as
+pandas frames, with an API token. See [sdk/README.md](sdk/README.md).
 
 ## The assistant
 
@@ -67,26 +60,19 @@ default. See [The assistant](docs/assistant.md).
 ## Documentation
 
 - [Quick start](docs/quickstart.md)
-- [Notebooks](docs/notebook.md): JupyterLab and `fione-sdk`
 - [The assistant](docs/assistant.md): the language
   model, what is sent, proposals, MCP
 - [Configuration](docs/configuration.md): every setting, reverse proxy, backups of the secret key
 - [Fione Serving](docs/serving.md): running a model as a prediction API
-- [Moving from v1](docs/migrating-from-v1.md)
 - [Known limitations](docs/known-limitations.md)
 
 ## Status
 
 This release covers the core: data, analysis, AutoML, models and their explanations,
-predictions, serving, jobs, users and sharing, and the opt-in notebooks (JupyterLab and a
-Python SDK), and an LLM assistant with an optional read-only MCP server.
+predictions, serving, jobs, users and sharing, a Python SDK, and an LLM assistant with an optional read-only MCP server.
 **Planned, not in this release**: ONNX export. No images are published yet;
-you build them from the repository (a version tag publishes the `fione`, `fione-serving`,
-`fione-notebook` and `fione-notebook-launcher` images).
-
-The Java v1 (a Fess plugin) is preserved in this repository's history, before the merge of v2.
-
-**Versioning:** this release is 20.0.0. Fione 13–15 followed Fess's version numbers; v2 no longer depends on Fess, so its numbers are independent and continue from 20.
+you build them from the repository (a version tag publishes the `fione` and `fione-serving`
+images).
 
 ## Development
 

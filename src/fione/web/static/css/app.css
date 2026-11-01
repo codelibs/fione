@@ -2817,21 +2817,6 @@ select.input {
   background: var(--color-warning-text);
 }
 
-/* ---------- Notebook ---------- */
-.notebook-page {
-  padding-block-end: var(--space-5);
-}
-
-.notebook-frame {
-  display: block;
-  width: 100%;
-  height: calc(100vh - 12rem);
-  min-height: 28rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
-}
-
 /* ---------- The assistant chat ---------- */
 .chat-layout {
   display: grid;

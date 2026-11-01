@@ -26,8 +26,8 @@ Size caps (artifact target, spec 5.2): at most 2,000 boosting rounds with 50-rou
 stopping, 256 leaves per tree, XGBoost depth 10, CatBoost depth 8; RandomForest and ExtraTrees
 100 trees of at most 30 levels and 2,048 leaves; DeepLearning two layers of at most 256 units.
 
-The families are the model types of H2O AutoML (GBM: LightGBM; XGBoost; DRF: RandomForest; XRT:
-ExtraTrees; GLM: Linear; DeepLearning) plus CatBoost. Linear and DeepLearning read the ``linear``
+The families are LightGBM, XGBoost, CatBoost, RandomForest, ExtraTrees, Linear and
+DeepLearning. Linear and DeepLearning read the ``linear``
 view of Prep (one-hot, standardised); their "rounds" are 1 and the epochs trained.
 """
 
@@ -529,7 +529,7 @@ def by_feature(weights: np.ndarray, columns) -> np.ndarray:
 
 class Linear(FamilySpec):
     """L2-regularised logistic (classification) or ridge (regression) regression on the linear
-    view, H2O's GLM. ``C`` is the inverse regularisation strength; ridge uses ``alpha = 1/C``.
+    view. ``C`` is the inverse regularisation strength; ridge uses ``alpha = 1/C``.
     """
 
     name = "Linear"
@@ -566,8 +566,8 @@ class Linear(FamilySpec):
 
 
 class DeepLearning(FamilySpec):
-    """A feed-forward network with two ReLU layers of ``width`` units (scikit-learn's MLP),
-    H2O's Deep Learning. It trains epoch by epoch on the linear view, stops after
+    """A feed-forward network with two ReLU layers of ``width`` units (scikit-learn's MLP).
+    It trains epoch by epoch on the linear view, stops after
     ``patience`` epochs without a better loss and keeps the best epoch's weights; ``rounds``
     counts epochs. The best epoch is picked on ``STOPPING_SHARE`` of the training rows, set
     aside inside the fit, never on the validation rows: a network's loss is noisy from epoch

@@ -1,4 +1,4 @@
-"""The MCP endpoint: off by default, a full-scope bearer token only, a browser's Origin
+"""The MCP endpoint: off by default, a bearer token only, a browser's Origin
 checked, and nothing but the registry's read-only tools behind it."""
 
 import asyncio
@@ -13,7 +13,6 @@ from api_helpers import add_user, connect, iris_frame, login
 from fione.assistant import store as assistant_store
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
-from fione.auth.tokens import TokenScope
 from fione.projects import service as projects
 from fione.projects.ingest import ingest_csv
 from fione.projects.service import DatasetType
@@ -35,9 +34,9 @@ def mcp(make_client):
     return client, user
 
 
-def bearer(client, user, *, scope=TokenScope.FULL, revoke=False):
+def bearer(client, user, *, revoke=False):
     with closing(connect(client)) as conn:
-        record, token = auth_service.create_token(conn, user.id, "mcp", scope=scope)
+        record, token = auth_service.create_token(conn, user.id, "mcp")
         if revoke:
             auth_service.revoke_token(conn, record.id)
     return {"Authorization": f"Bearer {token}"}
@@ -85,10 +84,6 @@ def test_auth(mcp):
     assert (r.status_code, r.headers["www-authenticate"]) == (401, "Bearer")
     assert post(client, rpc("ping"), {"Authorization": "Bearer nope"}).status_code == 401
     assert post(client, rpc("ping"), bearer(client, user, revoke=True)).status_code == 401
-    assert (
-        post(client, rpc("ping"), bearer(client, user, scope=TokenScope.NOTEBOOK)).status_code
-        == 403
-    )
     login(client, "ed")  # a session cookie alone is not credentials
     assert post(client, rpc("ping")).status_code == 401
     assert post(client, rpc("ping"), bearer(client, user)).status_code == 200

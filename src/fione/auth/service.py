@@ -1,13 +1,12 @@
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from functools import cache
 
 from fione import db
 from fione.auth.passwords import hash_password, verify_password
-from fione.auth.roles import NotebookPermission, Role, User
-from fione.auth.tokens import TokenScope, hash_token, new_token
+from fione.auth.roles import Role, User
+from fione.auth.tokens import hash_token, new_token
 
 _USERNAME_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
@@ -47,8 +46,6 @@ class ApiToken:
     name: str
     created_at: str
     revoked: bool
-    scope: TokenScope = TokenScope.FULL
-    expires_at: str | None = None
 
 
 @cache
@@ -193,36 +190,6 @@ def set_role(
     return user
 
 
-def get_notebook_permission(conn: sqlite3.Connection, user_id: int) -> NotebookPermission:
-    row = conn.execute("SELECT notebook FROM users WHERE id = ?", (user_id,)).fetchone()
-    if row is None:
-        raise UserNotFound(user_id)
-    return NotebookPermission(row["notebook"])
-
-
-def set_notebook_permission(
-    conn: sqlite3.Connection, user_id: int, perm: NotebookPermission
-) -> None:
-    cur = conn.execute(
-        "UPDATE users SET notebook = ? WHERE id = ?", (NotebookPermission(perm).value, user_id)
-    )
-    if cur.rowcount == 0:
-        raise UserNotFound(user_id)
-
-
-def notebook_permissions(conn: sqlite3.Connection) -> dict[int, NotebookPermission]:
-    """The stored permission of every user, by id."""
-    rows = conn.execute("SELECT id, notebook FROM users")
-    return {r["id"]: NotebookPermission(r["notebook"]) for r in rows}
-
-
-def can_use_notebook(conn: sqlite3.Connection, user: User) -> bool:
-    """Admins always may; others need the stored ``run``, read fresh on every call."""
-    if user.role == Role.ADMIN:
-        return True
-    return get_notebook_permission(conn, user.id) == NotebookPermission.RUN
-
-
 def delete_user(conn: sqlite3.Connection, user_id: int, *, actor_id: int | None = None) -> None:
     """Delete a user with their tokens and memberships; refused (``UserConflict``) for the
     last admin, for oneself (the admin ``actor_id``) and for owners of projects or jobs,
@@ -252,41 +219,18 @@ def _api_token(row: sqlite3.Row) -> ApiToken:
         name=row["name"],
         created_at=row["created_at"],
         revoked=row["revoked_at"] is not None,
-        scope=TokenScope(row["scope"]),
-        expires_at=row["expires_at"],
     )
 
 
-_TOKEN_COLUMNS = "id, user_id, name, created_at, revoked_at, scope, expires_at"
-_EXPIRY_FORMAT = "%Y-%m-%d %H:%M:%S"  # that of CURRENT_TIMESTAMP, so SQL compares them as text
-_EXPIRY = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d")
+_TOKEN_COLUMNS = "id, user_id, name, created_at, revoked_at"
 
 
-def expiry_after(seconds: int) -> str:
-    """The UTC time ``seconds`` from now, as ``create_token`` takes it."""
-    return (datetime.now(UTC) + timedelta(seconds=seconds)).strftime(_EXPIRY_FORMAT)
-
-
-def create_token(
-    conn: sqlite3.Connection,
-    user_id: int,
-    name: str,
-    *,
-    scope: TokenScope = TokenScope.FULL,
-    expires_at: str | None = None,
-) -> tuple[ApiToken, str]:
-    """Create an API token: its record and its plaintext; only the sha256 is stored.
-
-    ``expires_at`` is UTC ``YYYY-MM-DD HH:MM:SS`` (``expiry_after``); None never expires."""
-    if expires_at is not None:
-        if not _EXPIRY.fullmatch(expires_at):
-            raise ValueError("expires_at must be UTC text like 2026-01-31 12:00:00")
-        datetime.strptime(expires_at, _EXPIRY_FORMAT)  # a real date and time: ValueError if not
+def create_token(conn: sqlite3.Connection, user_id: int, name: str) -> tuple[ApiToken, str]:
+    """Create an API token: its record and its plaintext; only the sha256 is stored."""
     token = new_token()
     cur = conn.execute(
-        "INSERT INTO api_tokens (user_id, name, token_sha256, scope, expires_at)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (user_id, name, hash_token(token), TokenScope(scope).value, expires_at),
+        "INSERT INTO api_tokens (user_id, name, token_sha256) VALUES (?, ?, ?)",
+        (user_id, name, hash_token(token)),
     )
     record = get_token(conn, cur.lastrowid)
     assert record is not None
@@ -329,24 +273,13 @@ def count_tokens(conn: sqlite3.Connection, user_id: int) -> int:
     return row.fetchone()[0]
 
 
-def token_identity(conn: sqlite3.Connection, token: str) -> tuple[User, ApiToken] | None:
-    """The user and the record of a token that is neither revoked nor expired."""
+def user_from_token(conn: sqlite3.Connection, token: str) -> User | None:
     row = conn.execute(
-        "SELECT u.username, u.role, t.id, t.user_id, t.name, t.created_at, t.revoked_at,"
-        " t.scope, t.expires_at FROM api_tokens t JOIN users u ON u.id = t.user_id"
-        " WHERE t.token_sha256 = ? AND t.revoked_at IS NULL"
-        " AND (t.expires_at IS NULL OR t.expires_at > CURRENT_TIMESTAMP)",
+        "SELECT u.id, u.username, u.role FROM api_tokens t JOIN users u ON u.id = t.user_id"
+        " WHERE t.token_sha256 = ? AND t.revoked_at IS NULL",
         (hash_token(token),),
     ).fetchone()
-    if row is None:
-        return None
-    user = User(id=row["user_id"], username=row["username"], role=Role(row["role"]))
-    return user, _api_token(row)
-
-
-def user_from_token(conn: sqlite3.Connection, token: str) -> User | None:
-    found = token_identity(conn, token)
-    return found[0] if found else None
+    return _user(row) if row else None
 
 
 def revoke_token(conn: sqlite3.Connection, token_id: int) -> None:

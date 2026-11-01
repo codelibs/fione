@@ -83,7 +83,7 @@ def test_california_housing_regression_targets(tmp_path):
     model, fit_secs, artifact_bytes, predict_secs = _fit_save_load(train, config, tmp_path, test)
 
     rmse = float(np.sqrt(((model.predict(test) - test["MedHouseVal"]) ** 2).mean()))
-    print(f"  test RMSE {rmse:.4f} (spike 0.4335, H2O 0.4387)")
+    print(f"  test RMSE {rmse:.4f}")
     assert fit_secs <= 63  # 1.05 x the budget
     assert artifact_bytes <= 100 * MB
     assert predict_secs <= 0.5

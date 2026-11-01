@@ -3,10 +3,9 @@ import pytest
 from fione_sdk import FioneError
 
 
-@pytest.fixture(params=["full", "notebook"])
-def fione(request):
-    """A client with a full token and one with a notebook token: both reach every call."""
-    return request.getfixturevalue("sdk" if request.param == "full" else "notebook_sdk")
+@pytest.fixture
+def fione(sdk):
+    return sdk
 
 
 @pytest.fixture

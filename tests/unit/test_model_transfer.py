@@ -242,7 +242,7 @@ def test_export_import_keeps_diagnostics(dest, source, secret, trusted):
 
 
 def test_import_of_export_without_diagnostics(dest, source):
-    """A Phase 1 export has no ``diagnostics`` key; it imports, and exports again without one."""
+    """An export has no ``diagnostics`` key; it imports, and exports again without one."""
     rec = do_import(dest, rebuilt(source.parts, record=without(source, "diagnostics")))
     assert rec.diagnostics is None and rec.trusted == 1
     body = json.loads(parts(exported(dest, rec))["record.json"])

@@ -4,16 +4,12 @@ Policy (design spec 4.6): Apache-2.0, MIT, BSD, ISC and PSF are allowed;
 GPL/LGPL/AGPL and non-commercial licenses are forbidden; anything else
 (MPL, custom or unrecognised strings) needs a manual review.
 
-Exit code is 1 if any installed package is forbidden and not in EXCEPTIONS. When JupyterLab
-is installed (the notebook image), the JavaScript packages it bundles are checked too, more
-strictly: each must be allowed or in BUNDLE_REVIEWED with the same licence.
+Exit code is 1 if any installed package is forbidden and not in EXCEPTIONS.
 """
 
-import json
 import re
 import sys
 from importlib import metadata
-from pathlib import Path
 from typing import Literal
 
 Verdict = Literal["allowed", "forbidden", "review"]
@@ -23,18 +19,7 @@ EXCEPTIONS: dict[str, str] = {
     # MPL-2.0 AND MIT, a transitive dependency of optuna.
     "tqdm": "weak file-level copyleft; unmodified library use is compatible with Apache-2.0",
     "certifi": "MPL-2.0 CA bundle, unmodified, via httpx",
-    "fqdn": "MPL-2.0, unmodified, via jupyter_events",
 }
-
-_JUPYTERLAB_REASON = "bundled by JupyterLab in the opt-in notebook image, not vendored"
-# JavaScript package bundled by JupyterLab -> (its licence id in the bundle, why it is
-# accepted). An entry only matches that exact licence id.
-BUNDLE_REVIEWED: dict[str, tuple[str, str]] = {
-    "elkjs": ("EPL-2.0", _JUPYTERLAB_REASON),
-    "@fortawesome/fontawesome-free": ("(CC-BY-4.0 AND OFL-1.1 AND MIT)", _JUPYTERLAB_REASON),
-    "khroma": ("", "MIT by its licence text; the bundle records no licence id"),
-}
-_BUNDLE = "jupyterlab/static/third-party-licenses.json"
 
 _ALLOWED = re.compile(r"\b(apache|mit|bsd|0bsd|isc|psf|python software foundation)\b")
 _FORBIDDEN = re.compile(
@@ -162,46 +147,6 @@ def installed_distributions() -> list[metadata.Distribution]:
     return sorted(unique.values(), key=lambda d: _normalize(d.metadata["Name"]))
 
 
-def bundle_licenses(path: Path) -> list[tuple[str, str, Verdict]]:
-    """(name, licence id, verdict) of each package in JupyterLab's third-party-licenses.json.
-    Raises ValueError when the file is not in the expected format."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    packages = data.get("packages") if isinstance(data, dict) else None
-    if not isinstance(packages, list) or not packages:
-        raise ValueError("no package list")
-    result = []
-    for package in packages:
-        name = package.get("name") if isinstance(package, dict) else None
-        license_id = package.get("licenseId") if isinstance(package, dict) else None
-        if not isinstance(name, str) or not isinstance(license_id, str):
-            raise ValueError("a package without a name or licence id")
-        result.append((name, license_id, classify(license_id)))
-    return result
-
-
-def check_bundle(path: Path) -> bool:
-    """Print the verdict of each bundled package; False unless every one is allowed or
-    reviewed with the same licence id. Unlike for Python packages, "review" fails."""
-    try:
-        packages = bundle_licenses(path)
-    except (OSError, ValueError) as error:
-        print(f"forbidden cannot read JupyterLab's bundled licences ({path}): {error}")
-        return False
-    ok = True
-    for name, license_id, verdict in packages:
-        note = ""
-        reviewed = BUNDLE_REVIEWED.get(name)
-        if verdict != "allowed" and reviewed is not None and reviewed[0] == license_id:
-            note = f"  (exception: {reviewed[1]})"
-            verdict = "allowed"
-        elif verdict != "allowed":
-            ok = False
-        print(f"{verdict:<9} bundle {name}: {license_id or '-'}{note}")
-    if not ok:
-        print("Bundled packages must be allowed, or in BUNDLE_REVIEWED with the same licence id.")
-    return ok
-
-
 def main() -> int:
     failed = False
     dists = installed_distributions()
@@ -219,9 +164,6 @@ def main() -> int:
         print(f"{verdict:<9} {name} {dist.version}: {licenses}{note}")
     if failed:
         print("Forbidden licenses found; replace the dependency or add an EXCEPTIONS entry.")
-    for dist in dists:
-        if _normalize(dist.metadata["Name"]) == "jupyterlab":
-            failed = not check_bundle(Path(dist.locate_file(_BUNDLE))) or failed
     return 1 if failed else 0
 
 

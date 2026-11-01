@@ -7,7 +7,7 @@ import pyarrow as pa
 import pytest
 from fastapi.testclient import TestClient
 
-from api_helpers import NOTEBOOK_SETTINGS, add_user, bearer, make_settings
+from api_helpers import add_user, bearer, make_settings
 from fione.api import app as app_module
 from fione.api import routes_projects
 from fione.api.app import create_app
@@ -121,17 +121,6 @@ def test_lifespan_recovers_orphans_then_starts_the_runner(tmp_path, monkeypatch)
     with TestClient(create_app(make_settings(tmp_path / "data"), start_runner=False)):
         pass
     assert RecordingRunner.calls == []
-
-
-def test_lifespan_retries_notebook_stops_only_with_notebooks(tmp_path):
-    with TestClient(create_app(make_settings(tmp_path / "off"))) as client:
-        assert client.app.state.notebook_retrier is None
-    app = create_app(make_settings(tmp_path / "on", **NOTEBOOK_SETTINGS))
-    with TestClient(app) as client:
-        retrier = client.app.state.notebook_retrier
-        assert retrier._thread.is_alive() and retrier._launcher is app.state.notebook_launcher
-        thread = retrier._thread
-    assert not thread.is_alive()  # stopped with the app
 
 
 def test_secret_and_hashes_never_reach_responses_or_logs(client, caplog):

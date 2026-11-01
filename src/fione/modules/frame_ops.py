@@ -1,4 +1,4 @@
-"""The built-in frame operations, ported from the v1 ``frame_*.py`` scripts to pandas.
+"""The built-in frame operations, on pandas.
 
 Each takes one frame (``cbind``, ``concat`` and ``rbind`` a second one through
 ``other_dataset_id``) and returns one frame. Column lists are JSON arrays of names.
@@ -36,7 +36,7 @@ _COMPARE = {
     ">": operator.gt,
 }
 _CONDITION = re.compile(r"(?P<column>.+?) (?P<op>==|!=|<=|>=|<|>) (?P<value>.*)")
-# The v1 stop-word list for tokenize (frame_tokenize.py), unchanged.
+# The stop words of tokenize.
 STOP_WORDS = frozenset(
     "ax i you edu s t m subject can lines re what there all we one the a an of or in for by on"
     " but is not with as was if they are this and it have from at my be that to com org like"
@@ -110,8 +110,7 @@ def cor(df, params, ctx):
     check_cells(len(pick_columns(df, params["columns"])), len(pick_columns(df, params["columns"])))
     columns, matrix = numeric_matrix(df, params["columns"])
     data = pd.DataFrame(matrix, columns=columns)
-    # H2O's code (not its docstring, which says the opposite): "use" wins, otherwise na_rm
-    # picks 'complete.obs' and its absence 'everything'.
+    # "use" wins, otherwise na_rm picks 'complete.obs' and its absence 'everything'.
     use = params["use"] or ("complete.obs" if params["na_rm"] else "everything")
     missing = data.isna().any()
     if use == "all.obs" and missing.any():
@@ -243,7 +242,7 @@ def tokenize(df, params, ctx):
                     and not (params["use_stop_words"] and token in STOP_WORDS)
                 ):
                     tokens.append(token)
-        tokens.append(None)  # a gap ends each document, as in H2O
+        tokens.append(None)  # a gap ends each document
     return pd.DataFrame({column: pd.Series(tokens, dtype="str")})
 
 

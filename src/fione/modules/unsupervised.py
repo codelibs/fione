@@ -1,4 +1,4 @@
-"""K-means and low-rank projection, replacing the v1 H2O ``KMeans`` and ``GLRM`` modules.
+"""K-means and low-rank projection.
 
 Missing values are not modelled: a gap is filled with the column mean found in training (the
 mean is part of the state). Only integer and float columns are used; name the ones to use in

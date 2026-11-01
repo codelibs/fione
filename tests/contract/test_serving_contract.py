@@ -1,4 +1,4 @@
-"""The serving API contract (v1-compatible ``/invocations``) and the serving bundle."""
+"""The serving API contract (``/invocations``) and the serving bundle."""
 
 import asyncio
 import json

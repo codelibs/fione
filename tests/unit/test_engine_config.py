@@ -64,7 +64,7 @@ def test_validate_rejects_bad_values(changes, message):
         TrainConfig(**{"target": "y", **changes}).validate()
 
 
-def test_validate_accepts_h2o_metric_names_case_insensitively():
+def test_validate_accepts_metric_names_case_insensitively():
     config = TrainConfig(target="y", stopping_metric="AUC", sort_metric="logloss", max_models=10)
     assert config.validate() is config
 

@@ -141,11 +141,10 @@ def test_trials_table_lists_finished_trials(iris):
     assert isinstance(json.loads(trials["params"].iloc[0]), dict)
 
 
-def test_every_h2o_algorithm_has_a_family():
-    # H2O AutoML: GBM, XGBoost, DRF, XRT (part of DRF), GLM, DeepLearning; StackedEnsemble is
-    # the ensemble selection. FAMILIES, FAMILY_ORDER and FAMILY_WEIGHTS must agree.
-    h2o = {"LightGBM", "XGBoost", "RandomForest", "ExtraTrees", "Linear", "DeepLearning"}
-    assert h2o <= set(FAMILY_ORDER)
+def test_every_family_is_listed_once():
+    # FAMILIES, FAMILY_ORDER and FAMILY_WEIGHTS must agree.
+    core = {"LightGBM", "XGBoost", "RandomForest", "ExtraTrees", "Linear", "DeepLearning"}
+    assert core <= set(FAMILY_ORDER)
     assert set(FAMILY_ORDER) == set(FAMILIES) == set(automl_module.FAMILY_WEIGHTS)
     assert sum(automl_module.FAMILY_WEIGHTS.values()) == pytest.approx(1.0)
 
@@ -353,7 +352,7 @@ def test_missing_target_column_is_rejected():
 
 def test_unknown_family_is_rejected():
     with pytest.raises(ConfigError, match="unknown families"):
-        _fit(_binary(100), families=["H2O"], target="y")
+        _fit(_binary(100), families=["nope"], target="y")
 
 
 def test_cv_data_is_kept_on_request():

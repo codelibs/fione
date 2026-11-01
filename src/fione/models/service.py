@@ -50,7 +50,7 @@ class ModelRecord:
     metrics: dict
     importance: dict[str, float]
     created_at: float
-    diagnostics: dict | None = None  # fione.engine.diagnostics; None before Phase 2a
+    diagnostics: dict | None = None  # fione.engine.diagnostics; None when they could not be stored
 
 
 def _record(row: sqlite3.Row) -> ModelRecord:

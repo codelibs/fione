@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from api_helpers import PW, add_user, connect, login
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
-from fione.auth.tokens import TokenScope, hash_token
+from fione.auth.tokens import hash_token
 from fione.web import account_ui
 from web_helpers import make_world
 
@@ -230,30 +230,6 @@ def test_revoking_ones_own_token(client):
     assert tokens_of(client, "ed")[0].revoked
     page = client.get("/account?done=revoked").text
     assert "Revoked" in page and f"/account/tokens/{record.id}/revoke" not in page
-
-
-def test_the_token_table_shows_scope_and_expiry(client):
-    login(client, "ed")
-    with closing(connect(client)) as conn:
-        (user_id,) = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()
-        auth_service.create_token(conn, user_id, "plain")
-        live, _ = auth_service.create_token(
-            conn, user_id, "from-nb", scope=TokenScope.NOTEBOOK,
-            expires_at=auth_service.expiry_after(3600),
-        )  # fmt: skip
-        old, _ = auth_service.create_token(
-            conn, user_id, "stale", expires_at=auth_service.expiry_after(-5)
-        )
-    page = client.get("/account").text
-    rows = {m[1]: m[0] for m in re.findall(r"<tr>(.*?<th[^>]*>([^<]+)</th>.*?)</tr>", page, re.S)}
-    assert "Notebook" not in rows["plain"] and "Expired" not in rows["plain"]
-    assert "Notebook" in rows["from-nb"] and "Active" in rows["from-nb"]
-    assert "Expires" in rows["from-nb"] and "UTC" in rows["from-nb"]
-    assert "Expired" in rows["stale"] and "Active" not in rows["stale"]
-    assert f"/account/tokens/{old.id}/revoke" not in page
-    assert f"/account/tokens/{live.id}/revoke" in page
-    client.cookies.set("fione_lang", "ja")
-    assert "ノートブック" in client.get("/account").text
 
 
 @pytest.mark.parametrize("who", ["ed", "admin"])

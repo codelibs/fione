@@ -96,13 +96,9 @@
           <tr>
             <th scope="row" class="cell-value">{{ token.name }}</th>
             <td><time datetime="{{ token.created_at|iso }}">{{ t('time.utc', time=token.created_at|utc) }}</time></td>
+            <td>{% if token.revoked %}<span class="badge badge-neutral">{{ t('account.token_revoked') }}</span>{% else %}<span class="badge badge-success">{{ t('account.token_active') }}</span>{% endif %}</td>
             <td>
-              {% if token.revoked %}<span class="badge badge-neutral">{{ t('account.token_revoked') }}</span>{% elif token.id in expired %}<span class="badge badge-neutral">{{ t('account.token_expired') }}</span>{% else %}<span class="badge badge-success">{{ t('account.token_active') }}</span>{% endif %}
-              {% if token.scope == 'notebook' %}<span class="badge badge-info">{{ t('account.token_scope_notebook') }}</span>{% endif %}
-              {% if token.expires_at %}<br><time class="text-muted text-sm" datetime="{{ token.expires_at|iso }}">{{ t('account.token_expires', time=token.expires_at|utc) }}</time>{% endif %}
-            </td>
-            <td>
-              {% if not token.revoked and token.id not in expired %}
+              {% if not token.revoked %}
               <details class="confirm confirm-inline" data-confirm-panel>
                 <summary class="btn btn-ghost btn-sm">{{ t('account.revoke') }}<span class="visually-hidden">: {{ token.name }}</span></summary>
                 <div class="confirm__panel" role="group" aria-labelledby="revoke-q-{{ token.id }}">

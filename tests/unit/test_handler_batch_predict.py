@@ -632,7 +632,7 @@ def test_payload_without_the_key_still_runs(
     assert old.status is JobStatus.DONE, old.message
     off = run_job(submit(conn, owner, project, record, dataset, include_contributions=False))
     assert off.status is JobStatus.DONE, off.message
-    # the default output is Phase 1's, byte for byte: the same CSV, no contribution columns
+    # the default output: the same CSV, no contribution columns
     assert exported(storage, conn, old) == exported(storage, conn, off)
     header = exported(storage, conn, off).decode().splitlines()[0]
     assert header == '"predict","p_悪","p_普通","p_良","x","幅","color"'

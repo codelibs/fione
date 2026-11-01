@@ -19,7 +19,7 @@ from pydantic import (
 )
 
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
-from fione.auth.roles import NotebookPermission, ProjectAccess, Role, User
+from fione.auth.roles import ProjectAccess, Role, User
 from fione.auth.service import ApiToken
 from fione.engine.diagnostics import _label
 from fione.engine.events import Event
@@ -75,7 +75,6 @@ class UserIn(Body):
 class UserPatch(Body):
     role: Role | None = None
     password: NewPassword | None = None
-    notebook: Literal["none", "run"] | None = None
 
 
 class TokenIn(Body):
@@ -160,9 +159,8 @@ class ExplainJobIn(Body):
     dataset_id: DbId | None = None
 
 
-def user_out(user: User, *, notebook: NotebookPermission | None = None) -> dict:
-    out = {"id": user.id, "username": user.username, "role": user.role.value}
-    return out if notebook is None else {**out, "notebook": notebook.value}
+def user_out(user: User) -> dict:
+    return {"id": user.id, "username": user.username, "role": user.role.value}
 
 
 def token_out(token: ApiToken) -> dict:
@@ -172,8 +170,6 @@ def token_out(token: ApiToken) -> dict:
         "name": token.name,
         "created_at": token.created_at,
         "revoked": token.revoked,
-        "scope": token.scope.value,
-        "expires_at": token.expires_at,
     }
 
 
@@ -293,7 +289,7 @@ def _floats(values: np.ndarray) -> list:
 
 
 def diagnostics_out(record: ModelRecord) -> dict:
-    """The model's stored diagnostics (``None`` before Phase 2a, or when they could not be
+    """The model's stored diagnostics (``None`` when they could not be
     stored). Their size is capped when stored; labels in them are data, not markup."""
     return {"model_id": record.id, "diagnostics": record.diagnostics}
 

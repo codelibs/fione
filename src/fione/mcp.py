@@ -1,9 +1,9 @@
 """A minimal, stateless MCP endpoint (Streamable HTTP, JSON-RPC over POST) for the assistant's
 read-only tools, at ``/mcp`` on Fione's own port. Off unless ``FIONE_MCP_ENABLED`` is set.
 
-Only a full-scope API token (``Authorization: Bearer``) opens it: cookies are never read and
-notebook tokens are refused. It lists and calls the registry's tools as the token's user and
-nothing else: no writes, no stored proposals, and never example values from a dataset.
+Only an API token (``Authorization: Bearer``) opens it: cookies are never read. It lists and
+calls the registry's tools as the token's user and nothing else: no writes, no stored
+proposals, and never example values from a dataset.
 """
 
 import asyncio
@@ -19,7 +19,6 @@ from starlette.concurrency import run_in_threadpool
 
 from fione import db
 from fione.auth import service as auth_service
-from fione.auth.tokens import TokenScope
 from fione.tools import ToolContext, ToolError, call_tool, list_tools
 from fione.version import __version__
 
@@ -110,12 +109,9 @@ def _handle(request: Request, body: bytes) -> Response:
         return Response(status_code=403)
     with closing(db.connect(request.app.state.db_path)) as conn:
         token = _bearer(request)
-        found = auth_service.token_identity(conn, token) if token else None
-        if found is None:
+        user = auth_service.user_from_token(conn, token) if token else None
+        if user is None:
             return Response(status_code=401, headers={"WWW-Authenticate": "Bearer"})
-        user, record = found
-        if record.scope != TokenScope.FULL:
-            return Response(status_code=403)
         version = request.headers.get("mcp-protocol-version")
         if version is not None and version not in SUPPORTED_VERSIONS:
             return Response(status_code=400)
