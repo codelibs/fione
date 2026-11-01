@@ -1,5 +1,6 @@
 """Target checks and the feature preprocessing shared by all model families."""
 
+import copy
 from typing import Literal
 
 import numpy as np
@@ -13,6 +14,9 @@ Task = Literal["classification", "regression"]
 
 HIGH_CARDINALITY = 200  # categorical columns with more categories are frequency encoded
 MIN_ROWS = 10
+LINEAR_LEVELS = 15  # categories one-hot encoded per column in the linear view (the most frequent)
+LINEAR_CLIP = 5.0  # standardised numbers are clipped to +-this many standard deviations
+LINEAR_SKEW = 2.0  # non-negative numbers more skewed than this are log-transformed in that view
 # ordinal: seconds since the Unix epoch
 _DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
 _EPOCH = pd.Timestamp("1970-01-01")
@@ -20,6 +24,11 @@ _EPOCH = pd.Timestamp("1970-01-01")
 
 def _is_categorical(s: pd.Series) -> bool:
     return pd.api.types.is_bool_dtype(s.dtype) or not pd.api.types.is_numeric_dtype(s.dtype)
+
+
+def _holds_dates(s: pd.Series) -> bool:
+    """Whether ``s`` is an object column of dates (a date-only column read from Parquet)."""
+    return s.dtype == object and pd.api.types.infer_dtype(s, skipna=True) in ("date", "datetime")
 
 
 def _as_str(s: pd.Series) -> pd.Series:
@@ -39,14 +48,19 @@ def _datetimes(s: pd.Series) -> pd.Series:
 class Prep:
     """Turns raw feature frames into the inputs of each model family.
 
-    ``fit`` decides per column: constant and all-null columns are dropped; datetime columns are
-    expanded into numeric parts; bool and non-numeric columns become categoricals, or frequency
-    encodings above ``HIGH_CARDINALITY`` categories; everything else is numeric. The views put the
-    features in ``feature_names`` order under positional names ``f0, f1, ...``, because model
-    libraries reject some characters in feature names.
+    ``fit`` decides per column: constant and all-null columns are dropped; datetime and date
+    columns are expanded into numeric parts; bool and non-numeric columns become categoricals, or
+    frequency encodings above ``HIGH_CARDINALITY`` categories; everything else is numeric. The
+    views put the features in ``feature_names`` order under positional names ``f0, f1, ...``,
+    because model libraries reject some characters in feature names. ``groups`` (see
+    ``fione.engine.features``) add derived numeric features after those; they are fitted on ``X``
+    alone and skipped when they read a column that is not used.
     """
 
-    def fit(self, X: pd.DataFrame) -> "Prep":
+    groups: tuple = ()  # class-level defaults: models pickled before these existed still load
+    _logged: tuple = ()
+
+    def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
         self._plan: list[
             tuple[str, str]
@@ -57,7 +71,7 @@ class Prep:
             s = X[column]
             if s.nunique(dropna=False) <= 1:
                 self.dropped.append(column)
-            elif pd.api.types.is_datetime64_any_dtype(s.dtype):
+            elif pd.api.types.is_datetime64_any_dtype(s.dtype) or _holds_dates(s):
                 self._plan.append((column, "datetime"))
             elif _is_categorical(s):
                 counts = _as_str(s).value_counts()
@@ -72,20 +86,52 @@ class Prep:
         if not self._plan:
             raise ConfigError("no usable feature columns: every column is empty or constant")
         self.feature_names: list[str] = []
-        self.sources: list[str] = []  # the input column behind each feature
+        # The input columns behind each feature; a derived one may have several.
+        self.sources: list[tuple[str, ...]] = []
         self._category_at: dict[str, str] = {}  # view column -> categorical source column
         for column, kind in self._plan:
             if kind == "category":
                 self._category_at[f"f{len(self.feature_names)}"] = column
             if kind == "datetime":
                 self.feature_names += [f"{column}__{part}" for part in _DATE_PARTS]
-                self.sources += [column] * len(_DATE_PARTS)
+                self.sources += [(column,)] * len(_DATE_PARTS)
             else:
                 self.feature_names.append(column)
-                self.sources.append(column)
+                self.sources.append((column,))
+        used = set(self.columns)
+        self.groups = tuple(
+            fitted
+            for fitted in (copy.copy(g).fit(X) for g in groups if set(g.columns) <= used)
+            if fitted.names
+        )
+        for group in self.groups:
+            self.feature_names += group.names
+            self.sources += group.sources
         base = self._base(X)
-        self._medians = base.drop(columns=list(self._category_at)).median().fillna(0.0).to_dict()
+        numbers = base.drop(columns=list(self._category_at))
+        self._medians = numbers.median().fillna(0.0).to_dict()
+        self._fit_linear(base, numbers)
         return self
+
+    def _fit_linear(self, base: pd.DataFrame, numbers: pd.DataFrame) -> None:
+        """What the linear view needs: number scales, the missing-value flags and the one-hot
+        levels (``LINEAR_LEVELS`` most frequent, ties by name) per categorical column."""
+        filled = numbers.fillna(self._medians)
+        self._logged = tuple(
+            p for p in filled.columns if numbers[p].min() >= 0 and numbers[p].skew() > LINEAR_SKEW
+        )
+        for position in self._logged:
+            filled[position] = np.log1p(filled[position])
+        self._scale = {
+            position: (float(filled[position].mean()), float(filled[position].std() or 1.0))
+            for position in filled.columns
+        }
+        self._flags = [p for p in base.columns if base[p].isna().any()]
+        self._levels = {}
+        for position in self._category_at:
+            counts = base[position].value_counts()
+            ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            self._levels[position] = [level for level, _ in ranked[:LINEAR_LEVELS]]
 
     @property
     def columns(self) -> list[str]:
@@ -122,6 +168,9 @@ class Prep:
                 out.append(encoded.mask(encoded.isna() & values.notna(), 0.0))  # unseen: never seen
             else:
                 out.append(_as_str(s))
+        for group in self.groups:
+            derived = group.transform(df)
+            out += [derived[name] for name in derived.columns]
         frame = pd.concat([o.reset_index(drop=True) for o in out], axis=1)
         frame.columns = [f"f{i}" for i in range(len(self.feature_names))]
         frame.index = df.index
@@ -160,6 +209,44 @@ class Prep:
         for position, values in self._categorical(base).items():
             base[position] = values.codes.astype(float)
         return base.fillna(self._medians)
+
+    @property
+    def linear_width(self) -> int:
+        """Columns of the linear view: one per number, one per kept level, one per flag."""
+        levels = sum(len(found) for found in self._levels.values())
+        return len(self._scale) + levels + len(self._flags)
+
+    def linear(self, df: pd.DataFrame) -> pd.DataFrame:
+        """For linear models: standardised, clipped numbers (``f3``), a 0/1 flag for each column
+        that had missing values (``f3_na``) and one-hot levels of the categoricals (``f3_0``).
+        The digits after ``f`` name the feature (position in ``feature_names``) a column
+        derives from. Unseen and rare levels are all zeros."""
+        base = self._base(df)
+        names = []
+        for position in base.columns:
+            if position in self._category_at:
+                names += [f"{position}_{i}" for i in range(len(self._levels[position]))]
+            else:
+                names.append(position)
+            if position in self._flags:
+                names.append(f"{position}_na")
+        out = np.zeros((len(base), len(names)))  # filled in place: one copy of the view
+        at = {name: i for i, name in enumerate(names)}
+        for position in base.columns:
+            values = base[position]
+            if position in self._category_at:
+                for i, level in enumerate(self._levels[position]):
+                    out[:, at[f"{position}_{i}"]] = values == level
+            else:
+                mean, std = self._scale[position]
+                filled = values.fillna(self._medians[position])
+                if position in self._logged:
+                    filled = np.log1p(filled.clip(lower=0))
+                scaled = (filled - mean) / std
+                out[:, at[position]] = scaled.clip(-LINEAR_CLIP, LINEAR_CLIP)
+            if position in self._flags:
+                out[:, at[f"{position}_na"]] = values.isna()
+        return pd.DataFrame(out, index=df.index, columns=names, copy=False)
 
 
 def infer_task(y: pd.Series) -> Task:

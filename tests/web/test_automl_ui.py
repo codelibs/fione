@@ -432,6 +432,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "nfolds": 4,
         "seed": 2**32 - 1,
         "balance_classes": True,
+        "feature_engineering": False,  # on by default; the form leaves it unchecked
         "stopping_rounds": 2,
         "stopping_metric": "logloss",
         "stopping_tolerance": 0.25,
@@ -472,6 +473,7 @@ def test_unchecked_flags_and_empty_optionals_are_false_and_none(world):
         config[k]
         for k in (
             "balance_classes",
+            "feature_engineering",
             "keep_cv_predictions",
             "keep_cv_models",
             "keep_cv_fold_assignment",

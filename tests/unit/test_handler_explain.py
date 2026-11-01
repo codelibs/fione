@@ -15,6 +15,8 @@ import xgboost as xgb
 from catboost import CatBoostClassifier
 from predict_models import classifier, regressor, training_frame
 from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.linear_model import Ridge
+from sklearn.neural_network import MLPClassifier
 
 from fione import db
 from fione.auth import service as auth
@@ -23,7 +25,7 @@ from fione.config import Settings, load_secret
 from fione.engine import explain
 from fione.engine.artifact import save_model
 from fione.engine.explain import Contributions, PartialDependence
-from fione.engine.families import CatBoost, ExtraTrees, LightGBM, XGBoost
+from fione.engine.families import CatBoost, DeepLearning, ExtraTrees, LightGBM, Linear, XGBoost
 from fione.jobs import automl_handler, explain_handler, store, worker
 from fione.jobs.runner import TRAINING_KINDS
 from fione.jobs.store import JobStatus
@@ -481,6 +483,17 @@ def test_threads_are_capped_never_raised_and_predictions_unchanged():
     assert threads == [2, 2, 2, 2, 1, 2, 1]  # one thread stays one
     for (spec, one), before in zip(fitted, expected, strict=True):
         np.testing.assert_array_equal(spec.predict(one, X), before)
+
+
+@pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")
+def test_cap_threads_leaves_models_without_a_thread_count_alone():
+    X, y = np.random.default_rng(0).normal(size=(60, 3)), np.arange(60) % 2
+    models = [Ridge().fit(X, y), MLPClassifier(max_iter=2).fit(X, y)]
+    specs = [Linear("regression", 0), DeepLearning("classification", 2)]
+    model = SimpleNamespace(
+        members=[SimpleNamespace(spec=s, models=[m]) for s, m in zip(specs, models, strict=True)]
+    )
+    assert explain.cap_threads(model, 2) is model  # no KeyError for the missing n_jobs
 
 
 def test_catboost_predicts_on_its_spec_threads():

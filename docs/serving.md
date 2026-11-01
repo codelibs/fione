@@ -124,7 +124,7 @@ training (so its probabilities differ from the example above):
 - `columns` has one entry per input column, in the order of `GET /model`'s `names`. The bias is
   kept outside it, so an input column named `bias` cannot clash with it.
 - The values are in probability (or target) units, not log-odds. They come from the libraries'
-  tree contributions (TreeSHAP for the boosters, path contributions for ExtraTrees) combined over
+  tree contributions (TreeSHAP for the boosters, path contributions for the forests, coefficients for Linear, integrated gradients for DeepLearning) combined over
   the ensemble, so they are approximate: they add up to the output (to rounding), but they are
   exact Shapley values only for a single booster in its own margin units.
 - Contributions cost much more than a prediction. One request takes at most 100 instances
@@ -132,8 +132,10 @@ training (so its probabilities differ from the example above):
   At most 2 such requests run at once; another one gets 503 with `Retry-After: 1` straight
   away. Both numbers can be changed (see below).
 - Threads: LightGBM and XGBoost compute contributions on as many threads as the model's own
-  predictions, which follow the threads it was trained with; CatBoost and ExtraTrees use at
-  most 4 here. No thread limit is added: the caps above are what keep their cost bounded.
+  predictions, which follow the threads it was trained with; CatBoost, RandomForest and
+  ExtraTrees use at most 4 here. Linear and DeepLearning run on the numerical library's own
+  threads, which Fione does not limit. No thread limit is added: the caps above are what keep
+  their cost bounded.
 - Plain predictions wait while a contribution request computes, because the model answers one
   call at a time. The instance cap is the lever: a lower
   `FIONE_SERVING_MAX_CONTRIBUTION_INSTANCES` shortens each wait.

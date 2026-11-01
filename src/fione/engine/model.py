@@ -43,6 +43,7 @@ class TrainedModel:
     cv_models: dict | None = None
     fold_assignment: np.ndarray | None = None
     diagnostics: dict | None = None  # fione.engine.diagnostics of the OOF predictions; JSON
+    features: list[dict] | None = None  # derived-feature groups tried, and why (engine.features)
 
     def _predict(self, df: pd.DataFrame) -> np.ndarray:
         # The views come first, so that missing columns raise even for an empty frame.
@@ -79,19 +80,32 @@ def _normalised(values: np.ndarray) -> np.ndarray:
     return values / total if total > 0 else np.zeros_like(values)
 
 
+def attribution(prep: Prep) -> np.ndarray:
+    """Matrix (columns x features) giving each feature's share per input column; the shares of
+    a feature sum to 1."""
+    position = {column: i for i, column in enumerate(prep.columns)}
+    matrix = np.zeros((len(prep.columns), len(prep.sources)))
+    for j, sources in enumerate(prep.sources):
+        sources = (sources,) if isinstance(sources, str) else sources  # models of older versions
+        for column in sources:
+            matrix[position[column], j] += 1 / len(sources)
+    return matrix
+
+
 def feature_importance(members: list[Member], prep: Prep) -> pd.Series:
     """Weight-averaged importance of the members, summed back onto the input columns.
 
-    Each model's importance (boosting: gain; ExtraTrees: impurity) is normalised to sum to 1
-    first, so families are comparable; expanded features (datetime parts) count for their
-    source column. Columns no model uses get 0; if no model uses any, all get equal shares.
+    Each model's importance (boosting: gain; forests: impurity; Linear and DeepLearning:
+    absolute weights) is normalised to sum to 1 first, so families are comparable; expanded
+    features (datetime parts, derived features) count for their source columns, a feature with
+    several sources splitting its share equally. Columns no model uses get 0; if no model uses
+    any, all get equal shares.
     """
     total = np.zeros(len(prep.sources))
     for member in members:
         per_model = [_normalised(member.spec.importance(model)) for model in member.models]
         total += member.weight * np.mean(per_model, axis=0)
-    by_column = pd.Series(total, index=prep.sources).groupby(level=0, sort=False).sum()
-    by_column = by_column.reindex(prep.columns, fill_value=0.0)
+    by_column = pd.Series(attribution(prep) @ total, index=prep.columns)
     if by_column.sum() <= 0:
         by_column[:] = 1.0
     return (by_column / by_column.sum()).sort_values(ascending=False, kind="stable")

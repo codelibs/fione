@@ -16,7 +16,7 @@ def test_train_config_defaults():
     assert config.seed == 0
     assert config.balance_classes is False
     assert (config.stopping_rounds, config.stopping_metric, config.stopping_tolerance) == (
-        3,
+        10,
         "auto",
         0.001,
     )

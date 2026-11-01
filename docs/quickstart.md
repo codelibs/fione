@@ -129,6 +129,33 @@ To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.m
 questions about your data and models in plain language, set up [the assistant](assistant.md)
 (opt-in; it needs a language model server).
 
+## Derived features
+
+Fione builds *derived features* that never read the target, and chooses among them by
+validation (the "Add derived features" option, `feature_engineering` in the API, on by default):
+
+- text columns: the common words (letter runs, so `C85` gives `c`) as 0/1 flags, plus length,
+  word count, share of digits and capitals and the first number;
+- categories: how common each is, and how common each pair is;
+- rows: the number of missing values and of zeros;
+- dates: hour, minute, week, quarter, day of the year, weekend, and the seconds between date
+  columns;
+- numbers: sums, differences, products and ratios of the few most useful number columns, their
+  means within each of the three most useful small categories (and the difference from it),
+  how common each repeated value is, and k-means clusters with the distance to the cluster
+  centre.
+
+Date features need a column of the date or timestamp type (ISO dates are detected on upload;
+other formats stay text until their type is changed). Independently of this option, the linear
+model and the neural network log-transform non-negative numbers that are strongly skewed.
+
+Each group is tried on a small LightGBM over rows it samples, and kept only if the loss drops
+over paired cross-validation folds by more than three standard errors and by 0.1 % on average,
+with at least 70 % of the folds improving, and the kept groups together pass a last check on
+other folds of the same rows. The gate gets at most a tenth of the run time. The groups tried,
+their gains and why each was kept or not are on the model (`features`) and in a `features`
+notice.
+
 ## Stop, back up, upgrade
 
 Stop (the data stays in the Docker volumes `fione_fione-data` and `fione_seaweed-data`):

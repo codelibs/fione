@@ -76,7 +76,8 @@ class TrainConfig:
     nfolds: int = 5
     seed: int = 0
     balance_classes: bool = False
-    stopping_rounds: int = 3
+    feature_engineering: bool = True
+    stopping_rounds: int = 10
     stopping_metric: str = "auto"
     stopping_tolerance: float = 0.001
     sort_metric: str = "auto"
@@ -115,6 +116,7 @@ class TrainConfig:
                 raise ConfigError(f"{name} must be one of {sorted(_METRICS)}, got {value!r}")
         for name in (
             "balance_classes",
+            "feature_engineering",
             "keep_cv_predictions",
             "keep_cv_models",
             "keep_cv_fold_assignment",

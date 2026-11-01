@@ -77,6 +77,7 @@ SINGLE_FIELDS = (
     "nfolds",
     "seed",
     "balance_classes",
+    "feature_engineering",
     "stopping_rounds",
     "stopping_metric",
     "stopping_tolerance",
@@ -85,7 +86,13 @@ SINGLE_FIELDS = (
     "keep_cv_models",
     "keep_cv_fold_assignment",
 )
-FLAGS = ("balance_classes", "keep_cv_predictions", "keep_cv_models", "keep_cv_fold_assignment")
+FLAGS = (
+    "balance_classes",
+    "feature_engineering",
+    "keep_cv_predictions",
+    "keep_cv_models",
+    "keep_cv_fold_assignment",
+)
 _WHOLE = re.compile(r"[0-9]{1,18}")
 _DECIMAL = re.compile(r"[0-9]{1,12}(\.[0-9]{1,12})?")
 
