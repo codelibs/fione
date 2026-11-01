@@ -10,6 +10,7 @@ from sklearn.metrics import r2_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from fione.engine import automl as automl_module
+from fione.engine import search
 from fione.engine.automl import FAMILY_ORDER, AutoML
 from fione.engine.config import ConfigError, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
@@ -583,7 +584,8 @@ def test_predicting_no_rows_returns_empty_results_quietly(name, task, capfd):
 # --- cancellation -------------------------------------------------------------------
 
 
-def test_cancelling_after_the_first_family_returns_its_fold_models():
+def test_cancelling_after_the_first_family_returns_its_fold_models(monkeypatch):
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)
     events = []
     model = _fit(
         _binary(),
@@ -678,7 +680,8 @@ def test_too_small_budget_raises_promptly():
     assert time.monotonic() - start <= 2.0
 
 
-def test_deep_learning_is_not_refit_but_averages_its_fold_models():
+def test_deep_learning_is_not_refit_but_averages_its_fold_models(monkeypatch):
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)
     model = _fit(_binary(400), target="y", families=["DeepLearning"], nfolds=3, max_models=2)
     (member,) = model.members
     assert member.spec.name == "DeepLearning" and len(member.models) == 3  # the fold models
@@ -687,6 +690,7 @@ def test_deep_learning_is_not_refit_but_averages_its_fold_models():
 
 def test_a_too_wide_linear_view_leaves_those_families_out(monkeypatch):
     monkeypatch.setattr(automl_module, "LINEAR_MAX_CELLS", 100)
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)
     events = []
     model = _fit(
         _binary(300),
@@ -745,3 +749,20 @@ def test_extra_seeds_respect_the_size_limits(monkeypatch):
 def test_a_member_without_randomness_is_not_refit_with_other_seeds():
     model = _fit(_bagging_data(), families=["Linear"], target="y", max_models=3)
     assert [len(member.models) for member in model.members] == [1]
+
+
+def test_runners_up_of_a_family_join_the_ensemble_candidates(monkeypatch):
+    monkeypatch.setattr(search, "TOP_TRIALS", 3)
+    events = []
+    model = _fit(_bagging_data(), events, families=["LightGBM"], target="y", max_models=6)
+    board = model.leaderboard
+    candidates = board[board["family"] == "LightGBM"]
+    assert len(candidates) == 3 and len(set(candidates["model"])) == 3
+    assert board.loc[board["family"] == "Ensemble"].shape[0] == 1
+    assert board["weight"].dropna().sum() == pytest.approx(1.0)
+    weights = [e.data["weights"] for e in events if e.type == "ensemble"][0]
+    assert set(weights) == {"LightGBM", "LightGBM#2", "LightGBM#3"}
+    keys = [m.key for m in model.members]
+    assert len(set(keys)) == len(keys) and set(keys) <= set(weights)
+    assert sum(m.weight for m in model.members) == pytest.approx(1.0)
+    assert model.predict_proba(_bagging_data()).shape == (800, 2)

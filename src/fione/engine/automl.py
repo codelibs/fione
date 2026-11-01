@@ -222,7 +222,7 @@ class AutoML:
         )
         if self.should_stop():
             stop_reason = "cancelled"
-        final = {member.spec.name: member.weight for member in members}
+        final = {member.key: member.weight for member in members}
         blended = _blend(oof, final)
         try:
             found = diagnostics(task, y, blended, classes, seed=c.seed)
@@ -369,6 +369,8 @@ class AutoML:
             ]
             if result.models:
                 results[name] = result
+                for rank, runner_up in enumerate(result.runners_up, start=2):
+                    results[f"{name}#{rank}"] = runner_up
             if result.reason == "cancelled":
                 break
         return results, logs, reasons, finished, errors
@@ -425,7 +427,7 @@ class AutoML:
         for name in chosen:
             result, models = results[name], members_of[name]
             size = sum(result.spec.size_bytes(m) for m in models)
-            candidates.append((Member(result.spec, weights[name], models), size))
+            candidates.append((Member(result.spec, weights[name], models, name), size))
         kept = [(member, size) for member, size in candidates if size <= SIZE_CAP]
         for member, size in candidates:
             if size > SIZE_CAP:
@@ -514,14 +516,15 @@ def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
 def _leaderboard(
     results, weights, refit_secs, blended, y, folds: Folds, sort_metric, scores
 ) -> pd.DataFrame:
-    """One row per family and one for the ensemble. The ensemble's weights were chosen on the
-    same OOF predictions it is scored on, so its row is slightly optimistic."""
+    """One row per candidate (a family's best trial, then its runners-up) and one for the
+    ensemble. The ensemble's weights were chosen on the same OOF predictions it is scored on, so
+    its row is slightly optimistic."""
     rows = []
     for name, result in results.items():
         rows.append(
             {
-                "model": f"{name}_{result.best_trial}",
-                "family": name,
+                "model": f"{result.spec.name}_{result.best_trial}",
+                "family": result.spec.name,
                 "cv_score": scores[name],
                 "cv_std": metrics.fold_std(sort_metric, y, result.oof, folds),
                 "train_secs": result.best_secs + refit_secs.get(name, 0.0),

@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 from sklearn.datasets import make_classification, make_regression
 
+from fione.engine import search
 from fione.engine.config import Deadline, DeadlineExceeded, NoModelError
 from fione.engine.families import (
     FAMILIES,
@@ -837,3 +838,36 @@ def test_deep_learning_size_estimate_matches_its_pickle():
     )
     # The optimiser's moments and the best weights are training state: they must not be kept.
     assert len(pickle.dumps(model)) < 1.3 * spec.size_bytes(model)
+
+
+def _search_with_runners_up(top):
+    X, y = _classification(300, 5)
+    prep, y, folds = _setup(X, y)
+    events = []
+    result = run_family(
+        "LightGBM", X, y, folds, "classification", prep, Deadline(60), events.append,
+        _until_trials(events, 6),
+    )  # fmt: skip
+    return result, y, events
+
+
+def test_the_best_trials_are_handed_on_best_first(monkeypatch):
+    monkeypatch.setattr(search, "TOP_TRIALS", 3)
+    result, y, events = _search_with_runners_up(3)
+    assert len(result.runners_up) == 2
+    ranked = [result, *result.runners_up]
+    scores = [r.best_score for r in ranked]
+    assert scores == sorted(scores)
+    assert len({r.best_trial for r in ranked}) == 3  # three different trials
+    done = {e.data["trial"]: e.data["score"] for e in events if e.data.get("state") == "complete"}
+    assert scores == pytest.approx(sorted(done.values())[:3])
+    for r in ranked:
+        assert r.spec is result.spec and len(r.models) == 5 and r.oof.shape == (300, 2)
+        assert r.best_score == pytest.approx(done[r.best_trial])
+    assert result.runners_up[0].best_params != result.best_params
+
+
+def test_one_top_trial_hands_on_no_runners_up(monkeypatch):
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)
+    result, _, _ = _search_with_runners_up(1)
+    assert result.runners_up == []
