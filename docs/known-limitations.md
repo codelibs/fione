@@ -68,7 +68,10 @@ What this release does not do, or does with a catch. Japanese summary at the end
   (there is no out-of-core processing). Measured on a 16-core Mac, a training job peaked at about
   1.9 GB of memory for a 150 MB CSV (200,000 rows × 42 columns) and 2.5 GB for a 750 MB CSV
   (1,000,000 × 42); roughly 1.5–1.7 GB of that does not grow with the data (the libraries). Plan
-  for at least 4 GB of RAM, and more for wider data or larger files.
+  for at least 4 GB of RAM, and more for wider data or larger files. Linear and DeepLearning
+  work on a one-hot encoded copy (up to 15 columns per text column, 8 bytes each, copied again
+  per fold); when that copy would pass 100 million cells they are left out of the run, with a
+  notice.
 - **Cross-validation scores are slightly optimistic.** Boosting models stop early on their
   validation fold, and the ensemble's weights are chosen on the same out-of-fold predictions it
   is scored on. The leaderboard's ensemble row and the star rating inherit this; test data held
@@ -84,11 +87,28 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - **Contributions are approximations.** Each row's contributions (on the result page, through
   the API, in batch predictions and from Fione Serving) add up to the prediction, to rounding,
   in probability for classification and in the target's units for regression, not in log-odds.
-  They start from each library's own TreeSHAP (LightGBM, XGBoost, CatBoost) and from Saabas
-  path contributions for ExtraTrees, and are then converted to probabilities and combined over
+  They start from each library's own TreeSHAP (LightGBM, XGBoost, CatBoost), from Saabas
+  path contributions for RandomForest and ExtraTrees, from the exact coefficient times the
+  distance from the training mean for Linear and from integrated gradients along the path from
+  the training mean for DeepLearning, and are then converted to probabilities and combined over
   the ensemble; exact Shapley values exist only for each booster on its own, before that
   conversion. With more than two classes the conversion is a numerical path integral whose
   small remainder is shared out so that the sum stays exact.
+- **Derived features** (see [Moving from v1](migrating-from-v1.md#feature-engineering)) count
+  for the columns they read: a feature built from several columns (a sum, a missing-value count)
+  splits its contribution and importance equally among them. Partial dependence is unaffected,
+  because it varies the input column and recomputes every feature.
+- **The choice of derived features uses the same rows as the cross-validation**, on different
+  folds and with a strict rule, so the scores of a run are slightly optimistic, like the
+  diagnostics. On small data a real but small gain (about 1 % of the loss) often does not clear
+  the rule and the feature is left out. If the time for the choice runs out, groups that passed
+  but were not yet confirmed by the last check are dropped, so short runs may add none. The gate judges on a sample of at most 20,000 rows and a
+  small LightGBM, so a feature that only a neural network or a linear model would use is not
+  found; target encoding and categorical crosses as categories are not built.
+- **Models trained by this version cannot be used by an earlier install**, with or without
+  derived features: their preprocessing changed (the linear view's log transform, the sources of
+  each feature), and an earlier install loads them without a warning but predicts and explains
+  wrongly. Both show as version 20.0.0.
 - **One output is explained per row**: with two classes the second one (the last `p_` column),
   with more the predicted class (the API takes a `class_index` for another), for regression
   the value. Batch predictions and Fione Serving have no option for every class.
@@ -131,8 +151,9 @@ What this release does not do, or does with a catch. Japanese summary at the end
   then `contrib_bias` (`contrib_bias_2` when an input is named `bias`); an input column whose
   name is taken is kept as `input_<name>`. Each row gains
   one float64 column per input plus one, so 100,000 rows of a 2,000-column model make about
-  1.6 GB of output. At most 100,000 rows; the work runs on at most 4 threads, in chunks of at
-  most 5,000 rows, and is much slower than a plain prediction.
+  1.6 GB of output. At most 100,000 rows; the work runs on at most 4 threads (not Linear and
+  DeepLearning, which use the numerical library's own), in chunks of at most 5,000 rows, and is
+  much slower than a plain prediction.
 - **Diagnostics** (the Metrics tab) come from the ensemble's out-of-fold predictions, so they
   are slightly optimistic, like the cross-validation scores. Above 200,000 rows they come from
   a random sample. A model has none when it was trained before they existed or imported
@@ -339,11 +360,12 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - 実行中のジョブのキャンセルには最大 10 秒かかります。プロジェクトに属さないジョブは `GET /api/v1/jobs` に出ません。削除中にストレージが失敗すると、ファイルが残ることがあります。
 - 全モデルのエクスポートは、プロジェクトごとに最新の 1 つだけ残ります。
 - エンジンは実際には最大実行時間の約 3 分の 2 を使います。学習やエンジンのメッセージは日本語画面でも英語です。
-- 寄与度は近似です。各行の寄与度は予測値（分類では確率、回帰では目的変数の単位。log-odds ではありません）に丸め誤差の範囲で一致しますが、各ライブラリの TreeSHAP（ExtraTrees は Saabas）を確率に変換してアンサンブルで合成したもので、厳密な Shapley 値ではありません。説明するのは 1 行につき 1 つの出力です（2 クラスでは 2 番目のクラス、それ以上では予測したクラス、回帰では値）。
+- 寄与度は近似です。各行の寄与度は予測値（分類では確率、回帰では目的変数の単位。log-odds ではありません）に丸め誤差の範囲で一致しますが、各ライブラリの TreeSHAP（RandomForest と ExtraTrees は Saabas、Linear は係数×平均からの差、DeepLearning は平均からの積分勾配）を確率に変換してアンサンブルで合成したもので、厳密な Shapley 値ではありません。説明するのは 1 行につき 1 つの出力です（2 クラスでは 2 番目のクラス、それ以上では予測したクラス、回帰では値）。
+- 派生特徴量（文字列の語、件数、和・比、グループ平均など）は、元の列にまとめて寄与度・重要度を数えます。複数の列から作る特徴量は、それらの列に等分します。このバージョンで学習したモデルは、派生特徴量の有無にかかわらず、それより前のインストールで使わないでください（警告なしに読み込めますが、予測や説明が正しくなくなります）。派生特徴量を採用するかの判定は、交差検証と同じ行を（別の分割と厳しい基準で）使うため、学習のスコアはやや楽観的です。小さいデータでは損失の 1% 程度の本物の改善でも基準を満たさず、採用されないことがあります。
 - 説明には学習データが必要です。インポートしたモデルや学習データを削除したモデルは、「説明」タブの「説明を計算」で、列のそろったデータセットを選んでください。説明ジョブが保存するのは、最大 1,000 行の寄与度による重要度と、上位 10 列の部分依存です。曲線のグリッドは 1 万行のサンプルから作り、そのうち 300 行（列の多いモデルではもっと少なく）で平均します。1 MiB を超える結果は、目印なしで削られます。
 - 部分依存のグリッドは 2〜98 パーセンタイルまでで、数値の列には欠損値の点がありません。時刻は UTC です。学習で見なかったカテゴリもグリッドに入ることがあります。その場で計算する曲線はグリッドも平均も最大 300 行から作るので、保存した曲線と点が少し違うことがあります。
 - Web プロセスがモデルを読み込むようになりました（閲覧者の操作でも）。結果画面での先頭 5 行の理由、最大 100 行の寄与度、1 列の部分依存を、サーバー全体で 1 件ずつ計算します。待てるのは 4 件まで、最大 15 秒で、それ以外はすぐに「混雑」（HTTP 503）になります。読み込んだままにするのは 2 モデル・512 MiB までです。ファイルが 512 MiB を超えるモデル、信頼を確認していないインポート、行 × クラス × 列が多すぎるモデルはそこでは断り、書き込み権限が必要な説明ジョブでだけ説明します。列が数千あるデータセットでは、部分依存 1 回の読み込みだけで数百 MiB 使うことがあります。説明ジョブはジョブ一覧に出ますが、ダッシュボードの最近のジョブには出ません。
-- バッチ予測で「各予測の内訳を含める」を選ぶと付く列は `contrib_<列>` と `contrib_bias`（入力に `bias` という列があると `contrib_bias_2`）で、名前がぶつかる入力列は `input_<名前>` になります。1 行あたり入力の列数 + 1 個の float64 の列が増え（2,000 列のモデルで 10 万行なら約 1.6 GB）、最大 10 万行、4 スレッドまでで計算するので、通常の予測よりかなり遅くなります。
+- バッチ予測で「各予測の内訳を含める」を選ぶと付く列は `contrib_<列>` と `contrib_bias`（入力に `bias` という列があると `contrib_bias_2`）で、名前がぶつかる入力列は `input_<名前>` になります。1 行あたり入力の列数 + 1 個の float64 の列が増え（2,000 列のモデルで 10 万行なら約 1.6 GB）、最大 10 万行、4 スレッドまで（Linear と DeepLearning は数値ライブラリ任せ）で計算するので、通常の予測よりかなり遅くなります。
 - 診断（指標タブ）は学習時の out-of-fold 予測から作るため、CV のスコアと同じくやや楽観的です。20 万行を超えるとランダムサンプルから作ります。
 - モデルの診断には学習データの値が含まれます（クラスのラベルと、回帰では学習行から抜き出した最大 2,000 件の実際の値とその予測値）。プロジェクトを読めるすべての人に見え、モデルのエクスポートにも入り、学習データを削除しても残ります。保存した説明も、カテゴリやクラスのラベルをデータセット削除後も保持します（エクスポートはされません）。モデルファイルとサービング用ファイルには診断は入りません。
 - 診断を持つエクスポートは、診断の機能より前のインストールでは読み込めません（どちらもバージョン 20.0.0 で区別できません）。インポートは、有限でない数や float の範囲を超える整数（診断の中も含め、どこにあっても）、未知の項目や深すぎる入れ子を持つ診断を拒否するようになりました。
@@ -352,7 +374,7 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - 負荷の高いマシンでは、同じ時間予算で学習できるブースティングの回数が減ります。いちばん影響を受けるのは CatBoost です。
 - API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。
 - Fione Serving には認証も、予測のリクエスト数・同時実行数の制限もありません。寄与度を求めるリクエストだけは同時に 2 件まで（それ以上は 503）ですが、計算中はモデルを占有するので、通常の予測はその間待たされます。最大のリクエストでは約 100 MiB のメモリを使います。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
-- 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5〜1.7 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。
+- 学習・バッチ予測・Python モジュールはデータセット全体をメモリに読み込みます。16 コアの Mac で、150 MB の CSV（20 万行 × 42 列）で最大約 1.9 GB、750 MB の CSV（100 万行 × 42 列）で約 2.5 GB でした（うち約 1.5〜1.7 GB はデータの大きさによらない分）。メモリは 4 GB 以上を目安にしてください。Linear と DeepLearning は文字列列を最大 15 列に展開したコピー（分割ごとにさらにコピー）を使うため、そのコピーが 1 億セルを超えるときは、通知を出してこの 2 種類を実行から外します。
 - CV のスコアはやや楽観的です（早期終了とアンサンブルの重みが同じ fold の予測で決まるため）。正直な数値は、学習に使わないテストデータで確かめてください。
 - Linux では XGBoost が NVIDIA の NCCL ライブラリ（`nvidia-nccl-cu13`、イメージ内で約 350 MB）を取り込みます。パッケージのメタデータはライセンスを `LicenseRef-NVIDIA-Proprietary` としており、ホイール内のライセンス文は BSD-3-Clause 型です。イメージを再配布する前に確認してください（CPU 専用の `xgboost-cpu` は macOS 用のホイールがないため使っていません）。
 - 1 プロセス・1 ワーカーで動かしてください。イメージは約 1.65 GB / 1.7 GB で、まだ公開していません（リリースは amd64 のみ、タグは CI が通ったコミットにだけ付けてください）。ベースイメージはタグ固定で、ダイジェスト固定ではありません。

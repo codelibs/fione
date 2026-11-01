@@ -9,7 +9,7 @@ implementation.
 | | v1 | v2 |
 |---|---|---|
 | Runs as | A plugin of Fess (Java, LastaFlute) | Its own server (Python, FastAPI), no Fess or Elasticsearch |
-| AutoML engine | H2O | Fione's own: LightGBM, XGBoost, CatBoost and scikit-learn's ExtraTrees, tuned with Optuna and ensembled |
+| AutoML engine | H2O | Fione's own, with the model types of H2O AutoML ([below](#model-types)) plus CatBoost, tuned with Optuna and ensembled |
 | Storage | MinIO (JSON and files) | SeaweedFS or any S3-compatible storage for data and models; SQLite for users, projects, jobs and model records |
 | Start | Fess and H2O set up separately | `docker compose up` (Fione and SeaweedFS) |
 | Users and roles | Fess users with the roles `admin-easyml`, `admin-automl` and `admin-systemml`, which also decided the screens | Fione's own users with one role each: **admin**, **editor** or **viewer**; each project has an owner and can be shared with others as editor or viewer. The simple or detailed view is a display preference, not a permission. |
@@ -27,6 +27,59 @@ implementation.
 - **H2O Flow, Rapids and MOJO/genmodel downloads are gone.** Notebooks (JupyterLab with
   a Python SDK, see [Notebooks](notebook.md)) are Flow's successor; data operations are
   pandas-based modules.
+
+## Model types
+
+Each H2O AutoML algorithm has a counterpart, tuned with Optuna within the run time:
+
+| H2O AutoML | Fione v2 |
+|---|---|
+| GBM | LightGBM |
+| XGBoost | XGBoost |
+| DRF | RandomForest (scikit-learn) |
+| XRT (part of DRF) | ExtraTrees (scikit-learn) |
+| GLM | Linear: logistic regression, or ridge regression for a numeric target |
+| DeepLearning | DeepLearning: a two-layer neural network (scikit-learn's MLP) |
+| StackedEnsemble | One ensemble: greedy selection and weighting of the models' out-of-fold predictions (Caruana et al.), not a GLM metalearner; there is no separate "best of family" and "all models" pair |
+| (none) | CatBoost |
+
+Not carried over: H2O's `include_algos` / `exclude_algos`, `exploitation_ratio`, `modeling_plan`
+and `preprocessing` (target encoding). Fione does not yet let you pick the model types: a run
+tries them in the order LightGBM, CatBoost, XGBoost, RandomForest, ExtraTrees, DeepLearning,
+Linear, each with a share of the time, so a small "maximum models" or a short run time can
+leave the last ones untried.
+
+One default differs: "stopping rounds" is 10 here (H2O: 3), and a model type's first 10 tries
+do not count towards it, because they are random starting points.
+
+## Feature engineering
+
+H2O AutoML has one opt-in step, target encoding (`preprocessing`), which Fione does not carry
+over: CatBoost already encodes categories by target statistics inside its own folds, and an
+encoding fitted before the cross-validation folds would make the scores optimistic. Fione
+instead builds *derived features* that never read the target, and chooses among them by
+validation (the "Add derived features" option, `feature_engineering` in the API, on by default):
+
+- text columns: the common words (letter runs, so `C85` gives `c`) as 0/1 flags, plus length,
+  word count, share of digits and capitals and the first number;
+- categories: how common each is, and how common each pair is;
+- rows: the number of missing values and of zeros;
+- dates: hour, minute, week, quarter, day of the year, weekend, and the seconds between date
+  columns;
+- numbers: sums, differences, products and ratios of the few most useful number columns, their
+  means within each of the three most useful small categories (and the difference from it), how common each repeated value is,
+  and k-means clusters with the distance to the cluster centre.
+
+Date features need a column of the date or timestamp type (ISO dates are detected on upload;
+other formats stay text until their type is changed). Independently of this option, the linear model and the neural
+network log-transform non-negative numbers that are strongly skewed.
+
+Each group is tried on a small LightGBM over rows it samples, and kept only if the loss drops
+over paired cross-validation folds by more than three standard errors and by 0.1 % on average,
+with at least 70 % of the folds improving, and
+the kept groups together pass a last check on other folds of the same rows. The gate gets at most a
+tenth of the run time. The groups tried, their gains and why each was kept or not are on the
+model (`features`) and in a `features` notice.
 
 ## Terms
 

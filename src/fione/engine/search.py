@@ -19,7 +19,10 @@ make a trial run somewhat longer, never discard it.
 The search also ends after ``max_trials`` finished trials (reason ``max_models``), or when the
 best ``stopping_score`` (by default the search score; lower is better) of the finished trials
 has not improved by a relative ``stopping_tolerance`` over the last ``stopping_rounds`` of them
-(reason ``no_improvement``; a pruned trial counts as no improvement). ``sample_weight`` is
+(reason ``no_improvement``; a pruned trial counts as no improvement). The first
+``STARTUP_TRIALS`` trials are the sampler's random startup and never count towards the
+stagnation, so a family always gets ``STARTUP_TRIALS + stopping_rounds + 1`` trials unless
+something else ends its search. ``sample_weight`` is
 passed to every fold fit; scores stay unweighted.
 
 A trial that raises an ``Exception`` (a library failure) ends the search with reason ``error``
@@ -49,6 +52,9 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 Folds = list[tuple[np.ndarray, np.ndarray]]
 # A capped trial's folds get this much more than the UNIT_SAFETY units they need.
 CAP_MARGIN = 1.25
+# TPE draws its first trials at random; stagnation is only judged on the trials after them, so
+# a small ``stopping_rounds`` cannot end the search before the sampler has learned anything.
+STARTUP_TRIALS = 10
 
 
 @dataclass
@@ -213,7 +219,9 @@ def run_family(
     view = None
     study = optuna.create_study(
         direction="minimize",
-        sampler=optuna.samplers.TPESampler(seed=seed),
+        sampler=optuna.samplers.TPESampler(
+            seed=seed, n_startup_trials=STARTUP_TRIALS, multivariate=True
+        ),
         pruner=optuna.pruners.MedianPruner(n_startup_trials=3),
     )
     study.enqueue_trial(spec.defaults)
@@ -232,7 +240,7 @@ def run_family(
         if max_trials is not None and finished >= max_trials:
             reason = "max_models"
             break
-        if stopping_rounds and len(stop_history) > stopping_rounds:
+        if stopping_rounds and len(stop_history) > STARTUP_TRIALS + stopping_rounds:
             ref = stop_history[-1 - stopping_rounds]
             if not ref - stop_history[-1] > stopping_tolerance * abs(ref):
                 reason = "no_improvement"

@@ -3,7 +3,9 @@
 ``AutoML.fit`` creates one ``Deadline(max_runtime_secs)`` when it starts (the whole job counts,
 spec 5.1/5.7) and spends it in phases:
 
-1. Checks, ``Prep.fit`` and the folds: measured, not budgeted. Call the time left after them L.
+1. Checks, the choice of derived features (``fione.engine.features``; at most
+   ``FEATURE_SHARE`` of the time, and off with ``feature_engineering=False``), ``Prep.fit``
+   and the folds: measured, not otherwise budgeted. Call the time left after them L.
 2. Search: 0.65 L. Families run one after another in ``FAMILY_ORDER``; each gets the search
    time still left times its ``FAMILY_WEIGHTS`` share among the families not yet run, so time a
    family leaves unused flows to the next ones. The search scores trials with log loss / RMSE.
@@ -11,9 +13,10 @@ spec 5.1/5.7) and spends it in phases:
 4. Final refit: until the reserve (about 0.2 L when the search used its whole share; more when
    it ended early). Each member with weight > 0 is refit once on all rows with its best
    parameters: boosting for 1.1 x the mean best iteration of its fold models, without early
-   stopping; ExtraTrees as one full forest. The fold models are the fallback, averaged, with a
-   ``notice``, for a refit that is not expected to fit in the time left (from its best trial's
-   time) or that the deadline cuts short.
+   stopping; the forests as one full forest; Linear as one fit. DeepLearning is not refit: its
+   fold models, averaged, are its final model (``FamilySpec.refit``). The fold models are also
+   the fallback, averaged, with a ``notice``, for a refit that is not expected to fit in the
+   time left (from its best trial's time) or that the deadline cuts short.
 5. Reserve: max(0.5 s, 0.15 L), for packaging and for what deadlines cannot interrupt (the
    families' probes, first fits on small data, an iteration slower than measured). Packaging
    includes ``fione.engine.diagnostics`` on the blended OOF predictions (at most 200,000 rows).
@@ -52,7 +55,8 @@ from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModel
 from fione.engine.diagnostics import diagnostics
 from fione.engine.ensemble import caruana
 from fione.engine.events import Event, EventSink, jsonable
-from fione.engine.families import MAX_ROUNDS
+from fione.engine.families import FAMILIES, MAX_ROUNDS
+from fione.engine.features import select_groups
 from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep, Task, infer_task, validate_target
 from fione.engine.search import (
@@ -64,12 +68,32 @@ from fione.engine.search import (
     run_family,
 )
 
-FAMILY_ORDER = ("LightGBM", "CatBoost", "XGBoost", "ExtraTrees")
-FAMILY_WEIGHTS = {"LightGBM": 0.30, "CatBoost": 0.30, "XGBoost": 0.25, "ExtraTrees": 0.15}
+FAMILY_ORDER = (
+    "LightGBM",
+    "CatBoost",
+    "XGBoost",
+    "RandomForest",
+    "ExtraTrees",
+    "DeepLearning",
+    "Linear",
+)
+FAMILY_WEIGHTS = {
+    "LightGBM": 0.22,
+    "CatBoost": 0.22,
+    "XGBoost": 0.18,
+    "RandomForest": 0.10,
+    "ExtraTrees": 0.10,
+    "DeepLearning": 0.12,
+    "Linear": 0.06,
+}
+FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
 REFIT_ROUNDS_FACTOR = 1.1
+# The linear view (one-hot levels) of Linear and DeepLearning is built whole, and each fold copies
+# most of it again: above this many cells (800 MB as float64) those families are left out.
+LINEAR_MAX_CELLS = 100_000_000
 SIZE_CAP = 40 * 1024**2  # per member
 TOTAL_SIZE_CAP = 90 * 1024**2  # all members: the artifact target is 100 MB (spec 5.2)
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
@@ -139,13 +163,16 @@ class AutoML:
         elif c.balance_classes:
             counts = np.bincount(y)
             weight = (len(y) / (len(counts) * counts))[y]
-        prep = Prep().fit(X)
+        groups, tried = self._engineer(X, y, task, nfolds, deadline)
+        prep = Prep().fit(X, groups)
         folds = make_folds(y, task, nfolds, c.seed)
+        families = self._without_wide_linear_view(prep, len(X))
 
         left = deadline.remaining()
         reserve = max(MIN_RESERVE_SECS, RESERVE_SHARE * left)
         default_stopping = stopping_metric == metrics.ALLOWED[task][0]
         results, logs, reasons, finished, errors = self._search(
+            families,
             X,
             y,
             folds,
@@ -223,6 +250,7 @@ class AutoML:
             cv_models={n: r.models for n, r in results.items()} if c.keep_cv_models else None,
             fold_assignment=assignment if c.keep_cv_fold_assignment else None,
             diagnostics=found,
+            features=tried,
         )
         self._event(
             "finished",
@@ -233,7 +261,51 @@ class AutoML:
         )
         return model
 
-    def _search(self, X, y, folds, task, prep, search: Deadline, stopping_score, weight):
+    def _engineer(self, X, y, task, nfolds, deadline) -> tuple[list, list[dict] | None]:
+        """The derived-feature groups to add and the verdict on every candidate (None when
+        switched off). The choice gets at most ``FEATURE_SHARE`` of the time."""
+        if not self.config.feature_engineering:
+            return [], None
+        try:
+            kept, verdicts = select_groups(
+                X,
+                y,
+                task,
+                nfolds,
+                self.config.seed,
+                deadline.child(FEATURE_SHARE * deadline.remaining()),
+                self.should_stop,
+            )
+        except Exception as e:  # the base features still train
+            self.emit(error_notice("features_error", "features", e))
+            return [], None
+        tried = [v.to_dict() for v in verdicts]
+        adopted = [v["group"] for v in tried if v["adopted"]]
+        self._notice(
+            "derived features: " + (", ".join(adopted) if adopted else "none added"),
+            kind="features",
+            groups=tried,
+        )
+        return kept, tried
+
+    def _without_wide_linear_view(self, prep: Prep, n_rows: int) -> list[str]:
+        """``self.families`` without those that read the linear view when it would be too big
+        (unless that leaves none)."""
+        if n_rows * prep.linear_width <= LINEAR_MAX_CELLS:
+            return self.families
+        kept = [name for name in self.families if FAMILIES[name].view != "linear"]
+        if not kept or kept == self.families:
+            return self.families
+        left_out = [name for name in self.families if name not in kept]
+        self._notice(
+            f"{', '.join(left_out)} left out: the one-hot encoded data "
+            f"({n_rows:,} rows x {prep.linear_width:,} columns) would take too much memory",
+            kind="families_left_out",
+            families=left_out,
+        )
+        return kept
+
+    def _search(self, families, X, y, folds, task, prep, search: Deadline, stopping_score, weight):
         """Run the families in order; returns (results with models, trial rows, end reason per
         family, finished trial count, exception per failed family)."""
         c = self.config
@@ -242,11 +314,11 @@ class AutoML:
         reasons: dict[str, str] = {}
         errors: dict[str, Exception] = {}
         finished = 0
-        for i, name in enumerate(self.families):
+        for i, name in enumerate(families):
             if self.should_stop():
                 reasons[name] = "cancelled"
                 break
-            rest = self.families[i:]
+            rest = families[i:]
             max_trials = None
             if c.max_models is not None:
                 if finished >= c.max_models:
@@ -318,7 +390,7 @@ class AutoML:
         for name in chosen:
             result = results[name]
             models = result.models
-            if stop_reason != "cancelled" and not self.should_stop():
+            if stop_reason != "cancelled" and not self.should_stop() and result.spec.refit:
                 start = time.monotonic()
                 model, problem = _refit(result, X, y, prep, views, clock, weight)
                 refit_secs[name] = time.monotonic() - start

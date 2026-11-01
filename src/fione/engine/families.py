@@ -23,8 +23,12 @@ stopping. It refuses like ``fit``, with the unit scaled to the larger row count,
 about 10% of the measured pickles; an upper bound for the boosting families).
 
 Size caps (artifact target, spec 5.2): at most 2,000 boosting rounds with 50-round early
-stopping, 256 leaves per tree, XGBoost depth 10, CatBoost depth 8; ExtraTrees 100 trees of at
-most 30 levels and 2,048 leaves.
+stopping, 256 leaves per tree, XGBoost depth 10, CatBoost depth 8; RandomForest and ExtraTrees
+100 trees of at most 30 levels and 2,048 leaves; DeepLearning two layers of at most 256 units.
+
+The families are the model types of H2O AutoML (GBM: LightGBM; XGBoost; DRF: RandomForest; XRT:
+ExtraTrees; GLM: Linear; DeepLearning) plus CatBoost. Linear and DeepLearning read the ``linear``
+view of Prep (one-hot, standardised); their "rounds" are 1 and the epochs trained.
 """
 
 import time
@@ -37,7 +41,15 @@ import optuna
 import pandas as pd
 import xgboost as xgb
 from catboost import CatBoostClassifier, CatBoostRegressor
-from sklearn.ensemble import ExtraTreesClassifier, ExtraTreesRegressor
+from sklearn.ensemble import (
+    ExtraTreesClassifier,
+    ExtraTreesRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+)
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.model_selection import train_test_split
+from sklearn.neural_network import MLPClassifier, MLPRegressor
 
 from fione.engine.config import DeadlineExceeded
 from fione.engine.prep import Task
@@ -66,8 +78,11 @@ class FamilySpec:
     """One model family for one task. ``fit``/``predict`` take the family's ``view`` of Prep."""
 
     name: ClassVar[str]
-    view: ClassVar[str]  # Prep method producing this family's input: tree, catboost or dense
+    view: ClassVar[
+        str
+    ]  # Prep method producing this family's input: tree, catboost, dense or linear
     defaults: ClassVar[dict]  # the first trial's parameters, keyed like ``space``
+    refit: ClassVar[bool] = True  # False: the final model is the average of the fold models
 
     def __init__(self, task: Task, n_classes: int, seed: int = 0, n_jobs: int = 1):
         self.task = task
@@ -420,22 +435,19 @@ class CatBoost(FamilySpec):
         return np.asarray(model.get_feature_importance(), dtype=float)
 
 
-class ExtraTrees(FamilySpec):
-    name = "ExtraTrees"
+class Forest(FamilySpec):
+    """A scikit-learn forest grown in rounds of trees, within the deadline (``warm_start``)."""
+
     view = "dense"
-    defaults = {"max_features": 0.7, "min_samples_leaf": 2}
     n_trees = 100
     max_depth = 30
     max_leaf_nodes = 2048
-
-    def space(self, trial):
-        return {
-            "max_features": trial.suggest_float("max_features", 0.3, 1.0),
-            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
-        }
+    classifier: ClassVar[type]
+    regressor: ClassVar[type]
+    extra: ClassVar[dict] = {}  # constructor arguments that make the family what it is
 
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
-        cls = ExtraTreesClassifier if self.classification else ExtraTreesRegressor
+        cls = self.classifier if self.classification else self.regressor
         chunk = self.n_jobs  # one tree per thread: measures throughput at the smallest granularity
         model = cls(
             n_estimators=min(chunk, self.n_trees),
@@ -444,6 +456,7 @@ class ExtraTrees(FamilySpec):
             warm_start=True,
             n_jobs=self.n_jobs,
             random_state=self.seed,
+            **self.extra,
             **params,
         )
         while True:
@@ -477,6 +490,193 @@ class ExtraTrees(FamilySpec):
         return np.asarray(model.feature_importances_, dtype=float)
 
 
+class ExtraTrees(Forest):
+    name = "ExtraTrees"
+    defaults = {"max_features": 0.7, "min_samples_leaf": 2}
+    classifier = ExtraTreesClassifier
+    regressor = ExtraTreesRegressor
+
+    def space(self, trial):
+        return {
+            "max_features": trial.suggest_float("max_features", 0.3, 1.0),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
+        }
+
+
+class RandomForest(Forest):
+    name = "RandomForest"
+    defaults = {"max_features": 0.5, "min_samples_leaf": 2}
+    classifier = RandomForestClassifier
+    regressor = RandomForestRegressor
+
+    def space(self, trial):
+        return {
+            "max_features": trial.suggest_float("max_features", 0.2, 1.0),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
+        }
+
+
+def owners(columns) -> np.ndarray:
+    """The feature (position in ``Prep.feature_names``) behind each column of the linear view."""
+    return np.array([int(name[1:].split("_")[0]) for name in columns])
+
+
+def by_feature(weights: np.ndarray, columns) -> np.ndarray:
+    """``weights`` per column of the linear view, summed per feature (to its highest position)."""
+    owner = owners(columns)
+    return np.bincount(owner, weights=weights, minlength=owner.max() + 1)
+
+
+class Linear(FamilySpec):
+    """L2-regularised logistic (classification) or ridge (regression) regression on the linear
+    view, H2O's GLM. ``C`` is the inverse regularisation strength; ridge uses ``alpha = 1/C``.
+    """
+
+    name = "Linear"
+    view = "linear"
+    defaults = {"C": 1.0}
+    max_iter = 300
+
+    def space(self, trial):
+        return {"C": trial.suggest_float("C", 1e-3, 1e2, log=True)}
+
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
+        # One unit: the solver cannot be interrupted, so the deadline is only checked before it.
+        if self.classification:
+            model = LogisticRegression(C=params["C"], max_iter=self.max_iter)
+        else:
+            model = Ridge(alpha=1.0 / params["C"])
+        model.fit(X_tr, y_tr, sample_weight=sample_weight)
+        deadline.expired()  # consulted once, so that the unit time is measured (see ``fit``)
+        model.baseline_ = X_tr.to_numpy(np.float64).mean(axis=0)
+        return model
+
+    def _full_rounds(self, rounds: int) -> int:
+        return 1
+
+    def rounds(self, model) -> int:
+        return 1
+
+    def size_bytes(self, model) -> int:
+        return model.coef_.size * 8 + 1024
+
+    def importance(self, model) -> np.ndarray:
+        weight = np.abs(np.atleast_2d(model.coef_)).sum(axis=0)
+        return by_feature(weight, model.feature_names_in_)
+
+
+class DeepLearning(FamilySpec):
+    """A feed-forward network with two ReLU layers of ``width`` units (scikit-learn's MLP),
+    H2O's Deep Learning. It trains epoch by epoch on the linear view, stops after
+    ``patience`` epochs without a better loss and keeps the best epoch's weights; ``rounds``
+    counts epochs. The best epoch is picked on ``STOPPING_SHARE`` of the training rows, set
+    aside inside the fit, never on the validation rows: a network's loss is noisy from epoch
+    to epoch, so picking the best epoch on the rows that also score the trial would flatter
+    it, and the ensemble would over-trust it. Its final model is the average of the fold
+    models (``refit = False``), as one network refit on all rows is as noisy as any other.
+
+    Both linear-view families keep the training mean of each column as ``baseline_``, the
+    reference point of their contributions (see ``fione.engine.explain``).
+    """
+
+    name = "DeepLearning"
+    view = "linear"
+    refit = False
+    defaults = {"width": 64, "alpha": 1e-3, "learning_rate_init": 1e-3}
+    max_epochs = 200
+    patience = 10
+    stopping_share = 0.15
+    batch_size = 128
+
+    def space(self, trial):
+        return {
+            "width": trial.suggest_int("width", 16, 256, log=True),
+            "alpha": trial.suggest_float("alpha", 1e-6, 1e-1, log=True),
+            "learning_rate_init": trial.suggest_float("learning_rate_init", 1e-4, 1e-2, log=True),
+        }
+
+    def _loss(self, model, X, y) -> float:
+        if not self.classification:
+            return float(np.sqrt(np.mean((y - model.predict(X)) ** 2)))
+        proba = np.clip(model.predict_proba(X), 1e-15, 1.0)
+        return float(-np.mean(np.log(proba[np.arange(len(y)), y])))
+
+    def _set_aside(self, X, y, sample_weight):
+        """``X, X_stop, y, y_stop, sample_weight`` with a share of the rows set aside (stratified
+        when every class has two rows or more)."""
+        rows = np.arange(len(X))
+        classes = np.bincount(y) if self.classification else None
+        stratify = None
+        if (
+            classes is not None
+            and classes.min() >= 2
+            and self.stopping_share * len(y) >= len(classes)
+        ):
+            stratify = y
+        fit, stop = train_test_split(
+            rows, test_size=self.stopping_share, random_state=self.seed, stratify=stratify
+        )
+        weight = None if sample_weight is None else sample_weight[fit]
+        return X.iloc[fit], X.iloc[stop], y[fit], y[stop], weight
+
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
+        params = dict(params)
+        width = params.pop("width")
+        stopping = X_va is not None
+        if stopping:  # the epoch is picked on rows of the training fold, not on X_va
+            X_tr, X_va, y_tr, y_va, sample_weight = self._set_aside(X_tr, y_tr, sample_weight)
+
+        cls = MLPClassifier if self.classification else MLPRegressor
+        model = cls(
+            hidden_layer_sizes=(width, width),
+            batch_size=min(self.batch_size, len(X_tr)),
+            random_state=self.seed,
+            **params,
+        )
+        extra = {"classes": np.arange(self.n_classes)} if self.classification else {}
+        if not self.classification:  # the network learns the target in standard units
+            centre, scale = float(np.mean(y_tr)), float(np.std(y_tr)) or 1.0
+            y_tr = (y_tr - centre) / scale
+            y_va = None if y_va is None else (y_va - centre) / scale
+        best, best_epoch, best_state = np.inf, 0, None
+        for epoch in range(1, (self.max_epochs if stopping else rounds) + 1):
+            model.partial_fit(X_tr, y_tr, sample_weight=sample_weight, **extra)
+            if stopping:
+                loss = self._loss(model, X_va, y_va)
+                if loss < best:
+                    best, best_epoch = loss, epoch
+                    best_state = [w.copy() for w in model.coefs_ + model.intercepts_]
+                elif epoch - best_epoch >= self.patience:
+                    break
+            if deadline.expired():
+                break
+        if stopping:
+            layers = len(model.coefs_)
+            model.coefs_, model.intercepts_ = best_state[:layers], best_state[layers:]
+        if not self.classification:  # fold the scaling into the output layer
+            model.coefs_[-1] = model.coefs_[-1] * scale
+            model.intercepts_[-1] = model.intercepts_[-1] * scale + centre
+        for state in (
+            "_optimizer",
+            "_best_coefs",
+            "_best_intercepts",
+        ):  # training only: 3x the size
+            model.__dict__.pop(state, None)
+        model.fione_rounds_ = best_epoch if stopping else epoch
+        model.baseline_ = X_tr.to_numpy(np.float64).mean(axis=0)
+        return model
+
+    def rounds(self, model) -> int:
+        return model.fione_rounds_
+
+    def size_bytes(self, model) -> int:
+        return sum(w.size for w in model.coefs_ + model.intercepts_) * 8 + 1024
+
+    def importance(self, model) -> np.ndarray:
+        return by_feature(np.abs(model.coefs_[0]).sum(axis=1), model.feature_names_in_)
+
+
 FAMILIES: dict[str, type[FamilySpec]] = {
-    spec.name: spec for spec in (LightGBM, XGBoost, CatBoost, ExtraTrees)
+    spec.name: spec
+    for spec in (LightGBM, XGBoost, CatBoost, RandomForest, ExtraTrees, DeepLearning, Linear)
 }

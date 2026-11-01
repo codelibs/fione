@@ -31,6 +31,8 @@ from fione.engine.prep import Prep
 
 TASKS = ("binary", "multiclass", "regression")
 TARGETS = {"binary": "good", "multiclass": "判定", "regression": "value"}
+# Every family, heaviest first, summing to 1.
+MIXED_WEIGHTS = {name: (len(FAMILIES) - i) / 28 for i, name in enumerate(FAMILIES)}
 HOSTILE = ["<b>x</b>", "幅", "BiasTerm", "contrib_x"]
 
 
@@ -54,7 +56,7 @@ def _task_frame(task: str, frame: pd.DataFrame) -> pd.DataFrame:
 @cache
 def _fit(task: str) -> TrainedModel:
     config = TrainConfig(
-        TARGETS[task], max_runtime_secs=15, max_models=4, nfolds=3, keep_cv_models=True
+        TARGETS[task], max_runtime_secs=15, max_models=len(FAMILIES), nfolds=3, keep_cv_models=True
     )
     model = AutoML(config).fit(_task_frame(task, _frame()))
     assert sorted(model.cv_models) == sorted(FAMILIES), f"a family is missing: {model.cv_models}"
@@ -234,7 +236,7 @@ def test_family_contributions_are_additive(task, family):
 @pytest.mark.parametrize("task", ["binary", "multiclass"])
 def test_mixed_ensemble_refit_like_and_fold_fallback(task):
     fit = _fit(task)
-    weights = dict(zip(FAMILIES, [0.4, 0.3, 0.2, 0.1], strict=True))
+    weights = MIXED_WEIGHTS
     X = _features()
     refit_like = [(name, w, fit.cv_models[name][:1]) for name, w in weights.items()]
     _assert_additive(_with_members(fit, refit_like), X)
@@ -244,7 +246,7 @@ def test_mixed_ensemble_refit_like_and_fold_fallback(task):
 
 def test_mixed_ensemble_regression():
     fit = _fit("regression")
-    weights = dict(zip(FAMILIES, [0.4, 0.3, 0.2, 0.1], strict=True))
+    weights = MIXED_WEIGHTS
     folds = [(name, w, fit.cv_models[name]) for name, w in weights.items()]
     _assert_additive(_with_members(fit, folds), _features())
 
@@ -278,6 +280,50 @@ def test_fold_model_missing_a_class(family, missing):
     _assert_additive(mixed, X)
 
 
+@pytest.mark.parametrize("family", ["Linear", "DeepLearning"])
+def test_linear_view_contributions_start_from_the_training_mean(family):
+    fit = _fit("regression")
+    one = _with_members(fit, [(family, 1.0, fit.cv_models[family][:1])])
+    spec, model = one.members[0].spec, one.members[0].models[0]
+    X = _features()
+    view = one.prep.linear(X)
+    phi, bias = explain.native_contributions(spec, model, view)
+    assert phi.shape == (len(X), 1, len(one.prep.feature_names))
+    # Margins: the bias is the output at the baseline, and the sums are the output itself.
+    at_baseline = pd.DataFrame([model.baseline_], columns=view.columns)
+    assert_allclose(bias[:, 0], model.predict(at_baseline)[0], rtol=0, atol=1e-9)
+    assert_allclose(phi[:, 0].sum(-1) + bias[:, 0], model.predict(view), rtol=0, atol=1e-9)
+    # Moving a column to the baseline removes its contribution (Linear: exactly, by design).
+    if family == "Linear":
+        for position in range(phi.shape[2]):
+            owned = [i for i, n in enumerate(view.columns) if int(n[1:].split("_")[0]) == position]
+            moved = view.copy()
+            moved.iloc[:, owned] = model.baseline_[owned]
+            assert_allclose(
+                phi[:, 0, position], model.predict(view) - model.predict(moved), rtol=0, atol=1e-9
+            )
+
+
+def test_networks_and_wide_views_lower_the_rows_one_explanation_may_take():
+    fit = _fit("multiclass")
+    trees = _with_members(fit, [("LightGBM", 1.0, fit.cv_models["LightGBM"][:1])])
+    network = _with_members(fit, [("DeepLearning", 1.0, fit.cv_models["DeepLearning"][:1])])
+    hidden = max(network.members[0].models[0].coefs_[0].shape)
+    assert hidden > len(fit.prep.sources)  # the premise: the network is wider than the features
+    assert explain.contribution_rows(network, 10**6) == explain.CELLS // (3 * hidden)
+    assert explain.contribution_rows(trees, 10**6) == explain.CELLS // (3 * len(fit.prep.sources))
+
+
+def test_partial_dependence_rows_account_for_the_linear_view():
+    fit = _fit("multiclass")
+    network = _with_members(fit, [("DeepLearning", 1.0, fit.cv_models["DeepLearning"][:1])])
+    trees = _with_members(fit, [("LightGBM", 1.0, fit.cv_models["LightGBM"][:1])])
+    wide = network.members[0].models[0].coefs_[0].shape[0]
+    assert wide > len(fit.columns)  # one-hot levels make the view wider than the columns
+    assert explain.pd_rows(network, 10**6, 20) == explain.CELLS // (20 * wide)
+    assert explain.pd_rows(trees, 10**6, 20) == explain.CELLS // (20 * len(fit.columns))
+
+
 def test_datetime_parts_sum_into_their_column():
     fit = _fit("multiclass")
     assert any(name.startswith("when__") for name in fit.prep.feature_names)
@@ -293,9 +339,11 @@ def test_datetime_parts_sum_into_their_column():
     phi, _ = explain.native_contributions(spec, one.members[0].models[0], one.prep.dense(X))
     parts = [i for i, name in enumerate(one.prep.feature_names) if name.startswith("when__")]
     assert np.abs(phi[:, 0, parts]).sum() > 0
-    by_feature = pd.DataFrame(phi[:, 0], columns=one.prep.sources)
-    expected = by_feature.T.groupby(level=0, sort=False).sum().T[one.columns]
-    assert_allclose(contributions(one, X).values[:, 0], expected.to_numpy(), rtol=0, atol=1e-12)
+    expected = np.zeros((len(X), len(one.columns)))
+    for j, sources in enumerate(one.prep.sources):  # a feature's share is split over its sources
+        for column in sources:
+            expected[:, one.columns.index(column)] += phi[:, 0, j] / len(sources)
+    assert_allclose(contributions(one, X).values[:, 0], expected, rtol=0, atol=1e-12)
 
 
 @pytest.mark.parametrize("task", TASKS)
@@ -309,7 +357,7 @@ def test_awkward_rows_are_additive(task):
     X.loc[X.index[3], "when"] = "2023-03-01 12:00:00"
     X.loc[X.index[4], "when"] = "not a date"
     X.loc[X.index[5], "when"] = None
-    folds = [(name, 0.25, fit.cv_models[name]) for name in FAMILIES]
+    folds = [(name, 1 / len(FAMILIES), fit.cv_models[name]) for name in FAMILIES]
     _assert_additive(_with_members(fit, folds), X)
     _assert_additive(fit, X)
 

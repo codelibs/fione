@@ -15,6 +15,7 @@ from fione import db
 from fione.auth import service as auth
 from fione.auth.roles import Role
 from fione.config import Settings, load_secret
+from fione.engine import search
 from fione.engine.config import TrainConfig
 from fione.engine.families import XGBoost
 from fione.jobs import automl_handler, store, worker
@@ -257,6 +258,7 @@ def test_a_degraded_run_still_records_the_model(
         raise ValueError("library failure")
 
     monkeypatch.setattr(XGBoost, "_fit", boom)
+    monkeypatch.setattr(search, "STARTUP_TRIALS", 0)  # every family stops after a few trials
     config = {**CONFIG, "max_models": None, "stopping_rounds": 1, "stopping_tolerance": 0.5}
     job = models.submit_training(conn, storage, owner, project.id, dataset.id, config, name="quick")
     done = run_job(job)
