@@ -547,6 +547,7 @@ class Linear(FamilySpec):
         else:
             model = Ridge(alpha=1.0 / params["C"])
         model.fit(X_tr, y_tr, sample_weight=sample_weight)
+        deadline.expired()  # consulted once, so that the unit time is measured (see ``fit``)
         model.baseline_ = X_tr.to_numpy(np.float64).mean(axis=0)
         return model
 
@@ -633,6 +634,10 @@ class DeepLearning(FamilySpec):
             **params,
         )
         extra = {"classes": np.arange(self.n_classes)} if self.classification else {}
+        if not self.classification:  # the network learns the target in standard units
+            centre, scale = float(np.mean(y_tr)), float(np.std(y_tr)) or 1.0
+            y_tr = (y_tr - centre) / scale
+            y_va = None if y_va is None else (y_va - centre) / scale
         best, best_epoch, best_state = np.inf, 0, None
         for epoch in range(1, (self.max_epochs if stopping else rounds) + 1):
             model.partial_fit(X_tr, y_tr, sample_weight=sample_weight, **extra)
@@ -648,6 +653,9 @@ class DeepLearning(FamilySpec):
         if stopping:
             layers = len(model.coefs_)
             model.coefs_, model.intercepts_ = best_state[:layers], best_state[layers:]
+        if not self.classification:  # fold the scaling into the output layer
+            model.coefs_[-1] = model.coefs_[-1] * scale
+            model.intercepts_[-1] = model.intercepts_[-1] * scale + centre
         model.fione_rounds_ = best_epoch if stopping else epoch
         model.baseline_ = X_tr.to_numpy(np.float64).mean(axis=0)
         return model

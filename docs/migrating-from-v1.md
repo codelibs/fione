@@ -44,8 +44,13 @@ Each H2O AutoML algorithm has a counterpart, tuned with Optuna within the run ti
 | (none) | CatBoost |
 
 Not carried over: H2O's `include_algos` / `exclude_algos`, `exploitation_ratio`, `modeling_plan`
-and `preprocessing` (target encoding). A run always tries every model type; Fione does not
-yet let you pick them.
+and `preprocessing` (target encoding). Fione does not yet let you pick the model types: a run
+tries them in the order LightGBM, CatBoost, XGBoost, RandomForest, ExtraTrees, DeepLearning,
+Linear, each with a share of the time, so a small "maximum models" or a short run time can
+leave the last ones untried.
+
+One default differs: "stopping rounds" is 10 here (H2O: 3), and a model type's first 10 tries
+do not count towards it, because they are random starting points.
 
 ## Terms
 

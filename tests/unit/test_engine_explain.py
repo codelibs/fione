@@ -304,6 +304,16 @@ def test_linear_view_contributions_start_from_the_training_mean(family):
             )
 
 
+def test_networks_and_wide_views_lower_the_rows_one_explanation_may_take():
+    fit = _fit("multiclass")
+    trees = _with_members(fit, [("LightGBM", 1.0, fit.cv_models["LightGBM"][:1])])
+    network = _with_members(fit, [("DeepLearning", 1.0, fit.cv_models["DeepLearning"][:1])])
+    hidden = max(network.members[0].models[0].coefs_[0].shape)
+    assert hidden > len(fit.prep.sources)  # the premise: the network is wider than the features
+    assert explain.contribution_rows(network, 10**6) == explain.CELLS // (3 * hidden)
+    assert explain.contribution_rows(trees, 10**6) == explain.CELLS // (3 * len(fit.prep.sources))
+
+
 def test_datetime_parts_sum_into_their_column():
     fit = _fit("multiclass")
     assert any(name.startswith("when__") for name in fit.prep.feature_names)

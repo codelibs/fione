@@ -61,9 +61,24 @@ def explained_outputs(model: TrainedModel) -> list:
 
 def contribution_rows(model: TrainedModel, limit: int) -> int:
     """How many of ``limit`` rows one ``contributions`` call may take, so that rows x
-    classes x features stays within ``CELLS``; 0 for a model too wide for a single row."""
+    classes x features stays within ``CELLS``; 0 for a model too wide for a single row.
+
+    A linear-view member works on more columns than there are features (one-hot levels), and a
+    network on arrays as wide as its hidden layers, so the widest of those counts as the
+    features."""
     classes = len(model.classes_) if model.task == "classification" else 1
-    return max(0, min(limit, CELLS // (classes * max(1, len(model.prep.sources)))))
+    return max(0, min(limit, CELLS // (classes * _width(model))))
+
+
+def _width(model: TrainedModel) -> int:
+    widths = [len(model.prep.sources)]
+    for member in model.members:
+        for one in member.models:
+            if isinstance(member.spec, DeepLearning):
+                widths.append(max(one.coefs_[0].shape))
+            elif isinstance(member.spec, Linear):
+                widths.append(np.atleast_2d(one.coef_).shape[1])
+    return max(1, *widths)
 
 
 def pd_rows(model: TrainedModel, rows: int, grid_size: int) -> int:

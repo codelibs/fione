@@ -188,7 +188,7 @@ def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
     assert importance.shape == (6,) and (importance >= 0).all() and importance.sum() > 0
 
 
-# Linear is excluded: its solver cannot be cut short, so a refit is never shorter than asked.
+# Linear is excluded: one fit takes far less than the shortest calibrated budget, so it finishes.
 @pytest.mark.parametrize("name", [name for name in FAMILIES if name != "Linear"])
 def test_fit_full_raises_when_it_cannot_finish(name):
     X, y = _classification(50_000, 30)
@@ -757,21 +757,46 @@ def test_wide_thirty_class_catboost_does_not_blow_a_two_second_budget(wide):
     _returns_or_raises_within("CatBoost", X, classes, prep, budget=2, slack=1.5)
 
 
-def test_deep_learning_stops_after_patience_and_keeps_the_best_epoch():
+def test_deep_learning_stops_after_patience_and_never_looks_at_the_validation_rows():
     X, y = _classification(600, 6)
     prep, y, _ = _setup(X, y)
     spec = FAMILIES["DeepLearning"]("classification", 2)
     view = prep.linear(X)
-    # Large, barely regularised networks overfit 400 noisy rows quickly: the validation loss
-    # turns up and the fit ends long before ``max_epochs``.
+    # Large, barely regularised networks overfit 400 noisy rows quickly: the loss turns up and
+    # the fit ends long before ``max_epochs``.
     params = {"width": 256, "alpha": 1e-6, "learning_rate_init": 1e-2}
-    model = spec.fit(params, view.iloc[:400], y[:400], view.iloc[400:], y[400:], Deadline(30))
+    train, valid = view.iloc[:400], view.iloc[400:]
+    model = spec.fit(params, train, y[:400], valid, y[400:], Deadline(30))
     assert 1 <= spec.rounds(model) < spec.max_epochs - spec.patience
-    # The kept weights are the best epoch's, not the last one's.
-    best = spec._loss(model, view.iloc[400:], y[400:])
-    refit = spec._fit(params, view.iloc[:400], y[:400], view.iloc[400:], y[400:], Deadline(30))
-    assert best == pytest.approx(spec._loss(refit, view.iloc[400:], y[400:]))
     assert spec.predict(model, view).shape == (600, 2)
+    # The epoch is chosen on rows set aside from the training fold: other validation labels
+    # (or rows) change nothing, or the trial's score would flatter the network.
+    other = spec.fit(params, train, y[:400], valid, 1 - y[400:], Deadline(30))
+    assert spec.rounds(other) == spec.rounds(model)
+    for a, b in zip(model.coefs_, other.coefs_, strict=True):
+        np.testing.assert_array_equal(a, b)
+
+
+def test_deep_learning_regression_learns_targets_of_any_scale():
+    X, y = make_regression(400, 5, noise=0.1, random_state=0)
+    X = pd.DataFrame(X, columns=[f"x{i}" for i in range(5)])
+    errors = []
+    for scale in (1.0, 1e5):
+        prep, target, _ = _setup(X, y * scale + 3e5 * scale, "regression")
+        spec = FAMILIES["DeepLearning"]("regression", 0)
+        view = prep.linear(X)
+        model = spec.fit(
+            spec.defaults,
+            view.iloc[:300],
+            target[:300],
+            view.iloc[300:],
+            target[300:],
+            Deadline(30),
+        )
+        errors.append(
+            np.sqrt(np.mean((spec.predict(model, view.iloc[300:]) - target[300:]) ** 2)) / scale
+        )
+    assert errors[1] == pytest.approx(errors[0], rel=0.05)  # the same fit in other units
 
 
 def test_deep_learning_stops_at_the_deadline_after_one_epoch():
