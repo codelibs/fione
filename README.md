@@ -22,7 +22,8 @@ This is Fione v2, a rewrite in Python. It no longer depends on Fess, H2O or MinI
 - **Its own AutoML engine**: every model type H2O AutoML offers (gradient boosting with
   LightGBM and XGBoost, random forest and extremely randomized trees, a linear model, a neural
   network and an ensemble of them) plus CatBoost, tuned with Optuna and ensembled, within the
-  run time you set.
+  run time you set. It also builds derived features (text parts, counts, sums, group means) and
+  keeps only those that clearly improve a quick test model.
 - **Fione Serving**: a small prediction API (`/invocations`, `/model`, `/ping`) for any trained
   model, as one shared Docker image and the model files.
 - **Users and sharing**: administrators, editors and viewers; projects are shared per user.

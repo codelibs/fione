@@ -3,7 +3,9 @@
 ``AutoML.fit`` creates one ``Deadline(max_runtime_secs)`` when it starts (the whole job counts,
 spec 5.1/5.7) and spends it in phases:
 
-1. Checks, ``Prep.fit`` and the folds: measured, not budgeted. Call the time left after them L.
+1. Checks, the choice of derived features (``fione.engine.features``; at most
+   ``FEATURE_SHARE`` of the time, and off with ``feature_engineering=False``), ``Prep.fit``
+   and the folds: measured, not otherwise budgeted. Call the time left after them L.
 2. Search: 0.65 L. Families run one after another in ``FAMILY_ORDER``; each gets the search
    time still left times its ``FAMILY_WEIGHTS`` share among the families not yet run, so time a
    family leaves unused flows to the next ones. The search scores trials with log loss / RMSE.
@@ -54,6 +56,7 @@ from fione.engine.diagnostics import diagnostics
 from fione.engine.ensemble import caruana
 from fione.engine.events import Event, EventSink, jsonable
 from fione.engine.families import FAMILIES, MAX_ROUNDS
+from fione.engine.features import select_groups
 from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep, Task, infer_task, validate_target
 from fione.engine.search import (
@@ -83,6 +86,7 @@ FAMILY_WEIGHTS = {
     "DeepLearning": 0.12,
     "Linear": 0.06,
 }
+FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -159,7 +163,8 @@ class AutoML:
         elif c.balance_classes:
             counts = np.bincount(y)
             weight = (len(y) / (len(counts) * counts))[y]
-        prep = Prep().fit(X)
+        groups, tried = self._engineer(X, y, task, nfolds, deadline)
+        prep = Prep().fit(X, groups)
         folds = make_folds(y, task, nfolds, c.seed)
         families = self._without_wide_linear_view(prep, len(X))
 
@@ -245,6 +250,7 @@ class AutoML:
             cv_models={n: r.models for n, r in results.items()} if c.keep_cv_models else None,
             fold_assignment=assignment if c.keep_cv_fold_assignment else None,
             diagnostics=found,
+            features=tried,
         )
         self._event(
             "finished",
@@ -254,6 +260,33 @@ class AutoML:
             metrics=model.metrics,
         )
         return model
+
+    def _engineer(self, X, y, task, nfolds, deadline) -> tuple[list, list[dict] | None]:
+        """The derived-feature groups to add and the verdict on every candidate (None when
+        switched off). The choice gets at most ``FEATURE_SHARE`` of the time."""
+        if not self.config.feature_engineering:
+            return [], None
+        try:
+            kept, verdicts = select_groups(
+                X,
+                y,
+                task,
+                nfolds,
+                self.config.seed,
+                deadline.child(FEATURE_SHARE * deadline.remaining()),
+                self.should_stop,
+            )
+        except Exception as e:  # the base features still train
+            self.emit(error_notice("features_error", "features", e))
+            return [], None
+        tried = [v.to_dict() for v in verdicts]
+        adopted = [v["group"] for v in tried if v["adopted"]]
+        self._notice(
+            "derived features: " + (", ".join(adopted) if adopted else "none added"),
+            kind="features",
+            groups=tried,
+        )
+        return kept, tried
 
     def _without_wide_linear_view(self, prep: Prep, n_rows: int) -> list[str]:
         """``self.families`` without those that read the linear view when it would be too big

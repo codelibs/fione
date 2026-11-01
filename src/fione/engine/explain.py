@@ -38,7 +38,7 @@ from fione.engine.families import (
     n_threads,
     owners,
 )
-from fione.engine.model import TrainedModel
+from fione.engine.model import TrainedModel, attribution
 from fione.engine.prep import _EPOCH, _as_str, _datetimes
 
 FLAT_MARGIN = 1e-9  # a binary margin this close to the bias is rescaled by the sigmoid's slope
@@ -365,10 +365,7 @@ def contributions(model: TrainedModel, df: pd.DataFrame) -> Contributions:
                 bias += member.weight / len(member.models) * one_bias
     if len(outputs) < k:  # binary: the positive class
         phi, bias = phi[:, 1:], bias[:, 1:]
-    position = {column: i for i, column in enumerate(model.columns)}
-    values = np.zeros((len(df), len(outputs), len(model.columns)))
-    sources = [position[source] for source in model.prep.sources]
-    np.add.at(values, (slice(None), slice(None), sources), phi)
+    values = phi @ attribution(model.prep).T  # features -> input columns (model.columns order)
     return Contributions(list(model.columns), outputs, values, bias, values.sum(-1) + bias)
 
 

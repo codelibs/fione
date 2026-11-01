@@ -339,9 +339,11 @@ def test_datetime_parts_sum_into_their_column():
     phi, _ = explain.native_contributions(spec, one.members[0].models[0], one.prep.dense(X))
     parts = [i for i, name in enumerate(one.prep.feature_names) if name.startswith("when__")]
     assert np.abs(phi[:, 0, parts]).sum() > 0
-    by_feature = pd.DataFrame(phi[:, 0], columns=one.prep.sources)
-    expected = by_feature.T.groupby(level=0, sort=False).sum().T[one.columns]
-    assert_allclose(contributions(one, X).values[:, 0], expected.to_numpy(), rtol=0, atol=1e-12)
+    expected = np.zeros((len(X), len(one.columns)))
+    for j, sources in enumerate(one.prep.sources):  # a feature's share is split over its sources
+        for column in sources:
+            expected[:, one.columns.index(column)] += phi[:, 0, j] / len(sources)
+    assert_allclose(contributions(one, X).values[:, 0], expected, rtol=0, atol=1e-12)
 
 
 @pytest.mark.parametrize("task", TASKS)

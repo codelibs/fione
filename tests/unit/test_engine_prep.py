@@ -318,3 +318,26 @@ def test_a_refused_target_names_the_rule_it_breaks(y, task, code, details):
         validate_target(y, task, 5)
     assert (raised.value.code, raised.value.details) == (code, details)
     assert isinstance(raised.value, ConfigError)
+
+
+def test_date_only_columns_are_read_as_dates():
+    import datetime
+
+    days = [datetime.date(2024, 1, 1) + datetime.timedelta(days=i) for i in range(30)]
+    X = pd.DataFrame({"day": days, "x": np.arange(30.0)})
+    X.loc[3, "day"] = None
+    assert X["day"].dtype == object
+    prep = Prep().fit(X)
+    assert prep.kind_of("day") == "datetime"
+    assert [n for n in prep.feature_names if n.startswith("day__")][-1] == "day__ordinal"
+    tree = prep.tree(X)
+    assert tree.shape == (30, len(prep.feature_names))
+    assert tree.iloc[0, 0] == 2024 and tree.iloc[4, 2] == 5
+
+
+def test_an_object_column_that_mixes_dates_and_text_is_not_a_date():
+    import datetime
+
+    values = [datetime.date(2024, 1, 1 + i % 28) for i in range(40)] + ["n/a"] * 3
+    X = pd.DataFrame({"day": values, "x": np.arange(43.0)})
+    assert Prep().fit(X).kind_of("day") == "category"
