@@ -665,7 +665,7 @@
   "model.cfg.ignored_columns": "使わなかった列",
   "model.not_stored": "このモデルには保存されていません。",
   "model.serving": "サービング",
-  "model.board_hint": "試したアルゴリズムごとの行で、学習に使わなかった行での {metric} の良い順です。アンサンブルは重みのあるメンバーを組み合わせたものです。",
+  "model.board_hint": "試したアルゴリズムごとに最大 3 つのモデルの行で、学習に使わなかった行での {metric} の良い順です。アンサンブルは重みのあるメンバーを組み合わせたものです。",
   "model.col.model": "モデル",
   "model.col.score": "CV スコア",
   "model.col.spread": "分割間のばらつき",

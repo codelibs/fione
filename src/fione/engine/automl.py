@@ -259,7 +259,9 @@ class AutoML:
             members=members,
             label_dtype=target.dtype,
             cv_predictions=blended if c.keep_cv_predictions else None,
-            cv_models={n: r.models for n, r in results.items()} if c.keep_cv_models else None,
+            cv_models={n: r.models for n, r in results.items() if "#" not in n}
+            if c.keep_cv_models
+            else None,
             fold_assignment=assignment if c.keep_cv_fold_assignment else None,
             diagnostics=found,
             features=tried,
@@ -414,7 +416,7 @@ class AutoML:
                     models = [model]
                     refitted.add(name)
                 elif isinstance(problem, Exception):
-                    self.emit(error_notice("refit_error", name, problem))
+                    self.emit(error_notice("refit_error", result.spec.name, problem))
                 else:
                     why = (
                         "was cancelled"
@@ -423,7 +425,7 @@ class AutoML:
                     )
                     self._notice(
                         f"{name}: the final refit {why}; using its {len(models)} fold models",
-                        family=name,
+                        family=result.spec.name,
                     )
             members_of[name] = models
         self._bag(
@@ -450,8 +452,7 @@ class AutoML:
         if not kept:
             kept = [candidates[0]]
             self._notice(
-                f"{kept[0][0].spec.name} kept although it exceeds the size limit: "
-                "no smaller member",
+                f"{kept[0][0].key} kept although it exceeds the size limit: no smaller member",
                 family=kept[0][0].spec.name,
             )
         kept = [member for member, _ in kept]
@@ -465,24 +466,34 @@ class AutoML:
         self, results, chosen, members_of, refitted, refit_secs, X, y, prep, views, clock, weight
     ):
         """Refit the members that were refit once more, with other seeds, while the time and the
-        size limits allow it (heaviest member first, one extra model each per round)."""
+        size limits allow it (heaviest member first, one extra model each per round). An extra
+        model is kept only if, at its real size, the member and all the members still fit."""
         sizes = {n: sum(results[n].spec.size_bytes(m) for m in members_of[n]) for n in chosen}
+        first_secs = dict(refit_secs)
         for extra in range(1, BAG_EXTRA + 1):
             for name in chosen:
                 spec = results[name].spec
                 if name not in refitted or not spec.seeded:
                     continue
-                if self.should_stop() or clock.remaining() < BAG_TIME_FACTOR * refit_secs[name]:
+                if self.should_stop() or clock.remaining() < BAG_TIME_FACTOR * first_secs[name]:
                     continue
-                one = spec.size_bytes(members_of[name][0])
-                if sizes[name] + one > SIZE_CAP or sum(sizes.values()) + one > TOTAL_SIZE_CAP:
+                estimate = spec.size_bytes(members_of[name][0])  # a forest's size varies by seed
+                if (
+                    sizes[name] + estimate > SIZE_CAP
+                    or sum(sizes.values()) + estimate > TOTAL_SIZE_CAP
+                ):
                     continue
                 start = time.monotonic()
-                model, _ = _refit(results[name], X, y, prep, views, clock, weight, extra)
+                model, problem = _refit(results[name], X, y, prep, views, clock, weight, extra)
                 refit_secs[name] += time.monotonic() - start
-                if model is not None:
+                if isinstance(problem, Exception):
+                    self.emit(error_notice("refit_error", spec.name, problem))
+                if model is None:
+                    continue
+                real = spec.size_bytes(model)
+                if sizes[name] + real <= SIZE_CAP and sum(sizes.values()) + real <= TOTAL_SIZE_CAP:
                     members_of[name].append(model)
-                    sizes[name] += one
+                    sizes[name] += real
 
 
 def _mb(size: float) -> str:

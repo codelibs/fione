@@ -61,8 +61,7 @@ def _fit(task: str) -> TrainedModel:
         TARGETS[task], max_runtime_secs=15, max_models=len(FAMILIES), nfolds=3, keep_cv_models=True
     )
     model = AutoML(config).fit(_task_frame(task, _frame()))
-    best = sorted(name for name in model.cv_models if "#" not in name)  # not the runners-up
-    assert best == sorted(FAMILIES), f"a family is missing: {model.cv_models}"
+    assert sorted(model.cv_models) == sorted(FAMILIES), f"a family is missing: {model.cv_models}"
     return model
 
 

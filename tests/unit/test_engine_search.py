@@ -840,7 +840,7 @@ def test_deep_learning_size_estimate_matches_its_pickle():
     assert len(pickle.dumps(model)) < 1.3 * spec.size_bytes(model)
 
 
-def _search_with_runners_up(top):
+def _search_with_runners_up():
     X, y = _classification(300, 5)
     prep, y, folds = _setup(X, y)
     events = []
@@ -853,7 +853,7 @@ def _search_with_runners_up(top):
 
 def test_the_best_trials_are_handed_on_best_first(monkeypatch):
     monkeypatch.setattr(search, "TOP_TRIALS", 3)
-    result, y, events = _search_with_runners_up(3)
+    result, y, events = _search_with_runners_up()
     assert len(result.runners_up) == 2
     ranked = [result, *result.runners_up]
     scores = [r.best_score for r in ranked]
@@ -869,5 +869,5 @@ def test_the_best_trials_are_handed_on_best_first(monkeypatch):
 
 def test_one_top_trial_hands_on_no_runners_up(monkeypatch):
     monkeypatch.setattr(search, "TOP_TRIALS", 1)
-    result, _, _ = _search_with_runners_up(1)
+    result, _, _ = _search_with_runners_up()
     assert result.runners_up == []

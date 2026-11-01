@@ -125,7 +125,6 @@ def test_leaderboard_has_a_row_per_candidate_plus_the_ensemble(iris):
     model, _, _, _ = iris
     board = model.leaderboard
     assert list(board.columns) == LEADERBOARD_COLUMNS
-    # A family's runners-up have rows too.
     assert set(board["family"]) == {*FAMILY_ORDER, "Ensemble"}
     assert board["family"].eq("Ensemble").sum() == 1 and board["model"].is_unique
     members = board[board["family"] != "Ensemble"]
@@ -159,15 +158,19 @@ def test_ignored_columns_are_not_features(iris):
     assert model.target == "target" and model.config.ignored_columns == ["row_id"]
 
 
-def test_refit_members_are_single_models_without_cv_data(iris):
+def test_refit_members_hold_one_model_per_seed_without_cv_data(iris):
     model, _, _, _ = iris
     assert model.stop_reason == "max_models"
     # A refit member is one model per seed (none for Linear: one fit gives one model); one that
-    # is never refit keeps its fold models.
+    # is never refit keeps its five fold models, which share one seed.
     for member in model.members:
         spec = member.spec
         expected = (1 + automl_module.BAG_EXTRA if spec.seeded else 1) if spec.refit else 5
         assert len(member.models) == expected, spec.name
+        if spec.refit and spec.seeded:
+            params = [m.get_params() for m in member.models]
+            seeds = {p.get("random_state", p.get("random_seed")) for p in params}  # CatBoost: seed
+            assert len(seeds) == len(member.models), spec.name  # bagged, not fold models
     assert model.cv_predictions is None and model.cv_models is None
     assert model.fold_assignment is None
 
@@ -650,7 +653,7 @@ def test_adult_scale_model_with_extra_trees_is_small_and_predicts_fast(tmp_path,
     model = _fit(df, families=["LightGBM", "ExtraTrees"], target="income", max_runtime_secs=30)
     # Each is refit once, and again with other seeds when the time and size limits allow.
     assert [m.spec.name for m in model.members] == ["LightGBM", "ExtraTrees"]
-    assert all(len(m.models) >= 1 for m in model.members)
+    assert all(1 <= len(m.models) <= 1 + automl_module.BAG_EXTRA for m in model.members)
     path = tmp_path / "model.joblib"
     joblib.dump(model, path)
     assert path.stat().st_size <= 100 * 1024**2
@@ -769,3 +772,38 @@ def test_runners_up_of_a_family_join_the_ensemble_candidates(monkeypatch):
     assert len(set(keys)) == len(keys) and set(keys) <= set(weights)
     assert sum(m.weight for m in model.members) == pytest.approx(1.0)
     assert model.predict_proba(_bagging_data()).shape == (800, 2)
+
+
+def test_an_extra_seed_that_is_bigger_than_estimated_is_not_kept(monkeypatch):
+    """A forest's size varies with its seed: the extra model is measured after it is fitted."""
+    first = []
+
+    def size(self, model):
+        if not first:
+            first.append(model)
+        return 100 if model is first[0] else 1000
+
+    monkeypatch.setattr(LightGBM, "size_bytes", size)
+    monkeypatch.setattr(automl_module, "SIZE_CAP", 1500)
+    (member,) = _fit(_bagging_data(), families=["LightGBM"], target="y", max_models=3).members
+    assert len(member.models) == 2  # the first (100) and one extra (1000) fit, not a second
+
+
+def test_a_failing_extra_seed_is_reported_and_the_member_keeps_its_models(monkeypatch):
+    original = LightGBM._fit
+    calls = []
+
+    def flaky(self, *args, **kwargs):
+        if self.seed != 0 and kwargs.get("rounds") is None and args[3] is None:  # a bagged refit
+            calls.append(self.seed)
+            raise RuntimeError("extra seed failed")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(LightGBM, "_fit", flaky)
+    events = []
+    (member,) = _fit(
+        _bagging_data(), events, families=["LightGBM"], target="y", max_models=3
+    ).members
+    assert len(member.models) == 1 and calls
+    notices = [e.data for e in events if e.type == "notice"]
+    assert any(n.get("kind") == "refit_error" and n["family"] == "LightGBM" for n in notices)

@@ -96,7 +96,7 @@ def run_one(job: tuple[str, int, str, dict, str, dict]) -> dict:
     strat = frame[target] if task == "classification" else None
     train, test = train_test_split(frame, test_size=0.2, random_state=split, stratify=strat)
     started = time.monotonic()
-    model = AutoML(TrainConfig(target=target, task=task, **config)).fit(train)
+    model = AutoML(TrainConfig(**{"target": target, "task": task, **config})).fit(train)
     secs = time.monotonic() - started
     y = test[target].to_numpy()
     row = dict(label=label, dataset=name, split=split, task=task, secs=round(secs, 1))
@@ -112,7 +112,7 @@ def run_one(job: tuple[str, int, str, dict, str, dict]) -> dict:
     else:
         row["loss"] = float(np.sqrt(np.mean((y - model.predict(test).to_numpy()) ** 2)))
         row["cv_loss"] = model.metrics.get("rmse", np.nan)
-    row["members"] = ",".join(f"{m.spec.name}:{m.weight:.2f}" for m in model.members)
+    row["members"] = ",".join(f"{m.key}:{m.weight:.2f}" for m in model.members)
     return row
 
 
@@ -156,9 +156,15 @@ def run(args: argparse.Namespace) -> None:
 
 def compare(args: argparse.Namespace) -> None:
     a, b = pd.read_csv(args.base), pd.read_csv(args.new)
+    for name, frame in (("base", a), ("new", b)):
+        if frame["label"].nunique() > 1:
+            raise SystemExit(
+                f"the {name} file holds several arms: {sorted(frame['label'].unique())}"
+            )
     if args.metric == "error":  # 1 - accuracy, for the classification datasets
         a, b = a.dropna(subset=["accuracy"]).copy(), b.dropna(subset=["accuracy"]).copy()
         a["loss"], b["loss"] = 1 - a["accuracy"], 1 - b["accuracy"]
+        a = a[a["loss"] > 0]  # a change relative to no errors at all is undefined
     pairs = a.merge(b, on=["dataset", "split"], suffixes=("_a", "_b"))
     pairs["change"] = (pairs["loss_b"] - pairs["loss_a"]) / pairs["loss_a"]
     pairs["time"] = pairs["secs_b"] / pairs["secs_a"]
