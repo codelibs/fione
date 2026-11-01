@@ -1,4 +1,4 @@
-"""The Fione-kun chat page: a project's conversations of the signed-in user, the thread of one
+"""The assistant chat page: a project's conversations of the signed-in user, the thread of one
 and the question form.
 
 Conversations are their creator's alone, so every conversation id goes through
@@ -103,7 +103,7 @@ def _cards(conn, conversation: Conversation) -> dict[int, Card]:
 
 
 def _lines(messages: list[store.Message], cards: dict[int, Card]) -> list[Line]:
-    """What the thread shows: the questions, Fione-kun's texts (a leading blank line of a
+    """What the thread shows: the questions, the assistant's texts (a leading blank line of a
     reply is left out), what it looked at, the proposals it made, and why a message ended
     early."""
     tools = _tool_names()
@@ -255,7 +255,7 @@ REFUSALS = (
 
 @router.post("/projects/{pid}/assistant/c/{cid}/messages")
 def send(request: Request, conn: Conn, pid: str, cid: str, form: SmallForm) -> Response:
-    """Ask Fione-kun: on to the page (HTMX: the thread, which then polls). A refusal shows
+    """Ask the assistant: on to the page (HTMX: the thread, which then polls). A refusal shows
     the page with its status, a message and the question still in the form."""
     same_site(request)
     ctx = action(request, conn, pid, field(form, "csrf_token"), need="read")
@@ -402,7 +402,7 @@ def confirm(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
                 pid,
                 proposal.dataset_id,
                 config,
-                name=f"Fione-kun proposal {proposal.id}",
+                name=f"Assistant proposal {proposal.id}",
             )
         except BaseException:
             with db.immediate(conn):  # no job: the proposal waits for the next try

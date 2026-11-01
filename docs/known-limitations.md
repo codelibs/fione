@@ -288,21 +288,21 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - **Starlette is pinned below 1.10**: the upload handling uses Starlette internals that must be
   checked before allowing a newer version.
 
-## Fione-kun and MCP
+## The assistant and MCP
 
 - **Answers can be wrong.** The default model is small. Check results you rely on; a training
   it suggests runs only after a person confirms it.
 - **Names and statistics reach the language model server.** Dataset and column names and
   statistics are sent with each question; cell values only if an administrator allows
   example values for that server. With a server outside this machine, every chat user is warned.
-- **Text from the data can steer what Fione-kun says, not what it does.** Fione-kun can only
+- **Text from the data can steer what the assistant says, not what it does.** The assistant can only
   read and propose, and a proposal starts nothing until a person confirms it.
 - **Calls to a real model's tools are checked only by an opt-in test.** The tests of the
   default suite use a fake server (`tests/llm` runs against a real one, by hand).
 - **MCP uses a full API token** (the same rights as the REST API), runs at most two tool calls
   at once and has no other rate limit. It is off by default.
 - **A long conversation is shortened silently.** Only the newest part of it fits the model's
-  context, so Fione-kun may not remember what was said earlier; start a new conversation for a
+  context, so the assistant may not remember what was said earlier; start a new conversation for a
   new topic. A server whose real context is smaller than `FIONE_LLM_CONTEXT_TOKENS` cuts the
   prompt on its own, which Fione cannot see.
 - **An answer that is running when Fione restarts is lost** (it ends as interrupted).
@@ -365,4 +365,4 @@ Notebooks are opt-in (the Compose profile `notebook`); see [Notebooks](notebook.
 - 権限の取り消し、新しいパスワード、管理者のロールを外すこと、ユーザーの削除では、ノートブックのトークンはすぐに無効になりますが、コンテナを削除するのはランチャーです。ランチャーに届かないと停止は保留になり、「ユーザー」画面（API では `notebook_stop_pending`）に表示され、Fione が 1 分ごとと、ノートブックの起動・停止・状態確認のたびに再試行します。成功するまで、すでにその JupyterLab にログインしているブラウザは使い続けられます。保留中の停止はデータベースに残るため、再起動しても再試行が続きます。
 - JupyterLab を開いたまま停止すると、ブラウザのコンソールにエラーが出ることがあります。新しいノートブックの最初の Shift+Enter が無視されることがあります（標準の JupyterLab でも起こります）。Firefox と Safari、rootless Docker、Podman は検証していません。ノートブックのイメージは約 950 MB（arm64 で 947 MB を測定）です。ノートブックのボリュームとコンテナのファイルには容量の上限がなく、1 人のユーザーがホストのディスクを使い切ることがあります。
 - ダークモードは Chrome / Edge 123 以降、Firefox 120 以降、Safari 17.5 以降が必要です。ログインには JavaScript が必要です。簡易・詳細の表示はブラウザごとに記憶されます。
-- Fione 君と MCP：答えは間違うことがあります（モデルは小さい）。学習の提案は人が確認して初めて動きます。名前と統計は言語モデルのサーバーに届きます（セルの値は管理者が許したときだけ）。データ内の文章は Fione 君の発言を左右できても、動作は左右できません。実モデルでのツール呼び出しは opt-in のテストでしか確かめていません。MCP は full の API トークンを使い、同時 2 呼び出しまでで、他のレート制限はなく、既定はオフです。長い会話は古い部分から黙って省かれます（新しい話題は新しい会話で）。回答中の再起動でその回答は失われます。macOS の Docker では Ollama は CPU だけで動くため、既定はホストの Ollama アプリです。Ollama のイメージは約 3.8 GB、モデルは約 8 GB です。会話は暗号化せずに保存され、管理者にも見えません。異常なモデルサーバーへの放棄された要求は、サーバーのタイムアウトまで共有の接続プール（約 100）を占めることがあります。ドットのないサーバー名は「ローカル」とみなされますが、リゾルバーの検索ドメインでリモートに届くことがあります。システムページのコンテキスト警告はモデルがロードされている間だけ出ます。
+- アシスタントと MCP：答えは間違うことがあります（モデルは小さい）。学習の提案は人が確認して初めて動きます。名前と統計は言語モデルのサーバーに届きます（セルの値は管理者が許したときだけ）。データ内の文章はアシスタントの発言を左右できても、動作は左右できません。実モデルでのツール呼び出しは opt-in のテストでしか確かめていません。MCP は full の API トークンを使い、同時 2 呼び出しまでで、他のレート制限はなく、既定はオフです。長い会話は古い部分から黙って省かれます（新しい話題は新しい会話で）。回答中の再起動でその回答は失われます。macOS の Docker では Ollama は CPU だけで動くため、既定はホストの Ollama アプリです。Ollama のイメージは約 3.8 GB、モデルは約 8 GB です。会話は暗号化せずに保存され、管理者にも見えません。異常なモデルサーバーへの放棄された要求は、サーバーのタイムアウトまで共有の接続プール（約 100）を占めることがあります。ドットのないサーバー名は「ローカル」とみなされますが、リゾルバーの検索ドメインでリモートに届くことがあります。システムページのコンテキスト警告はモデルがロードされている間だけ出ます。

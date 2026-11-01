@@ -184,7 +184,7 @@ def test_tool_round_trip(env, fake_llm):
 
 def test_system_prompt_says_what_the_model_may_do():
     text = prompt.system_prompt("ja", "iris-lab-0a1b2c", "Iris lab")
-    assert "Fione-kun" in text and "Japanese" in text
+    assert "You are the assistant of Fione" in text and "Japanese" in text
     assert PROJECT_LINE.format(project_id="iris-lab-0a1b2c", project_name='"Iris lab"') in text
     for phrase in (
         "never invent numbers",

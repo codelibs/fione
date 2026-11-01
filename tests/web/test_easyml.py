@@ -158,7 +158,7 @@ def test_the_iris_flow_ends_with_a_star_rating_and_a_prediction_download(runner_
     summary = client.get(summary_url).text
     assert 1 <= stars_of(summary) <= 5
     assert stars_of(summary) >= 4  # iris is easy: well above always guessing one species
-    assert "right about" in summary and "Fione-kun" in summary
+    assert "right about" in summary and "Assistant" in summary
     assert "Enough models were tried" in summary  # max_models = 1
     assert "/api/v1/models/" in summary and "docker run" in summary
     model_id = summary_url.split("/")[-2]
@@ -787,7 +787,7 @@ def test_the_wizard_in_japanese_uses_the_product_terms(make_client):
     for term in ("データ分析", "予測する列", "入力する列", "最大実行時間", "実行"):
         assert term in analysis, term
     summary = world.client.get(world.path("/projects/{p}/models/{model}/summary"), headers=ja).text
-    assert "予測結果サマリー" in summary and "Fione 君" in summary
+    assert "予測結果サマリー" in summary and "アシスタント" in summary
     assert re.search(r'aria-label="5 段階中 星 \d つ"', summary)
 
 

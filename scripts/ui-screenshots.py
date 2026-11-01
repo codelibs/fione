@@ -8,7 +8,7 @@ Starts Fione on a free port with a temporary data directory, creates the first a
 and creates two projects through the UI, then walks the EasyML wizard with the iris data (a real
 training run of at most a minute, a prediction, a failed and a cancelled run) and writes PNGs to
 OUTPUT_DIR. The notebook page is shown not running and starting, against a stub launcher this
-script runs (a running notebook needs the Docker stack: tests/e2e). Fione-kun's page is shown
+script runs (a running notebook needs the Docker stack: tests/e2e). The assistant's page is shown
 against the fake LLM of tests/fake_llm.py, run as a process, with a pending training proposal.
 Fails if a page logs a
 console error (a Content-Security-Policy violation, say), raises one, or scrolls sideways.
@@ -791,7 +791,7 @@ def account_and_admin(s: "Shooter", base: str, project: str, data_dir: Path) -> 
 
 
 def assistant_page(s: "Shooter", base: str, project: str) -> None:
-    """Fione-kun's page against the fake LLM: empty, then with a question, what it looked at
+    """The assistant's page against the fake LLM: empty, then with a question, what it looked at
     and a pending training proposal (nothing is confirmed, so no job starts)."""
     shoot_all(s, base, project + "/assistant", "assistant-empty", ("en", "ja"))
     page = s.page("light", "desktop")
@@ -858,7 +858,7 @@ def main() -> None:
     base = f"http://127.0.0.1:{port}"
     launcher = ThreadingHTTPServer(("127.0.0.1", 0), StubLauncher)
     threading.Thread(target=launcher.serve_forever, daemon=True).start()
-    # Fione-kun's language model: tests/fake_llm.py run as the Compose stack runs it (a
+    # The assistant's language model: tests/fake_llm.py run as the Compose stack runs it (a
     # process, not an import: tests/ is not on this script's path).
     llm_port = free_port()
     fake = subprocess.Popen(

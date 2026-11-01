@@ -179,7 +179,7 @@ def render(
             "mode": ui_mode(request),
             # Called by base.html only: fragments never open its connection.
             "notebook_link": lambda: _notebook_link(request, auth),
-            # Fione-kun's place in a project's navigation and entry links: configured or not.
+            # The assistant's place in a project's navigation and entry links: configured or not.
             "assistant_link": request.app.state.settings.llm_base_url is not None,
             **context,  # may override ``here``: where the language switch returns to
         },

@@ -101,11 +101,11 @@ def e2e_item(messages: list[dict]) -> dict:
                                dataset, then "I proposed a training configuration. ..."
         describe               list_datasets, describe_dataset of the first one, then a count
         slow                   a long text, slowly (a reply there is time to stop)
-        anything else          "Hello, I am Fione-kun (fake)."
+        anything else          "Hello, I am the assistant (fake)."
     """
     last = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=None)
     if last is None:
-        return {"text": "Hello, I am Fione-kun (fake)."}
+        return {"text": "Hello, I am the assistant (fake)."}
     asked = str(messages[last].get("content") or "").strip()
     since = messages[last + 1 :]
     made = [
@@ -138,7 +138,7 @@ def e2e_item(messages: list[dict]) -> dict:
     if asked == "slow":
         return {"text": "This is a slow answer, written one small piece at a time. " * 4,
                 "chunks": 60, "chunk_delay": 0.2}  # fmt: skip
-    return {"text": "Hello, I am Fione-kun (fake)."}
+    return {"text": "Hello, I am the assistant (fake)."}
 
 
 def _pieces(text: str, count: int) -> list[str]:
