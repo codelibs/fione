@@ -121,11 +121,13 @@ def test_classification_labels_keep_their_values(iris):
     assert set(model.metrics) == {"logloss", "accuracy"}
 
 
-def test_leaderboard_has_one_row_per_family_plus_the_ensemble(iris):
+def test_leaderboard_has_a_row_per_candidate_plus_the_ensemble(iris):
     model, _, _, _ = iris
     board = model.leaderboard
     assert list(board.columns) == LEADERBOARD_COLUMNS
-    assert sorted(board["family"]) == sorted([*FAMILY_ORDER, "Ensemble"])
+    # A family's runners-up have rows too.
+    assert set(board["family"]) == {*FAMILY_ORDER, "Ensemble"}
+    assert board["family"].eq("Ensemble").sum() == 1 and board["model"].is_unique
     members = board[board["family"] != "Ensemble"]
     assert members["weight"].sum() == pytest.approx(1.0)
     assert (members["weight"] >= 0).all()
@@ -640,14 +642,15 @@ def test_adult_scale_model_is_small_and_predicts_fast(tmp_path):
 def test_adult_scale_model_with_extra_trees_is_small_and_predicts_fast(tmp_path, monkeypatch):
     # The search rarely picks ExtraTrees, the largest and (single-threaded) slowest member.
     monkeypatch.setattr(
-        automl_module, "caruana", lambda oof, *a, **k: dict.fromkeys(oof, 1 / len(oof))
+        automl_module,
+        "caruana",
+        lambda oof, *a, **k: {key: 0.5 if "#" not in key else 0.0 for key in oof},
     )
     df = _adult_like()
     model = _fit(df, families=["LightGBM", "ExtraTrees"], target="income", max_runtime_secs=30)
-    assert [(m.spec.name, len(m.models)) for m in model.members] == [
-        ("LightGBM", 1),
-        ("ExtraTrees", 1),
-    ]
+    # Each is refit once, and again with other seeds when the time and size limits allow.
+    assert [m.spec.name for m in model.members] == ["LightGBM", "ExtraTrees"]
+    assert all(len(m.models) >= 1 for m in model.members)
     path = tmp_path / "model.joblib"
     joblib.dump(model, path)
     assert path.stat().st_size <= 100 * 1024**2

@@ -156,6 +156,9 @@ def run(args: argparse.Namespace) -> None:
 
 def compare(args: argparse.Namespace) -> None:
     a, b = pd.read_csv(args.base), pd.read_csv(args.new)
+    if args.metric == "error":  # 1 - accuracy, for the classification datasets
+        a, b = a.dropna(subset=["accuracy"]).copy(), b.dropna(subset=["accuracy"]).copy()
+        a["loss"], b["loss"] = 1 - a["accuracy"], 1 - b["accuracy"]
     pairs = a.merge(b, on=["dataset", "split"], suffixes=("_a", "_b"))
     pairs["change"] = (pairs["loss_b"] - pairs["loss_a"]) / pairs["loss_a"]
     pairs["time"] = pairs["secs_b"] / pairs["secs_a"]
@@ -210,6 +213,12 @@ def main() -> None:
     c = sub.add_parser("compare", help="paired comparison of two result files")
     c.add_argument("base")
     c.add_argument("new")
+    c.add_argument(
+        "--metric",
+        choices=["loss", "error"],
+        default="loss",
+        help="loss: log loss or RMSE (default); error: 1 - accuracy of the classification fits",
+    )
     c.set_defaults(func=compare)
     args = parser.parse_args()
     args.func(args)

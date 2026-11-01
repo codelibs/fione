@@ -31,6 +31,8 @@ from fione.engine.prep import Prep
 
 TASKS = ("binary", "multiclass", "regression")
 TARGETS = {"binary": "good", "multiclass": "判定", "regression": "value"}
+
+
 # Every family, heaviest first, summing to 1.
 MIXED_WEIGHTS = {name: (len(FAMILIES) - i) / 28 for i, name in enumerate(FAMILIES)}
 HOSTILE = ["<b>x</b>", "幅", "BiasTerm", "contrib_x"]
@@ -59,7 +61,8 @@ def _fit(task: str) -> TrainedModel:
         TARGETS[task], max_runtime_secs=15, max_models=len(FAMILIES), nfolds=3, keep_cv_models=True
     )
     model = AutoML(config).fit(_task_frame(task, _frame()))
-    assert sorted(model.cv_models) == sorted(FAMILIES), f"a family is missing: {model.cv_models}"
+    best = sorted(name for name in model.cv_models if "#" not in name)  # not the runners-up
+    assert best == sorted(FAMILIES), f"a family is missing: {model.cv_models}"
     return model
 
 

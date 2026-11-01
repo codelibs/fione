@@ -9,14 +9,19 @@ spec 5.1/5.7) and spends it in phases:
 2. Search: 0.65 L. Families run one after another in ``FAMILY_ORDER``; each gets the search
    time still left times its ``FAMILY_WEIGHTS`` share among the families not yet run, so time a
    family leaves unused flows to the next ones. The search scores trials with log loss / RMSE.
-3. Ensemble selection: ``caruana`` on the families' out-of-fold (OOF) predictions; cheap.
+   Each family hands on its ``TOP_TRIALS`` best trials, as candidates ``Family``,
+   ``Family#2`` and ``Family#3``.
+3. Ensemble selection: ``caruana`` on the candidates' out-of-fold (OOF) predictions; cheap.
 4. Final refit: until the reserve (about 0.2 L when the search used its whole share; more when
    it ended early). Each member with weight > 0 is refit once on all rows with its best
    parameters: boosting for 1.1 x the mean best iteration of its fold models, without early
    stopping; the forests as one full forest; Linear as one fit. DeepLearning is not refit: its
    fold models, averaged, are its final model (``FamilySpec.refit``). The fold models are also
    the fallback, averaged, with a ``notice``, for a refit that is not expected to fit in the
-   time left (from its best trial's time) or that the deadline cuts short.
+   time left (from its best trial's time) or that the deadline cuts short. Time left after
+   that buys extra refits with other seeds (up to ``BAG_EXTRA`` per member, each when the time
+   left is ``BAG_TIME_FACTOR`` times the member's first refit and the size limits allow),
+   averaged with it.
 5. Reserve: max(0.5 s, 0.15 L), for packaging and for what deadlines cannot interrupt (the
    families' probes, first fits on small data, an iteration slower than measured). Packaging
    includes ``fione.engine.diagnostics`` on the blended OOF predictions (at most 200,000 rows).
@@ -388,8 +393,8 @@ class AutoML:
         return "no_improvement"  # each family stagnated (or used the trials it was allotted)
 
     def _drop(self, member: Member, why: str) -> None:
-        name = member.spec.name
-        self._notice(f"{name} dropped from the ensemble: {why}", family=name)
+        name = member.key or member.spec.name  # "LightGBM#2" for a runner-up
+        self._notice(f"{name} dropped from the ensemble: {why}", family=member.spec.name)
 
     def _members(self, results, weights, X, y, prep, clock, weight, stop_reason):
         """Final members, heaviest first, and the refit time per family."""
