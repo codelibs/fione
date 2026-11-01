@@ -333,10 +333,10 @@ def test_diagnostics_failure_does_not_fail_training(monkeypatch):
     assert model.predict(_iris()).isin([0, 1, 2]).all()
 
 
-def test_phase1_pickle_loads_without_diagnostics(iris_model, tmp_path):
+def test_pickle_without_diagnostics_loads(iris_model, tmp_path):
     model = copy.copy(iris_model)
     assert model.diagnostics is not None
-    del model.__dict__["diagnostics"]  # what a Phase 1 pickle holds
+    del model.__dict__["diagnostics"]  # what a pickle without them holds
     joblib.dump(model, tmp_path / "model.joblib")
     loaded = joblib.load(tmp_path / "model.joblib")  # a file this test wrote itself
     assert loaded.diagnostics is None

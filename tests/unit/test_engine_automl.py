@@ -342,7 +342,7 @@ def test_missing_target_column_is_rejected():
 
 def test_unknown_family_is_rejected():
     with pytest.raises(ConfigError, match="unknown families"):
-        _fit(_binary(100), families=["H2O"], target="y")
+        _fit(_binary(100), families=["nope"], target="y")
 
 
 def test_cv_data_is_kept_on_request():

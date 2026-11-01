@@ -79,7 +79,7 @@ def test_the_built_in_ids_and_kinds():
         check_schema(m.params)
 
 
-# --- frame operations; the expectations follow the v1 scripts named in the comments ----------
+# --- frame operations ----------------------------------------------------------------------
 
 OTHER_COLS = pd.DataFrame({"y": [10, 20, 30, 40, 50], "x": [0, 0, 0, 0, 0]})
 OTHER_ROW = pd.DataFrame({"id": [6], "x": [0.5], "名前": ["f"], "g": ["u"]})
@@ -102,7 +102,7 @@ CASES = [
         frame(),
         pd.concat([frame(), OTHER_ROW], ignore_index=True),
     ),
-    # frame_concat.py, axis=1 (the v1 default): column-wise
+    # axis=1 (the default): column-wise
     (
         "concat",
         {"other_dataset_id": 1},
@@ -157,7 +157,7 @@ CASES = [
         expect(a=[1.0, 2.0], b=[np.nan, np.nan], c=[3.0, np.nan]),
         expect(a=[1.0, 2.0], b=[1.0, 2.0], c=[3.0, np.nan]),
     ),
-    # frame_floor.py: floor of the listed columns only (v1 returned just those)
+    # floor of the listed columns only
     ("floor", {"columns": ["x"]}, None, frame(), expect(x=[3.0, 1.0, np.nan, 4.0, 2.0])),
     (
         "floor",
@@ -196,7 +196,7 @@ CASES = [
         frame(),
         frame().assign(名前=["z"] * 5),
     ),
-    # '&' is AND (v1 combined every condition with OR by mistake), and binds tighter than '|'
+    # '&' is AND, and binds tighter than '|'
     (
         "replace",
         {"column": "名前", "row_conditions": "g == u & id < 3 | id == 5", "value": "hit"},
@@ -241,7 +241,7 @@ CASES = [
         pd.DataFrame({"i": range(10)}),
         expect(i=sorted(SPLIT_ORDER[8:])),
     ),
-    # nothing set aside: the whole frame is the training part (v1 returned the input)
+    # nothing set aside: the whole frame is the training part
     (
         "split",
         {"train_ratio": 100, "valid_ratio": 0, "test_ratio": 0},
@@ -301,8 +301,7 @@ def test_cor_pearson_and_spearman():
 
 
 def test_cor_missing_value_handling():
-    # v1 ran H2O's `use = "complete.obs" if na_rm else "everything"` (h2o/frame.py cor), whose
-    # docstring says the opposite: with the defaults a column with a gap came out as NaN.
+    # With the defaults a column with a gap comes out as NaN.
     df = expect(a=[1.0, 2, 3, 4, np.nan], b=[2.0, 4, 6, 8, 10], c=[5.0, 4, 3, 2, 1])
     default, _ = run_op("cor", df)
     assert default.loc[0].isna().tolist() == [True, True, True]  # a is unknown against all

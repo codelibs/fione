@@ -7,40 +7,28 @@ desktop and a phone viewport, plus a few Japanese ones.
 Starts Fione on a free port with a temporary data directory, creates the first admin, signs in
 and creates two projects through the UI, then walks the EasyML wizard with the iris data (a real
 training run of at most a minute, a prediction, a failed and a cancelled run) and writes PNGs to
-OUTPUT_DIR. The notebook page is shown not running and starting, against a stub launcher this
-script runs (a running notebook needs the Docker stack: tests/e2e). Fione-kun's page is shown
-against the fake LLM of tests/fake_llm.py, run as a process, with a pending training proposal.
-Fails if a page logs a
-console error (a Content-Security-Policy violation, say), raises one, or scrolls sideways.
+OUTPUT_DIR. Fione-kun's page is shown against the fake LLM of tests/fake_llm.py, run as a
+process, with a pending training proposal. Fails if a page logs a console error (a
+Content-Security-Policy violation, say), raises one, or scrolls sideways.
 """
 
-import json
 import os
 import re
 import socket
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import urllib.request
-from contextlib import closing
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pandas as pd
 from playwright.sync_api import Page, expect, sync_playwright
 from sklearn.datasets import load_iris
 
-from fione import db
-from fione.api.app import DB_FILE
-from fione.auth import service as auth_service
-from fione.auth.tokens import TokenScope
-
 FAKE_LLM = Path(__file__).resolve().parent.parent / "tests" / "fake_llm.py"
 SETUP_TOKEN = "screenshot-setup-token-0123456789"
 ADMIN, PASSWORD = "admin", "screenshot-password"
-LAUNCHER_SECRET = "screenshot-launcher-secret-0123456789"
 VIEWPORTS = {"desktop": (1280, 800), "phone": (390, 844)}
 SCHEMES = ("light", "dark")
 # After an HTMX swap: the request has finished and the new content has settled.
@@ -126,7 +114,7 @@ def sign_in(page: Page, base: str, username: str = ADMIN, password: str = PASSWO
     page.wait_for_url(f"{base}/")
 
 
-def run(base: str, out: Path, errors: list[str], data_dir: Path) -> None:
+def run(base: str, out: Path, errors: list[str]) -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         s = Shooter(browser, base, out, errors)
@@ -247,8 +235,7 @@ def run(base: str, out: Path, errors: list[str], data_dir: Path) -> None:
         s.mode = "detailed"  # the AutoML screens are the detailed view's
         automl(s, base, project)
         model_screens(s, base, project)
-        account_and_admin(s, base, project, data_dir)
-        notebook_page(s, base)
+        account_and_admin(s, base, project)
         assistant_page(s, base, project)
         browser.close()
 
@@ -659,23 +646,7 @@ def model_screens(s: "Shooter", base: str, project: str) -> None:
     page.context.close()
 
 
-def seed_scoped_tokens(data_dir: Path) -> None:
-    """A notebook token and an expired one for the admin, so the account page shows both."""
-    with closing(db.connect(data_dir / DB_FILE)) as conn:
-        (admin_id,) = conn.execute("SELECT id FROM users WHERE username = ?", (ADMIN,)).fetchone()
-        auth_service.create_token(
-            conn,
-            admin_id,
-            "notebook session",
-            scope=TokenScope.NOTEBOOK,
-            expires_at=auth_service.expiry_after(12 * 3600),
-        )
-        auth_service.create_token(
-            conn, admin_id, "last week's script", expires_at=auth_service.expiry_after(-3600)
-        )
-
-
-def account_and_admin(s: "Shooter", base: str, project: str, data_dir: Path) -> None:
+def account_and_admin(s: "Shooter", base: str, project: str) -> None:
     """The account page (a new token shown once, a password change), the users, sharing and
     system status screens. The admin's own password and role are never changed: every other
     step signs in with them."""
@@ -690,11 +661,6 @@ def account_and_admin(s: "Shooter", base: str, project: str, data_dir: Path) -> 
         page.click("form[action='/admin/users'] button[type=submit]")
         page.wait_for_url(re.compile(r"/admin/users\?done=created"))
     s.shot(page, "users-created-en-light-desktop", full_page=False)
-    # One user may run notebooks, so both states of the column are shown.
-    page.locator("tr", has=page.locator("th", has_text="editor1")).get_by_role(
-        "button", name="Allow"
-    ).click()
-    page.wait_for_url(re.compile(r"/admin/users\?done=notebook"))
     # One's own account cannot be deleted: the reason is shown.
     me = page.locator("tr", has=page.locator("th", has_text="admin")).first
     if me.locator("summary").count():
@@ -717,7 +683,6 @@ def account_and_admin(s: "Shooter", base: str, project: str, data_dir: Path) -> 
         s.errors.append(f"users: the actions are out of view on a phone ({box})")
     page.context.close()
     shoot_all(s, base, "/admin/system", "system", ("en", "ja"))
-    seed_scoped_tokens(data_dir)
     shoot_all(s, base, "/account", "account", ("en", "ja"))
 
     # A new token: its secret is shown once, and gone after a reload.
@@ -805,50 +770,6 @@ def assistant_page(s: "Shooter", base: str, project: str) -> None:
     shoot_all(s, base, project + "/assistant", "assistant-proposal", ("en", "ja"))
 
 
-class StubLauncher(BaseHTTPRequestHandler):
-    """The notebook launcher's API in memory: a started notebook stays ``starting``."""
-
-    states: dict[str, str] = {}
-
-    def _answer(self, status: int, data: dict | None = None) -> None:
-        payload = b"" if data is None else json.dumps(data).encode()
-        self.send_response(status)
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def do_GET(self):  # noqa: N802
-        self._answer(200, {"state": self.states.get(self.path, "absent")})
-
-    def do_PUT(self):  # noqa: N802
-        self.rfile.read(int(self.headers["Content-Length"]))
-        self.states[self.path] = "starting"
-        self._answer(200, {"state": "starting"})
-
-    def do_DELETE(self):  # noqa: N802
-        self.states.pop(self.path, None)
-        self._answer(204)
-
-    def log_message(self, format, *args):  # noqa: A002
-        pass
-
-
-def notebook_page(s: "Shooter", base: str) -> None:
-    """The notebook page of an admin (always allowed): not running, then starting (polled)."""
-    shoot_all(s, base, "/notebook", "notebook-absent", ("en", "ja"))
-    page = s.page("light", "desktop")
-    sign_in(page, base)
-    page.click("nav a[href='/notebook']")
-    page.click("form[action='/notebook/start'] button[type=submit]")
-    page.wait_for_selector("#notebook-status[hx-trigger]")
-    page.wait_for_timeout(2500)  # one poll, still starting
-    wait_settled(page)
-    if not page.locator("#notebook-status[hx-trigger]").count():
-        s.errors.append("notebook: the status stopped polling")
-    page.context.close()
-    shoot_all(s, base, "/notebook", "notebook-starting", ("en", "ja"))
-
-
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
@@ -856,8 +777,6 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     port = free_port()
     base = f"http://127.0.0.1:{port}"
-    launcher = ThreadingHTTPServer(("127.0.0.1", 0), StubLauncher)
-    threading.Thread(target=launcher.serve_forever, daemon=True).start()
     # Fione-kun's language model: tests/fake_llm.py run as the Compose stack runs it (a
     # process, not an import: tests/ is not on this script's path).
     llm_port = free_port()
@@ -874,9 +793,6 @@ def main() -> None:
             # The script signs in with a wrong password once per variant on purpose.
             "FIONE_LOGIN_MAX_FAILURES": "1000",
             "FIONE_PUBLIC_URL": base,
-            "FIONE_NOTEBOOK_URL": f"http://127.0.0.1:{free_port()}",  # never framed here
-            "FIONE_NOTEBOOK_LAUNCHER_URL": f"http://127.0.0.1:{launcher.server_address[1]}",
-            "FIONE_NOTEBOOK_LAUNCHER_SECRET": LAUNCHER_SECRET,
             "FIONE_LLM_BASE_URL": f"http://127.0.0.1:{llm_port}/v1",
             "FIONE_LLM_PROVIDER": "ollama",
         }
@@ -899,13 +815,12 @@ def main() -> None:
         errors: list[str] = []
         try:
             wait_until_up(base, server)
-            run(base, out, errors, Path(data_dir))
+            run(base, out, errors)
         finally:
             server.terminate()
             server.wait(timeout=30)
             fake.terminate()
             fake.wait(timeout=30)
-            launcher.shutdown()
             if errors:
                 print("\n".join(["Page errors:", *errors]), file=sys.stderr)
     if errors:

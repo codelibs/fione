@@ -58,14 +58,6 @@ def test_url_is_required_without_http(monkeypatch):
     assert err.value.code == "config"
 
 
-def test_notebook_token_works_with_the_sdk(notebook_sdk):
-    nb = notebook_sdk
-    project = nb.create_project("p")
-    assert [p["id"] for p in nb.projects()] == [project["id"]]
-    dataset = nb.upload(project["id"], FRAME, "frame")
-    pd.testing.assert_frame_equal(nb.read(project["id"], dataset["id"]), FRAME, check_dtype=False)
-
-
 def test_url_and_timeout_come_from_the_environment_and_arguments(monkeypatch):
     monkeypatch.setenv("FIONE_URL", "http://fione.test")
     monkeypatch.setenv("FIONE_TOKEN", "t")

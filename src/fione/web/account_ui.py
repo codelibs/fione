@@ -97,8 +97,6 @@ def _view(
     tokens = auth_service.page_tokens(
         conn, auth.user.id, limit=TOKENS_PER_PAGE, offset=(number - 1) * TOKENS_PER_PAGE
     )
-    now = auth_service.expiry_after(0)
-    expired = {t.id for t in tokens if t.expires_at is not None and t.expires_at <= now}
     done = request.query_params.get("done")
     response = render(
         request,
@@ -108,7 +106,6 @@ def _view(
         nav="account",
         roles=[r.value for r in Role],
         tokens=tokens,
-        expired=expired,
         total=total,
         page_number=number,
         pages=pages,

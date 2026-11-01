@@ -30,7 +30,7 @@ class DeadlineExceeded(Exception):
 _TASKS = ("auto", "classification", "regression")
 # The folds' random_state (numpy's RandomState through scikit-learn) takes 0..2**32 - 1.
 MAX_SEED = 2**32 - 1
-# H2O's metric names plus accuracy and r2, compared case-insensitively. The AutoML accepts the
+# The metric names, compared case-insensitively. The AutoML accepts the
 # subset that fits the task (see ``fione.engine.metrics``).
 _METRICS = frozenset(
     {

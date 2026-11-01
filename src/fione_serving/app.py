@@ -1,6 +1,6 @@
 """The prediction API: ``/invocations``, ``/model``, ``/ping``.
 
-``/invocations`` keeps v1's contract. Each instance is answered on its own and in order, so a
+Each instance is answered on its own and in order, so a
 row that cannot be predicted becomes ``{"exception": ...}`` and never fails the request. Rows
 are checked in bulk (missing columns, text in numeric columns) and the valid ones are predicted
 in a single batch; only if that batch call itself raises is each row predicted separately, to

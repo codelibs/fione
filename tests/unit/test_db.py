@@ -60,20 +60,6 @@ def test_failed_migration_rolls_back(conn, monkeypatch):
     assert conn.execute("SELECT name FROM sqlite_master WHERE name='t'").fetchone() is None
 
 
-def test_migration_gives_existing_users_no_notebook_permission(conn, monkeypatch):
-    before = next(i for i, sql in enumerate(db.MIGRATIONS) if "ADD COLUMN notebook" in sql)
-    with monkeypatch.context() as m:
-        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:before])
-        db.migrate(conn)
-    for name, role in (("a", "admin"), ("e", "editor"), ("v", "viewer")):
-        conn.execute(
-            "INSERT INTO users (username, password_hash, role) VALUES (?, 'x', ?)", (name, role)
-        )
-    assert db.migrate(conn) == len(db.MIGRATIONS)
-    rows = conn.execute("SELECT username, notebook FROM users ORDER BY id").fetchall()
-    assert [tuple(r) for r in rows] == [("a", "none"), ("e", "none"), ("v", "none")]
-
-
 def test_migration_keeps_existing_models(conn, monkeypatch):
     before = next(i for i, sql in enumerate(db.MIGRATIONS) if "diagnostics_json" in sql)
     with monkeypatch.context() as m:
@@ -261,53 +247,11 @@ def test_login_limits_must_be_positive(tmp_path, field):
     assert getattr(Settings(data_dir=tmp_path, **{field: 1}), field) == 1
 
 
-NOTEBOOKS = {
-    "notebook_url": "http://127.0.0.1:8888",
-    "public_url": "http://127.0.0.1:8080",
-    "notebook_launcher_url": "http://launcher",
-    "notebook_launcher_secret": "x" * 32,
-}
-
-
-def test_settings_validation(tmp_path):
-    def settings(**changes):
-        return Settings(data_dir=tmp_path, **(NOTEBOOKS | changes))
-
-    assert settings().notebooks_enabled
-    for name in ("public_url", "notebook_launcher_url", "notebook_launcher_secret"):
-        with pytest.raises(ValueError, match=f"FIONE_{name.upper()} is required"):
-            settings(**{name: ""})
-    with pytest.raises(ValueError, match="own origin"):
-        settings(notebook_url="http://127.0.0.1:8080")
-    with pytest.raises(ValueError, match="own origin"):
-        settings(public_url="http://fione.example:80", notebook_url="http://FIONE.example:80")
-    # One origin to a browser, though the strings differ: the default port is implied.
-    with pytest.raises(ValueError, match="own origin"):
-        settings(
-            public_url="https://fione.example.com", notebook_url="https://fione.example.com:443"
-        )
-    with pytest.raises(ValueError, match="own origin"):
-        settings(public_url="http://H:80", notebook_url="http://h")
-    normal = settings(public_url="https://Fione.Example.com:443", notebook_url="http://NB.x:080")
-    assert (normal.public_url, normal.notebook_url) == ("https://fione.example.com", "http://nb.x")
-    assert settings(notebook_url="https://nb.x:8443").notebook_url == "https://nb.x:8443"
-    bad = ("http://h:8888/path", "http://h:8888/", "ftp://h", "http://h?x", "h:8888", "http://u@h")
-    bad += ("http://h:65536",)
-    for url in bad:
-        with pytest.raises(ValueError, match="FIONE_NOTEBOOK_URL must be"):
-            settings(notebook_url=url)
+def test_public_url_is_a_bare_origin_in_normal_form(tmp_path):
+    assert Settings(data_dir=tmp_path).public_url is None
+    assert Settings(data_dir=tmp_path, public_url="").public_url is None
+    assert Settings(data_dir=tmp_path, public_url="https://Fione.Example.com:443").public_url == (
+        "https://fione.example.com"
+    )
     with pytest.raises(ValueError, match="FIONE_PUBLIC_URL must be"):
-        settings(public_url="https://fione.example.com/app")
-    with pytest.raises(ValueError, match="FIONE_NOTEBOOK_LAUNCHER_SECRET"):
-        settings(notebook_launcher_secret="x" * 31)
-    with pytest.raises(ValueError, match="FIONE_NOTEBOOK_LAUNCHER_SECRET"):
-        settings(notebook_launcher_secret="x" * 31 + " ")
-    with pytest.raises(ValueError, match="FIONE_NOTEBOOK_LAUNCHER_URL"):
-        settings(notebook_launcher_url="file:///etc/passwd")
-    for seconds in (599, 604801):
-        with pytest.raises(ValueError, match="notebook_max_lifetime_secs"):
-            settings(notebook_max_lifetime_secs=seconds)
-    off = Settings(data_dir=tmp_path, **{name: "" for name in NOTEBOOKS})
-    assert not off.notebooks_enabled
-    assert all(getattr(off, name) is None for name in NOTEBOOKS)
-    assert not Settings(data_dir=tmp_path, public_url="http://h:1").notebooks_enabled
+        Settings(data_dir=tmp_path, public_url="https://fione.example.com/app")

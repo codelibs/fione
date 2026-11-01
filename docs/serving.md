@@ -173,23 +173,6 @@ What the model expects and predicts. From the same iris model:
 An empty `200` response while the server runs. The image's Docker health check uses it. (There
 is no `/health` endpoint on Fione Serving; `/api/v1/health` belongs to the Fione server.)
 
-## Differences from v1 Fione Serving
-
-v1 shipped a zip with a Dockerfile, `fione-serving.jar` and an H2O MOJO model that you built
-with `docker build`. v2 ships only the model files; the image is shared and run with
-`docker run`.
-
-`/invocations` and `/ping` keep v1's shapes. `GET /model` keeps `names`, `domains`,
-`responseColumn`, `category`, `nclasses`, `nfeatures`, `uuid` and `instance`. Compared with
-v1 Fione Serving (`codelibs/fione-serving`):
-
-- **Dropped** (H2O MOJO details with no meaning for Fione's models): `offsetColumn`,
-  `algoName`, `h2oVersion`, `supervised`, `balanceClasses`, `defaultThreshold`,
-  `priorClassDistrib`, `modelClassDistrib`, `mojo_version`, `modelDescriptor`.
-- **Added**: `engine`, `fioneVersion`.
-- **Changed**: `uuid` is now derived from the model file's SHA-256.
-- v1 required `Content-Type: application/json` on `/model` and `/invocations`; v2 does not.
-
 ## Model files and trust
 
 A model is `model.joblib` (a joblib pickle of Fione's model classes) plus `manifest.json`

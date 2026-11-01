@@ -4,11 +4,9 @@ public test values of docker/e2e.env) and a real browser (Playwright, Chromium).
     uv run pytest tests/e2e -m e2e
 
 One stack per session, under a unique project name on free host ports, always removed with
-its volumes and notebook containers at the end (also on failure or Ctrl-C). The stack runs
-the notebook profile, with Fione and the notebook gateway on the same host name (127.0.0.1;
-``localhost`` would be another site). Set ``FIONE_IMAGE_TAG`` to use images built beforehand
-(``docker compose ... --profile serving --profile notebook build``); otherwise all the images
-are built. ``FIONE_E2E=0`` skips the suite; so does a missing Docker. On failure the Compose
+its volumes at the end (also on failure or Ctrl-C). Set ``FIONE_IMAGE_TAG`` to use images
+built beforehand (``docker compose ... --profile serving build``); otherwise both images are
+built. ``FIONE_E2E=0`` skips the suite; so does a missing Docker. On failure the Compose
 logs are printed, and they, a Playwright trace and a screenshot of the failing page are
 saved under ``FIONE_E2E_ARTIFACTS`` (default ``test-results/e2e``).
 """
@@ -19,7 +17,6 @@ import secrets
 import shutil
 import socket
 import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,8 +38,6 @@ FAILED_LOAD = "Failed to load resource"
 # the shell over docker/e2e.env): only these pass. COMPOSE_PROFILES is dropped too: an exported
 # `ollama` would start a real Ollama and download 8 GB.
 PASSED_SETTINGS = ("FIONE_IMAGE_TAG",)
-# Both built and removed; only the notebook profile is started (fione-serving needs a model).
-PROFILES = ("--profile", "serving", "--profile", "notebook")
 
 
 def _env_value(name: str) -> str:
@@ -65,7 +60,6 @@ def _free_port() -> int:
 class Stack:
     project: str
     port: int
-    notebook_port: int
     image_tag: str
     env: dict
     artifacts: Path
@@ -74,10 +68,6 @@ class Stack:
     @property
     def base(self) -> str:
         return f"http://127.0.0.1:{self.port}"
-
-    @property
-    def notebook_base(self) -> str:
-        return f"http://127.0.0.1:{self.notebook_port}"
 
     @property
     def serving_image(self) -> str:
@@ -129,33 +119,10 @@ class Stack:
     def logs(self) -> str:
         return self.compose("logs", "--no-color", "--tail", "300", check=False).stdout
 
-    def labelled(self, kind: str) -> list[str]:
-        """The ids of this project's notebook containers (``kind`` "container", any state) or
-        notebook volumes ("volume"), which the launcher made outside Compose."""
-        listing = ["ps", "-a"] if kind == "container" else ["volume", "ls"]
-        command = ["docker", *listing, "-q", "--filter", f"label=fione.project={self.project}"]
-        out = subprocess.run(command, capture_output=True, text=True, timeout=60).stdout
-        return out.split()
-
     def down(self) -> None:
-        """Remove the notebook containers first (they hold the `notebooks` network), then the
-        stack with its volumes, then the notebook volumes."""
         if not self.down_done:
             self.down_done = True
-            if containers := self.labelled("container"):
-                _report_failure(["docker", "rm", "-f", *containers])
-            self.compose(*PROFILES, "down", "-v", "--remove-orphans", check=False)
-            if volumes := self.labelled("volume"):
-                _report_failure(["docker", "volume", "rm", *volumes])
-
-
-def _report_failure(command: list[str]) -> None:
-    """Run a clean-up command; if it fails, say so (a leak would go unnoticed otherwise)."""
-    done = subprocess.run(command, capture_output=True, text=True, timeout=120)
-    if done.returncode:
-        # Past pytest's capture: teardown output is otherwise only shown for failed tests.
-        message = f"e2e clean-up failed: {' '.join(command[:3])}: {done.stderr.strip()}"
-        print(message, file=sys.__stderr__)
+            self.compose("--profile", "serving", "down", "-v", "--remove-orphans", check=False)
 
 
 def _docker_ready() -> str | None:
@@ -179,7 +146,7 @@ def stack(request):
     prebuilt = os.environ.get("FIONE_IMAGE_TAG")
     artifacts = Path(os.environ.get("FIONE_E2E_ARTIFACTS", ROOT / "test-results" / "e2e"))
     artifacts.mkdir(parents=True, exist_ok=True)
-    port, notebook_port = _free_port(), _free_port()
+    port = _free_port()
     env = {
         k: v
         for k, v in os.environ.items()
@@ -187,14 +154,10 @@ def stack(request):
     } | {
         "FIONE_PORT": str(port),
         "FIONE_SERVING_PORT": str(_free_port()),
-        "FIONE_NOTEBOOK_PORT": str(notebook_port),
-        "FIONE_PUBLIC_URL": f"http://127.0.0.1:{port}",
-        "FIONE_NOTEBOOK_URL": f"http://127.0.0.1:{notebook_port}",
     }
     stack = Stack(
         project=f"fione-e2e-{secrets.token_hex(3)}",
         port=port,
-        notebook_port=notebook_port,
         image_tag=prebuilt or _env_value("FIONE_IMAGE_TAG"),
         env=env,
         artifacts=artifacts,
@@ -202,8 +165,8 @@ def stack(request):
     atexit.register(stack.down)  # also after Ctrl-C, when fixtures may not finalize
     try:
         if not prebuilt:
-            stack.compose(*PROFILES, "build", timeout=UP_TIMEOUT_SECS)
-        up = ["--profile", "notebook", "up", "-d", "--wait", "--wait-timeout", "180"]
+            stack.compose("--profile", "serving", "build", timeout=UP_TIMEOUT_SECS)
+        up = ["up", "-d", "--wait", "--wait-timeout", "180"]
         stack.compose(*up, *([] if not prebuilt else ["--no-build"]), timeout=UP_TIMEOUT_SECS)
         yield stack
     except subprocess.CalledProcessError as e:
@@ -248,8 +211,7 @@ class Console:
         self.expected.add(url)
 
     def expect_error_prefix(self, prefix: str) -> None:
-        """Failed loads of URLs under ``prefix`` are expected: only for JupyterLab's writes to
-        its settings and workspaces APIs, which the notebook gateway refuses."""
+        """Failed loads of URLs under ``prefix`` are expected."""
         self.expected_prefixes.add(prefix)
 
     def _expected(self, url: str) -> bool:

@@ -32,7 +32,7 @@ OpenAI-compatible server. Nothing is installed with Fione and no model is bundle
 
 On Linux, the Ollama of the host is reached through the Docker host gateway, so it must listen
 beyond the loopback address (`OLLAMA_HOST=0.0.0.0`). Ollama has no authentication, so that opens
-it to your network and to the notebook containers: bind it to the Docker bridge address and
+it to your network: bind it to the Docker bridge address and
 firewall it, or use the Compose `ollama` profile, which is not published.
 
 All the settings are in [Configuration](configuration.md). Fione-kun appears in a project's
@@ -95,7 +95,7 @@ Fione can serve the same read-only tools to MCP clients (an AI assistant or an e
 speaks MCP). It is **off by default**; set `FIONE_MCP_ENABLED=true` (in `docker/.env` for
 Compose). The endpoint is `/mcp` on Fione's own port, for example `http://127.0.0.1:8080/mcp`.
 
-1. Create an API token on the **Account** page (a full token; notebook tokens are refused).
+1. Create an API token on the **Account** page.
 2. Give the client the URL and the header `Authorization: Bearer <the token>`. Many clients take
    a configuration like this:
 
@@ -107,7 +107,7 @@ Compose). The endpoint is `/mcp` on Fione's own port, for example `http://127.0.
 The client acts as the token's owner and sees the projects that person can read: it can list
 projects, datasets and models and read their descriptions, results and explanations, and it can
 get a proposed training configuration back, which is not saved. It cannot start or change
-anything, and it never receives example values. A token is a full API token, so keep it secret.
+anything, and it never receives example values. A token has the same rights as you, so keep it secret.
 Behind a reverse proxy, block `/mcp` unless you want MCP clients outside your network. At most
 two tool calls run at once.
 

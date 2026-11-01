@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [v2, main]
+    branches: [main]
 
 permissions:
   contents: read
@@ -25,15 +25,13 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install 3.12
-      - run: uv sync --frozen --group notebook
+      - run: uv sync --frozen
       - run: uv run python scripts/check_licenses.py
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      # Unit, API, web and contract tests (acceptance, e2e, docker and notebook are deselected
+      # Unit, API, web and contract tests (acceptance, e2e and docker are deselected
       # by default). Spread over the runner's cores: the suite is thousands of small tests.
       - run: uv run pytest -q -n auto
-      # The notebook image's Jupyter extension, against a real Jupyter server.
-      - run: uv run pytest -m notebook -q
 
   e2e:
     # Pushes to the main branches only: the browser suite against the Compose stack.
@@ -51,12 +49,12 @@ jobs:
       - run: uv python install 3.12
       - run: uv sync --frozen
       - run: uv run playwright install --with-deps chromium
-      - name: Build the images (fione, serving, notebook launcher and notebook)
+      - name: Build the images (fione and serving)
         run: >
           docker compose --env-file docker/e2e.env
           -f docker/compose.yaml -f docker/compose.e2e.yaml
-          --profile serving --profile notebook build
-      # The notebook image, the launcher and the gateway against a real Docker daemon.
+          --profile serving build
+      # The Compose stack against a real Docker daemon.
       - run: uv run pytest -m docker -q
       - name: End-to-end tests
         env:

@@ -144,19 +144,6 @@ def ui_mode(request: Request) -> str:
     return "detailed" if request.cookies.get(MODE_COOKIE) == "detailed" else "simple"
 
 
-def _notebook_link(request: Request, auth: Auth | None) -> bool:
-    """Whether the main navigation shows the notebook page: only on an install with notebooks,
-    which alone pays for the short connection. False if it cannot be told (the page may be
-    the error page of a database failure)."""
-    if auth is None or auth.via != "cookie" or not request.app.state.settings.notebooks_enabled:
-        return False
-    try:
-        with closing(db.connect(request.app.state.db_path)) as conn:
-            return auth_service.can_use_notebook(conn, auth.user)
-    except Exception:
-        return False
-
-
 def render(
     request: Request, template: str, auth: Auth | None = None, *, status: int = 200, **context
 ) -> HTMLResponse:
@@ -177,8 +164,6 @@ def render(
             "static": _static,
             "version": __version__,
             "mode": ui_mode(request),
-            # Called by base.html only: fragments never open its connection.
-            "notebook_link": lambda: _notebook_link(request, auth),
             # Fione-kun's place in a project's navigation and entry links: configured or not.
             "assistant_link": request.app.state.settings.llm_base_url is not None,
             **context,  # may override ``here``: where the language switch returns to
@@ -387,10 +372,7 @@ async def _ui_error(request: Request, exc: UiError) -> Response:
 # Status -> message of the error page for errors raised outside the UI's own checks.
 HTTP_ERROR_KEYS = {404: "error.not_found", 405: "error.method", 413: "error.too_large"}
 ERROR_HINTS = {404: "error.not_found_hint", 403: "error.forbidden_hint"}
-KEY_HINTS = {
-    "error.admin_only": "error.admin_only_hint",
-    "notebook.forbidden": "notebook.forbidden_hint",
-}
+KEY_HINTS = {"error.admin_only": "error.admin_only_hint"}
 
 
 def wants_html(request: Request) -> bool:
@@ -411,7 +393,6 @@ def install(app: FastAPI) -> None:
         easyml,
         models_ui,
         modules_ui,
-        notebook_ui,
         sharing_ui,
     )
 
@@ -424,7 +405,6 @@ def install(app: FastAPI) -> None:
     app.include_router(account_ui.router)
     app.include_router(admin_ui.router)
     app.include_router(sharing_ui.router)
-    app.include_router(notebook_ui.router)
     app.include_router(assistant_ui.router)
     app.add_exception_handler(UiError, _ui_error)
     api_http_error = app.exception_handlers[StarletteHTTPException]

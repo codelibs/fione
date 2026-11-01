@@ -11,7 +11,6 @@ from fione import db
 from fione.api import routes_projects
 from fione.auth import service as auth
 from fione.auth.roles import Role
-from fione.auth.tokens import TokenScope
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 
@@ -49,7 +48,7 @@ def test_user_crud(client, people):
     )
     assert r.status_code == 201
     carol = r.json()
-    assert carol == {"id": carol["id"], "username": "carol", "role": "viewer", "notebook": "none"}
+    assert carol == {"id": carol["id"], "username": "carol", "role": "viewer"}
     listing = client.get("/api/v1/users", headers=root)
     assert [u["username"] for u in listing.json()] == [
         "root",
@@ -93,8 +92,6 @@ def test_user_create_validation(client, people, body, fragment):
 def test_patch_needs_a_change(client, people):
     user_id = people["editor"][0].id
     r = client.patch(f"/api/v1/users/{user_id}", json={}, headers=h(people, "root"))
-    assert r.status_code == 422
-    r = client.patch(f"/api/v1/users/{user_id}", json={"notebook": None}, headers=h(people, "root"))
     assert r.status_code == 422
 
 
@@ -341,79 +338,3 @@ def test_project_deletion_uses_at_most_eight_cancel_threads(client, people, monk
     assert r.status_code == 204
     assert sizes == [routes_projects.MAX_CANCEL_THREADS] == [8]
     assert len(runner.cancelled) == 12
-
-
-# --- notebook permission ---------------------------------------------------------------
-
-
-def test_users_carry_the_notebook_permission(client, people):
-    root = h(people, "root")
-    listing = client.get("/api/v1/users", headers=root).json()
-    assert {u["notebook"] for u in listing} == {"none"}
-    me = client.get("/api/v1/auth/me", headers=root).json()
-    assert "notebook" not in me
-
-
-def test_patch_sets_notebook_permission(client, people):
-    root = h(people, "root")
-    editor_id = people["editor"][0].id
-    r = client.patch(f"/api/v1/users/{editor_id}", json={"notebook": "run"}, headers=root)
-    assert r.status_code == 200
-    assert r.json() == {"id": editor_id, "username": "editor", "role": "editor", "notebook": "run"}
-    users = client.get("/api/v1/users", headers=root).json()
-    listing = {u["username"]: u["notebook"] for u in users}
-    assert listing["editor"] == "run" and listing["viewer"] == "none"
-    r = client.patch(
-        f"/api/v1/users/{editor_id}", json={"notebook": "none", "role": "viewer"}, headers=root
-    )
-    assert r.json()["notebook"] == "none" and r.json()["role"] == "viewer"
-
-
-def test_patch_without_a_notebook_keeps_it(client, people):
-    root = h(people, "root")
-    editor_id = people["editor"][0].id
-    client.patch(f"/api/v1/users/{editor_id}", json={"notebook": "run"}, headers=root)
-    r = client.patch(f"/api/v1/users/{editor_id}", json={"role": "viewer"}, headers=root)
-    assert r.json()["notebook"] == "run"
-
-
-@pytest.mark.parametrize("value", ["admin", "", 1, True])
-def test_patch_refuses_other_notebook_values(client, people, value):
-    editor_id = people["editor"][0].id
-    r = client.patch(
-        f"/api/v1/users/{editor_id}", json={"notebook": value}, headers=h(people, "root")
-    )
-    assert r.status_code == 422
-
-
-def test_patch_notebook_is_for_admins_only(client, people):
-    editor_id = people["editor"][0].id
-    r = client.patch(
-        f"/api/v1/users/{editor_id}", json={"notebook": "run"}, headers=h(people, "editor")
-    )
-    assert r.status_code == 403
-    r = client.patch(f"/api/v1/users/{editor_id}", json={"notebook": "run"})
-    assert r.status_code == 401
-
-
-def test_a_notebook_token_cannot_grant_the_notebook_permission(client, people):
-    root, editor_id = people["root"][0], people["editor"][0].id
-    conn = connect(client)
-    try:
-        _, token = auth.create_token(
-            conn, root.id, "nb", scope=TokenScope.NOTEBOOK, expires_at=auth.expiry_after(60)
-        )
-    finally:
-        conn.close()
-    r = client.patch(
-        f"/api/v1/users/{editor_id}",
-        json={"notebook": "run"},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert r.status_code == 403 and r.json()["code"] == "token_scope"
-
-
-def test_listing_users_survives_a_user_created_meanwhile(client, people, monkeypatch):
-    monkeypatch.setattr(auth, "notebook_permissions", lambda conn: {})
-    listing = client.get("/api/v1/users", headers=h(people, "root")).json()
-    assert {u["notebook"] for u in listing} == {"none"}

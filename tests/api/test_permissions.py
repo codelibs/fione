@@ -148,14 +148,6 @@ ROWS = [
     Row(
         "PATCH",
         "/api/v1/users/{user_id}",
-        "/api/v1/users/{victim}",
-        e(401, 403, 403, 403, 200, 403, 403),
-        json={"notebook": "run"},
-        note="the notebook permission",
-    ),
-    Row(
-        "PATCH",
-        "/api/v1/users/{user_id}",
         "/api/v1/users/{admin_id}",
         e(401, 403, 403, 403, 409, 403, 403),
         json={"role": "editor"},
