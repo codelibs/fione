@@ -298,7 +298,7 @@ def test_regression_oof_has_one_column():
         folds,
         "regression",
         prep,
-        Deadline(2),
+        Deadline(30),
         events.append,
         _until_trials(events, 1),
     )

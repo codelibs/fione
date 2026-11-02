@@ -158,7 +158,7 @@ def test_ignored_columns_are_not_features(iris):
     assert model.target == "target" and model.config.ignored_columns == ["row_id"]
 
 
-def test_refit_members_hold_one_model_per_seed_without_cv_data(iris):
+def test_refit_members_hold_one_model_per_seed_without_cv_data(iris, extra_seeds):
     model, _, _, _ = iris
     assert model.stop_reason == "max_models"
     # A refit member is one model per seed (none for Linear: one fit gives one model); one that
@@ -716,7 +716,7 @@ def _bagging_data():
     return _binary(400, seed=3)
 
 
-def test_extra_seeds_are_averaged_into_a_refit_member(monkeypatch):
+def test_extra_seeds_are_averaged_into_a_refit_member(monkeypatch, extra_seeds):
     df = _bagging_data()
     model = _fit(df, families=["LightGBM"], target="y", max_models=3)
     (member,) = model.members
@@ -731,13 +731,13 @@ def test_extra_seeds_are_averaged_into_a_refit_member(monkeypatch):
     assert len(single.models) == 1
 
 
-def test_extra_seeds_wait_for_enough_time_left(monkeypatch):
+def test_extra_seeds_wait_for_enough_time_left(monkeypatch, extra_seeds):
     monkeypatch.setattr(automl_module, "BAG_TIME_FACTOR", 1e12)
     (member,) = _fit(_bagging_data(), families=["LightGBM"], target="y", max_models=3).members
     assert len(member.models) == 1
 
 
-def test_extra_seeds_respect_the_size_limits(monkeypatch):
+def test_extra_seeds_respect_the_size_limits(monkeypatch, extra_seeds):
     df = _bagging_data()
     monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
     (member,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
@@ -752,7 +752,7 @@ def test_extra_seeds_respect_the_size_limits(monkeypatch):
     assert len(together.models) == 3
 
 
-def test_a_member_without_randomness_is_not_refit_with_other_seeds():
+def test_a_member_without_randomness_is_not_refit_with_other_seeds(extra_seeds):
     model = _fit(_bagging_data(), families=["Linear"], target="y", max_models=3)
     assert [len(member.models) for member in model.members] == [1]
 
@@ -774,7 +774,7 @@ def test_runners_up_of_a_family_join_the_ensemble_candidates(monkeypatch):
     assert model.predict_proba(_bagging_data()).shape == (400, 2)
 
 
-def test_an_extra_seed_that_is_bigger_than_estimated_is_not_kept(monkeypatch):
+def test_an_extra_seed_that_is_bigger_than_estimated_is_not_kept(monkeypatch, extra_seeds):
     """A forest's size varies with its seed: the extra model is measured after it is fitted."""
     first = []
 
@@ -789,7 +789,7 @@ def test_an_extra_seed_that_is_bigger_than_estimated_is_not_kept(monkeypatch):
     assert len(member.models) == 2  # the first (100) and one extra (1000) fit, not a second
 
 
-def test_a_failing_extra_seed_is_reported_and_the_member_keeps_its_models(monkeypatch):
+def test_a_failing_extra_seed_is_reported_and_the_member_keeps_its_models(monkeypatch, extra_seeds):
     original = LightGBM._fit
     calls = []
 
