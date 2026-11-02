@@ -103,6 +103,10 @@ What this release does not do, or does with a catch. Japanese summary at the end
   but were not yet confirmed by the last check are dropped, so short runs may add none. The gate judges on a sample of at most 20,000 rows and a
   small LightGBM, so a feature that only a neural network or a linear model would use is not
   found; target encoding and categorical crosses as categories are not built.
+- **Extra seeds make a model bigger and slower to predict.** Time left after the final refits
+  buys up to four more refits of each boosting or forest member; their predictions, importances
+  and contributions are averaged, so each costs that many times more (the size limits still
+  hold). Linear is deterministic and is not repeated.
 - **One output is explained per row**: with two classes the second one (the last `p_` column),
   with more the predicted class (the API takes a `class_index` for another), for regression
   the value. Batch predictions and Fione Serving have no option for every class.

@@ -12,12 +12,26 @@ with warnings.catch_warnings():
 
 from api_helpers import make_settings  # noqa: E402
 from fione.api.app import create_app  # noqa: E402
+from fione.engine import automl  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _no_explain_after_training(monkeypatch):
     """Training does not queue an explain job in tests unless a test asks for it."""
     monkeypatch.setenv("FIONE_EXPLAIN_AFTER_TRAINING", "false")
+
+
+@pytest.fixture
+def extra_seeds():
+    """Ask for this to train with the extra seeds of the default configuration."""
+
+
+@pytest.fixture(autouse=True)
+def _no_extra_seeds(request, monkeypatch):
+    """Extra seeds make every training slower and the suite runs training in parallel, so only
+    the tests that ask for ``extra_seeds`` (and the timing tests) train with them."""
+    if "extra_seeds" not in request.fixturenames and not request.node.get_closest_marker("timing"):
+        monkeypatch.setattr(automl, "BAG_EXTRA", 0)
 
 
 def _kill_workers(app) -> None:

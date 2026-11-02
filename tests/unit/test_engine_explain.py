@@ -31,6 +31,8 @@ from fione.engine.prep import Prep
 
 TASKS = ("binary", "multiclass", "regression")
 TARGETS = {"binary": "good", "multiclass": "判定", "regression": "value"}
+
+
 # Every family, heaviest first, summing to 1.
 MIXED_WEIGHTS = {name: (len(FAMILIES) - i) / 28 for i, name in enumerate(FAMILIES)}
 HOSTILE = ["<b>x</b>", "幅", "BiasTerm", "contrib_x"]

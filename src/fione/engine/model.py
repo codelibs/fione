@@ -22,6 +22,7 @@ class Member:
     spec: FamilySpec
     weight: float
     models: list
+    key: str = ""  # the candidate's name in the run (its family, or family#rank for a runner-up)
 
 
 @dataclass

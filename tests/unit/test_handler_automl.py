@@ -259,7 +259,10 @@ def test_a_degraded_run_still_records_the_model(
 
     monkeypatch.setattr(XGBoost, "_fit", boom)
     monkeypatch.setattr(search, "STARTUP_TRIALS", 0)  # every family stops after a few trials
-    config = {**CONFIG, "max_models": None, "stopping_rounds": 1, "stopping_tolerance": 0.5}
+    # A long budget: the run ends when every family stagnates, and a slow machine must not run
+    # a family out of time first.
+    config = {**CONFIG, "max_runtime_secs": 60, "max_models": None}
+    config |= {"stopping_rounds": 1, "stopping_tolerance": 0.5}
     job = models.submit_training(conn, storage, owner, project.id, dataset.id, config, name="quick")
     done = run_job(job)
     assert done.status is JobStatus.DONE, done.message

@@ -9,14 +9,19 @@ spec 5.1/5.7) and spends it in phases:
 2. Search: 0.65 L. Families run one after another in ``FAMILY_ORDER``; each gets the search
    time still left times its ``FAMILY_WEIGHTS`` share among the families not yet run, so time a
    family leaves unused flows to the next ones. The search scores trials with log loss / RMSE.
-3. Ensemble selection: ``caruana`` on the families' out-of-fold (OOF) predictions; cheap.
+   Each family hands on its ``TOP_TRIALS`` best trials, as candidates ``Family``,
+   ``Family#2`` and ``Family#3``.
+3. Ensemble selection: ``caruana`` on the candidates' out-of-fold (OOF) predictions; cheap.
 4. Final refit: until the reserve (about 0.2 L when the search used its whole share; more when
    it ended early). Each member with weight > 0 is refit once on all rows with its best
    parameters: boosting for 1.1 x the mean best iteration of its fold models, without early
    stopping; the forests as one full forest; Linear as one fit. DeepLearning is not refit: its
    fold models, averaged, are its final model (``FamilySpec.refit``). The fold models are also
    the fallback, averaged, with a ``notice``, for a refit that is not expected to fit in the
-   time left (from its best trial's time) or that the deadline cuts short.
+   time left (from its best trial's time) or that the deadline cuts short. Time left after
+   that buys extra refits with other seeds (up to ``BAG_EXTRA`` per member, each when the time
+   left is ``BAG_TIME_FACTOR`` times the member's first refit and the size limits allow),
+   averaged with it.
 5. Reserve: max(0.5 s, 0.15 L), for packaging and for what deadlines cannot interrupt (the
    families' probes, first fits on small data, an iteration slower than measured). Packaging
    includes ``fione.engine.diagnostics`` on the blended OOF predictions (at most 200,000 rows).
@@ -94,6 +99,13 @@ REFIT_ROUNDS_FACTOR = 1.1
 # The linear view (one-hot levels) of Linear and DeepLearning is built whole, and each fold copies
 # most of it again: above this many cells (800 MB as float64) those families are left out.
 LINEAR_MAX_CELLS = 100_000_000
+# Time left after the refits buys extra refits of a member with other seeds, averaged with the
+# first (variance falls with the seeds): up to ``BAG_EXTRA`` more, each only when the time left
+# is ``BAG_TIME_FACTOR`` times what the member's first refit took.
+BAG_EXTRA = 4
+BAG_TIME_FACTOR = 2.0
+BAG_SEED_STEP = 7919
+BAG_SEED_SPACE = 2**31 - 1
 SIZE_CAP = 40 * 1024**2  # per member
 TOTAL_SIZE_CAP = 90 * 1024**2  # all members: the artifact target is 100 MB (spec 5.2)
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
@@ -215,7 +227,7 @@ class AutoML:
         )
         if self.should_stop():
             stop_reason = "cancelled"
-        final = {member.spec.name: member.weight for member in members}
+        final = {member.key: member.weight for member in members}
         blended = _blend(oof, final)
         try:
             found = diagnostics(task, y, blended, classes, seed=c.seed)
@@ -247,7 +259,9 @@ class AutoML:
             members=members,
             label_dtype=target.dtype,
             cv_predictions=blended if c.keep_cv_predictions else None,
-            cv_models={n: r.models for n, r in results.items()} if c.keep_cv_models else None,
+            cv_models={n: r.models for n, r in results.items() if "#" not in n}
+            if c.keep_cv_models
+            else None,
             fold_assignment=assignment if c.keep_cv_fold_assignment else None,
             diagnostics=found,
             features=tried,
@@ -362,6 +376,8 @@ class AutoML:
             ]
             if result.models:
                 results[name] = result
+                for rank, runner_up in enumerate(result.runners_up, start=2):
+                    results[f"{name}#{rank}"] = runner_up
             if result.reason == "cancelled":
                 break
         return results, logs, reasons, finished, errors
@@ -379,14 +395,16 @@ class AutoML:
         return "no_improvement"  # each family stagnated (or used the trials it was allotted)
 
     def _drop(self, member: Member, why: str) -> None:
-        name = member.spec.name
-        self._notice(f"{name} dropped from the ensemble: {why}", family=name)
+        name = member.key or member.spec.name  # "LightGBM#2" for a runner-up
+        self._notice(f"{name} dropped from the ensemble: {why}", family=member.spec.name)
 
     def _members(self, results, weights, X, y, prep, clock, weight, stop_reason):
         """Final members, heaviest first, and the refit time per family."""
         views: dict[str, pd.DataFrame] = {}
         chosen = sorted((n for n in results if weights[n] > 0), key=lambda n: -weights[n])
         candidates, refit_secs = [], {}
+        members_of: dict[str, list] = {}
+        refitted: set[str] = set()
         for name in chosen:
             result = results[name]
             models = result.models
@@ -396,8 +414,9 @@ class AutoML:
                 refit_secs[name] = time.monotonic() - start
                 if model is not None:
                     models = [model]
+                    refitted.add(name)
                 elif isinstance(problem, Exception):
-                    self.emit(error_notice("refit_error", name, problem))
+                    self.emit(error_notice("refit_error", result.spec.name, problem))
                 else:
                     why = (
                         "was cancelled"
@@ -406,10 +425,16 @@ class AutoML:
                     )
                     self._notice(
                         f"{name}: the final refit {why}; using its {len(models)} fold models",
-                        family=name,
+                        family=result.spec.name,
                     )
+            members_of[name] = models
+        self._bag(
+            results, chosen, members_of, refitted, refit_secs, X, y, prep, views, clock, weight
+        )
+        for name in chosen:
+            result, models = results[name], members_of[name]
             size = sum(result.spec.size_bytes(m) for m in models)
-            candidates.append((Member(result.spec, weights[name], models), size))
+            candidates.append((Member(result.spec, weights[name], models, name), size))
         kept = [(member, size) for member, size in candidates if size <= SIZE_CAP]
         for member, size in candidates:
             if size > SIZE_CAP:
@@ -427,8 +452,7 @@ class AutoML:
         if not kept:
             kept = [candidates[0]]
             self._notice(
-                f"{kept[0][0].spec.name} kept although it exceeds the size limit: "
-                "no smaller member",
+                f"{kept[0][0].key} kept although it exceeds the size limit: no smaller member",
                 family=kept[0][0].spec.name,
             )
         kept = [member for member, _ in kept]
@@ -438,14 +462,47 @@ class AutoML:
             member.models = [member.spec.serving(model) for model in member.models]
         return kept, refit_secs
 
+    def _bag(
+        self, results, chosen, members_of, refitted, refit_secs, X, y, prep, views, clock, weight
+    ):
+        """Refit the members that were refit once more, with other seeds, while the time and the
+        size limits allow it (heaviest member first, one extra model each per round). An extra
+        model is kept only if, at its real size, the member and all the members still fit."""
+        sizes = {n: sum(results[n].spec.size_bytes(m) for m in members_of[n]) for n in chosen}
+        first_secs = dict(refit_secs)
+        for extra in range(1, BAG_EXTRA + 1):
+            for name in chosen:
+                spec = results[name].spec
+                if name not in refitted or not spec.seeded:
+                    continue
+                if self.should_stop() or clock.remaining() < BAG_TIME_FACTOR * first_secs[name]:
+                    continue
+                estimate = spec.size_bytes(members_of[name][0])  # a forest's size varies by seed
+                if (
+                    sizes[name] + estimate > SIZE_CAP
+                    or sum(sizes.values()) + estimate > TOTAL_SIZE_CAP
+                ):
+                    continue
+                start = time.monotonic()
+                model, problem = _refit(results[name], X, y, prep, views, clock, weight, extra)
+                refit_secs[name] += time.monotonic() - start
+                if isinstance(problem, Exception):
+                    self.emit(error_notice("refit_error", spec.name, problem))
+                if model is None:
+                    continue
+                real = spec.size_bytes(model)
+                if sizes[name] + real <= SIZE_CAP and sum(sizes.values()) + real <= TOTAL_SIZE_CAP:
+                    members_of[name].append(model)
+                    sizes[name] += real
+
 
 def _mb(size: float) -> str:
     return f"{size / 2**20:.0f} MB"
 
 
-def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight):
+def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight, bag: int = 0):
     """``(model refit on all rows, None)``, or ``(None, why)`` with why ``"time"``,
-    ``"cancelled"`` or the exception the refit raised."""
+    ``"cancelled"`` or the exception the refit raised. ``bag`` > 0 refits with another seed."""
     spec = result.spec
     # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit.
     if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / (len(result.models) - 1):
@@ -455,7 +512,12 @@ def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight):
             views[spec.view] = getattr(prep, spec.view)(X)
         best = np.mean([spec.rounds(model) for model in result.models])
         rounds = min(MAX_ROUNDS, max(1, round(best * REFIT_ROUNDS_FACTOR)))
-        model = spec.fit_full(result.best_params, views[spec.view], y, clock, rounds, weight)
+        seed = spec.seed
+        spec.seed = (seed + BAG_SEED_STEP * bag) % BAG_SEED_SPACE
+        try:
+            model = spec.fit_full(result.best_params, views[spec.view], y, clock, rounds, weight)
+        finally:
+            spec.seed = seed
         return model, None
     except DeadlineExceeded:
         return None, "cancelled" if clock.should_stop() else "time"
@@ -470,14 +532,15 @@ def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
 def _leaderboard(
     results, weights, refit_secs, blended, y, folds: Folds, sort_metric, scores
 ) -> pd.DataFrame:
-    """One row per family and one for the ensemble. The ensemble's weights were chosen on the
-    same OOF predictions it is scored on, so its row is slightly optimistic."""
+    """One row per candidate (a family's best trial, then its runners-up) and one for the
+    ensemble. The ensemble's weights were chosen on the same OOF predictions it is scored on, so
+    its row is slightly optimistic."""
     rows = []
     for name, result in results.items():
         rows.append(
             {
-                "model": f"{name}_{result.best_trial}",
-                "family": name,
+                "model": f"{result.spec.name}_{result.best_trial}",
+                "family": result.spec.name,
                 "cv_score": scores[name],
                 "cv_std": metrics.fold_std(sort_metric, y, result.oof, folds),
                 "train_secs": result.best_secs + refit_secs.get(name, 0.0),

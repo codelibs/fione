@@ -206,7 +206,7 @@ def trained(make_client, monkeypatch):
             follow_redirects=False,
         )
         job_id = int(location(r).rsplit("/", 1)[1])
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + 240
         while True:
             with closing(connect(world.client)) as conn:
                 job = store.get_job(conn, job_id)
