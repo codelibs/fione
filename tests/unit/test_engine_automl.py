@@ -713,7 +713,7 @@ def test_a_too_wide_linear_view_leaves_those_families_out(monkeypatch):
 
 
 def _bagging_data():
-    return _binary(800, seed=3)
+    return _binary(400, seed=3)
 
 
 def test_extra_seeds_are_averaged_into_a_refit_member(monkeypatch):
@@ -771,7 +771,7 @@ def test_runners_up_of_a_family_join_the_ensemble_candidates(monkeypatch):
     keys = [m.key for m in model.members]
     assert len(set(keys)) == len(keys) and set(keys) <= set(weights)
     assert sum(m.weight for m in model.members) == pytest.approx(1.0)
-    assert model.predict_proba(_bagging_data()).shape == (800, 2)
+    assert model.predict_proba(_bagging_data()).shape == (400, 2)
 
 
 def test_an_extra_seed_that_is_bigger_than_estimated_is_not_kept(monkeypatch):
