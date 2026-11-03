@@ -945,11 +945,10 @@ for _tool in (
     Tool(
         "propose_training_config",
         "Propose a training configuration for a dataset and target column. This only returns a "
-        "proposal for the user to confirm; nothing is started. The run time follows the size "
-        "of the data. Set max_runtime_secs only when the user wants a different time, "
-        "decision 'balanced' only when their score treats every class alike (such as balanced "
-        "accuracy) and a class is rare, and target_transform 'log1p' only when their score is "
-        "a relative error (such as RMSLE) on a skewed non-negative target.",
+        "proposal for the user to confirm; nothing is started. Set the optional max_runtime_secs, "
+        "decision ('balanced': a rare class and a score such as balanced accuracy) and "
+        "target_transform ('log1p': a skewed target and a score such as RMSLE) only when the "
+        "user's goal calls for it.",
         _schema(
             {
                 "dataset_id": _ID,
