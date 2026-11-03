@@ -407,6 +407,24 @@ def test_slots():
         binary.slots(1)
 
 
+def test_a_log1p_models_contributions_add_up_to_its_predictions_in_the_target_units():
+    base = _fit("regression")
+    logged = replace(base, config=replace(base.config, target_transform="log1p"))
+    frame = _task_frame("regression", _frame(40, 3))
+    before, after = explain.contributions(base, frame), explain.contributions(logged, frame)
+    assert_allclose(after.prediction, np.expm1(before.prediction), rtol=1e-9)
+    assert_allclose(after.values.sum(-1) + after.bias, after.prediction, rtol=1e-9)
+    assert_allclose(after.prediction[:, 0], logged.predict(frame).to_numpy(), rtol=1e-9)
+    assert np.sign(after.values).tolist() == np.sign(before.values).tolist()
+
+
+def test_the_log1p_rescaling_has_a_slope_when_nothing_changes():
+    values, bias = np.zeros((1, 1, 3)), np.array([[0.5]])
+    scaled, new_bias = explain._in_target_units(values, bias)
+    assert_allclose(scaled, 0.0)
+    assert_allclose(new_bias, np.expm1(0.5))
+
+
 # --- partial dependence and global importance ----------------------------------------------
 
 

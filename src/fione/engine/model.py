@@ -77,6 +77,8 @@ class TrainedModel:
         """Predicted labels (the target's values and dtype) or floats, on ``df``'s index."""
         raw = self._predict(df)
         if self.task == "regression":
+            if self.config.target_transform == "log1p":
+                raw = np.expm1(raw)
             return pd.Series(raw, index=df.index, name=self.target, dtype=float)
         labels = np.asarray(self.classes_, dtype=object)[self.choose(raw)]
         return pd.Series(labels, index=df.index, name=self.target).astype(self.label_dtype)

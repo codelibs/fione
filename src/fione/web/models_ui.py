@@ -348,6 +348,8 @@ def _config(record: ModelRecord) -> list[tuple[str, tuple[str, str | None]]]:
             key = f"train.task.{value}"
         elif name == "decision" and value in ("argmax", "balanced"):
             key = f"train.decision.{value}"
+        elif name == "target_transform" and value in ("none", "log1p"):
+            key = f"train.transform.{value}"
         elif name in ("stopping_metric", "sort_metric") and isinstance(value, str):
             known = ("auto", "logloss", "auc", "accuracy", "rmse", "mae", "r2")
             key = f"train.metric.{value.lower()}" if value.lower() in known else None

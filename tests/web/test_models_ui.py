@@ -197,6 +197,7 @@ def trained(make_client, monkeypatch):
             "nfolds": str(FAST["nfolds"]),
             "seed": "0",
             "decision": "argmax",
+            "target_transform": "none",
             "stopping_rounds": "3",
             "stopping_metric": "auto",
             "stopping_tolerance": "0.001",
@@ -1428,3 +1429,5 @@ def test_the_settings_list_names_the_decision_rule_by_its_label():
     record = SimpleNamespace(config={"task": "classification", "decision": "balanced"})
     shown = dict(models_ui._config(record))
     assert shown["decision"] == ("balanced", "train.decision.balanced")
+    shown = dict(models_ui._config(SimpleNamespace(config={"target_transform": "log1p"})))
+    assert shown["target_transform"] == ("log1p", "train.transform.log1p")
