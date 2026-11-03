@@ -206,7 +206,7 @@ class Predictor:
             rows = [{"value": jsonable(float(v))} for v in output]
             best = np.zeros(len(rows), dtype=int)
         else:
-            best = output.argmax(axis=1)
+            best = self.model.choose(output)
             rows = [
                 {
                     "label": self.classes[b],

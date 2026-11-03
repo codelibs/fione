@@ -28,6 +28,7 @@ class DeadlineExceeded(Exception):
 
 
 _TASKS = ("auto", "classification", "regression")
+_DECISIONS = ("argmax", "balanced")
 # The folds' random_state (numpy's RandomState through scikit-learn) takes 0..2**32 - 1.
 MAX_SEED = 2**32 - 1
 # The metric names, compared case-insensitively. The AutoML accepts the
@@ -76,6 +77,7 @@ class TrainConfig:
     nfolds: int = 5
     seed: int = 0
     balance_classes: bool = False
+    decision: Literal["argmax", "balanced"] = "argmax"
     feature_engineering: bool = True
     stopping_rounds: int = 10
     stopping_metric: str = "auto"
@@ -100,6 +102,8 @@ class TrainConfig:
             raise ConfigError(
                 f"seed must be a whole number from 0 to {MAX_SEED}, got {self.seed!r}"
             )
+        if self.decision not in _DECISIONS:
+            raise ConfigError(f"decision must be one of {list(_DECISIONS)}, got {self.decision!r}")
         _check_int("stopping_rounds", self.stopping_rounds, 0)
         tolerance = self.stopping_tolerance
         if (
@@ -123,6 +127,10 @@ class TrainConfig:
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ConfigError(f"{name} must be true or false, got {getattr(self, name)!r}")
+        if self.decision == "balanced" and self.balance_classes:
+            raise ConfigError(
+                "decision 'balanced' and balance_classes both correct for rare classes; use one"
+            )
         ignored = self.ignored_columns
         if not isinstance(ignored, list) or not all(isinstance(c, str) for c in ignored):
             raise ConfigError("ignored_columns must be a list of column names")

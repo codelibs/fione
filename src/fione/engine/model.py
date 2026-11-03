@@ -12,6 +12,7 @@ import pandas as pd
 
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.families import FamilySpec
+from fione.engine.metrics import choose
 from fione.engine.prep import Prep, Task
 
 
@@ -45,6 +46,11 @@ class TrainedModel:
     fold_assignment: np.ndarray | None = None
     diagnostics: dict | None = None  # fione.engine.diagnostics of the OOF predictions; JSON
     features: list[dict] | None = None  # derived-feature groups tried, and why (engine.features)
+    class_prior: np.ndarray | None = None  # the classes' shares, set by decision="balanced"
+
+    def choose(self, proba: np.ndarray) -> np.ndarray:
+        """The class index per row of ``proba`` under the model's decision rule."""
+        return choose(proba, self.class_prior)
 
     def _predict(self, df: pd.DataFrame) -> np.ndarray:
         # The views come first, so that missing columns raise even for an empty frame.
@@ -72,7 +78,7 @@ class TrainedModel:
         raw = self._predict(df)
         if self.task == "regression":
             return pd.Series(raw, index=df.index, name=self.target, dtype=float)
-        labels = np.asarray(self.classes_, dtype=object)[raw.argmax(axis=1)]
+        labels = np.asarray(self.classes_, dtype=object)[self.choose(raw)]
         return pd.Series(labels, index=df.index, name=self.target).astype(self.label_dtype)
 
 

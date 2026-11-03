@@ -337,6 +337,66 @@ def test_balance_classes_weights_every_fit_and_lifts_minority_recall(monkeypatch
         assert w[y_tr == 1].mean() > 5 * w[y_tr == 0].mean()
 
 
+def test_balanced_decision_predicts_rare_classes_more_and_keeps_the_probabilities(monkeypatch):
+    df = _binary(4_000, weights=[0.95], class_sep=0.6, flip_y=0.01)
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    model = _fit(df, families=["LightGBM"], target="y", max_models=1, decision="balanced")
+    share = df["y"].value_counts(normalize=True).sort_index().to_numpy()
+    np.testing.assert_allclose(model.class_prior, share)
+    proba = model.predict_proba(df).to_numpy()
+    balanced = model.predict(df)
+    assert (balanced == np.argmax(proba / share, axis=1)).all()
+    model.class_prior = None
+    assert (model.predict(df) == np.argmax(proba, axis=1)).all()
+    assert (balanced == 1).sum() > (model.predict(df) == 1).sum()
+    np.testing.assert_allclose(model.predict_proba(df).to_numpy(), proba)
+
+
+def test_balanced_decision_sets_the_stored_accuracy_and_confusion(monkeypatch):
+    df = _binary(4_000, weights=[0.95], class_sep=0.6, flip_y=0.01)
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        decision="balanced",
+        keep_cv_predictions=True,
+    )
+    chosen = np.argmax(model.cv_predictions / model.class_prior, axis=1)
+    assert model.metrics["accuracy"] == pytest.approx(float(np.mean(chosen == df["y"].to_numpy())))
+    matrix = np.asarray(model.diagnostics["confusion"]["matrix"])
+    assert matrix.sum(axis=0)[1] == (chosen == 1).sum()  # the predicted-rare column
+
+
+def test_balanced_decision_scores_the_leaderboard_by_the_same_rule(monkeypatch):
+    df = _binary(4_000, weights=[0.95], class_sep=0.6, flip_y=0.01)
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        decision="balanced",
+        sort_metric="accuracy",
+    )
+    ensemble = model.leaderboard.set_index("model").loc["Ensemble", "cv_score"]
+    assert ensemble == pytest.approx(model.metrics["accuracy"])
+
+
+def test_the_default_decision_leaves_no_prior():
+    assert _fit(_binary(300), families=["LightGBM"], target="y", max_models=1).class_prior is None
+
+
+def test_decision_is_ignored_for_regression_with_a_notice():
+    df = _binary(300)
+    df["y"] = df["x0"] + 0.1
+    events = []
+    model = _fit(df, events, families=["LightGBM"], target="y", max_models=1, decision="balanced")
+    assert model.class_prior is None
+    assert any("decision" in e.data["message"] for e in events if e.type == "notice")
+
+
 def test_balance_classes_is_ignored_for_regression_with_a_notice():
     df = _binary(300)
     df["y"] = df["x0"] + 0.1

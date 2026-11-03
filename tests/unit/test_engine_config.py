@@ -15,6 +15,7 @@ def test_train_config_defaults():
     assert config.nfolds == 5
     assert config.seed == 0
     assert config.balance_classes is False
+    assert config.decision == "argmax"
     assert (config.stopping_rounds, config.stopping_metric, config.stopping_tolerance) == (
         10,
         "auto",
@@ -23,6 +24,11 @@ def test_train_config_defaults():
     assert config.sort_metric == "auto"
     assert config.ignored_columns == []
     assert TrainConfig(target="y").ignored_columns is not config.ignored_columns
+
+
+def test_a_job_payload_with_the_decision_builds_a_config():
+    config = TrainConfig.from_dict({"target": "y", "decision": "balanced"})
+    assert config.decision == "balanced"
 
 
 def test_train_config_dict_round_trip():
@@ -55,6 +61,8 @@ def test_from_dict_rejects_unknown_and_missing_keys():
         ({"stopping_metric": "f1"}, "stopping_metric"),
         ({"sort_metric": "speed"}, "sort_metric"),
         ({"balance_classes": "yes"}, "balance_classes"),
+        ({"decision": "majority"}, "decision must be one of"),
+        ({"decision": "balanced", "balance_classes": True}, "use one"),
         ({"ignored_columns": "id"}, "ignored_columns"),
         ({"ignored_columns": ["y"]}, "target"),
     ],

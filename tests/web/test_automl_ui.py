@@ -385,6 +385,7 @@ def form_for(csrf: str, **changes) -> dict:
         "nfolds": "4",
         "seed": "4294967295",
         "balance_classes": "on",
+        "decision": "argmax",
         "stopping_rounds": "2",
         "stopping_metric": "logloss",
         "stopping_tolerance": "0.25",
@@ -432,6 +433,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "nfolds": 4,
         "seed": 2**32 - 1,
         "balance_classes": True,
+        "decision": "argmax",
         "feature_engineering": False,  # on by default; the form leaves it unchecked
         "stopping_rounds": 2,
         "stopping_metric": "logloss",
@@ -444,6 +446,20 @@ def test_every_training_parameter_round_trips_into_the_job(world):
     }
     assert {f.name for f in dataclasses.fields(TrainConfig)} == set(expected)  # all covered
     assert config.to_dict() == expected
+
+
+def test_the_balanced_decision_is_queued_and_a_bad_one_is_refused(world):
+    csrf = world.login("ed")
+    url = world.path("/projects/{p}/datasets/{train}/train")
+    sent = world.client.post(
+        url, data=form_for(csrf, decision="balanced", balance_classes=None), follow_redirects=False
+    )
+    job_id = int(location(sent).rsplit("/", 1)[1])
+    with closing(connect(world.client)) as conn:
+        assert store.get_job(conn, job_id).payload["config"]["decision"] == "balanced"
+    for changes in ({"decision": "majority"}, {"decision": "balanced"}):  # unknown; with balance
+        refused = world.client.post(url, data=form_for(csrf, **changes), follow_redirects=False)
+        assert refused.status_code == 422
 
 
 def test_unchecked_flags_and_empty_optionals_are_false_and_none(world):

@@ -30,11 +30,17 @@ def resolve(name: str, task: Task, field: str) -> str:
     return name
 
 
-def value(name: str, y: np.ndarray, pred: np.ndarray) -> float:
+def choose(pred: np.ndarray, prior: np.ndarray | None = None) -> np.ndarray:
+    """The class index per row: the largest probability, or with ``prior`` (the classes'
+    shares of the training data) the largest probability relative to its class's share."""
+    return (pred if prior is None else pred / prior).argmax(axis=1)
+
+
+def value(name: str, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None = None) -> float:
     if name == "logloss":
         return score("classification", y, pred)
     if name == "accuracy":
-        return float(np.mean(pred.argmax(axis=1) == y))
+        return float(np.mean(choose(pred, prior) == y))
     if name == "auc":
         if pred.shape[1] == 2:
             return float(roc_auc_score(y, pred[:, 1]))
@@ -56,14 +62,19 @@ def loss(name: str, y: np.ndarray, pred: np.ndarray) -> float:
     return -v if name in HIGHER_IS_BETTER else v
 
 
-def fold_std(name: str, y: np.ndarray, pred: np.ndarray, folds: Folds) -> float:
+def fold_std(
+    name: str, y: np.ndarray, pred: np.ndarray, folds: Folds, prior: np.ndarray | None = None
+) -> float:
     """Standard deviation of the metric over the validation folds."""
-    return float(np.std([value(name, y[valid], pred[valid]) for _, valid in folds]))
+    return float(np.std([value(name, y[valid], pred[valid], prior) for _, valid in folds]))
 
 
-def summary(task: Task, y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
-    """logloss, accuracy and (binary only) auc; or rmse, mae and r2."""
+def summary(
+    task: Task, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None = None
+) -> dict[str, float]:
+    """logloss, accuracy (of the classes ``choose`` picks) and (binary only) auc; or rmse,
+    mae and r2."""
     names = list(ALLOWED[task])
     if task == "classification" and pred.shape[1] != 2:
         names.remove("auc")
-    return {name: value(name, y, pred) for name in names}
+    return {name: value(name, y, pred, prior) for name in names}

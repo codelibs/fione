@@ -393,6 +393,11 @@ def test_slots():
     multi = contributions(_fit("multiclass"), _features())
     assert (multi.slots() == multi.prediction.argmax(1)).all()
     assert (multi.slots(2) == 2).all()
+    skewed = replace(binary, prior=np.array([0.9, 0.1]))  # the prior must not pick a column
+    assert (skewed.slots() == 0).all()
+    prior = np.array([0.8, 0.1, 0.1])
+    weighted = replace(multi, prior=prior)
+    assert (weighted.slots() == (multi.prediction / prior).argmax(1)).all()
     assert multi.slots(2).shape == (len(multi.prediction),)
     assert (multi.slots(np.int64(1)) == 1).all()
     for bad in (-1, 3, True, 1.0, "1"):

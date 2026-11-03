@@ -129,6 +129,17 @@ To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.m
 questions about your data and models in plain language, set up [the assistant](assistant.md)
 (opt-in; it needs a language model server).
 
+## Choosing the predicted class
+
+A classification model predicts the class with the largest probability. When one class is much
+rarer than the others and the score treats every class alike (balanced accuracy, macro recall),
+set "Choosing the predicted class" to *Adjust for class sizes* (`decision: "balanced"` in the
+API). The predicted label is then the class whose probability is largest relative to its share of
+the training data, so rare classes are predicted more often. The probabilities do not change;
+the accuracy and the confusion matrix of the training result, batch prediction, Fione Serving
+and the explanation follow the same rule. It cannot be combined with "Balance the classes",
+which corrects the same imbalance while learning, and it is ignored for regression.
+
 ## Derived features
 
 Fione builds *derived features* that never read the target, and chooses among them by
