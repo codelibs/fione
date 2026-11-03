@@ -4,7 +4,8 @@
 spec 5.1/5.7) and spends it in phases:
 
 1. Checks, the choice of derived features (``fione.engine.features``; at most
-   ``FEATURE_SHARE`` of the time, and off with ``feature_engineering=False``), ``Prep.fit``
+   ``FEATURE_SHARE`` of the time, or ``FEATURE_MIN_SECS`` of a short run, and off with
+   ``feature_engineering=False``), ``Prep.fit``
    and the folds: measured, not otherwise budgeted. Call the time left after them L.
 2. Search: 0.65 L. Families run one after another in ``FAMILY_ORDER``; each gets the search
    time still left times its ``FAMILY_WEIGHTS`` share among the families not yet run, so time a
@@ -92,6 +93,10 @@ FAMILY_WEIGHTS = {
     "Linear": 0.06,
 }
 FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
+# A short run gets more: the choice needs about this long on a few thousand rows, and without it
+# the most useful candidates run out of time unconfirmed. Never over FEATURE_MAX_SHARE.
+FEATURE_MIN_SECS = 30.0
+FEATURE_MAX_SHARE = 0.30
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -290,9 +295,14 @@ class AutoML:
         )
         return model
 
+    @staticmethod
+    def _feature_secs(left: float) -> float:
+        return max(FEATURE_SHARE * left, min(FEATURE_MIN_SECS, FEATURE_MAX_SHARE * left))
+
     def _engineer(self, X, y, task, nfolds, deadline) -> tuple[list, list[dict] | None]:
         """The derived-feature groups to add and the verdict on every candidate (None when
-        switched off). The choice gets at most ``FEATURE_SHARE`` of the time."""
+        switched off). The choice gets at most ``FEATURE_SHARE`` of the time, or of a short run
+        ``FEATURE_MIN_SECS`` (but under ``FEATURE_MAX_SHARE``)."""
         if not self.config.feature_engineering:
             return [], None
         try:
@@ -302,7 +312,7 @@ class AutoML:
                 task,
                 nfolds,
                 self.config.seed,
-                deadline.child(FEATURE_SHARE * deadline.remaining()),
+                deadline.child(self._feature_secs(deadline.remaining())),
                 self.should_stop,
             )
         except Exception as e:  # the base features still train

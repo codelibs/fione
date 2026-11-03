@@ -58,7 +58,7 @@ def _task_frame(task: str, frame: pd.DataFrame) -> pd.DataFrame:
 @cache
 def _fit(task: str) -> TrainedModel:
     config = TrainConfig(
-        TARGETS[task], max_runtime_secs=15, max_models=len(FAMILIES), nfolds=3, keep_cv_models=True
+        TARGETS[task], max_runtime_secs=30, max_models=len(FAMILIES), nfolds=3, keep_cv_models=True
     )
     model = AutoML(config).fit(_task_frame(task, _frame()))
     assert sorted(model.cv_models) == sorted(FAMILIES), f"a family is missing: {model.cv_models}"
