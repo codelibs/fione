@@ -397,6 +397,57 @@ def test_decision_is_ignored_for_regression_with_a_notice():
     assert any("decision" in e.data["message"] for e in events if e.type == "notice")
 
 
+def _skewed(n=800, seed=0):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"x0": rng.normal(size=n), "x1": rng.normal(size=n)})
+    df["y"] = np.exp(1.5 * df["x0"] + 0.3 * df["x1"] + rng.normal(scale=0.2, size=n))
+    return df
+
+
+def test_log1p_target_is_learned_on_the_log_scale_and_reported_in_its_own_units(monkeypatch):
+    df = _skewed()
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=2,
+        sort_metric="rmse",
+        target_transform="log1p",
+        keep_cv_predictions=True,
+    )
+    shown = model.cv_predictions
+    assert (shown >= 0).all()  # expm1 of a log-scale prediction, in the target's units
+    rmse = float(np.sqrt(np.mean((df["y"].to_numpy() - shown) ** 2)))
+    assert model.metrics["rmse"] == pytest.approx(rmse)
+    assert model.metrics["rmse"] > 1  # raw units: the log-scale error would be well below 1
+    ensemble = model.leaderboard.set_index("model").loc["Ensemble", "cv_score"]
+    assert ensemble == pytest.approx(rmse)
+    assert model.predict(df).between(0, 1.5 * df["y"].max()).all()
+    assert model.diagnostics["task"] == "regression"
+
+
+def test_log1p_target_is_ignored_for_classification_with_a_notice():
+    events = []
+    model = _fit(
+        _binary(300),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        target_transform="log1p",
+    )
+    assert any("target_transform" in e.data["message"] for e in events if e.type == "notice")
+    assert model.predict(_binary(300)).isin([0, 1]).all()
+
+
+def test_log1p_target_needs_values_above_minus_one():
+    df = _skewed()
+    df.loc[0, "y"] = -1.0
+    with pytest.raises(ConfigError, match="above -1"):
+        _fit(df, families=["LightGBM"], target="y", max_models=1, target_transform="log1p")
+
+
 def test_balance_classes_is_ignored_for_regression_with_a_notice():
     df = _binary(300)
     df["y"] = df["x0"] + 0.1

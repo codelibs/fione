@@ -65,6 +65,7 @@ POLL_ACTIVE, POLL_IDLE = "5s", "30s"  # job-list refresh
 JOB_KINDS = ("automl", "batch_predict", "module", "export_models", "explain")
 TASKS = ("auto", "classification", "regression")
 DECISIONS = ("argmax", "balanced")
+TRANSFORMS = ("none", "log1p")
 MAX_RUNTIME_DIGITS = 6  # minutes, as in the wizard
 SEED_MAX = 2**32 - 1  # numpy's RandomState (the folds) takes 0..2**32-1
 # Training form fields: one value each, except ``inputs`` (one per checked column).
@@ -79,6 +80,7 @@ SINGLE_FIELDS = (
     "seed",
     "balance_classes",
     "decision",
+    "target_transform",
     "feature_engineering",
     "stopping_rounds",
     "stopping_metric",
@@ -438,6 +440,7 @@ def _form_values(defaults: dict) -> dict:
         "sort_metric",
         "task",
         "decision",
+        "target_transform",
     ):
         values[name] = str(defaults[name])
     values["stopping_tolerance"] = f"{defaults['stopping_tolerance']:g}"
@@ -486,6 +489,7 @@ def _train_view(
         inputs=inputs if inputs is not None else defaults.inputs,
         tasks=TASKS,
         decisions=DECISIONS,
+        transforms=TRANSFORMS,
         metric_options=_metric_options(),
         errors=errors or {},
         detail=detail,
@@ -539,6 +543,9 @@ def _parse_train(form: FormData, names: list[str], inferred_task: str):
     if values["decision"] not in DECISIONS:
         errors["decision"] = "train.error.decision"
     config["decision"] = values["decision"]
+    if values["target_transform"] not in TRANSFORMS:
+        errors["target_transform"] = "train.error.target_transform"
+    config["target_transform"] = values["target_transform"]
     minutes = values["max_runtime_minutes"].strip()
     if len(minutes) > MAX_RUNTIME_DIGITS or _whole(minutes, 1) is None:
         errors["max_runtime_minutes"] = "analysis.error.runtime"

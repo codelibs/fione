@@ -151,6 +151,7 @@ TRAIN_FORM = {
     "nfolds": "5",
     "seed": "0",
     "decision": "argmax",
+    "target_transform": "none",
     "stopping_rounds": "3",
     "stopping_metric": "auto",
     "stopping_tolerance": "0.001",

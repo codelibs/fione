@@ -140,6 +140,17 @@ the accuracy and the confusion matrix of the training result, batch prediction, 
 and the explanation follow the same rule. It cannot be combined with "Balance the classes",
 which corrects the same imbalance while learning, and it is ignored for regression.
 
+## Learning a skewed target
+
+For a regression target of 0 or more that is strongly skewed (prices, counts, durations) and is
+scored by relative error such as RMSLE, set "Learning the target" to *Logarithm*
+(`target_transform: "log1p"` in the API). Fione then learns log(1 + value) and gives predictions
+in the column's own units again. The model's scores, the diagnostics, the leaderboard, batch
+prediction, Fione Serving and the explanations are all in those units; the explanation shares the
+change from the bias to the prediction in proportion to each column's effect on the logarithm,
+which is an approximation. Only the scores of the search itself (the trial history) stay on the
+logarithm scale. Every value must be above -1, and the setting is ignored for classification.
+
 ## Derived features
 
 Fione builds *derived features* that never read the target, and chooses among them by

@@ -29,6 +29,7 @@ class DeadlineExceeded(Exception):
 
 _TASKS = ("auto", "classification", "regression")
 _DECISIONS = ("argmax", "balanced")
+_TRANSFORMS = ("none", "log1p")
 # The folds' random_state (numpy's RandomState through scikit-learn) takes 0..2**32 - 1.
 MAX_SEED = 2**32 - 1
 # The metric names, compared case-insensitively. The AutoML accepts the
@@ -78,6 +79,7 @@ class TrainConfig:
     seed: int = 0
     balance_classes: bool = False
     decision: Literal["argmax", "balanced"] = "argmax"
+    target_transform: Literal["none", "log1p"] = "none"
     feature_engineering: bool = True
     stopping_rounds: int = 10
     stopping_metric: str = "auto"
@@ -104,6 +106,11 @@ class TrainConfig:
             )
         if self.decision not in _DECISIONS:
             raise ConfigError(f"decision must be one of {list(_DECISIONS)}, got {self.decision!r}")
+        if self.target_transform not in _TRANSFORMS:
+            raise ConfigError(
+                f"target_transform must be one of {list(_TRANSFORMS)}, "
+                f"got {self.target_transform!r}"
+            )
         _check_int("stopping_rounds", self.stopping_rounds, 0)
         tolerance = self.stopping_tolerance
         if (

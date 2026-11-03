@@ -351,6 +351,18 @@ def _probability(spec: FamilySpec, model, view: pd.DataFrame) -> tuple[np.ndarra
     return full_phi, full_bias
 
 
+def _in_target_units(values: np.ndarray, bias: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Contributions of a log1p model in the target's own units: the change from the bias to
+    the prediction, ``expm1(prediction) - expm1(bias)``, is shared in proportion to the
+    contributions, so that they still add up to the prediction (an approximation, as the
+    transform is not linear)."""
+    total = values.sum(-1)
+    change = np.expm1(total + bias) - np.expm1(bias)
+    small = np.abs(total) < 1e-12  # no change to share: the slope at the bias
+    scale = np.where(small, np.exp(bias), change / np.where(small, 1.0, total))
+    return values * scale[..., None], np.expm1(bias)
+
+
 def contributions(model: TrainedModel, df: pd.DataFrame) -> Contributions:
     """The contributions of ``model.columns`` to ``model``'s output on each row of ``df``."""
     # The views come first, so that missing columns raise even for an empty frame.
@@ -370,6 +382,8 @@ def contributions(model: TrainedModel, df: pd.DataFrame) -> Contributions:
     if len(outputs) < k:  # binary: the positive class
         phi, bias = phi[:, 1:], bias[:, 1:]
     values = phi @ attribution(model.prep).T  # features -> input columns (model.columns order)
+    if model.task == "regression" and model.config.target_transform == "log1p":
+        values, bias = _in_target_units(values, bias)
     return Contributions(
         list(model.columns), outputs, values, bias, values.sum(-1) + bias, model.class_prior
     )

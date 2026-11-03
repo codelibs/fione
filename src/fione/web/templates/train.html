@@ -148,6 +148,14 @@
           <p class="field__hint" id="decision-hint">{{ t('train.h.decision') }}</p>
           {{ error("decision") }}
         </div>
+        <div class="field">
+          <label class="field__label" for="f-target_transform">{{ t('train.f.target_transform') }}</label>
+          <select class="input input-md input-limited" id="f-target_transform" name="target_transform"{{ described("target_transform") }}>
+            {% for transform in transforms %}<option value="{{ transform }}"{% if values.target_transform == transform %} selected{% endif %}>{{ t('train.transform.' ~ transform) }}</option>{% endfor %}
+          </select>
+          <p class="field__hint" id="target_transform-hint">{{ t('train.h.target_transform') }}</p>
+          {{ error("target_transform") }}
+        </div>
         {{ flag("feature_engineering") }}
       </fieldset>
 

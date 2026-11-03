@@ -175,6 +175,13 @@ class AutoML:
         elif c.balance_classes:
             counts = np.bincount(y)
             weight = (len(y) / (len(counts) * counts))[y]
+        y_seen = y  # the target as the user gave it; ``y`` is what the models learn
+        if c.target_transform == "log1p" and task == "classification":
+            self._notice("target_transform is ignored for classification")
+        elif c.target_transform == "log1p":
+            if (y <= -1).any():
+                raise ConfigError("target_transform 'log1p' needs target values above -1")
+            y = np.log1p(y)
         prior = None
         if c.decision == "balanced" and task == "regression":
             self._notice("decision is ignored for regression")
@@ -233,9 +240,11 @@ class AutoML:
         if self.should_stop():
             stop_reason = "cancelled"
         final = {member.key: member.weight for member in members}
-        blended = _blend(oof, final)
+        # What is reported (scores, diagnostics, cv predictions) is in the target's own units.
+        original = np.expm1 if y is not y_seen else _same
+        blended = original(_blend(oof, final))
         try:
-            found = diagnostics(task, y, blended, classes, seed=c.seed, prior=prior)
+            found = diagnostics(task, y_seen, blended, classes, seed=c.seed, prior=prior)
         except Exception as e:
             found = None
             self._notice(
@@ -244,7 +253,7 @@ class AutoML:
                 exception=type(e).__name__,
             )
         leaderboard = _leaderboard(
-            results, final, refit_secs, blended, y, folds, sort_metric, scores, prior
+            results, final, refit_secs, blended, y_seen, folds, sort_metric, original, prior
         )
         assignment = np.empty(len(y), dtype=np.int64)
         for i, (_, valid) in enumerate(folds):
@@ -259,7 +268,7 @@ class AutoML:
             feature_importance=feature_importance(members, prep),
             stop_reason=stop_reason,
             config=c,
-            metrics=metrics.summary(task, y, blended, prior),
+            metrics=metrics.summary(task, y_seen, blended, prior),
             prep=prep,
             members=members,
             label_dtype=target.dtype,
@@ -535,20 +544,26 @@ def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
     return sum(w * oof[name] for name, w in weights.items() if w > 0)
 
 
+def _same(values: np.ndarray) -> np.ndarray:
+    return values
+
+
 def _leaderboard(
-    results, weights, refit_secs, blended, y, folds: Folds, sort_metric, scores, prior
+    results, weights, refit_secs, blended, y, folds: Folds, sort_metric, original, prior
 ) -> pd.DataFrame:
     """One row per candidate (a family's best trial, then its runners-up) and one for the
     ensemble. The ensemble's weights were chosen on the same OOF predictions it is scored on, so
-    its row is slightly optimistic."""
+    its row is slightly optimistic. ``original`` maps an OOF prediction to the units ``y`` and
+    ``blended`` are in."""
     rows = []
     for name, result in results.items():
+        oof = original(result.oof)
         rows.append(
             {
                 "model": f"{result.spec.name}_{result.best_trial}",
                 "family": result.spec.name,
-                "cv_score": scores[name],
-                "cv_std": metrics.fold_std(sort_metric, y, result.oof, folds, prior),
+                "cv_score": metrics.value(sort_metric, y, oof, prior),
+                "cv_std": metrics.fold_std(sort_metric, y, oof, folds, prior),
                 "train_secs": result.best_secs + refit_secs.get(name, 0.0),
                 "weight": weights.get(name, 0.0),
             }
