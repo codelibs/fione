@@ -244,6 +244,8 @@
   "analysis.warn.leaks": "{n} columns might give the answer away (they match the column to predict too closely). They are unchecked below.",
   "analysis.warn.leak_scores": "{n} columns predict the answer suspiciously well on their own. They stay checked: make sure each one is known at prediction time.",
   "analysis.warn.leak_partial": "Fione ran out of time while checking which columns predict the answer on their own, so some columns were not checked.",
+  "analysis.tip.skewed_target": "The values to predict are 0 or more and strongly skewed. If your score is a relative error (such as RMSLE), set \"Learning the target\" to Logarithm.",
+  "analysis.tip.rare_class": "The rarest class is only {share}% of the rows. If your score treats every class alike (such as balanced accuracy), set \"Choosing the predicted class\" to Adjust for class sizes.",
   "analysis.error.summary": "Please check the following, then run again:",
   "analysis.error.target": "Choose a column to predict from the list.",
   "analysis.error.inputs_unknown": "Some selected input columns are not in this data. Reload the page and choose again.",

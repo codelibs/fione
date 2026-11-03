@@ -18,6 +18,7 @@ from typing import Annotated
 from urllib.parse import urlencode
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
@@ -44,7 +45,7 @@ from fione.data.profile import (
 from fione.engine import explain
 from fione.engine.artifact import MODEL_FILE, UntrustedArtifactError, read_manifest
 from fione.engine.config import TargetError, TrainConfig
-from fione.engine.prep import validate_target
+from fione.engine.prep import LINEAR_SKEW, validate_target
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
 from fione.models import explanations
@@ -355,6 +356,25 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
     return out
 
 
+RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest the class-size decision
+
+
+def _tips(found, task: str) -> list[tuple[str, dict]]:
+    """``(key, vars)`` for advanced settings that suit the column to predict: a skewed
+    non-negative number (``target_transform``) or a rare class (``decision``)."""
+    y = found.y.dropna()
+    if len(y) == 0:
+        return []
+    if task == "regression" and pd.api.types.is_numeric_dtype(y):
+        if y.min() >= 0 and y.skew() > LINEAR_SKEW:
+            return [("analysis.tip.skewed_target", {})]
+    elif task == "classification" and y.nunique() >= 2:
+        share = float(y.value_counts(normalize=True).min())
+        if share < RARE_CLASS_SHARE:
+            return [("analysis.tip.rare_class", {"share": _pct(share)})]
+    return []
+
+
 def _pct(rate: float) -> str:
     """A rate as a percentage for people: ``0``, ``<0.1``, ``2.5`` or ``40``."""
     if rate <= 0:
@@ -411,6 +431,7 @@ def _analysis_view(
         form=form,
         detected=defaults.task,
         warnings=_warnings(dataset, found, form.task, form.inputs),
+        tips=_tips(found, form.task),
         target_missing=float(found.y.isna().mean()) if len(found.y) else 0.0,
         target_values=int(found.y.nunique()),
         missing_pct=_pct(sum(missing) / len(missing)) if missing else "0",
