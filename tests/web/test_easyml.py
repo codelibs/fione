@@ -571,6 +571,20 @@ def test_the_tips_are_for_the_detailed_view_where_the_settings_are(owner):
     assert "rarest class" not in tips_page(owner, tip_frame(rare), detailed=False)
 
 
+def test_the_run_time_follows_the_size_of_the_data(owner, monkeypatch):
+    frame = tip_frame(pd.Series(["a", "b"] * 200))
+    page = tips_page(owner, frame)
+    assert 'id="runtime-3" name="runtime" value="3" checked' in page
+    assert "so the maximum run time is set" not in page
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.03)  # 400 cells: 6 minutes
+    page = tips_page(owner, frame)
+    assert 'value="10" checked' in page
+    assert "400 rows and 2 columns" in page and "set to 10 minutes" in page
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 1)
+    page = tips_page(owner, frame)
+    assert 'value="30" checked' in page and "even 30 minutes" in page
+
+
 def test_iris_keeps_all_four_inputs_selected(owner):
     """Twice the rows, so the score runs: both petal columns then score as high as a leak."""
     client, pid, csrf = owner

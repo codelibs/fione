@@ -15,6 +15,14 @@
     <dd>{{ c.task }}</dd>
     <dt>{{ t('assistant.proposal.max_runtime') }}</dt>
     <dd>{{ c.max_runtime_secs }}</dd>
+    {% if (c.decision | default("argmax")) != "argmax" %}
+    <dt>{{ t('train.f.decision') }}</dt>
+    <dd>{{ t('train.decision.' ~ c.decision) }}</dd>
+    {% endif %}
+    {% if (c.target_transform | default("none")) != "none" %}
+    <dt>{{ t('train.f.target_transform') }}</dt>
+    <dd>{{ t('train.transform.' ~ c.target_transform) }}</dd>
+    {% endif %}
     {% if c.ignored_columns %}
     <dt>{{ t('assistant.proposal.ignored') }}</dt>
     <dd>{{ c.ignored_columns | join(", ") }}</dd>
