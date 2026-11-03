@@ -77,6 +77,23 @@ def test_confirm_submits_exactly_the_stored_config(setup):
     assert job.payload["dataset_id"] == proposal.dataset_id
 
 
+def test_the_card_shows_the_settings_that_are_not_the_default(setup):
+    world, proposal = proposal_of(setup)
+    page = f"/projects/{world.p}/assistant?c={proposal.conversation_id}"
+    world.login("ed")
+    html = world.client.get(page).text
+    assert "Choosing the predicted class" not in html and "Learning the target" not in html
+    changed = dict(proposal.config, decision="balanced", target_transform="log1p")
+    with closing(connect(world.client)) as conn:
+        conn.execute(
+            "UPDATE chat_proposals SET config_json = ? WHERE id = ?",
+            (json.dumps(changed), proposal.id),
+        )
+        conn.commit()
+    html = world.client.get(page).text
+    assert "Adjust for class sizes" in html and "Logarithm (log1p)" in html
+
+
 def test_viewer_cannot_confirm_or_dismiss(setup):
     world, proposal = proposal_of(setup, "ed")
     before = job_count(world)

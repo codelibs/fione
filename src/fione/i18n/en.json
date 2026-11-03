@@ -246,6 +246,8 @@
   "analysis.warn.leak_partial": "Fione ran out of time while checking which columns predict the answer on their own, so some columns were not checked.",
   "analysis.tip.skewed_target": "The values to predict are 0 or more and strongly skewed. If your score is a relative error (such as RMSLE), set \"Learning the target\" to Logarithm.",
   "analysis.tip.rare_class": "The rarest class is only {share}% of the rows. If your score treats every class alike (such as balanced accuracy), set \"Choosing the predicted class\" to Adjust for class sizes.",
+  "analysis.tip.runtime": "The data has {rows} rows and {cols} columns, so the maximum run time is set to {minutes} minutes to leave time to try enough models. Shorten it below if you need an answer sooner.",
+  "analysis.tip.runtime_long": "The data is large: even {minutes} minutes may be enough for only a few models. Choose Other below for a longer run, which can find a better model.",
   "analysis.error.summary": "Please check the following, then run again:",
   "analysis.error.target": "Choose a column to predict from the list.",
   "analysis.error.inputs_unknown": "Some selected input columns are not in this data. Reload the page and choose again.",

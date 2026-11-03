@@ -18,7 +18,6 @@ from typing import Annotated
 from urllib.parse import urlencode
 
 import numpy as np
-import pandas as pd
 import pyarrow as pa
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
@@ -45,7 +44,7 @@ from fione.data.profile import (
 from fione.engine import explain
 from fione.engine.artifact import MODEL_FILE, UntrustedArtifactError, read_manifest
 from fione.engine.config import TargetError, TrainConfig
-from fione.engine.prep import LINEAR_SKEW, validate_target
+from fione.engine.prep import validate_target
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
 from fione.models import explanations
@@ -60,7 +59,13 @@ from fione.predict.batch import PREDICT, check_inputs
 from fione.projects import service as projects
 from fione.projects.ingest import read_dataset_rows, read_dataset_sample
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
-from fione.tools.builtin import propose, sample_profile
+from fione.tools.builtin import (
+    is_skewed_target,
+    propose,
+    rare_class_share,
+    runtime_need_secs,
+    sample_profile,
+)
 from fione.web.access import Ctx
 from fione.web.access import action as _action
 from fione.web.access import dataset_in as _dataset
@@ -280,6 +285,14 @@ def _leak_check(request: Request, dataset: Dataset, target: str):
     return (made[0] if made else None), entry
 
 
+def recommended_runtime(dataset: Dataset) -> int:
+    """The smallest preset (minutes) that covers ``runtime_need_secs``, from the default up."""
+    need = runtime_need_secs(dataset) / 60
+    return next(
+        (m for m in RUNTIME_PRESETS if m >= DEFAULT_RUNTIME and m >= need), RUNTIME_PRESETS[-1]
+    )
+
+
 def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | None):
     """The analysis of ``dataset`` for ``target`` (or the default one) and the defaults."""
     names = _names(dataset)
@@ -322,7 +335,7 @@ def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | 
         target=chosen,
         inputs={n for n in names if n != chosen and n not in reasons},
         task=found.task,
-        runtime=str(DEFAULT_RUNTIME),
+        runtime=str(recommended_runtime(dataset)),
     )
     return found, columns, defaults
 
@@ -353,25 +366,27 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
         out.append((level, "analysis.warn.leak_scores", {"n": len(scored)}))
     if found.profile.leak_partial:
         out.append(("info", "analysis.warn.leak_partial", {}))
+    minutes = recommended_runtime(dataset)
+    if minutes > DEFAULT_RUNTIME:
+        out.append(
+            (
+                "info",
+                "analysis.tip.runtime",
+                {"rows": f"{dataset.n_rows:,}", "cols": dataset.n_cols, "minutes": minutes},
+            )
+        )
+    if runtime_need_secs(dataset) > RUNTIME_PRESETS[-1] * 60:
+        out.append(("info", "analysis.tip.runtime_long", {"minutes": RUNTIME_PRESETS[-1]}))
     return out
-
-
-RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest the class-size decision
 
 
 def _tips(found, task: str) -> list[tuple[str, dict]]:
     """``(key, vars)`` for advanced settings that suit the column to predict: a skewed
     non-negative number (``target_transform``) or a rare class (``decision``)."""
-    y = found.y.dropna()
-    if len(y) == 0:
-        return []
-    if task == "regression" and pd.api.types.is_numeric_dtype(y):
-        if y.min() >= 0 and y.skew() > LINEAR_SKEW:
-            return [("analysis.tip.skewed_target", {})]
-    elif task == "classification" and y.nunique() >= 2:
-        share = float(y.value_counts(normalize=True).min())
-        if share < RARE_CLASS_SHARE:
-            return [("analysis.tip.rare_class", {"share": _pct(share)})]
+    if is_skewed_target(found.y, task):
+        return [("analysis.tip.skewed_target", {})]
+    if (share := rare_class_share(found.y, task)) is not None:
+        return [("analysis.tip.rare_class", {"share": _pct(share)})]
     return []
 
 

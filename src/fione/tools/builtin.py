@@ -45,7 +45,7 @@ from fione.data.profile import (
 from fione.engine import diagnostics as diag
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.explain import PD_GRID
-from fione.engine.prep import infer_task
+from fione.engine.prep import LINEAR_SKEW, infer_task
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import explanations
@@ -594,8 +594,44 @@ def _get_training_events(ctx: ToolContext, args: dict) -> dict:
 # --- propose_training_config ----------------------------------------------
 
 
-def _runtime_secs(n_rows: int) -> int:
-    return 120 if n_rows < 10_000 else 600 if n_rows < 100_000 else 1800
+# One trial (the folds and the refit) costs about this many seconds per cell (rows x columns)
+# on the larger sets measured; a run should try about TRIALS_WANTED of them.
+SECS_PER_CELL = 6e-6
+TRIALS_WANTED = 30
+MAX_RUNTIME_SECS = 1800
+MIN_RUNTIME_SECS = 120
+RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balanced"
+
+
+def runtime_need_secs(dataset: Dataset) -> float:
+    """Seconds a run needs to try about ``TRIALS_WANTED`` models on ``dataset``."""
+    cells = dataset.n_rows * max(1, dataset.n_cols - 1)
+    return cells * SECS_PER_CELL * TRIALS_WANTED
+
+
+def _runtime_secs(dataset: Dataset) -> int:
+    """The proposed run time: ``runtime_need_secs`` in whole minutes, from 2 to 30 minutes."""
+    minutes = math.ceil(runtime_need_secs(dataset) / 60)
+    return min(MAX_RUNTIME_SECS, max(MIN_RUNTIME_SECS, minutes * 60))
+
+
+def is_skewed_target(y: pd.Series, task: str) -> bool:
+    """A non-negative regression target skewed enough that ``target_transform="log1p"`` may
+    pay (the engine's own rule for its log-transformed views)."""
+    y = y.dropna()
+    if task != "regression" or len(y) == 0 or not pd.api.types.is_numeric_dtype(y):
+        return False
+    return bool(y.min() >= 0 and y.skew() > LINEAR_SKEW)
+
+
+def rare_class_share(y: pd.Series, task: str) -> float | None:
+    """The share of the rarest class when it is under ``RARE_CLASS_SHARE`` (where
+    ``decision="balanced"`` may pay), else None."""
+    y = y.dropna()
+    if task != "classification" or y.nunique() < 2:
+        return None
+    share = float(y.value_counts(normalize=True).min())
+    return share if share < RARE_CLASS_SHARE else None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -704,11 +740,31 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         warnings.append(f"column '{name}': {reason}")
     if profile.leak_partial:
         warnings.append("the leak check ran out of time; some columns were not scored")
+    if is_skewed_target(found.y, task):
+        warnings.append(
+            "the target is not negative and strongly skewed; if the score is a relative error "
+            "(such as RMSLE), target_transform 'log1p' may help"
+        )
+    if (share := rare_class_share(found.y, task)) is not None:
+        warnings.append(
+            f"the rarest class is {share:.1%} of the rows; if the score treats every class "
+            "alike (such as balanced accuracy), decision 'balanced' may help"
+        )
+    overrides = {
+        k: args[k] for k in ("max_runtime_secs", "decision", "target_transform") if k in args
+    }
+    if overrides.get("decision", "argmax") != "argmax" and task != "classification":
+        raise ToolError("decision applies to a classification target only")
+    if overrides.get("target_transform", "none") != "none":
+        if task != "regression":
+            raise ToolError("target_transform applies to a regression target only")
+        if pd.api.types.is_numeric_dtype(found.y) and found.y.min() <= -1:
+            raise ToolError("target_transform 'log1p' needs target values above -1")
     try:
         config = TrainConfig(
             target=target,
             task=task,
-            max_runtime_secs=_runtime_secs(dataset.n_rows),
+            **{"max_runtime_secs": _runtime_secs(dataset), **overrides},
             ignored_columns=ignored,
         ).validate()
     except ConfigError as e:
@@ -889,12 +945,18 @@ for _tool in (
     Tool(
         "propose_training_config",
         "Propose a training configuration for a dataset and target column. This only returns a "
-        "proposal for the user to confirm; nothing is started.",
+        "proposal for the user to confirm; nothing is started. Set the optional max_runtime_secs, "
+        "decision ('balanced': a rare class and a score such as balanced accuracy) and "
+        "target_transform ('log1p': a skewed target and a score such as RMSLE) only when the "
+        "user's goal calls for it.",
         _schema(
             {
                 "dataset_id": _ID,
                 "target": _COLUMN,
                 "notes": {"type": "string", "maxLength": 2000},
+                "max_runtime_secs": {"type": "integer", "minimum": 1},
+                "decision": {"type": "string", "enum": ["argmax", "balanced"]},
+                "target_transform": {"type": "string", "enum": ["none", "log1p"]},
             },
             ["dataset_id", "target"],
         ),

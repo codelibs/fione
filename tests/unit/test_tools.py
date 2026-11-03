@@ -625,10 +625,71 @@ def test_propose_cleans_notes_and_never_interprets_them(env):
 
 
 @pytest.mark.parametrize(
-    ("rows", "secs"), [(1, 120), (9_999, 120), (10_000, 600), (99_999, 600), (100_000, 1800)]
+    ("rows", "cols", "secs"),
+    [(1, 2, 120), (18_000, 9, 120), (166_000, 9, 240), (100_000, 11, 180), (750_000, 19, 1800)],
 )
-def test_runtime_by_dataset_size(rows, secs):
-    assert builtin._runtime_secs(rows) == secs
+def test_runtime_follows_the_size_of_the_data(rows, cols, secs):
+    dataset = SimpleNamespace(n_rows=rows, n_cols=cols)  # in whole minutes, from 2 to 30
+    assert builtin._runtime_secs(dataset) == secs
+
+
+def test_propose_sets_only_the_settings_the_user_wanted(env):
+    base = {"dataset_id": env.dataset.id, "target": "label"}
+    config = call(env, "propose_training_config", base)["config"]
+    assert (config["decision"], config["target_transform"]) == ("argmax", "none")
+    chosen = call(
+        env,
+        "propose_training_config",
+        {**base, "max_runtime_secs": 90, "decision": "balanced"},
+    )["config"]
+    assert chosen["max_runtime_secs"] == 90 and chosen["decision"] == "balanced"
+    with pytest.raises(ToolError):  # not one of the listed values
+        call(env, "propose_training_config", {**base, "decision": "other"})
+
+
+def test_propose_hints_at_settings_that_suit_the_target(env):
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(
+        {
+            "x": rng.normal(size=400),
+            "skewed": rng.lognormal(0, 1.5, 400),
+            "rare": ["a"] * 380 + ["b"] * 20,
+        }
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "hints", DatasetType.TRAIN, [frame]
+    )
+    skewed = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "skewed"})
+    assert any("log1p" in w for w in skewed["warnings"])
+    rare = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "rare"})
+    assert any("balanced" in w and "5.0%" in w for w in rare["warnings"])
+    assert rare["config"]["decision"] == "argmax"  # a hint, not a choice
+
+
+def test_propose_refuses_settings_the_target_cannot_use(env):
+    frame = pd.DataFrame(
+        {
+            "x": np.arange(300, dtype=float),
+            "signed": np.linspace(-5, 5, 300) + np.arange(300) % 7,
+            "kind": ["a", "b", "c"] * 100,
+        }
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "signed", DatasetType.TRAIN, [frame]
+    )
+    base = {"dataset_id": ds.id}
+    with pytest.raises(ToolError, match="above -1"):
+        call(
+            env,
+            "propose_training_config",
+            {**base, "target": "signed", "target_transform": "log1p"},
+        )
+    with pytest.raises(ToolError, match="regression"):
+        call(
+            env, "propose_training_config", {**base, "target": "kind", "target_transform": "log1p"}
+        )
+    with pytest.raises(ToolError, match="classification"):
+        call(env, "propose_training_config", {**base, "target": "signed", "decision": "balanced"})
 
 
 def test_propose_warns_about_unusable_datasets(env):
@@ -687,7 +748,7 @@ def test_describe_reads_a_bounded_sample(env, monkeypatch):
     )
     assert ds.n_rows == 300_000
     proposal = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "b"})
-    assert proposal["config"]["max_runtime_secs"] == 1800
+    assert proposal["config"]["max_runtime_secs"] == 120  # 300k rows x 1 column is a short job
 
     def forbidden(*args, **kwargs):
         raise AssertionError("the whole dataset was read")

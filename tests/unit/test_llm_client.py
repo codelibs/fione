@@ -290,7 +290,9 @@ def test_settings_rules(tmp_path, monkeypatch):
     text = str(raised.value)
     assert "FIONE_LLM_CONTEXT_TOKENS" in text and "FIONE_LLM_MAX_TOKENS" in text
     assert str(MIN_PROMPT_TOKENS) in text and "OLLAMA_CONTEXT_LENGTH=16384" in text
-    assert check(llm_context_tokens=MIN_PROMPT_TOKENS + 1024).llm_context_tokens == 4032
+    assert check(llm_context_tokens=MIN_PROMPT_TOKENS + 1024).llm_context_tokens == (
+        MIN_PROMPT_TOKENS + 1024
+    )
     assert check(llm_context_tokens=MIN_PROMPT_TOKENS + 64, llm_max_tokens=64).llm_max_tokens == 64
     defaults = check()
     assert defaults.llm_context_tokens - defaults.llm_max_tokens >= MIN_PROMPT_TOKENS

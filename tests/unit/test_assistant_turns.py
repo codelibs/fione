@@ -630,9 +630,9 @@ def test_budget_counts_bytes_for_japanese(env, fake_llm):
         store.add_message(env.conn, env.conversation.id, "user", "質問" * 100)
         store.add_message(env.conn, env.conversation.id, "assistant", "回答" * 100)
     fake = fake_llm([{"text": "ok"}])
-    settings = settings_for(env, fake, llm_context_tokens=4096, llm_max_tokens=256)
+    settings = settings_for(env, fake, llm_context_tokens=4352, llm_max_tokens=256)
     turn(env, settings, "最新の質問")
-    budget = budget_bytes(4096, 256, list_tools())
+    budget = budget_bytes(4352, 256, list_tools())
     everything = [
         {"role": "system", "content": "x" * len(fake.requests[0]["messages"][0]["content"])},
         *(
