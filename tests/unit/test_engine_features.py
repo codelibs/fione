@@ -552,3 +552,11 @@ def test_value_frequency_stores_only_repeated_values_up_to_the_cap(monkeypatch):
     out = group.transform(pd.DataFrame({"v": [1.0, 4.0, 105.0, 555.0]}))["v__value_frequency"]
     n = len(values)
     assert out.tolist() == pytest.approx([10 / n, 1 / n, 1 / n, 1 / n])
+
+
+@pytest.mark.parametrize(
+    ("left", "secs"),
+    [(60.0, 18.0), (120.0, 30.0), (180.0, 30.0), (600.0, 60.0), (3600.0, 360.0)],
+)
+def test_a_short_run_gives_the_feature_choice_a_minimum_of_time(left, secs):
+    assert AutoML._feature_secs(left) == pytest.approx(secs)
