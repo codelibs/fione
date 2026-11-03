@@ -537,6 +537,40 @@ def test_exact_suspect_is_still_deselected(owner):
     assert "Is identical to the column to predict" in page
 
 
+def tips_page(owner, frame: pd.DataFrame, detailed: bool = True) -> str:
+    client, pid, csrf = owner
+    if detailed:
+        client.cookies.set("fione_mode", "detailed")
+    content = frame.to_csv(index=False).encode()
+    return client.get(location(upload(client, f"/projects/{pid}/upload", csrf, content))).text
+
+
+def tip_frame(label: pd.Series, n: int = 400) -> pd.DataFrame:
+    return pd.DataFrame({"x": np.random.default_rng(1).normal(size=n), "label": label})
+
+
+def test_a_skewed_non_negative_target_suggests_the_logarithm(owner):
+    skewed = np.random.default_rng(0).lognormal(0, 1.5, 400)
+    page = tips_page(owner, tip_frame(pd.Series(skewed)))
+    assert "strongly skewed" in page and "Logarithm" in page
+    assert "strongly skewed" not in tips_page(owner, tip_frame(pd.Series(skewed - 50)))  # negatives
+    plain = pd.Series(np.random.default_rng(0).normal(10, 1, 400))
+    assert "strongly skewed" not in tips_page(owner, tip_frame(plain))
+
+
+def test_a_rare_class_suggests_the_class_size_decision(owner):
+    rare = pd.Series(["a"] * 380 + ["b"] * 20)
+    page = tips_page(owner, tip_frame(rare))
+    assert "only 5% of the rows" in page and "Adjust for class sizes" in page
+    even = pd.Series(["a"] * 200 + ["b"] * 200)
+    assert "rarest class" not in tips_page(owner, tip_frame(even))
+
+
+def test_the_tips_are_for_the_detailed_view_where_the_settings_are(owner):
+    rare = pd.Series(["a"] * 380 + ["b"] * 20)
+    assert "rarest class" not in tips_page(owner, tip_frame(rare), detailed=False)
+
+
 def test_iris_keeps_all_four_inputs_selected(owner):
     """Twice the rows, so the score runs: both petal columns then score as high as a leak."""
     client, pid, csrf = owner

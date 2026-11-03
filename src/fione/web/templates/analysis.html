@@ -60,6 +60,11 @@
     {% for level, key, vars in warnings %}
     <div class="alert alert-{{ level }}" role="note">{{ icon("info" if level == "info" else "alert") }}<span>{{ t(key, **vars) }}</span></div>
     {% endfor %}
+    {% if mode == "detailed" %}
+    {% for key, vars in tips %}
+    <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t(key, **vars) }} <a href="{{ base }}/train?target={{ target.name|urlencode }}">{{ t('analysis.advanced') }}</a></span></div>
+    {% endfor %}
+    {% endif %}
 
     {% if ctx.can_write %}
     <form class="stack-lg" id="run-form" method="post" action="{{ base }}/run" data-run-form>
