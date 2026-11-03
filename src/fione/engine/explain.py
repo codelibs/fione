@@ -38,6 +38,7 @@ from fione.engine.families import (
     n_threads,
     owners,
 )
+from fione.engine.metrics import choose
 from fione.engine.model import TrainedModel, attribution
 from fione.engine.prep import _EPOCH, _as_str, _datetimes
 
@@ -125,11 +126,14 @@ class Contributions:
     values: np.ndarray
     bias: np.ndarray
     prediction: np.ndarray
+    prior: np.ndarray | None = None  # the model's class_prior, for the class it predicts
 
     def slots(self, class_index: int | None = None) -> np.ndarray:
         """The output explained per row: ``class_index``, else the predicted one (multiclass)."""
         if class_index is None:
-            return self.prediction.argmax(axis=1)
+            if len(self.outputs) == 1:  # binary and regression explain their one output
+                return np.zeros(len(self.prediction), dtype=int)
+            return choose(self.prediction, self.prior)
         _check_int("class_index", class_index, 0, len(self.outputs) - 1)
         return np.full(len(self.prediction), class_index)
 
@@ -366,7 +370,9 @@ def contributions(model: TrainedModel, df: pd.DataFrame) -> Contributions:
     if len(outputs) < k:  # binary: the positive class
         phi, bias = phi[:, 1:], bias[:, 1:]
     values = phi @ attribution(model.prep).T  # features -> input columns (model.columns order)
-    return Contributions(list(model.columns), outputs, values, bias, values.sum(-1) + bias)
+    return Contributions(
+        list(model.columns), outputs, values, bias, values.sum(-1) + bias, model.class_prior
+    )
 
 
 def global_importance(c: Contributions) -> pd.Series:

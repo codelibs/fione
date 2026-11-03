@@ -64,6 +64,7 @@ JOBS_PER_PAGE = 50
 POLL_ACTIVE, POLL_IDLE = "5s", "30s"  # job-list refresh
 JOB_KINDS = ("automl", "batch_predict", "module", "export_models", "explain")
 TASKS = ("auto", "classification", "regression")
+DECISIONS = ("argmax", "balanced")
 MAX_RUNTIME_DIGITS = 6  # minutes, as in the wizard
 SEED_MAX = 2**32 - 1  # numpy's RandomState (the folds) takes 0..2**32-1
 # Training form fields: one value each, except ``inputs`` (one per checked column).
@@ -77,6 +78,7 @@ SINGLE_FIELDS = (
     "nfolds",
     "seed",
     "balance_classes",
+    "decision",
     "feature_engineering",
     "stopping_rounds",
     "stopping_metric",
@@ -428,7 +430,15 @@ def _form_values(defaults: dict) -> dict:
         "max_runtime_secs_per_model": "",
         "max_models": "",
     }
-    for name in ("nfolds", "seed", "stopping_rounds", "stopping_metric", "sort_metric", "task"):
+    for name in (
+        "nfolds",
+        "seed",
+        "stopping_rounds",
+        "stopping_metric",
+        "sort_metric",
+        "task",
+        "decision",
+    ):
         values[name] = str(defaults[name])
     values["stopping_tolerance"] = f"{defaults['stopping_tolerance']:g}"
     for name in FLAGS:
@@ -475,6 +485,7 @@ def _train_view(
         values=values if values is not None else _form_values(_defaults()),
         inputs=inputs if inputs is not None else defaults.inputs,
         tasks=TASKS,
+        decisions=DECISIONS,
         metric_options=_metric_options(),
         errors=errors or {},
         detail=detail,
@@ -525,6 +536,9 @@ def _parse_train(form: FormData, names: list[str], inferred_task: str):
     if values["task"] not in TASKS:
         errors["task"] = "analysis.error.task"
     config["task"] = values["task"]
+    if values["decision"] not in DECISIONS:
+        errors["decision"] = "train.error.decision"
+    config["decision"] = values["decision"]
     minutes = values["max_runtime_minutes"].strip()
     if len(minutes) > MAX_RUNTIME_DIGITS or _whole(minutes, 1) is None:
         errors["max_runtime_minutes"] = "analysis.error.runtime"

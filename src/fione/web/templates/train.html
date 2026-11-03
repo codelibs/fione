@@ -140,6 +140,14 @@
           {{ number("seed", 0, seed_max) }}
         </div>
         {{ flag("balance_classes") }}
+        <div class="field">
+          <label class="field__label" for="f-decision">{{ t('train.f.decision') }}</label>
+          <select class="input input-md input-limited" id="f-decision" name="decision"{{ described("decision") }}>
+            {% for decision in decisions %}<option value="{{ decision }}"{% if values.decision == decision %} selected{% endif %}>{{ t('train.decision.' ~ decision) }}</option>{% endfor %}
+          </select>
+          <p class="field__hint" id="decision-hint">{{ t('train.h.decision') }}</p>
+          {{ error("decision") }}
+        </div>
         {{ flag("feature_engineering") }}
       </fieldset>
 

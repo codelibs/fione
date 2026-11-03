@@ -12,8 +12,8 @@ Classification (``y`` holds class codes 0..k-1 of ``labels``, ``pred`` the (n, k
   as ``str(label)``, as in the artifact manifest; everything else refers to a class by its
   index.
 - ``confusion``: ``classes`` (indices, ``-1`` = "other") and ``matrix`` (rows actual, columns the
-  argmax). Above ``MAX_CONFUSION`` classes it keeps the largest by support (ties: lower index
-  first), in index order, and counts the rest as "other".
+  predicted class, as ``choose`` picks it). Above ``MAX_CONFUSION`` classes it keeps the largest
+  by support (ties: lower index first), in index order, and counts the rest as "other".
 - ``per_class``: precision, recall, f1 (as sklearn's with ``zero_division=nan``, so ``None`` when
   undefined) and support, in index order; above ``MAX_PER_CLASS`` classes only the largest by
   support (ties as above), with ``per_class_truncated``.
@@ -37,6 +37,7 @@ import numpy as np
 from sklearn.metrics import precision_recall_curve, roc_auc_score, roc_curve
 
 from fione.engine.events import jsonable
+from fione.engine.metrics import choose
 from fione.engine.prep import Task
 
 VERSION = 1
@@ -125,6 +126,7 @@ def diagnostics(
     *,
     max_rows: int = 200_000,
     seed: int = 0,
+    prior: np.ndarray | None = None,
 ) -> dict:
     """The diagnostics of ``pred`` against ``y`` (see the module docstring)."""
     y, pred = np.asarray(y), np.asarray(pred, dtype=float)
@@ -135,15 +137,17 @@ def diagnostics(
         y, pred = y[rows], pred[rows]
     out = {"version": VERSION, "task": task, "n_rows": len(y), "sampled": sampled}
     if task == "classification":
-        out.update(_classification(y.astype(np.int64), pred, labels))
+        out.update(_classification(y.astype(np.int64), pred, labels, prior))
     else:
         out.update(_regression(y.astype(float), pred, rng))
     return out
 
 
-def _classification(y: np.ndarray, pred: np.ndarray, labels: list) -> dict:
+def _classification(
+    y: np.ndarray, pred: np.ndarray, labels: list, prior: np.ndarray | None
+) -> dict:
     k = pred.shape[1]
-    predicted = pred.argmax(axis=1)
+    predicted = choose(pred, prior)
     support = np.bincount(y, minlength=k)
     n_predicted = np.bincount(predicted, minlength=k)
     tp = np.bincount(y[y == predicted], minlength=k)

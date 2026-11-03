@@ -1,3 +1,4 @@
+import copy
 from types import SimpleNamespace
 
 import numpy as np
@@ -34,6 +35,15 @@ def test_predictions_equal_the_models_own(cls):
     out = batch_predict(cls, df)
     assert (out["predict"] == cls.predict(df).to_numpy()).all()
     np.testing.assert_allclose(out[PROBA].to_numpy(), cls.predict_proba(df).to_numpy())
+
+
+def test_a_balanced_model_is_labelled_as_its_own_predict_does(cls):
+    skewed = copy.copy(cls)
+    skewed.class_prior = np.array([0.8, 0.1, 0.1])
+    df = features(200)
+    out = batch_predict(skewed, df)
+    assert (out["predict"] == skewed.predict(df).to_numpy()).all()
+    assert (out["predict"] != cls.predict(df).to_numpy()).any()
 
 
 def test_probabilities_sum_to_one(cls):

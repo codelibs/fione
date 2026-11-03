@@ -150,6 +150,7 @@ TRAIN_FORM = {
     "max_runtime_minutes": "1",
     "nfolds": "5",
     "seed": "0",
+    "decision": "argmax",
     "stopping_rounds": "3",
     "stopping_metric": "auto",
     "stopping_tolerance": "0.001",

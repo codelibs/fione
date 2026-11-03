@@ -184,7 +184,7 @@ def _predict(
             slots = np.zeros(len(part), dtype=int)
         else:
             proba = model.predict_proba(part).to_numpy()
-            chosen = proba.argmax(axis=1)
+            chosen = model.choose(proba)
             labels = np.asarray(model.classes_, dtype=object)[chosen]
             result = pd.DataFrame({PREDICT: pd.Series(labels).astype(model.label_dtype)})
             result[prediction_columns(model)[1:]] = proba

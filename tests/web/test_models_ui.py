@@ -8,6 +8,7 @@ import time
 from contextlib import closing
 from functools import cache
 from html import escape, unescape
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -195,6 +196,7 @@ def trained(make_client, monkeypatch):
             "max_models": str(FAST["max_models"] + 1),
             "nfolds": str(FAST["nfolds"]),
             "seed": "0",
+            "decision": "argmax",
             "stopping_rounds": "3",
             "stopping_metric": "auto",
             "stopping_tolerance": "0.001",
@@ -1420,3 +1422,9 @@ def test_the_swapped_curve_is_announced(world):
     column = iris_explanation()["partial_dependence"][1]["column"]
     html = pd_fragment(world, model, column=column)
     assert f"Showing how the prediction changes with {column}." in html
+
+
+def test_the_settings_list_names_the_decision_rule_by_its_label():
+    record = SimpleNamespace(config={"task": "classification", "decision": "balanced"})
+    shown = dict(models_ui._config(record))
+    assert shown["decision"] == ("balanced", "train.decision.balanced")

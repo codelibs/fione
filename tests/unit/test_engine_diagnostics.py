@@ -12,7 +12,7 @@ from sklearn.datasets import load_iris
 from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 
 from fione.engine import automl as automl_module
-from fione.engine import metrics
+from fione.engine import explain, metrics
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
 from fione.engine.diagnostics import diagnostics
@@ -291,6 +291,17 @@ def iris_model():
         target="target", max_runtime_secs=10, max_models=4, keep_cv_predictions=True
     )
     return AutoML(config).fit(_iris())
+
+
+def test_pickle_without_a_class_prior_loads(iris_model, tmp_path):
+    model = copy.copy(iris_model)
+    model.class_prior = np.array([0.5, 0.25, 0.25])
+    del model.__dict__["class_prior"]  # what a model saved before the setting holds
+    joblib.dump(model, tmp_path / "model.joblib")
+    loaded = joblib.load(tmp_path / "model.joblib")  # a file this test wrote itself
+    assert loaded.class_prior is None
+    assert len(loaded.predict(_iris().head())) == 5
+    assert explain.contributions(loaded, _iris().head()).prior is None
 
 
 def test_automl_fit_stores_diagnostics(iris_model):

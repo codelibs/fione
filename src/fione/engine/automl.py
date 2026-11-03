@@ -175,6 +175,11 @@ class AutoML:
         elif c.balance_classes:
             counts = np.bincount(y)
             weight = (len(y) / (len(counts) * counts))[y]
+        prior = None
+        if c.decision == "balanced" and task == "regression":
+            self._notice("decision is ignored for regression")
+        elif c.decision == "balanced":
+            prior = np.bincount(y) / len(y)
         groups, tried = self._engineer(X, y, task, nfolds, deadline)
         prep = Prep().fit(X, groups)
         folds = make_folds(y, task, nfolds, c.seed)
@@ -210,14 +215,14 @@ class AutoML:
 
         oof = {name: result.oof for name, result in results.items()}
         weights = caruana(oof, y, task)
-        scores = {name: metrics.value(sort_metric, y, p) for name, p in oof.items()}
+        scores = {name: metrics.value(sort_metric, y, p, prior) for name, p in oof.items()}
         pick = max if sort_metric in metrics.HIGHER_IS_BETTER else min
         self._event(
             "ensemble",
             sort_metric=sort_metric,
             weights=weights,
             scores=scores,
-            ensemble_score=metrics.value(sort_metric, y, _blend(oof, weights)),
+            ensemble_score=metrics.value(sort_metric, y, _blend(oof, weights), prior),
             best_single=pick(scores, key=scores.get),
         )
 
@@ -230,7 +235,7 @@ class AutoML:
         final = {member.key: member.weight for member in members}
         blended = _blend(oof, final)
         try:
-            found = diagnostics(task, y, blended, classes, seed=c.seed)
+            found = diagnostics(task, y, blended, classes, seed=c.seed, prior=prior)
         except Exception as e:
             found = None
             self._notice(
@@ -239,7 +244,7 @@ class AutoML:
                 exception=type(e).__name__,
             )
         leaderboard = _leaderboard(
-            results, final, refit_secs, blended, y, folds, sort_metric, scores
+            results, final, refit_secs, blended, y, folds, sort_metric, scores, prior
         )
         assignment = np.empty(len(y), dtype=np.int64)
         for i, (_, valid) in enumerate(folds):
@@ -254,7 +259,7 @@ class AutoML:
             feature_importance=feature_importance(members, prep),
             stop_reason=stop_reason,
             config=c,
-            metrics=metrics.summary(task, y, blended),
+            metrics=metrics.summary(task, y, blended, prior),
             prep=prep,
             members=members,
             label_dtype=target.dtype,
@@ -265,6 +270,7 @@ class AutoML:
             fold_assignment=assignment if c.keep_cv_fold_assignment else None,
             diagnostics=found,
             features=tried,
+            class_prior=prior,
         )
         self._event(
             "finished",
@@ -530,7 +536,7 @@ def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
 
 
 def _leaderboard(
-    results, weights, refit_secs, blended, y, folds: Folds, sort_metric, scores
+    results, weights, refit_secs, blended, y, folds: Folds, sort_metric, scores, prior
 ) -> pd.DataFrame:
     """One row per candidate (a family's best trial, then its runners-up) and one for the
     ensemble. The ensemble's weights were chosen on the same OOF predictions it is scored on, so
@@ -542,7 +548,7 @@ def _leaderboard(
                 "model": f"{result.spec.name}_{result.best_trial}",
                 "family": result.spec.name,
                 "cv_score": scores[name],
-                "cv_std": metrics.fold_std(sort_metric, y, result.oof, folds),
+                "cv_std": metrics.fold_std(sort_metric, y, result.oof, folds, prior),
                 "train_secs": result.best_secs + refit_secs.get(name, 0.0),
                 "weight": weights.get(name, 0.0),
             }
@@ -551,8 +557,8 @@ def _leaderboard(
         {
             "model": "Ensemble",
             "family": "Ensemble",
-            "cv_score": metrics.value(sort_metric, y, blended),
-            "cv_std": metrics.fold_std(sort_metric, y, blended, folds),
+            "cv_score": metrics.value(sort_metric, y, blended, prior),
+            "cv_std": metrics.fold_std(sort_metric, y, blended, folds, prior),
             "train_secs": sum(row["train_secs"] for row in rows if row["weight"] > 0),
             "weight": np.nan,
         }
