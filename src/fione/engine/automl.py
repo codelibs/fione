@@ -76,6 +76,7 @@ from fione.engine.search import (
 
 FAMILY_ORDER = (
     "LightGBM",
+    "TextLinear",
     "CatBoost",
     "XGBoost",
     "RandomForest",
@@ -84,13 +85,14 @@ FAMILY_ORDER = (
     "Linear",
 )
 FAMILY_WEIGHTS = {
-    "LightGBM": 0.22,
-    "CatBoost": 0.22,
-    "XGBoost": 0.18,
-    "RandomForest": 0.10,
-    "ExtraTrees": 0.10,
-    "DeepLearning": 0.12,
-    "Linear": 0.06,
+    "LightGBM": 0.176,
+    "TextLinear": 0.2,  # only searched for data with prose, where it matters most
+    "CatBoost": 0.176,
+    "XGBoost": 0.144,
+    "RandomForest": 0.08,
+    "ExtraTrees": 0.08,
+    "DeepLearning": 0.096,
+    "Linear": 0.048,
 }
 FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
 # A short run gets more: the choice needs about this long on a few thousand rows, and without it
@@ -196,6 +198,8 @@ class AutoML:
         prep = Prep().fit(X, groups)
         folds = make_folds(y, task, nfolds, c.seed)
         families = self._without_wide_linear_view(prep, len(X))
+        # The words are read only from prose columns.
+        families = [f for f in families if f != "TextLinear" or prep.prose] or families
 
         left = deadline.remaining()
         reserve = max(MIN_RESERVE_SECS, RESERVE_SHARE * left)
@@ -332,7 +336,7 @@ class AutoML:
         (unless that leaves none)."""
         if n_rows * prep.linear_width <= LINEAR_MAX_CELLS:
             return self.families
-        kept = [name for name in self.families if FAMILIES[name].view != "linear"]
+        kept = [name for name in self.families if FAMILIES[name].view not in ("linear", "text")]
         if not kept or kept == self.families:
             return self.families
         left_out = [name for name in self.families if name not in kept]

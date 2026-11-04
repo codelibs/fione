@@ -39,7 +39,7 @@ from sklearn.metrics import log_loss
 
 from fione.engine.config import Deadline
 from fione.engine.families import n_threads
-from fione.engine.prep import Prep, Task, _as_str, _datetimes
+from fione.engine.prep import Prep, Task, _as_str, _datetimes, is_prose
 from fione.engine.search import make_folds
 
 GATE_ROWS = 20_000  # rows the gate samples
@@ -64,7 +64,6 @@ MAX_REPEATED_VALUES = 10_000  # repeated values stored per column
 TOPICS = 32  # components of the word-weight matrix kept per prose column
 TOPIC_WORDS = 30_000  # most frequent words the topics are read from
 TOPIC_ROWS = 20_000  # rows the topics are fitted on
-PROSE_WORDS = 5  # a column whose median value has this many words is prose, not a label or name
 TOKENS = 8  # tokens kept per text column
 TOKEN_SUPPORT = 0.02  # share of the rows a token must occur in (and at least 5 rows)
 MAX_PAIR_COLUMNS = 5  # numbers or dates combined pairwise
@@ -461,13 +460,6 @@ def _structured(s: pd.Series) -> bool:
     return bool((several | mixed).mean() >= TEXT_MIN_STRUCTURED)
 
 
-def _prose(s: pd.Series) -> bool:
-    """Whether a string column holds running text: the median value has ``PROSE_WORDS`` words
-    (runs of letters, so a timestamp or a code is not prose)."""
-    values = _as_str(s).dropna().head(1000)
-    return bool(len(values) and values.str.count(_TOKEN.pattern).median() >= PROSE_WORDS)
-
-
 def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
     """The groups worth judging for these columns, in the order the gate tries them.
     ``ranked`` lists the input columns, the most useful first, to pick the few that pairwise
@@ -486,7 +478,7 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
     numbers = by_rank(prep.numeric_columns)[:MAX_PAIR_COLUMNS]
     dates = by_rank(c for c in columns if kinds[c] == "datetime")
     # The topics of prose come first: they are worth the most, and the gate may run out of time.
-    found: list[Group] = [TextTopics(c) for c in by_rank(text)[:MAX_TEXT_COLUMNS] if _prose(X[c])]
+    found: list[Group] = [TextTopics(c) for c in by_rank(text)[:MAX_TEXT_COLUMNS] if is_prose(X[c])]
     for column in by_rank(text)[:MAX_TEXT_COLUMNS]:
         found += [TextTokens(column), TextShape(column)]
     if categories:

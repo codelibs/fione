@@ -133,7 +133,7 @@ training (so its probabilities differ from the example above):
   away. Both numbers can be changed (see below).
 - Threads: LightGBM and XGBoost compute contributions on as many threads as the model's own
   predictions, which follow the threads it was trained with; CatBoost, RandomForest and
-  ExtraTrees use at most 4 here. Linear and DeepLearning run on the numerical library's own
+  ExtraTrees use at most 4 here. Linear, TextLinear and DeepLearning run on the numerical library's own
   threads, which Fione does not limit. No thread limit is added: the caps above are what keep
   their cost bounded.
 - Plain predictions wait while a contribution request computes, because the model answers one

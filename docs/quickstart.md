@@ -140,6 +140,15 @@ the accuracy and the confusion matrix of the training result, batch prediction, 
 and the explanation follow the same rule. It cannot be combined with "Balance the classes",
 which corrects the same imbalance while learning, and it is ignored for regression.
 
+## Text columns
+
+A column of running text (the median value has five words or more) is read in two ways. Its
+topics are derived features (see below). A model family called TextLinear also reads its words:
+a logistic (or ridge) regression on the TF-IDF weights of words and word pairs, with the other
+columns beside them, learned again on each training fold. It joins the search and the ensemble
+only for data with such a column, and its predictions are mixed with the other families' by the
+same cross-validation scores.
+
 ## Learning a skewed target
 
 For a regression target of 0 or more that is strongly skewed (prices, counts, durations) and is

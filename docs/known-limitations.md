@@ -66,8 +66,8 @@ What this release does not do, or does with a catch. Japanese summary at the end
   (there is no out-of-core processing). Measured on a 16-core Mac, a training job peaked at about
   1.9 GB of memory for a 150 MB CSV (200,000 rows × 42 columns) and 2.5 GB for a 750 MB CSV
   (1,000,000 × 42); roughly 1.5–1.7 GB of that does not grow with the data (the libraries). Plan
-  for at least 4 GB of RAM, and more for wider data or larger files. Linear and DeepLearning
-  work on a one-hot encoded copy (up to 15 columns per text column, 8 bytes each, copied again
+  for at least 4 GB of RAM, and more for wider data or larger files. Linear, TextLinear and
+  DeepLearning work on a one-hot encoded copy (up to 15 columns per text column, 8 bytes each, copied again
   per fold); when that copy would pass 100 million cells they are left out of the run, with a
   notice.
 - **Cross-validation scores are slightly optimistic.** Boosting models stop early on their
@@ -87,7 +87,8 @@ What this release does not do, or does with a catch. Japanese summary at the end
   in probability for classification and in the target's units for regression, not in log-odds.
   They start from each library's own TreeSHAP (LightGBM, XGBoost, CatBoost), from Saabas
   path contributions for RandomForest and ExtraTrees, from the exact coefficient times the
-  distance from the training mean for Linear and from integrated gradients along the path from
+  distance from the training mean for Linear and TextLinear (the words of a text column summed
+  into one value per row) and from integrated gradients along the path from
   the training mean for DeepLearning, and are then converted to probabilities and combined over
   the ensemble; exact Shapley values exist only for each booster on its own, before that
   conversion. With more than two classes the conversion is a numerical path integral whose
@@ -107,7 +108,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - **Extra seeds make a model bigger and slower to predict.** Time left after the final refits
   buys up to four more refits of each boosting or forest member; their predictions, importances
   and contributions are averaged, so each costs that many times more (the size limits still
-  hold). Linear is deterministic and is not repeated.
+  hold). Linear and TextLinear are deterministic and are not repeated.
 - **One output is explained per row**: with two classes the second one (the last `p_` column),
   with more the predicted class (the API takes a `class_index` for another), for regression
   the value. Batch predictions and Fione Serving have no option for every class.
@@ -150,7 +151,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
   then `contrib_bias` (`contrib_bias_2` when an input is named `bias`); an input column whose
   name is taken is kept as `input_<name>`. Each row gains
   one float64 column per input plus one, so 100,000 rows of a 2,000-column model make about
-  1.6 GB of output. At most 100,000 rows; the work runs on at most 4 threads (not Linear and
+  1.6 GB of output. At most 100,000 rows; the work runs on at most 4 threads (not Linear, TextLinear and
   DeepLearning, which use the numerical library's own), in chunks of at most 5,000 rows, and is
   much slower than a plain prediction.
 - **Diagnostics** (the Metrics tab) come from the ensemble's out-of-fold predictions, so they
@@ -247,12 +248,12 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 実行中のジョブのキャンセルには最大 10 秒かかります。プロジェクトに属さないジョブは `GET /api/v1/jobs` に出ません。削除中にストレージが失敗すると、ファイルが残ることがあります。
 - 全モデルのエクスポートは、プロジェクトごとに最新の 1 つだけ残ります。
 - エンジンは実際には最大実行時間の約 3 分の 2 を使います。学習やエンジンのメッセージは日本語画面でも英語です。
-- 寄与度は近似です。各行の寄与度は予測値（分類では確率、回帰では目的変数の単位。log-odds ではありません）に丸め誤差の範囲で一致しますが、各ライブラリの TreeSHAP（RandomForest と ExtraTrees は Saabas、Linear は係数×平均からの差、DeepLearning は平均からの積分勾配）を確率に変換してアンサンブルで合成したもので、厳密な Shapley 値ではありません。説明するのは 1 行につき 1 つの出力です（2 クラスでは 2 番目のクラス、それ以上では予測したクラス、回帰では値）。
+- 寄与度は近似です。各行の寄与度は予測値（分類では確率、回帰では目的変数の単位。log-odds ではありません）に丸め誤差の範囲で一致しますが、各ライブラリの TreeSHAP（RandomForest と ExtraTrees は Saabas、Linear と TextLinear は係数×平均からの差、DeepLearning は平均からの積分勾配）を確率に変換してアンサンブルで合成したもので、厳密な Shapley 値ではありません。説明するのは 1 行につき 1 つの出力です（2 クラスでは 2 番目のクラス、それ以上では予測したクラス、回帰では値）。
 - 派生特徴量（文字列の語と話題、件数、和・比、グループ平均など）は、元の列にまとめて寄与度・重要度を数えます。複数の列から作る特徴量は、それらの列に等分します。このバージョンで学習したモデルは、派生特徴量の有無にかかわらず、それより前のインストールで使わないでください（警告なしに読み込めますが、予測や説明が正しくなくなります）。派生特徴量を採用するかの判定は、交差検証と同じ行を（別の分割と厳しい基準で）使うため、学習のスコアはやや楽観的です。小さいデータでは損失の 1% 程度の本物の改善でも基準を満たさず、採用されないことがあります。
 - 説明には学習データが必要です。インポートしたモデルや学習データを削除したモデルは、「説明」タブの「説明を計算」で、列のそろったデータセットを選んでください。説明ジョブが保存するのは、最大 1,000 行の寄与度による重要度と、上位 10 列の部分依存です。曲線のグリッドは 1 万行のサンプルから作り、そのうち 300 行（列の多いモデルではもっと少なく）で平均します。1 MiB を超える結果は、目印なしで削られます。
 - 部分依存のグリッドは 2〜98 パーセンタイルまでで、数値の列には欠損値の点がありません。時刻は UTC です。学習で見なかったカテゴリもグリッドに入ることがあります。その場で計算する曲線はグリッドも平均も最大 300 行から作るので、保存した曲線と点が少し違うことがあります。
 - Web プロセスがモデルを読み込むようになりました（閲覧者の操作でも）。結果画面での先頭 5 行の理由、最大 100 行の寄与度、1 列の部分依存を、サーバー全体で 1 件ずつ計算します。待てるのは 4 件まで、最大 15 秒で、それ以外はすぐに「混雑」（HTTP 503）になります。読み込んだままにするのは 2 モデル・512 MiB までです。ファイルが 512 MiB を超えるモデル、信頼を確認していないインポート、行 × クラス × 列が多すぎるモデルはそこでは断り、書き込み権限が必要な説明ジョブでだけ説明します。列が数千あるデータセットでは、部分依存 1 回の読み込みだけで数百 MiB 使うことがあります。説明ジョブはジョブ一覧に出ますが、ダッシュボードの最近のジョブには出ません。
-- バッチ予測で「各予測の内訳を含める」を選ぶと付く列は `contrib_<列>` と `contrib_bias`（入力に `bias` という列があると `contrib_bias_2`）で、名前がぶつかる入力列は `input_<名前>` になります。1 行あたり入力の列数 + 1 個の float64 の列が増え（2,000 列のモデルで 10 万行なら約 1.6 GB）、最大 10 万行、4 スレッドまで（Linear と DeepLearning は数値ライブラリ任せ）で計算するので、通常の予測よりかなり遅くなります。
+- バッチ予測で「各予測の内訳を含める」を選ぶと付く列は `contrib_<列>` と `contrib_bias`（入力に `bias` という列があると `contrib_bias_2`）で、名前がぶつかる入力列は `input_<名前>` になります。1 行あたり入力の列数 + 1 個の float64 の列が増え（2,000 列のモデルで 10 万行なら約 1.6 GB）、最大 10 万行、4 スレッドまで（Linear、TextLinear、DeepLearning は数値ライブラリ任せ）で計算するので、通常の予測よりかなり遅くなります。
 - 診断（指標タブ）は学習時の out-of-fold 予測から作るため、CV のスコアと同じくやや楽観的です。20 万行を超えるとランダムサンプルから作ります。
 - モデルの診断には学習データの値が含まれます（クラスのラベルと、回帰では学習行から抜き出した最大 2,000 件の実際の値とその予測値）。プロジェクトを読めるすべての人に見え、モデルのエクスポートにも入り、学習データを削除しても残ります。保存した説明も、カテゴリやクラスのラベルをデータセット削除後も保持します（エクスポートはされません）。モデルファイルとサービング用ファイルには診断は入りません。
 - 診断を持つエクスポートは、診断の機能より前のインストールでは読み込めません（どちらもバージョン 20.0.0 で区別できません）。インポートは、有限でない数や float の範囲を超える整数（診断の中も含め、どこにあっても）、未知の項目や深すぎる入れ子を持つ診断を拒否するようになりました。

@@ -341,3 +341,35 @@ def test_an_object_column_that_mixes_dates_and_text_is_not_a_date():
     values = [datetime.date(2024, 1, 1 + i % 28) for i in range(40)] + ["n/a"] * 3
     X = pd.DataFrame({"day": values, "x": np.arange(43.0)})
     assert Prep().fit(X).kind_of("day") == "category"
+
+
+def _posts(n=120):
+    subjects = {"space": "rocket orbit launch moon crew", "food": "bread cheese soup butter sauce"}
+    rng = np.random.default_rng(1)
+    labels = rng.choice(list(subjects), n)
+    texts = [" ".join(rng.choice(subjects[label].split(), 7)) for label in labels]
+    return pd.DataFrame(
+        {"num": rng.normal(size=n), "post": texts, "code": [f"A{i}" for i in range(n)]}
+    )
+
+
+def test_prose_columns_are_the_ones_with_running_text():
+    frame = _posts()
+    frame["when"] = "2015-02-24 11:35:52 -0800"  # digits are not words
+    frame.loc[0, "when"] = "2015-02-25 09:00:00 -0800"
+    prep = Prep().fit(frame)
+    assert prep.prose == ("post",)
+
+
+def test_text_view_is_the_linear_view_plus_the_text_of_each_prose_column():
+    frame = _posts()
+    frame.loc[3, "post"] = None
+    prep = Prep().fit(frame)
+    view = prep.text(frame)
+    linear = prep.linear(frame)
+    at = prep.feature_names.index("post")
+    name = f"f{at}_t"
+    kept = [c for c in linear.columns if int(c[1:].split("_")[0]) != at]  # nothing of the text
+    assert list(view.columns) == [*kept, name]
+    assert view[name].iloc[0] == frame["post"].iloc[0] and view[name].iloc[3] == ""
+    assert Prep().fit(frame.drop(columns=["post"])).prose == ()

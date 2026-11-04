@@ -181,7 +181,7 @@ def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
     spec = FAMILIES[name]("classification", 2)
     view = getattr(prep, spec.view)(X)
     model = spec.fit_full(spec.defaults, view, y, Deadline(30), rounds=7)
-    one_step = {"Linear": 1}  # fitted in one go: it has no rounds
+    one_step = {"Linear": 1, "TextLinear": 1}  # fitted in one go: they have no rounds
     full = Forest.n_trees if issubclass(FAMILIES[name], Forest) else 7
     assert spec.rounds(model) == one_step.get(name, full)
     assert spec.predict(model, view).shape == (1_000, 2)
@@ -190,8 +190,9 @@ def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
     assert importance.shape == (6,) and (importance >= 0).all() and importance.sum() > 0
 
 
-# Linear is excluded: one fit takes far less than the shortest calibrated budget, so it finishes.
-@pytest.mark.parametrize("name", [name for name in FAMILIES if name != "Linear"])
+# The linear families are excluded: one fit takes far less than the shortest calibrated budget,
+# so it finishes.
+@pytest.mark.parametrize("name", [name for name in FAMILIES if "Linear" not in name])
 def test_fit_full_raises_when_it_cannot_finish(name):
     X, y = _classification(50_000, 30)
     prep, y, _ = _setup(X, y)
