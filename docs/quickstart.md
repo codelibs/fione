@@ -151,7 +151,7 @@ same cross-validation scores.
 
 ## Learning a skewed target
 
-For a regression target of 0 or more that is strongly skewed (prices, counts, durations) and is
+For a regression target of 0 or more that is skewed (prices, counts, durations) and is
 scored by relative error such as RMSLE, set "Learning the target" to *Logarithm*
 (`target_transform: "log1p"` in the API). Fione then learns log(1 + value) and gives predictions
 in the column's own units again. The model's scores, the diagnostics, the leaderboard, batch

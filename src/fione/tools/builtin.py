@@ -45,7 +45,7 @@ from fione.data.profile import (
 from fione.engine import diagnostics as diag
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.explain import PD_GRID
-from fione.engine.prep import LINEAR_SKEW, infer_task
+from fione.engine.prep import infer_task
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import explanations
@@ -600,6 +600,10 @@ SECS_PER_CELL = 6e-6
 TRIALS_WANTED = 30
 MAX_RUNTIME_SECS = 1800
 MIN_RUNTIME_SECS = 120
+# Skew above which a target of 0 or more is suggested for target_transform="log1p". On every
+# regression set measured with RMSLE that skewed 0.5 or more, the logarithm helped or held; 1.0
+# keeps the tip off targets that are nearly symmetric.
+TARGET_SKEW = 1.0
 RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balanced"
 
 
@@ -616,12 +620,12 @@ def _runtime_secs(dataset: Dataset) -> int:
 
 
 def is_skewed_target(y: pd.Series, task: str) -> bool:
-    """A non-negative regression target skewed enough that ``target_transform="log1p"`` may
-    pay (the engine's own rule for its log-transformed views)."""
+    """A non-negative regression target skewed enough (``TARGET_SKEW``) that
+    ``target_transform="log1p"`` may pay."""
     y = y.dropna()
     if task != "regression" or len(y) == 0 or not pd.api.types.is_numeric_dtype(y):
         return False
-    return bool(y.min() >= 0 and y.skew() > LINEAR_SKEW)
+    return bool(y.min() >= 0 and y.skew() > TARGET_SKEW)
 
 
 def rare_class_share(y: pd.Series, task: str) -> float | None:
@@ -742,7 +746,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         warnings.append("the leak check ran out of time; some columns were not scored")
     if is_skewed_target(found.y, task):
         warnings.append(
-            "the target is not negative and strongly skewed; if the score is a relative error "
+            "the target is not negative and skewed; if the score is a relative error "
             "(such as RMSLE), target_transform 'log1p' may help"
         )
     if (share := rare_class_share(found.y, task)) is not None:
