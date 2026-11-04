@@ -552,10 +552,19 @@ def tip_frame(label: pd.Series, n: int = 400) -> pd.DataFrame:
 def test_a_skewed_non_negative_target_suggests_the_logarithm(owner):
     skewed = np.random.default_rng(0).lognormal(0, 1.5, 400)
     page = tips_page(owner, tip_frame(pd.Series(skewed)))
-    assert "strongly skewed" in page and "Logarithm" in page
-    assert "strongly skewed" not in tips_page(owner, tip_frame(pd.Series(skewed - 50)))  # negatives
+    assert "are 0 or more and skewed" in page and "Logarithm" in page
+    negatives = tips_page(owner, tip_frame(pd.Series(skewed - 50)))
+    assert "are 0 or more and skewed" not in negatives
     plain = pd.Series(np.random.default_rng(0).normal(10, 1, 400))
-    assert "strongly skewed" not in tips_page(owner, tip_frame(plain))
+    assert "are 0 or more and skewed" not in tips_page(owner, tip_frame(plain))
+
+
+def test_a_moderately_skewed_target_suggests_the_logarithm_and_a_mild_one_does_not(owner):
+    moderate = pd.Series(np.random.default_rng(0).lognormal(0, 0.4, 400))
+    mild = pd.Series(np.random.default_rng(0).gamma(16, 1, 400))
+    assert 1.0 < moderate.skew() and mild.skew() < 1.0
+    assert "are 0 or more and skewed" in tips_page(owner, tip_frame(moderate))
+    assert "are 0 or more and skewed" not in tips_page(owner, tip_frame(mild))
 
 
 def test_a_rare_class_suggests_the_class_size_decision(owner):
