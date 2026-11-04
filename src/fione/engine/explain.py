@@ -34,6 +34,8 @@ from fione.engine.families import (
     Forest,
     LightGBM,
     Linear,
+    TextLinear,
+    TextModel,
     XGBoost,
     n_threads,
     owners,
@@ -81,6 +83,8 @@ def _width(model: TrainedModel, features: int, hidden: bool = True) -> int:
                 widths.append(max(one.coefs_[0].shape) if hidden else one.coefs_[0].shape[0])
             elif isinstance(member.spec, Linear):
                 widths.append(np.atleast_2d(one.coef_).shape[1])
+            elif isinstance(member.spec, TextLinear):  # the words are summed per column
+                widths.append(len(one.dense) + len(one.texts))
     return max(1, *widths)
 
 
@@ -104,6 +108,8 @@ def cap_threads(model: TrainedModel, threads: int = THREADS) -> TrainedModel:
                 member.spec.n_jobs = threads
             continue
         for one in member.models:
+            if isinstance(one, TextModel):  # its linear model has no thread count
+                continue
             if "n_jobs" in one.get_params() and _lowered(one.get_params()["n_jobs"], threads):
                 one.set_params(n_jobs=threads)  # not Ridge and the network, which have none
     return model
@@ -284,6 +290,30 @@ def _linear_view_contributions(spec, model, view: pd.DataFrame) -> tuple[np.ndar
     return by_feature, bias
 
 
+def _text_linear_contributions(model, view: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Contributions of the text view, summed onto the features they derive from: like the
+    linear view's (``coef * (x - baseline)``), with the words of a text column summed to one
+    value per row, never laid out as columns."""
+    coef = np.atleast_2d(model.model.coef_)  # (k, inputs)
+    bias = np.tile(np.atleast_1d(model.model.intercept_) + coef @ model.baseline_, (len(view), 1))
+    names = [*model.dense, *model.texts]
+    owner = owners(names)
+    out = np.zeros((len(view), coef.shape[0], owner.max() + 1))
+    dense = view[model.dense].to_numpy(np.float64)
+    width = len(model.dense)
+    phi = (dense - model.baseline_[:width])[:, None, :] * coef[None, :, :width]
+    np.add.at(out, (slice(None), slice(None), owner[:width]), phi)
+    start = width
+    for i, (column, vectorizer) in enumerate(zip(model.texts, model.vectorizers, strict=True)):
+        size = len(vectorizer.vocabulary_)
+        block = coef[:, start : start + size]
+        words = vectorizer.transform(view[column]).astype(np.float64)
+        centred = np.asarray(words @ block.T) - model.baseline_[start : start + size] @ block.T
+        out[:, :, owner[width + i]] += centred
+        start += size
+    return out, bias
+
+
 def native_contributions(
     spec: FamilySpec, model, view: pd.DataFrame
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -312,6 +342,8 @@ def native_contributions(
         )
     elif isinstance(spec, Linear | DeepLearning):
         return _linear_view_contributions(spec, model, view)
+    elif isinstance(spec, TextLinear):
+        return _text_linear_contributions(model, view)
     elif isinstance(spec, CatBoost):
         categorical = [i for i, dtype in enumerate(view.dtypes) if dtype is np.dtype(object)]
         raw = model.get_feature_importance(

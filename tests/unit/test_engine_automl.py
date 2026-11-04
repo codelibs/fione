@@ -125,7 +125,7 @@ def test_leaderboard_has_a_row_per_candidate_plus_the_ensemble(iris):
     model, _, _, _ = iris
     board = model.leaderboard
     assert list(board.columns) == LEADERBOARD_COLUMNS
-    assert set(board["family"]) == {*FAMILY_ORDER, "Ensemble"}
+    assert set(board["family"]) == {*FAMILY_ORDER, "Ensemble"} - {"TextLinear"}  # no prose
     assert board["family"].eq("Ensemble").sum() == 1 and board["model"].is_unique
     members = board[board["family"] != "Ensemble"]
     assert members["weight"].sum() == pytest.approx(1.0)
@@ -918,3 +918,65 @@ def test_a_failing_extra_seed_is_reported_and_the_member_keeps_its_models(monkey
     assert len(member.models) == 1 and calls
     notices = [e.data for e in events if e.type == "notice"]
     assert any(n.get("kind") == "refit_error" and n["family"] == "LightGBM" for n in notices)
+
+
+def _posts(n=300, seed=0):
+    """Short texts on three subjects, and a number that says nothing."""
+    rng = np.random.default_rng(seed)
+    subjects = {
+        "space": "rocket orbit launch moon crew planet".split(),
+        "food": "bread cheese soup butter sauce flour".split(),
+        "law": "court judge appeal verdict trial clause".split(),
+    }
+    labels = rng.choice(list(subjects), n)
+    texts = [" ".join(rng.choice(subjects[label], 8)) for label in labels]
+    return pd.DataFrame({"post": texts, "noise": rng.normal(size=n), "topic": labels})
+
+
+def test_text_linear_runs_only_for_data_with_prose_and_reads_the_words():
+    df = _posts()
+    events = []
+    model = _fit(
+        df, events, families=["LightGBM", "TextLinear"], target="topic", max_runtime_secs=30
+    )
+    assert "TextLinear" in set(model.leaderboard["family"])
+    pred = model.predict(df.drop(columns=["topic"]))
+    assert (pred.to_numpy() == df["topic"].to_numpy()).mean() > 0.9
+    plain = df.assign(post=df["post"].str.split().str[0])  # one word: not prose
+    model = _fit(plain, families=["LightGBM", "TextLinear"], target="topic", max_runtime_secs=30)
+    assert "TextLinear" not in set(model.leaderboard["family"])
+
+
+def test_text_linear_fits_the_words_once_per_training_set():
+    from fione.engine.families import TextLinear
+    from fione.engine.prep import Prep
+
+    df = _posts()
+    X = df.drop(columns=["topic"])
+    y = pd.factorize(df["topic"])[0]
+    view = Prep().fit(X).text(X)
+    spec = TextLinear("classification", 3)
+    for C in (1.0, 10.0):
+        spec.fit({"C": C}, view.iloc[:200], y[:200], view.iloc[200:], y[200:], search.Deadline(60))
+    assert len(spec._words) == 1
+    import pickle
+
+    assert pickle.loads(pickle.dumps(spec))._words == {}  # the cache stays out of the model file
+    model = spec.fit(spec.defaults, view.iloc[:200], y[:200], None, None, search.Deadline(60))
+    proba = spec.predict(model, view.iloc[200:])
+    assert proba.shape == (100, 3) and np.allclose(proba.sum(axis=1), 1)
+    assert spec.importance(model).argmax() == 0 and spec.size_bytes(model) > 0
+
+
+def test_text_linear_predicts_texts_it_has_never_seen():
+    df = _posts(300, seed=3)
+    train, new = df.iloc[:200], df.iloc[200:]
+    model = _fit(
+        train,
+        families=["TextLinear"],
+        target="topic",
+        max_runtime_secs=30,
+        feature_engineering=False,
+    )
+    pred = model.predict(new.drop(columns=["topic"]))
+    assert (pred.to_numpy() == new["topic"].to_numpy()).mean() > 0.9

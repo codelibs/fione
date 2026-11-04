@@ -1,6 +1,7 @@
 """Target checks and the feature preprocessing shared by all model families."""
 
 import copy
+import re
 from typing import Literal
 
 import numpy as np
@@ -17,6 +18,9 @@ MIN_ROWS = 10
 LINEAR_LEVELS = 15  # categories one-hot encoded per column in the linear view (the most frequent)
 LINEAR_CLIP = 5.0  # standardised numbers are clipped to +-this many standard deviations
 LINEAR_SKEW = 2.0  # non-negative numbers more skewed than this are log-transformed in that view
+PROSE_WORDS = 5  # a column whose median value has this many words is prose, not a label or name
+MAX_PROSE = 3  # prose columns the text view reads (the first ones)
+_LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code has no words
 # ordinal: seconds since the Unix epoch
 _DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
 _EPOCH = pd.Timestamp("1970-01-01")
@@ -34,6 +38,13 @@ def _holds_dates(s: pd.Series) -> bool:
 def _as_str(s: pd.Series) -> pd.Series:
     """Values as strings, missing values kept missing."""
     return s.astype(str).where(s.notna())
+
+
+def is_prose(s: pd.Series) -> bool:
+    """Whether a string column holds running text: the median value has ``PROSE_WORDS`` words
+    (runs of letters, so a timestamp or a code is not prose)."""
+    values = _as_str(s).dropna().head(1000)
+    return bool(len(values) and values.str.count(_LETTERS.pattern).median() >= PROSE_WORDS)
 
 
 def _datetimes(s: pd.Series) -> pd.Series:
@@ -59,6 +70,7 @@ class Prep:
 
     groups: tuple = ()  # class-level defaults: models pickled before these existed still load
     _logged: tuple = ()
+    prose: tuple = ()
 
     def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
@@ -85,6 +97,11 @@ class Prep:
                 self._plan.append((column, "numeric"))
         if not self._plan:
             raise ConfigError("no usable feature columns: every column is empty or constant")
+        self.prose = tuple(
+            [c for c, kind in self._plan if kind in ("category", "frequency") and is_prose(X[c])][
+                :MAX_PROSE
+            ]
+        )
         self.feature_names: list[str] = []
         # The input columns behind each feature; a derived one may have several.
         self.sources: list[tuple[str, ...]] = []
@@ -209,6 +226,18 @@ class Prep:
         for position, values in self._categorical(base).items():
             base[position] = values.codes.astype(float)
         return base.fillna(self._medians)
+
+    def text(self, df: pd.DataFrame) -> pd.DataFrame:
+        """The linear view without the prose columns' frequencies, and after it each prose column
+        as its text (``f3_t``; missing is empty), for models that read words. The frequency of a
+        text says nothing but how often it was repeated, and is 0 for every text not seen."""
+        out = self.linear(df)
+        spots = {self.feature_names.index(column): column for column in self.prose}
+        drop = [c for c in out.columns if int(c[1:].split("_")[0]) in spots]
+        out = out.drop(columns=drop)
+        for position, column in spots.items():
+            out[f"f{position}_t"] = _as_str(df[column]).fillna("")
+        return out
 
     @property
     def linear_width(self) -> int:

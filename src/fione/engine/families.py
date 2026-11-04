@@ -26,9 +26,11 @@ Size caps (artifact target, spec 5.2): at most 2,000 boosting rounds with 50-rou
 stopping, 256 leaves per tree, XGBoost depth 10, CatBoost depth 8; RandomForest and ExtraTrees
 100 trees of at most 30 levels and 2,048 leaves; DeepLearning two layers of at most 256 units.
 
-The families are LightGBM, XGBoost, CatBoost, RandomForest, ExtraTrees, Linear and
-DeepLearning. Linear and DeepLearning read the ``linear``
-view of Prep (one-hot, standardised); their "rounds" are 1 and the epochs trained.
+The families are LightGBM, XGBoost, CatBoost, RandomForest, ExtraTrees, Linear, DeepLearning
+and TextLinear. Linear and DeepLearning read the ``linear`` view of Prep (one-hot,
+standardised); their "rounds" are 1 and the epochs trained. TextLinear reads the ``text`` view
+(the linear view and the prose columns as text) and learns the word weights on each training
+fold, so its predictions out of fold are honest.
 """
 
 import time
@@ -41,12 +43,14 @@ import optuna
 import pandas as pd
 import xgboost as xgb
 from catboost import CatBoostClassifier, CatBoostRegressor
+from scipy import sparse
 from sklearn.ensemble import (
     ExtraTreesClassifier,
     ExtraTreesRegressor,
     RandomForestClassifier,
     RandomForestRegressor,
 )
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier, MLPRegressor
@@ -678,7 +682,131 @@ class DeepLearning(FamilySpec):
         return by_feature(np.abs(model.coefs_[0]).sum(axis=1), model.feature_names_in_)
 
 
+TEXT_WORDS = 30_000  # words and word pairs kept per text column
+TEXT_SUFFIX = "_t"  # ends the name of a text column of the text view
+
+
+def is_text_column(name: str) -> bool:
+    return name.endswith(TEXT_SUFFIX)
+
+
+class TextModel:
+    """TF-IDF of the text columns beside the dense columns of the text view, and a linear model
+    on both. ``baseline_`` is the training mean of every input of the linear model."""
+
+    def __init__(self, dense, texts, vectorizers, model, baseline):
+        self.dense, self.texts, self.vectorizers = dense, texts, vectorizers
+        self.model, self.baseline_ = model, baseline
+
+    @property
+    def classes_(self):
+        return self.model.classes_
+
+    def matrix(self, X: pd.DataFrame):
+        parts = [sparse.csr_matrix(X[self.dense].to_numpy(np.float64))]
+        parts += [
+            v.transform(X[c]).astype(np.float64)
+            for c, v in zip(self.texts, self.vectorizers, strict=True)
+        ]
+        return sparse.hstack(parts, format="csr")
+
+    def predict_proba(self, X, **options):
+        return self.model.predict_proba(self.matrix(X))
+
+    def predict(self, X, **options):
+        return self.model.predict(self.matrix(X))
+
+    def blocks(self) -> list[int]:
+        """Inputs of the linear model per part: the dense columns, then each text column."""
+        return [len(self.dense), *(len(v.vocabulary_) for v in self.vectorizers)]
+
+
+class TextLinear(FamilySpec):
+    """Logistic (classification) or ridge (regression) regression on the TF-IDF word weights of
+    the prose columns and the linear view. The words are learned on each training fold. ``C`` is
+    the inverse regularisation strength; ridge uses ``alpha = 1/C``."""
+
+    name = "TextLinear"
+    view = "text"
+    seeded = False
+    defaults = {"C": 30.0}
+    max_iter = 300
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # The words do not depend on C: each training set is read once, however many trials.
+        self._words: dict[tuple, TfidfVectorizer] = {}
+
+    def __getstate__(self):
+        return {**self.__dict__, "_words": {}}  # the cache is for the search, not for the model
+
+    def _read(self, texts: pd.Series) -> TfidfVectorizer:
+        key = (len(texts), int(pd.util.hash_pandas_object(texts, index=False).sum()))
+        if key not in self._words:
+            self._words[key] = self._vectorizer(texts)
+        return self._words[key]
+
+    def space(self, trial):
+        return {"C": trial.suggest_float("C", 1e-2, 1e3, log=True)}
+
+    @staticmethod
+    def _vectorizer(texts: pd.Series) -> TfidfVectorizer:
+        for min_df in (2, 1):
+            vectorizer = TfidfVectorizer(
+                sublinear_tf=True,
+                min_df=min_df,
+                max_features=TEXT_WORDS,
+                ngram_range=(1, 2),
+                dtype=np.float32,
+            )
+            try:
+                return vectorizer.fit(texts)
+            except ValueError:  # no words at all
+                continue
+        return TfidfVectorizer(vocabulary={"": 0}, dtype=np.float32).fit([""])
+
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
+        dense = [c for c in X_tr.columns if not is_text_column(c)]
+        texts = [c for c in X_tr.columns if is_text_column(c)]
+        vectorizers = [self._read(X_tr[c]) for c in texts]
+        shell = TextModel(dense, texts, vectorizers, None, None)
+        M = shell.matrix(X_tr)
+        if self.classification:
+            model = LogisticRegression(C=params["C"], max_iter=self.max_iter)
+        else:
+            model = Ridge(alpha=1.0 / params["C"])
+        model.fit(M, y_tr, sample_weight=sample_weight)
+        deadline.expired()  # consulted once, so that the unit time is measured (see ``fit``)
+        return TextModel(dense, texts, vectorizers, model, np.asarray(M.mean(axis=0)).ravel())
+
+    def _full_rounds(self, rounds: int) -> int:
+        return 1
+
+    def rounds(self, model) -> int:
+        return 1
+
+    def size_bytes(self, model) -> int:
+        words = sum(len(v.vocabulary_) for v in model.vectorizers)
+        return model.model.coef_.size * 8 + words * 100 + 1024
+
+    def importance(self, model) -> np.ndarray:
+        weight = np.abs(np.atleast_2d(model.model.coef_)).sum(axis=0)
+        names = list(model.dense)
+        for column, width in zip(model.texts, model.blocks()[1:], strict=True):
+            names += [column] * width
+        return by_feature(weight, names)
+
+
 FAMILIES: dict[str, type[FamilySpec]] = {
     spec.name: spec
-    for spec in (LightGBM, XGBoost, CatBoost, RandomForest, ExtraTrees, DeepLearning, Linear)
+    for spec in (
+        LightGBM,
+        XGBoost,
+        CatBoost,
+        RandomForest,
+        ExtraTrees,
+        DeepLearning,
+        Linear,
+        TextLinear,
+    )
 }

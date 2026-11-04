@@ -34,7 +34,10 @@ TARGETS = {"binary": "good", "multiclass": "判定", "regression": "value"}
 
 
 # Every family, heaviest first, summing to 1.
-MIXED_WEIGHTS = {name: (len(FAMILIES) - i) / 28 for i, name in enumerate(FAMILIES)}
+MIXED_WEIGHTS = {
+    name: (len(FAMILIES) - i) / (len(FAMILIES) * (len(FAMILIES) + 1) / 2)
+    for i, name in enumerate(FAMILIES)
+}
 HOSTILE = ["<b>x</b>", "幅", "BiasTerm", "contrib_x"]
 
 
@@ -45,6 +48,8 @@ def _frame(n: int = 300, seed: int = 0) -> pd.DataFrame:
     frame["contrib_x"] = rng.normal(size=n)
     days = rng.integers(0, 3 * 365, size=n)
     frame["when"] = pd.Timestamp("2022-01-01") + pd.to_timedelta(days, unit="D")
+    words = np.array("red green blue fast slow bright dark cold warm quiet loud old new".split())
+    frame["note"] = [" ".join(rng.choice(words, 6)) for _ in range(n)]  # prose: TextLinear reads it
     frame["good"] = frame["判定"] == "良"
     frame["constant"] = 1  # dropped by the models' prep
     return frame

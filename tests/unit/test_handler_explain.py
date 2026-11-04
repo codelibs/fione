@@ -24,8 +24,17 @@ from fione.auth.roles import ProjectAccess, Role
 from fione.config import Settings, load_secret
 from fione.engine import explain
 from fione.engine.artifact import save_model
+from fione.engine.config import Deadline
 from fione.engine.explain import Contributions, PartialDependence
-from fione.engine.families import CatBoost, DeepLearning, ExtraTrees, LightGBM, Linear, XGBoost
+from fione.engine.families import (
+    CatBoost,
+    DeepLearning,
+    ExtraTrees,
+    LightGBM,
+    Linear,
+    TextLinear,
+    XGBoost,
+)
 from fione.jobs import automl_handler, explain_handler, store, worker
 from fione.jobs.runner import TRAINING_KINDS
 from fione.jobs.store import JobStatus
@@ -488,8 +497,17 @@ def test_threads_are_capped_never_raised_and_predictions_unchanged():
 @pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")
 def test_cap_threads_leaves_models_without_a_thread_count_alone():
     X, y = np.random.default_rng(0).normal(size=(60, 3)), np.arange(60) % 2
-    models = [Ridge().fit(X, y), MLPClassifier(max_iter=2).fit(X, y)]
-    specs = [Linear("regression", 0), DeepLearning("classification", 2)]
+    text = pd.DataFrame({"f0": X[:, 0], "f1_t": ["red apple", "green pear"] * 30})
+    models = [
+        Ridge().fit(X, y),
+        MLPClassifier(max_iter=2).fit(X, y),
+        TextLinear("classification", 2).fit(TextLinear.defaults, text, y, None, None, Deadline(30)),
+    ]
+    specs = [
+        Linear("regression", 0),
+        DeepLearning("classification", 2),
+        TextLinear("classification", 2),
+    ]
     model = SimpleNamespace(
         members=[SimpleNamespace(spec=s, models=[m]) for s, m in zip(specs, models, strict=True)]
     )

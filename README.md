@@ -18,9 +18,10 @@ predictions and serve the model as a prediction API. It runs with one `docker co
   in the UI, the API, batch predictions and Fione Serving. Columns that predict the answer
   suspiciously well are flagged as possible leaks.
 - **Its own AutoML engine**: gradient boosting with LightGBM, XGBoost and CatBoost, random
-  forest and extremely randomized trees, a linear model and a neural network, tuned with
-  Optuna and ensembled, within the run time you set. It also builds derived features (text parts,
-  counts, sums, group means), keeping only those that clearly improve a quick test model, and
+  forest and extremely randomized trees, a linear model, a neural network and, for data with text
+  columns, a TF-IDF linear model, tuned with
+  Optuna and ensembled, within the run time you set. It also builds derived features (text parts and
+  topics, counts, sums, group means), keeping only those that clearly improve a quick test model, and
   averages extra seeds of the best models when time is left.
 - **Fione Serving**: a small prediction API (`/invocations`, `/model`, `/ping`) for any trained
   model, as one shared Docker image and the model files.
