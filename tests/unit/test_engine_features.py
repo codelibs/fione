@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.tree import DecisionTreeClassifier
 
 from fione.engine import features
 from fione.engine.automl import AutoML
@@ -16,6 +17,7 @@ from fione.engine.features import (
     RowCounts,
     TextShape,
     TextTokens,
+    TextTopics,
     ValueFrequency,
     paired,
     passes,
@@ -88,6 +90,57 @@ def test_text_shape_measures_length_words_digits_and_the_first_number():
     assert out["t__number"].iloc[:2].tolist() == [17599.0, 5.0]
     assert out["t__digit_share"].iloc[0] == pytest.approx(5 / 8)
     assert out["t__length"].isna().iloc[2]
+
+
+def sentences(n=300, seed=0):
+    """Short texts about one of three subjects; the label is the subject."""
+    rng = np.random.default_rng(seed)
+    subjects = {
+        "space": "rocket orbit launch moon satellite telescope planet engine crew mission".split(),
+        "food": "bread cheese soup butter pepper dinner kitchen recipe flour sauce".split(),
+        "law": "court judge appeal verdict statute lawyer clause trial ruling contract".split(),
+    }
+    labels = rng.choice(list(subjects), n)
+    texts = [" ".join(rng.choice(subjects[label], 8)) for label in labels]
+    return pd.DataFrame({"text": texts}), labels
+
+
+def test_text_topics_separate_subjects_and_keep_missing():
+    X, labels = sentences()
+    X.loc[0, "text"] = None
+    group = TextTopics("text").fit(X)
+    assert group.names[0] == "text__topic0" and 2 <= len(group.names) <= features.TOPICS
+    assert all(group.sources[i] == ("text",) for i in range(len(group.names)))
+    out = group.transform(X)
+    assert out.iloc[0].isna().all() and not out.iloc[1:].isna().any().any()
+    # a plain tree on the topics must tell the subjects apart
+    tree = DecisionTreeClassifier(max_depth=4, random_state=0).fit(out.iloc[1:], labels[1:])
+    assert tree.score(out.iloc[1:], labels[1:]) > 0.9
+    assert np.array_equal(
+        group.transform(X.head(1)).to_numpy()[0], out.iloc[0].to_numpy(), equal_nan=True
+    )
+
+
+def test_text_topics_without_words_give_no_features():
+    X = pd.DataFrame({"text": ["", "-", "?!", ".."] * 10})
+    assert TextTopics("text").fit(X).names == []
+
+
+def test_text_topics_are_offered_for_prose_only():
+    X, _ = sentences()
+    X["name"] = [f"Person, Mr. Number {i}" for i in range(len(X))]  # 4 words: a name, not prose
+    labels = [g.label for g in features.candidates(Prep().fit(X), X, [])]
+    assert "text topics of text" in labels and "text topics of name" not in labels
+
+
+def test_text_topics_survive_pickling_and_the_views():
+    import pickle
+
+    X, _ = sentences()
+    prep = Prep().fit(X, [TextTopics("text")])
+    clone = pickle.loads(pickle.dumps(prep))  # noqa: S301 - a frame this test built
+    for view in ("tree", "dense", "catboost", "linear"):
+        pd.testing.assert_frame_equal(getattr(prep, view)(X), getattr(clone, view)(X))
 
 
 def test_constant_outputs_are_dropped():
@@ -426,9 +479,26 @@ def test_groups_whose_last_check_is_cut_short_by_the_deadline_are_not_kept(monke
         return real(self, groups, repeats)
 
     monkeypatch.setattr(features._Gate, "losses", cut_the_final_check)
+    monkeypatch.setattr(features, "DECISIVE_GAIN", 2.0)  # no gain is that large
     kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
     assert kept == [] and not any(v.adopted for v in verdicts)
     assert "time" in {v.reason for v in verdicts}
+
+
+def test_a_decisive_group_is_kept_when_the_deadline_cuts_the_last_check(monkeypatch):
+    X, y = people()
+    real = features._Gate.losses
+
+    def cut_the_final_check(self, groups, repeats):
+        if min(repeats) >= features.GATE_REPEATS:
+            raise features._OutOfTime
+        return real(self, groups, repeats)
+
+    monkeypatch.setattr(features._Gate, "losses", cut_the_final_check)
+    monkeypatch.setattr(features, "DECISIVE_GAIN", 0.0)  # every adopted group counts
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    adopted = {v.group for v in verdicts if v.adopted}
+    assert adopted and {g.label for g in kept} == adopted
 
 
 def test_the_deadline_is_polled_inside_the_comparisons():

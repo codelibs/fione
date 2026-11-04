@@ -157,7 +157,9 @@ Fione builds *derived features* that never read the target, and chooses among th
 validation (the "Add derived features" option, `feature_engineering` in the API, on by default):
 
 - text columns: the common words (letter runs, so `C85` gives `c`) as 0/1 flags, plus length,
-  word count, share of digits and capitals and the first number;
+  word count, share of digits and capitals and the first number; for running text (a median
+  of five words or more) also 32 *topics*, the main directions of word use found by an SVD of
+  the word weights (TF-IDF);
 - categories: how common each is, and how common each pair is;
 - rows: the number of missing values and of zeros;
 - dates: hour, minute, week, quarter, day of the year, weekend, and the seconds between date
@@ -174,7 +176,7 @@ model and the neural network log-transform non-negative numbers that are strongl
 Each group is tried on a small LightGBM over rows it samples, and kept only if the loss drops
 over paired cross-validation folds by more than three standard errors and by 0.1 % on average,
 with at least 70 % of the folds improving, and the kept groups together pass a last check on
-other folds of the same rows. The gate gets at most a tenth of the run time. The groups tried,
+other folds of the same rows. The gate gets a tenth of the run time (a short run gives it 30 seconds, but never more than 30 % of the run). The groups tried,
 their gains and why each was kept or not are on the model (`features`) and in a `features`
 notice.
 

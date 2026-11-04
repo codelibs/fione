@@ -1,10 +1,10 @@
 """Generic derived features, and the validation gate that decides which of them a model keeps.
 
-A ``Group`` is a family of derived numeric features that read raw input columns: shape and
-tokens of text columns, frequencies of categories, row-wise counts, date parts and differences,
-pairwise arithmetic of numbers, group means, frequencies of category pairs. ``Prep.fit`` fits
-the groups it is given on the training features alone, so they never see the target: a model
-can be scored on out-of-fold predictions without leaking, however many groups exist.
+A ``Group`` is a family of derived numeric features that read raw input columns: shape, tokens
+and topics of text columns, frequencies of categories, row-wise counts, date parts and
+differences, pairwise arithmetic of numbers, group means, frequencies of category pairs.
+``Prep.fit`` fits the groups it is given on the training features alone, so they never see the
+target: a model can be scored on out-of-fold predictions without leaking, however many groups exist.
 
 What does use the target is the choice of groups. ``select_groups`` judges each candidate
 group, in order, by what it adds to a small reference LightGBM on rows it samples: the group is
@@ -33,6 +33,8 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
+from sklearn.decomposition import TruncatedSVD
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import log_loss
 
 from fione.engine.config import Deadline
@@ -50,6 +52,7 @@ GATE_SEED_OFFSET = 1000  # the gate's folds differ from the search's
 GATE_SEED_SPACE = 2**31 - 1000  # keeps the folds' seeds (plus the repeat) valid for any seed
 THREAD_ROWS = 5000  # below this the reference model runs on one thread: faster on small data
 GATE_REPEATS = 3  # fold repeats a promising group is judged on
+DECISIVE_GAIN = 0.05  # share of the loss a group saves to be kept when time ends the last check
 MAX_CANDIDATES = 40
 CLUSTERS = 8
 CLUSTER_ROWS = 20_000  # rows the clusters are fitted on
@@ -58,6 +61,10 @@ TEXT_MIN_DISTINCT = 12  # string columns with fewer values are plain categories
 TEXT_MIN_STRUCTURED = 0.2  # share of values with several words or letters mixed with digits
 MAX_TEXT_COLUMNS = 6  # text columns that get groups (the most useful by rank)
 MAX_REPEATED_VALUES = 10_000  # repeated values stored per column
+TOPICS = 32  # components of the word-weight matrix kept per prose column
+TOPIC_WORDS = 30_000  # most frequent words the topics are read from
+TOPIC_ROWS = 20_000  # rows the topics are fitted on
+PROSE_WORDS = 5  # a column whose median value has this many words is prose, not a label or name
 TOKENS = 8  # tokens kept per text column
 TOKEN_SUPPORT = 0.02  # share of the rows a token must occur in (and at least 5 rows)
 MAX_PAIR_COLUMNS = 5  # numbers or dates combined pairwise
@@ -161,6 +168,45 @@ class TextTokens(Group):
             for t in self._tokens
         }
         return pd.DataFrame(out, index=df.index).astype(float)
+
+
+class TextTopics(Group):
+    """The main directions of word use in a prose column: the TF-IDF word weights of the column,
+    reduced by a truncated SVD (latent semantic analysis) to ``TOPICS`` numbers. A tree model
+    cannot read a sentence, but it can split on how much of a topic a text holds."""
+
+    def __init__(self, column: str):
+        self.label, self.columns = f"text topics of {column}", (column,)
+
+    def _fit(self, X):
+        column = self.columns[0]
+        values = _as_str(X[column]).dropna()
+        if len(values) > TOPIC_ROWS:
+            values = values.sample(TOPIC_ROWS, random_state=0)
+        self._topics = None
+        try:
+            vectorizer = TfidfVectorizer(
+                sublinear_tf=True, min_df=3, max_features=TOPIC_WORDS, dtype=np.float32
+            )
+            weights = vectorizer.fit_transform(values)
+        except ValueError:  # no words at all
+            weights = None
+        if weights is not None and min(weights.shape) > 2:
+            size = min(TOPICS, min(weights.shape) - 1)
+            self._topics = (vectorizer, TruncatedSVD(size, random_state=0).fit(weights))
+        size = self._topics[1].n_components if self._topics else 0
+        self._sources = {f"{column}__topic{i}": self.columns for i in range(size)}
+
+    def _compute(self, df):
+        column = self.columns[0]
+        if self._topics is None:
+            return pd.DataFrame(index=df.index)
+        vectorizer, svd = self._topics
+        s = _as_str(df[column])
+        topics = svd.transform(vectorizer.transform(s.fillna("")))
+        out = pd.DataFrame(topics.astype(float), index=df.index, columns=list(self._sources))
+        out[s.isna().to_numpy()] = np.nan
+        return out
 
 
 class CategoryFrequency(Group):
@@ -415,6 +461,13 @@ def _structured(s: pd.Series) -> bool:
     return bool((several | mixed).mean() >= TEXT_MIN_STRUCTURED)
 
 
+def _prose(s: pd.Series) -> bool:
+    """Whether a string column holds running text: the median value has ``PROSE_WORDS`` words
+    (runs of letters, so a timestamp or a code is not prose)."""
+    values = _as_str(s).dropna().head(1000)
+    return bool(len(values) and values.str.count(_TOKEN.pattern).median() >= PROSE_WORDS)
+
+
 def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
     """The groups worth judging for these columns, in the order the gate tries them.
     ``ranked`` lists the input columns, the most useful first, to pick the few that pairwise
@@ -432,7 +485,8 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
     small = [c for c in categories if X[c].nunique() <= MAX_GROUP_CATEGORIES]
     numbers = by_rank(prep.numeric_columns)[:MAX_PAIR_COLUMNS]
     dates = by_rank(c for c in columns if kinds[c] == "datetime")
-    found: list[Group] = []
+    # The topics of prose come first: they are worth the most, and the gate may run out of time.
+    found: list[Group] = [TextTopics(c) for c in by_rank(text)[:MAX_TEXT_COLUMNS] if _prose(X[c])]
     for column in by_rank(text)[:MAX_TEXT_COLUMNS]:
         found += [TextTokens(column), TextShape(column)]
     if categories:
@@ -621,9 +675,13 @@ def select_groups(
                 _drop_adopted(verdicts, "final check")
                 kept = []
     except _OutOfTime:
-        if kept:  # their last check did not finish: they are not trusted
-            _drop_adopted(verdicts, "time")
-            kept = []
+        # Their last check did not finish. A gain this large is no fluke of the selection, so
+        # those groups stay; the others are not trusted.
+        decisive = {v.group for v in verdicts if v.adopted and v.gain >= DECISIVE_GAIN}
+        kept = [g for g in kept if g.label in decisive]
+        for verdict in verdicts:
+            if verdict.adopted and verdict.group not in decisive:
+                verdict.adopted, verdict.reason = False, "time"
         judged = {v.group for v in verdicts}
         verdicts += [Verdict(g.label, 0, False, 0.0, "time") for g in pool if g.label not in judged]
     return kept, verdicts
