@@ -7,8 +7,9 @@ predictions and serve the model as a prediction API. It runs with one `docker co
 
 - **EasyML wizard** for people new to machine learning: upload → data analysis (the column to
   predict, the input columns, the prediction type, the maximum run time) → run → prediction
-  summary with a 1–5 star rating and the assistant's comment → predictions as a CSV; the result
-  page also shows the reasons for the first rows.
+  summary with a 1–5 star rating, a plain-language explanation of the score and a comment from
+  the Assistant → predictions as a CSV; the result page also shows the reasons for the first
+  rows.
 - **AutoML screens** for experts (the detailed view): column statistics and charts,
   correlations, leak warnings, every training setting, the job list, leaderboards, variable
   importance, score history, CV metrics, model export and import.

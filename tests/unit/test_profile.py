@@ -25,6 +25,7 @@ from fione.data.profile import (
     LeakCheck,
     flag_scores,
     leak_check,
+    leak_code,
     profile_dataset,
     single_column_score,
 )
@@ -402,6 +403,12 @@ def test_reason_strings_are_exact():
     assert CORRELATED == "near-perfect correlation with target"
     assert SCORE_REASONS == {CORRELATED, PREDICTS_ALONE, ORDERED_BY_TARGET}
     assert LEAK_STRONG == 0.99
+
+
+def test_leak_codes_name_the_reason():
+    assert leak_code(CORRELATED) == "leak_correlated"
+    assert leak_code(ORDERED_BY_TARGET) == "leak_ordered"
+    assert leak_code("anything else") == "leak_other"
 
 
 def test_flag_rule():

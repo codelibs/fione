@@ -8,6 +8,7 @@ from contextlib import closing
 import pytest
 
 from api_helpers import connect
+from fione import i18n
 from fione.assistant import store
 from fione.assistant.client import ChatClient
 from fione.assistant.turns import run_turn
@@ -92,6 +93,59 @@ def test_the_card_shows_the_settings_that_are_not_the_default(setup):
         conn.commit()
     html = world.client.get(page).text
     assert "Adjust for class sizes" in html and "Logarithm (log1p)" in html
+
+
+def test_the_card_explains_in_the_language_of_the_page(setup):
+    world, proposal = proposal_of(setup)
+    details = {
+        "warnings": [
+            {"code": "skewed_target", "message": "target_transform 'log1p' may help", "params": {}},
+            {"code": "rare_class", "message": "decision 'balanced'", "params": {"share": "5.0"}},
+            {"code": "leak_correlated", "message": "x", "params": {"column": "id2", "score": 1}},
+        ],
+        "ignored_suggestions": [{"column": "id", "reason": "id column", "code": "id"}],
+        "rationale": "because",
+    }
+    with closing(connect(world.client)) as conn:
+        conn.execute(
+            "UPDATE chat_proposals SET details_json = ? WHERE id = ?",
+            (json.dumps(details), proposal.id),
+        )
+    world.login("ed")
+    page = f"/projects/{world.p}/assistant?c={proposal.conversation_id}"
+    html = world.client.get(page).text
+    assert "Logarithm (log1p), which is likely to be more accurate" in html
+    assert "only 5.0% of the rows" in html and "The column “id2” moves almost exactly" in html
+    assert "Looks like an ID" in html and "Classification" in html
+    assert "Training stops when this time limit is reached" in html
+    assert "target_transform" not in html and "balanced" not in html
+    assert "assistant.warn." not in html
+    world.client.cookies.set(i18n.LANG_COOKIE, "ja")
+    html = world.client.get(page).text
+    assert "「対数(log1p)」にすると、精度が上がりやすく" in html
+    assert "予測する列がカテゴリなので" in html and "学習は遅くともこの制限時間で止まります" in html
+    assert "target_transform" not in html and "assistant.warn." not in html
+
+
+def test_a_warning_without_a_translation_shows_its_own_message(setup):
+    world, proposal = proposal_of(setup)
+    details = {
+        "warnings": [
+            {"code": "brand_new", "message": "an English sentence", "params": {}},
+            {"code": "leak_correlated", "message": "column 'x' leaks", "params": {}},
+            {"code": "leak_correlated", "message": "no params at all"},
+        ]
+    }
+    with closing(connect(world.client)) as conn:
+        conn.execute(
+            "UPDATE chat_proposals SET details_json = ? WHERE id = ?",
+            (json.dumps(details), proposal.id),
+        )
+    world.login("ed")
+    html = world.client.get(f"/projects/{world.p}/assistant?c={proposal.conversation_id}").text
+    assert "an English sentence" in html and "column &#39;x&#39; leaks" in html
+    assert "no params at all" in html
+    assert "assistant.warn." not in html and "{column}" not in html
 
 
 def test_viewer_cannot_confirm_or_dismiss(setup):
@@ -229,8 +283,8 @@ def test_hostile_names_escaped_on_the_card(setup):
         world.client, fake, "ed", world.p, world.ids[world.p]["train"], "species"
     )
     details = {
-        "warnings": [hostile],
-        "ignored_suggestions": [{"column": hostile, "reason": hostile}],
+        "warnings": [{"code": "leak_other", "message": hostile, "params": {"column": hostile}}],
+        "ignored_suggestions": [{"column": hostile, "reason": hostile, "code": "id"}],
         "rationale": hostile,
     }
     with closing(connect(world.client)) as conn:
@@ -242,6 +296,28 @@ def test_hostile_names_escaped_on_the_card(setup):
     html = world.client.get(f"/projects/{world.p}/assistant?c={proposal.conversation_id}").text
     assert hostile not in html
     assert "&lt;img src=x onerror=alert(1)&gt;" in html
+
+
+def test_a_proposal_stored_with_plain_text_warnings_still_renders(setup):
+    fake, world = setup
+    proposal = make_proposal(
+        world.client, fake, "ed", world.p, world.ids[world.p]["train"], "species"
+    )
+    details = {
+        "warnings": ["column 'a' may leak the answer"],
+        "ignored_suggestions": [{"column": "id", "reason": "one value per row"}],
+        "rationale": "because",
+    }
+    with closing(connect(world.client)) as conn:
+        conn.execute(
+            "UPDATE chat_proposals SET details_json = ? WHERE id = ?",
+            (json.dumps(details), proposal.id),
+        )
+    world.login("ed")
+    page = world.client.get(f"/projects/{world.p}/assistant?c={proposal.conversation_id}")
+    assert page.status_code == 200
+    assert "column &#39;a&#39; may leak the answer" in page.text
+    assert "id: one value per row" in page.text
 
 
 def test_dismiss_is_final_and_idempotent(setup):

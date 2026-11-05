@@ -71,6 +71,16 @@
       {% if notice %}
       <div class="alert alert-danger" role="alert" id="assistant-notice" tabindex="-1" autofocus>{{ icon("alert") }}<span>{{ t(notice) }}{% if detail %} {{ detail }}{% endif %}</span></div>
       {% endif %}
+      {% if llm_ready and (conversation is not defined or not lines) %}
+      <div class="stack-tight" data-examples>
+        <p class="text-muted text-sm">{{ t('assistant.examples') }}</p>
+        <div class="cluster">
+          {% for n in examples %}
+          <a class="btn btn-ghost btn-sm" href="{{ chat }}?{% if conversation is defined %}c={{ conversation.id }}&amp;{% endif %}ask=example:{{ n }}">{{ t('assistant.example_' ~ n) }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
       {% if conversation is defined %}
       <form class="chat-form stack-tight" method="post" action="{{ chat }}/c/{{ conversation.id }}/messages">
       {% else %}

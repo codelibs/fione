@@ -24,7 +24,7 @@ from fione.api.deps import Conn
 from fione.api.routes_datasets import cell
 from fione.api.routes_jobs import delete_finished_job, delete_finished_jobs_of
 from fione.api.schemas import job_out
-from fione.data.profile import SCORE_REASONS
+from fione.data.profile import SCORE_REASONS, leak_code
 from fione.engine import metrics
 from fione.engine.config import ConfigError, TargetError, TrainConfig
 from fione.jobs import store
@@ -36,7 +36,6 @@ from fione.projects.ingest import read_dataset_rows
 from fione.projects.service import Dataset, DatasetType
 from fione.web.access import Ctx, action, dataset_in, job_in, page
 from fione.web.easyml import (
-    LEAK_REASONS,
     MAX_FORM_FIELDS,
     STOP_POLLING,
     _analysis,
@@ -150,7 +149,7 @@ def _leaks(request: Request, dataset: Dataset, target: str) -> dict:
     _, (check, _) = _leak_check(request, dataset, target)
     return {
         s.column: {
-            "key": LEAK_REASONS.get(s.reason, "other"),
+            "key": leak_code(s.reason).removeprefix("leak_"),
             "score": s.score,
             "exact": s.reason not in SCORE_REASONS,
         }

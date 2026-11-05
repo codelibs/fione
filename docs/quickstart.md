@@ -76,7 +76,7 @@ This writes `iris.csv`: 150 rows, four measurements and the `species` column.
 4. Under **Maximum run time** choose **1 min**, then press **Run**.
 5. The progress page shows what is being tried. When training ends, the
    **Prediction summary** opens: the best model, a rating from 1 to 5 stars, what the score
-   means in plain words, and the assistant's comment.
+   means in plain words, and a short comment from the Assistant.
 
 ## 6. Make predictions
 

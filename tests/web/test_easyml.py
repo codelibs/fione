@@ -7,6 +7,7 @@ import dataclasses
 import io
 import re
 import time
+import types
 from contextlib import closing
 from html import escape
 from urllib.parse import parse_qs, urlsplit
@@ -16,6 +17,7 @@ import pandas as pd
 import pytest
 
 from api_helpers import add_user, connect, iris_csv, iris_frame, login
+from fione import i18n
 from fione.auth import service as auth
 from fione.auth.roles import Role
 from fione.engine.artifact import save_model
@@ -24,10 +26,11 @@ from fione.engine.config import TrainConfig
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import service as models
+from fione.models.rating import Baseline, star_rating
 from fione.predict import batch
 from fione.projects import service as projects
 from fione.tools import builtin
-from fione.web import easyml, uploads
+from fione.web import easyml, uploads, views
 from fione.web.headers import CONTENT_SECURITY_POLICY
 from web_helpers import FAST, iris_test_csv, make_world
 
@@ -1472,3 +1475,128 @@ def test_contribution_shares_keep_one_entry_per_column():
         }
     )
     assert shares == [("a", 0.6), ("b", 0.3)] and partial
+
+
+def sentence_of(task, metrics, diagnostics=None, majority=0.5):
+    record = types.SimpleNamespace(task=task, metrics=metrics, diagnostics=diagnostics)
+    baseline = Baseline(majority_rate=majority, target_std=2.0)
+    rating = star_rating(task, metrics, majority_rate=majority, target_std=2.0)
+    return easyml._score_sentence(record, rating, baseline)
+
+
+def per_class(rare_support=25, recall=0.6, precision=0.75, total=500, rare_class=1):
+    return {
+        "labels": ["no", "yes"],
+        "per_class": [
+            {
+                "class": 0,
+                "precision": 0.97,
+                "recall": 0.99,
+                "f1": 0.98,
+                "support": total - rare_support,
+            },
+            {
+                "class": rare_class,
+                "precision": precision,
+                "recall": recall,
+                "f1": 0.67,
+                "support": rare_support,
+            },
+        ],
+    }
+
+
+def test_a_rare_class_is_described_by_what_the_model_finds_of_it():
+    metrics = {"accuracy": 0.95, "auc": 0.9}
+    assert sentence_of("classification", metrics, per_class(), majority=0.9) == (
+        "summary.score.rare",
+        {"label": "yes", "share": "5", "recall": "60", "precision": "75"},
+    )
+    assert "found 60% of the “yes” rows" in i18n.t(
+        "summary.score.rare", "en", label="yes", share="5", recall="60", precision="75"
+    )
+    # Without accuracy and AUC, the diagnostics still give a sentence.
+    assert (
+        sentence_of("classification", {"logloss": 0.2}, per_class(), majority=0.9)[0]
+        == "summary.score.rare"
+    )
+
+
+def test_the_rare_class_label_is_escaped_on_the_summary_page():
+    hostile = "<b>x</b>"
+    sentence = (
+        "summary.score.rare",
+        {"label": hostile, "share": "10", "recall": "60", "precision": "75"},
+    )
+    template = views.templates.env.from_string("{{ t(sentence[0], **sentence[1]) }}")
+    html = template.render(sentence=sentence, t=lambda key, **v: i18n.t(key, "en", **v))
+    assert hostile not in html
+    assert "&lt;b&gt;x&lt;/b&gt;" in html
+
+
+@pytest.mark.parametrize(
+    "diagnostics",
+    [
+        None,
+        per_class(rare_support=200),  # 40% of the rows: not rare
+        per_class(rare_support=50),  # 10%: at the shared threshold
+        per_class(rare_support=0),  # no rare row to find
+        per_class(recall=None),
+        per_class(precision=None),  # the model found some, so a precision is missing
+        per_class(recall=1.5),
+        {"labels": ["a", "b", "c"], "per_class": [{"class": i, "support": 5} for i in range(3)]},
+    ],
+)
+def test_other_classifications_keep_their_accuracy_sentence(diagnostics):
+    metrics = {"accuracy": 0.95, "auc": 0.9}
+    assert (
+        sentence_of("classification", metrics, diagnostics, majority=0.6)[0]
+        == "summary.score.accuracy"
+    )
+
+
+@pytest.mark.parametrize("precision", [None, 0.0])
+def test_a_rare_class_the_model_never_finds_is_said_plainly(precision):
+    metrics = {"accuracy": 0.95, "auc": 0.9}
+    diagnostics = per_class(recall=0.0, precision=precision)
+    assert sentence_of("classification", metrics, diagnostics, majority=0.95) == (
+        "summary.score.rare_none",
+        {"label": "yes", "share": "5"},
+    )
+    for lang in i18n.LANGUAGES:
+        text = i18n.t("summary.score.rare_none", lang, label="yes", share="5")
+        assert "yes" in text and "{" not in text
+
+
+def test_a_tiny_rare_share_is_not_shown_as_zero():
+    diagnostics = per_class(rare_support=2, recall=0.0, precision=None, total=10_000)
+    assert sentence_of("classification", {"accuracy": 0.99}, diagnostics)[1]["share"] == "<0.1"
+
+
+@pytest.mark.parametrize("index", [2, -1, True, 1.0, "1", None])
+def test_a_bad_class_index_keeps_the_accuracy_sentence(index):
+    metrics = {"accuracy": 0.95, "auc": 0.9}
+    diagnostics = per_class(rare_class=index)
+    assert sentence_of("classification", metrics, diagnostics, majority=0.6)[0] == (
+        "summary.score.accuracy"
+    )
+    diagnostics = per_class(recall=0.0, precision=None, rare_class=index)
+    assert sentence_of("classification", metrics, diagnostics, majority=0.6)[0] == (
+        "summary.score.accuracy"
+    )
+
+
+def test_bad_class_labels_keep_the_accuracy_sentence():
+    metrics = {"accuracy": 0.95, "auc": 0.9}
+    for labels in ("yes", None, []):
+        diagnostics = per_class() | {"labels": labels}
+        assert sentence_of("classification", metrics, diagnostics, majority=0.6)[0] == (
+            "summary.score.accuracy"
+        )
+
+
+def test_the_average_error_is_the_regression_fallback():
+    assert sentence_of("regression", {"mae": 1.234}) == ("summary.score.mae", {"error": "1.23"})
+    assert sentence_of("regression", {"mae": float("nan")}) is None
+    assert sentence_of("regression", {"mae": 1.0, "rmse": 1.5})[0] == "summary.score.rmse"
+    assert sentence_of("classification", {"mae": 1.0}) is None
