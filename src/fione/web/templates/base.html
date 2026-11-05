@@ -77,6 +77,22 @@
     </div>
   </header>
   <main id="main" class="app-main" tabindex="-1">
+    {% if user %}
+    {# The assistant's state when it cannot answer, for everyone signed in, with where to go
+       next: the setup or System page for administrators, else the project's assistant. #}
+    {% set llm_now = llm_snapshot() %}
+    {% if llm_now.state != "ready" %}
+    <div class="container">
+      <div class="alert alert-warning" role="status" data-llm-banner>{{ icon("alert") }}<span>{{ t('assistant.state.' ~ llm_now.state) }}
+        {% if user.role.value == "admin" %}
+        <a href="{{ '/admin/setup/assistant' if llm_now.state == 'consent_required' else '/admin/system' }}">{{ t('assistant.banner_setup' if llm_now.state == 'consent_required' else 'system.title') }}</a>
+        {% elif ctx is defined %}
+        <a href="/projects/{{ ctx.project.id }}/assistant">{{ t('assistant.title') }}</a>
+        {% endif %}
+      </span></div>
+    </div>
+    {% endif %}
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   <footer class="app-footer container">Fione {{ version }}</footer>

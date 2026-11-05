@@ -10,7 +10,6 @@ from contextlib import closing
 import pytest
 
 from api_helpers import add_user, connect, iris_frame, login
-from fione.assistant import store as assistant_store
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
 from fione.projects import service as projects
@@ -173,14 +172,11 @@ def test_tools_list_matches_the_registry(mcp):
     assert all(t["inputSchema"]["type"] == "object" for t in tools)
 
 
-def test_call_reads_and_hides_samples(make_client, fake_llm):
+def test_mcp_never_includes_example_values(make_client, fake_llm):
     fake = fake_llm()
-    client = make_client(mcp_enabled=True, llm_base_url=fake.url, llm_provider="openai")
+    client = make_client(mcp_enabled=True, llm_base_url=fake.url, llm_provider="ollama")
     user = add_user(client, "ed", Role.EDITOR)
     _, dataset = iris_dataset(client, user)
-    with closing(connect(client)) as conn:  # the chat's provider may be sent example values
-        assistant_store.set_samples_allowed(conn, fake.url, True, user.id)
-        assert assistant_store.samples_allowed(conn, fake.url)
     result = call(client, bearer(client, user), "describe_dataset", {"dataset_id": dataset.id})
     assert result["isError"] is False
     assert "_data_notice" in result["structuredContent"]

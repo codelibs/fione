@@ -11,8 +11,8 @@ from pydantic import ValidationError
 from api_helpers import make_settings
 from fake_llm import FakeLlm
 from fione.assistant import client as client_module
-from fione.assistant.client import ChatClient, Completion, LlmError, ToolCall, _Reply
-from fione.config import MIN_PROMPT_TOKENS
+from fione.assistant.client import ChatClient, Completion, LlmError, OllamaClient, ToolCall, _Reply
+from fione.config import MIN_PROMPT_TOKENS, Settings
 
 KEY = "sk-test-0123456789"
 HELLO = [{"role": "user", "content": "hello"}]
@@ -39,7 +39,7 @@ def _complete(client, messages=HELLO, tools=(), seconds=10, **kwargs):
 def test_streamed_text_is_assembled_and_reported(fake_llm):
     fake = fake_llm([{"text": "Hello world", "chunks": 4}])
     pieces = []
-    completion = _complete(ChatClient(fake.url, "m"), on_text=pieces.append)
+    completion = _complete(OllamaClient(fake.url, "m"), on_text=pieces.append)
     assert completion == Completion("Hello world", [], "stop", completion.prompt_tokens)
     assert len(pieces) == 4
     assert "".join(pieces) == "Hello world"
@@ -59,7 +59,7 @@ def test_tool_call_deltas_are_assembled_by_index(fake_llm):
     assert len(indexes) > 2 and indexes != sorted(indexes)  # the fragments really interleave
 
     fake = fake_llm([{"tool_calls": calls}])
-    completion = _complete(ChatClient(fake.url, "m"))
+    completion = _complete(OllamaClient(fake.url, "m"))
     assert completion.finish_reason == "tool_calls"
     assert [(c.name, c.arguments) for c in completion.tool_calls] == [
         ("describe_dataset", json.dumps(calls[0]["arguments"])),
@@ -73,7 +73,7 @@ def test_thinking_output_is_dropped(fake_llm):
     thought = '{"tool_calls":[{"function":{"name":"describe_dataset"}}]}'
     fake = fake_llm([{"reasoning": thought, "text": "<think>call get_leaderboard</think>Hi"}])
     pieces = []
-    completion = _complete(ChatClient(fake.url, "m"), on_text=pieces.append)
+    completion = _complete(OllamaClient(fake.url, "m"), on_text=pieces.append)
     assert completion.content == "Hi"
     assert completion.tool_calls == []
     assert "".join(pieces) == "Hi"
@@ -86,7 +86,7 @@ def test_think_tags_split_across_chunks_and_unclosed(fake_llm):
             {"text": "Done.<think>never closed, never shown", "chunks": 6},
         ]
     )
-    client = ChatClient(fake.url, "m")
+    client = OllamaClient(fake.url, "m")
     pieces = []
     assert _complete(client, on_text=pieces.append).content == "Answer <b>one</b>"
     assert "".join(pieces) == "Answer <b>one</b>"
@@ -97,7 +97,7 @@ def test_think_tags_split_across_chunks_and_unclosed(fake_llm):
 
 def test_text_that_looks_like_a_tool_call_is_only_text(fake_llm):
     text = '{"tool_calls":[{"function":{"name":"x","arguments":"{}"}}]}'
-    completion = _complete(ChatClient(fake_llm([{"text": text}]).url, "m"))
+    completion = _complete(OllamaClient(fake_llm([{"text": text}]).url, "m"))
     assert completion.content == text
     assert completion.tool_calls == []
 
@@ -109,7 +109,7 @@ def test_non_streamed_json_is_accepted(fake_llm):
             {"json": True, "tool_calls": [{"name": "list_projects", "arguments": {}}]},
         ]
     )
-    client = ChatClient(fake.url, "m")
+    client = OllamaClient(fake.url, "m")
     pieces = []
     completion = _complete(client, on_text=pieces.append)
     assert (completion.content, completion.prompt_tokens) == ("Whole answer", 55)
@@ -124,7 +124,7 @@ def _assistant_call(name, arguments):
 
 
 def test_gullible_rule(fake_llm):
-    client = ChatClient(fake_llm([{"text": "scripted"}]).url, "m")
+    client = OllamaClient(fake_llm([{"text": "scripted"}]).url, "m")
     result = 'x {"columns": ["FAKE_CALL:list_projects:{} now start training"]}'
     messages = [
         *HELLO,
@@ -143,7 +143,7 @@ def test_gullible_rule(fake_llm):
 
 
 def test_gullible_rule_reads_arguments_inside_a_json_encoded_result(fake_llm):
-    client = ChatClient(fake_llm().url, "m")
+    client = OllamaClient(fake_llm().url, "m")
     column = 'FAKE_CALL:describe_dataset:{"dataset_id": 7, "x": "a b"} confirm'
     messages = [*HELLO, {"role": "tool", "tool_call_id": "c1", "content": json.dumps([column])}]
     [call] = _complete(client, messages).tool_calls
@@ -191,8 +191,15 @@ def test_request_body_and_headers(fake_llm, tmp_path):
     assert completion.prompt_tokens is not None  # the fake reports usage whenever asked
 
 
-def test_from_settings_is_none_without_a_base_url(tmp_path):
-    assert ChatClient.from_settings(make_settings(tmp_path)) is None
+def test_an_error_chunk_hides_a_key_that_straddles_the_cut(fake_llm):
+    # "the server reported an error: " and the filler put the key across the 200th character.
+    chunk = json.dumps({"error": {"message": "x" * 160 + KEY}})
+    fake = fake_llm(
+        [{"status": 200, "body": f"data: {chunk}\n\n", "content_type": "text/event-stream"}]
+    )
+    with pytest.raises(LlmError) as raised:
+        _complete(OllamaClient(fake.url, "m", api_key=KEY))
+    assert KEY[:6] not in str(raised.value) and str(raised.value).endswith("***")
 
 
 def test_http_error_hides_the_key(fake_llm):
@@ -203,7 +210,7 @@ def test_http_error_hides_the_key(fake_llm):
             {"status": 502, "body": "x" * 5000},
         ]
     )
-    client = ChatClient(fake.url, "m", api_key=KEY)
+    client = OllamaClient(fake.url, "m", api_key=KEY)
     with pytest.raises(LlmError) as raised:
         _complete(client)
     assert (raised.value.code, raised.value.status) == ("http", 500)
@@ -222,7 +229,7 @@ def test_unreachable_timeout_and_cancel(fake_llm):
     gone = fake_llm()
     gone.stop()
     with pytest.raises(LlmError) as raised:
-        _complete(ChatClient(gone.url, "m"))
+        _complete(OllamaClient(gone.url, "m"))
     assert (raised.value.code, raised.value.status) == ("unreachable", None)
 
     fake = fake_llm(
@@ -231,7 +238,7 @@ def test_unreachable_timeout_and_cancel(fake_llm):
             {"text": "x" * 50, "chunks": 50, "chunk_delay": 0.05},
         ]
     )
-    client = ChatClient(fake.url, "m")
+    client = OllamaClient(fake.url, "m")
     started = time.monotonic()
     with pytest.raises(LlmError) as raised:
         _complete(client, seconds=0.5)
@@ -249,8 +256,29 @@ def test_a_stream_that_stops_short_is_a_protocol_error(fake_llm):
     partial = 'data: {"choices":[{"delta":{"content":"par"}}]}\n\n'
     fake = fake_llm([{"status": 200, "body": partial, "content_type": "text/event-stream"}])
     with pytest.raises(LlmError) as raised:
-        _complete(ChatClient(fake.url, "m"))
+        _complete(OllamaClient(fake.url, "m"))
     assert raised.value.code == "protocol"
+
+
+def test_token_defaults_follow_the_provider(tmp_path, monkeypatch):
+    def tokens(**values):
+        settings = make_settings(tmp_path, **values)
+        return settings.llm_max_tokens, settings.llm_context_tokens
+
+    claude = {"llm_provider": "claude", "llm_base_url": "", "llm_api_key": KEY}
+    assert tokens() == (1024, 16384)
+    assert tokens(**claude) == (16000, 200000)
+    assert tokens(**claude, llm_max_tokens=2000) == (2000, 200000)
+    assert tokens(**claude, llm_context_tokens=50000) == (16000, 50000)
+    assert tokens(llm_max_tokens=20000, llm_context_tokens=100000) == (20000, 100000)
+    assert tokens(**claude, llm_max_tokens=64000) == (64000, 200000)
+    monkeypatch.setenv("FIONE_LLM_MAX_TOKENS", "3000")
+    assert tokens(**claude) == (3000, 200000)
+    monkeypatch.delenv("FIONE_LLM_MAX_TOKENS")
+    with pytest.raises(ValidationError):
+        tokens(**claude, llm_max_tokens=64001)
+    with pytest.raises(ValidationError):  # Ollama's default context has no room for it
+        tokens(llm_max_tokens=20000)
 
 
 def test_settings_rules(tmp_path, monkeypatch):
@@ -261,6 +289,9 @@ def test_settings_rules(tmp_path, monkeypatch):
         {"llm_base_url": "http://host:11434", "llm_provider": "ollama"},
         {"llm_base_url": "http://host/v10", "llm_provider": "ollama"},
         {"llm_base_url": "ftp://host/v1"},
+        {"llm_provider": "openai"},
+        {"llm_provider": "claude"},  # no API key
+        {"llm_provider": "claude", "llm_api_key": ""},
         {"llm_base_url": "http://host/v1?key=1"},
         {"llm_base_url": "http://host/v1#frag"},
         {"llm_base_url": "http://user:pw@host/v1"},
@@ -273,7 +304,6 @@ def test_settings_rules(tmp_path, monkeypatch):
         {"llm_base_url": "http://host/ v1"},
         {"llm_extra_body": {"model": "x"}},
         {"llm_extra_body": {"stream_options": {}}},
-        {"llm_model": ""},
         {"llm_model": "a b"},
         {"llm_model": "é"},
         {"llm_model": "m" * 201},
@@ -290,6 +320,11 @@ def test_settings_rules(tmp_path, monkeypatch):
     text = str(raised.value)
     assert "FIONE_LLM_CONTEXT_TOKENS" in text and "FIONE_LLM_MAX_TOKENS" in text
     assert str(MIN_PROMPT_TOKENS) in text and "OLLAMA_CONTEXT_LENGTH=16384" in text
+    with pytest.raises(ValidationError) as raised:
+        check(llm_provider="claude", llm_api_key=KEY, llm_context_tokens=17000)
+    text = str(raised.value)
+    assert str(MIN_PROMPT_TOKENS) in text and "FIONE_LLM_MAX_TOKENS" in text
+    assert "Ollama" not in text and "16384" not in text
     assert check(llm_context_tokens=MIN_PROMPT_TOKENS + 1024).llm_context_tokens == (
         MIN_PROMPT_TOKENS + 1024
     )
@@ -299,23 +334,23 @@ def test_settings_rules(tmp_path, monkeypatch):
 
     settings = check(llm_base_url="https://api.example.com/v1/", llm_provider="ollama")
     assert settings.llm_base_url == "https://api.example.com/v1"
-    assert check(llm_base_url="http://h:1234").llm_base_url == "http://h:1234"
+    claude = check(llm_provider="claude", llm_api_key=KEY, llm_base_url="http://h:1234")
+    assert claude.llm_base_url == "http://h:1234"
     for url in ("http://[::1]:11434/v1", "http://my_ollama:11434/v1"):
         assert check(llm_base_url=url, llm_provider="ollama").llm_base_url == url
-    assert check().llm_base_url is None
     assert (check().llm_model, check().llm_auto_pull) == ("gemma4:12b-mlx", False)
-    assert check().llm_extra_body == {}
+    assert check(llm_provider="claude", llm_api_key=KEY).llm_extra_body == {}
     assert settings.llm_extra_body == {"reasoning_effort": "none"}
     assert check(llm_provider="ollama", llm_extra_body={}).llm_extra_body == {}
 
     monkeypatch.setenv("FIONE_LLM_BASE_URL", "")
     monkeypatch.setenv("FIONE_LLM_API_KEY", "")
     monkeypatch.setenv("FIONE_LLM_EXTRA_BODY", "")
-    settings = check()
+    settings = Settings(data_dir=tmp_path)  # the environment, not make_settings' defaults
     assert (settings.llm_base_url, settings.llm_api_key, settings.llm_extra_body) == (
+        "http://host.docker.internal:11434/v1",
         None,
-        None,
-        {},
+        {"reasoning_effort": "none"},
     )
     monkeypatch.setenv("FIONE_LLM_EXTRA_BODY", '{"top_p": 0.5}')
     assert check().llm_extra_body == {"top_p": 0.5}
@@ -328,8 +363,39 @@ def test_settings_rules(tmp_path, monkeypatch):
     assert settings.llm_api_key.get_secret_value() == KEY
     assert KEY not in repr(settings) and KEY not in str(settings)
     with pytest.raises(ValidationError) as raised:
-        check(llm_api_key=KEY, llm_model="")
+        check(llm_api_key=KEY, llm_model="a b")
     assert KEY not in str(raised.value)
+
+
+def test_claude_requires_an_api_key(tmp_path):
+    with pytest.raises(ValidationError, match="FIONE_LLM_API_KEY"):
+        make_settings(tmp_path, llm_provider="claude")
+    settings = make_settings(tmp_path, llm_provider="claude", llm_api_key=KEY)
+    assert settings.llm_api_key.get_secret_value() == KEY
+
+
+def test_claude_rejects_extra_body(tmp_path):
+    with pytest.raises(ValidationError, match="FIONE_LLM_EXTRA_BODY"):
+        make_settings(
+            tmp_path, llm_provider="claude", llm_api_key=KEY, llm_extra_body={"top_p": 0.5}
+        )
+    claude = make_settings(tmp_path, llm_provider="claude", llm_api_key=KEY)
+    assert claude.llm_extra_body == {}
+
+
+def test_the_default_base_url_follows_the_provider(tmp_path):
+    ollama = make_settings(tmp_path, llm_base_url="", llm_provider="ollama")
+    assert ollama.llm_base_url == "http://host.docker.internal:11434/v1"
+    claude = make_settings(tmp_path, llm_base_url="", llm_provider="claude", llm_api_key=KEY)
+    assert claude.llm_base_url == "https://api.anthropic.com"
+    assert (ollama.llm_model, claude.llm_model) == ("gemma4:12b-mlx", "claude-opus-5-5")
+    chosen = make_settings(tmp_path, llm_provider="claude", llm_api_key=KEY, llm_model="m")
+    assert chosen.llm_model == "m"
+
+
+def test_openai_is_rejected(tmp_path):
+    with pytest.raises(ValidationError, match="llm_provider"):
+        make_settings(tmp_path, llm_provider="openai", llm_base_url="http://h:1/v1")
 
 
 def test_fake_serves_the_ollama_endpoints(fake_llm):
@@ -345,7 +411,7 @@ def test_fake_serves_the_ollama_endpoints(fake_llm):
     assert lines[1]["completed"] == lines[1]["total"]
     assert [m["name"] for m in httpx.get(f"{root}/api/tags").json()["models"]] == ["tiny:1b"]
 
-    _complete(ChatClient(fake.url, "tiny:1b"))
+    _complete(OllamaClient(fake.url, "tiny:1b"))
     [running] = httpx.get(f"{root}/api/ps").json()["models"]
     assert (running["name"], running["context_length"]) == ("tiny:1b", 4096)
     assert httpx.get(f"{root}/_requests").json() == fake.requests
@@ -369,7 +435,7 @@ def test_a_trickle_without_newlines_ends_at_the_deadline_or_the_cancel(fake_llm)
         "chunks": 60,
         "chunk_delay": 0.1,
     }
-    client = ChatClient(fake_llm([trickle, trickle]).url, "m")
+    client = OllamaClient(fake_llm([trickle, trickle]).url, "m")
     started = time.monotonic()
     with pytest.raises(LlmError) as raised:
         _complete(client, seconds=0.5)
@@ -388,21 +454,21 @@ def test_a_line_that_never_ends_is_a_protocol_error(fake_llm, monkeypatch):
     monkeypatch.setattr(client_module, "MAX_LINE_BYTES", 1000)
     long_line = {"status": 200, "body": "data: " + "x" * 5000, "content_type": "text/event-stream"}
     with pytest.raises(LlmError) as raised:
-        _complete(ChatClient(fake_llm([long_line]).url, "m"))
+        _complete(OllamaClient(fake_llm([long_line]).url, "m"))
     assert (raised.value.code, "too long" in str(raised.value)) == ("protocol", True)
 
 
 @pytest.mark.parametrize("base_url", ["http://[:]/v1", "http://[1.2.3.4]/v1"])
 def test_an_unusable_address_is_an_llm_error(base_url):
     with pytest.raises(LlmError):  # not settings-valid, but a caller may build the client itself
-        _complete(ChatClient(base_url, "m"))
+        _complete(OllamaClient(base_url, "m"))
 
 
 def test_a_response_over_the_size_cap_is_refused(fake_llm, monkeypatch):
     monkeypatch.setattr(client_module, "MAX_RESPONSE_BYTES", 1000)
     events = [_delta({"content": "x" * 100})] * 20
     with pytest.raises(LlmError) as raised:
-        _complete(ChatClient(fake_llm([_raw_stream(*events)]).url, "m"))
+        _complete(OllamaClient(fake_llm([_raw_stream(*events)]).url, "m"))
     assert (raised.value.code, "too large" in str(raised.value)) == ("protocol", True)
 
 
@@ -412,7 +478,7 @@ def test_calls_that_reuse_an_index_stay_apart(fake_llm):
         {"name": "describe_dataset", "arguments": {"dataset_id": 1}},
     ]
     completion = _complete(
-        ChatClient(fake_llm([{"tool_calls": calls, "whole_calls": True}]).url, "m")
+        OllamaClient(fake_llm([{"tool_calls": calls, "whole_calls": True}]).url, "m")
     )
     assert [(c.name, c.arguments) for c in completion.tool_calls] == [
         ("list_projects", "{}"),
@@ -480,7 +546,7 @@ def test_calls_without_ids_are_told_apart_by_complete_arguments():
     ids=["not-json", "deep-json", "error-frame", "nameless-call", "broken-gzip", "json-array"],
 )
 def test_bad_server_data_is_only_ever_an_llm_error(fake_llm, script, code):
-    client = ChatClient(fake_llm([script]).url, "m", api_key=KEY)
+    client = OllamaClient(fake_llm([script]).url, "m", api_key=KEY)
     with pytest.raises(LlmError) as raised:
         _complete(client)
     assert raised.value.code == code
@@ -490,14 +556,14 @@ def test_bad_server_data_is_only_ever_an_llm_error(fake_llm, script, code):
 def test_an_error_frame_reports_its_message(fake_llm):
     fake = fake_llm([_raw_stream({"error": {"message": "model crashed"}})])
     with pytest.raises(LlmError, match="model crashed"):
-        _complete(ChatClient(fake.url, "m"))
+        _complete(OllamaClient(fake.url, "m"))
 
 
 def test_a_redirect_is_an_error_and_is_not_followed(fake_llm):
     fake = fake_llm()
     fake.script = [{"status": 302, "headers": {"Location": f"{fake.url}/chat/completions"}}]
     with pytest.raises(LlmError) as raised:
-        _complete(ChatClient(fake.url, "m", api_key=KEY))
+        _complete(OllamaClient(fake.url, "m", api_key=KEY))
     assert (raised.value.code, raised.value.status) == ("http", 302)
     assert len(fake.requests) == 1
 
@@ -506,7 +572,7 @@ def test_a_redirect_is_an_error_and_is_not_followed(fake_llm):
 def test_every_reasoning_field_is_dropped(fake_llm, field):
     script = [{"reasoning": "secret thoughts", "reasoning_field": field, "text": "Hi"}]
     pieces = []
-    completion = _complete(ChatClient(fake_llm(script).url, "m"), on_text=pieces.append)
+    completion = _complete(OllamaClient(fake_llm(script).url, "m"), on_text=pieces.append)
     assert (completion.content, pieces) == ("Hi", ["Hi"])
 
 
@@ -518,7 +584,7 @@ def test_only_the_first_choice_is_read(fake_llm):
         {"choices": [{"index": 1, "delta": {}, "finish_reason": "length"}]},
         "[DONE]",
     ]
-    completion = _complete(ChatClient(fake_llm([_raw_stream(*events)]).url, "m"))
+    completion = _complete(OllamaClient(fake_llm([_raw_stream(*events)]).url, "m"))
     assert (completion.content, completion.finish_reason) == ("AA", "stop")
 
 
@@ -529,7 +595,7 @@ def test_a_closing_think_tag_alone_drops_the_reasoning_before_it(fake_llm):
             {"text": "<think>a</think>One </think>two"},
         ]
     )
-    client = ChatClient(fake.url, "m")
+    client = OllamaClient(fake.url, "m")
     assert _complete(client).content == "\n\nHello!"
     # Once a span has been seen the tag is not read as the end of unseen reasoning.
     assert _complete(client).content == "One </think>two"
@@ -537,12 +603,12 @@ def test_a_closing_think_tag_alone_drops_the_reasoning_before_it(fake_llm):
 
 def test_the_client_it_made_is_closed_and_one_it_was_given_is_not(fake_llm):
     fake = fake_llm()
-    with ChatClient(fake.url, "m") as client:
+    with OllamaClient(fake.url, "m") as client:
         _complete(client)
     assert client._http.is_closed
 
     http = httpx.Client()
-    with ChatClient(fake.url, "m", http=http) as client:
+    with OllamaClient(fake.url, "m", http=http) as client:
         _complete(client)
     assert not http.is_closed
     http.close()

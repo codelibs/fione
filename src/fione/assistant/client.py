@@ -1,16 +1,18 @@
-"""A client for OpenAI-compatible ``/chat/completions`` servers (OpenAI, Ollama's ``/v1``, vLLM,
-llama.cpp), over httpx.
+"""The chat clients of the language model providers, over httpx: ``OllamaClient`` for the
+OpenAI-compatible ``/chat/completions`` API (Ollama's ``/v1``) and ``ClaudeClient``
+(``fione.assistant.claude``) for the Anthropic Messages API. ``ChatClient.from_settings`` makes
+the configured one; both are an ``LlmClient``.
 
-The answer is a ``Completion``. Only the structured ``tool_calls`` field makes a ``ToolCall``:
-text, JSON inside the text and the reasoning fields (``reasoning_content``, ``reasoning``,
-``thinking``, ``<think>`` spans) are never read as calls, and the last two are dropped.
+The answer is a ``Completion``. Only structured tool calls make a ``ToolCall``: text, JSON
+inside the text and reasoning (``reasoning_content``, ``reasoning``, ``thinking``, ``<think>``
+spans, Claude's thinking blocks) are never read as calls, and reasoning is not shown.
 """
 
 import json
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
 import httpx
 
@@ -24,13 +26,27 @@ MAX_ERROR_BODY_BYTES = 4096
 MAX_RESPONSE_BYTES = 16 * 2**20
 MAX_LINE_BYTES = 2**20  # of a line that has not ended yet
 
-ErrorCode = Literal["unreachable", "timeout", "http", "protocol", "cancelled"]
+ErrorCode = Literal[
+    "unreachable",
+    "timeout",
+    "http",
+    "unauthorized",
+    "protocol",
+    "truncated",
+    "refused",
+    "cancelled",
+]
 
 
 class LlmError(Exception):
-    """A failed completion. The message is short, safe to show, and free of the API key."""
+    """A failed completion. The message is short, safe to show, and free of the API key:
+    ``secret`` is replaced in it before it is cut to ``MAX_MESSAGE_CHARS``."""
 
-    def __init__(self, code: ErrorCode, message: str, status: int | None = None):
+    def __init__(
+        self, code: ErrorCode, message: str, status: int | None = None, *, secret: str | None = None
+    ):
+        if secret:
+            message = message.replace(secret, "***")
         super().__init__(clean_text(message, MAX_MESSAGE_CHARS))
         self.code = code
         self.status = status
@@ -109,10 +125,12 @@ def _partial_tag_length(text: str, tag: str) -> int:
 
 
 class _Reply:
-    """What the chunks of one completion add up to."""
+    """What the chunks of one completion add up to; ``secret`` (the API key) is taken out of
+    an error the server reports."""
 
-    def __init__(self, on_text: Callable[[str], None] | None):
+    def __init__(self, on_text: Callable[[str], None] | None, secret: str | None = None):
         self._on_text = on_text
+        self._secret = secret
         self._think = _ThinkFilter()
         self._text: list[str] = []
         self._calls: list[dict] = []  # in the order they began
@@ -124,7 +142,11 @@ class _Reply:
         if not isinstance(chunk, dict):
             raise LlmError("protocol", "the server sent an unexpected chunk")
         if chunk.get("error"):
-            raise LlmError("protocol", f"the server reported an error: {_error_text(chunk)}")
+            raise LlmError(
+                "protocol",
+                f"the server reported an error: {_error_text(chunk)}",
+                secret=self._secret,
+            )
         usage = chunk.get("usage")
         if isinstance(usage, dict) and isinstance(usage.get("prompt_tokens"), int):
             self.prompt_tokens = usage["prompt_tokens"]
@@ -240,48 +262,8 @@ def _loads(data: bytes):
         raise LlmError("protocol", "the server sent data that is not JSON") from None
 
 
-class ChatClient:
-    def __init__(
-        self,
-        base_url: str,
-        model: str,
-        *,
-        api_key: str | None = None,
-        extra_body: dict | None = None,
-        max_tokens: int = 1024,
-        http: httpx.Client | None = None,
-    ):
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self._api_key = api_key
-        self._extra_body = dict(extra_body or {})
-        self._max_tokens = max_tokens
-        self._http = http or httpx.Client()
-        self._owns_http = http is None
-
-    def close(self) -> None:
-        """Close the HTTP client, if this one made it."""
-        if self._owns_http:
-            self._http.close()
-
-    def __enter__(self) -> "ChatClient":
-        return self
-
-    def __exit__(self, *exc) -> None:
-        self.close()
-
-    @classmethod
-    def from_settings(cls, settings: Settings) -> "ChatClient | None":
-        if settings.llm_base_url is None:
-            return None
-        key = settings.llm_api_key
-        return cls(
-            settings.llm_base_url,
-            settings.llm_model,
-            api_key=key.get_secret_value() if key else None,
-            extra_body=settings.llm_extra_body,
-            max_tokens=settings.llm_max_tokens,
-        )
+class LlmClient(Protocol):
+    """A chat client of one provider; ``ChatClient.from_settings`` makes the configured one."""
 
     def complete(
         self,
@@ -291,11 +273,79 @@ class ChatClient:
         deadline: float,
         on_text: Callable[[str], None] | None = None,
         cancelled: Callable[[], bool] = lambda: False,
-    ) -> Completion:
-        """One completion, streamed. ``deadline`` is a ``time.monotonic()`` value; ``on_text``
-        gets the visible text as it arrives. ``cancelled`` is asked for every block received.
+    ) -> Completion: ...
 
-        Only ``LlmError`` comes out. The deadline is not a hard bound:
+    def close(self) -> None: ...
+
+    def __enter__(self) -> "LlmClient": ...
+
+    def __exit__(self, *exc) -> None: ...
+
+
+class ChatClient:
+    @staticmethod
+    def from_settings(settings: Settings) -> LlmClient:
+        """The client of ``settings.llm_provider``."""
+        key = settings.llm_api_key
+        options = {
+            "api_key": key.get_secret_value() if key else None,
+            "max_tokens": settings.llm_max_tokens,
+        }
+        if settings.llm_provider == "claude":
+            from fione.assistant.claude import ClaudeClient
+
+            return ClaudeClient(settings.llm_base_url, settings.llm_model, **options)
+        return OllamaClient(
+            settings.llm_base_url,
+            settings.llm_model,
+            extra_body=settings.llm_extra_body,
+            **options,
+        )
+
+
+class HttpClient:
+    """What the clients share: the HTTP client, the deadline and cancel checks, the streamed
+    request with its errors as ``LlmError`` and the API key taken out of every message."""
+
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        *,
+        api_key: str | None = None,
+        max_tokens: int = 1024,
+        http: httpx.Client | None = None,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self._api_key = api_key
+        self._max_tokens = max_tokens
+        self._http = http or httpx.Client()
+        self._owns_http = http is None
+
+    def close(self) -> None:
+        """Close the HTTP client, if this one made it."""
+        if self._owns_http:
+            self._http.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    def _post(
+        self,
+        url: str,
+        body: dict,
+        headers: dict,
+        *,
+        deadline: float,
+        cancelled: Callable[[], bool],
+        read: Callable[[httpx.Response, Callable[[], None]], None],
+    ) -> None:
+        """POST ``body`` and hand the successful response to ``read``. Only ``LlmError`` comes
+        out. The deadline is not a hard bound:
         - Once the body arrives it is checked for every block, and a trickle ends at the next
           block. A body that stalls ends at the read timeout, which is fixed when the request
           starts: up to the time that was left then (at most 120 s) past the deadline, and
@@ -305,21 +355,7 @@ class ChatClient:
           is bounded only by httpx's own timeouts (5 s to connect, then each read), and the
           trickle by nothing but the size of the headers.
         So the caller must not rely on this call to return at the deadline: it owns the overall
-        limit of a turn and has to abandon the worker thread at that limit.
-
-        The lone ``</think>`` of a template that opens the span in the prompt drops the
-        reasoning before it from ``content``, but ``on_text`` has shown it by then."""
-        body = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-            "max_tokens": self._max_tokens,
-            **self._extra_body,
-        }
-        if tools:
-            body["tools"] = tools
-        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        limit of a turn and has to abandon the worker thread at that limit."""
         self._check(deadline, cancelled)
         remaining = deadline - time.monotonic()
         timeout = httpx.Timeout(
@@ -329,22 +365,13 @@ class ChatClient:
         def check() -> None:
             self._check(deadline, cancelled)
 
-        reply = _Reply(on_text)
         try:
             with self._http.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                json=body,
-                headers=headers,
-                timeout=timeout,
+                "POST", url, json=body, headers=headers, timeout=timeout
             ) as response:
                 if not response.is_success:
                     raise self._http_error(response, check)
-                content_type = response.headers.get("content-type", "")
-                if "json" in content_type and "event-stream" not in content_type:
-                    self._read_json(response, reply, check)
-                else:
-                    self._read_stream(response, reply, check)
+                read(response, check)
         except httpx.ConnectTimeout:
             raise LlmError("unreachable", "cannot connect to the LLM server") from None
         except httpx.TimeoutException:
@@ -357,7 +384,6 @@ class ChatClient:
             raise LlmError("protocol", "the LLM server sent an invalid response") from None
         except httpx.InvalidURL:
             raise LlmError("unreachable", "the LLM server's address is not valid") from None
-        return reply.done()
 
     @staticmethod
     def _check(deadline: float, cancelled: Callable[[], bool]) -> None:
@@ -365,28 +391,6 @@ class ChatClient:
             raise LlmError("cancelled", "the request was cancelled")
         if time.monotonic() >= deadline:
             raise LlmError("timeout", "the LLM server did not answer in time")
-
-    def _read_stream(self, response, reply: _Reply, check: Callable[[], None]) -> None:
-        for line in _lines(response, check):
-            check()
-            if not line.startswith(b"data:"):
-                continue  # comments and other SSE fields
-            data = line[5:].strip()
-            if data == b"[DONE]":
-                return
-            self._guard(reply.add_chunk, _loads(data))
-        if reply.finish_reason is None:
-            raise LlmError("protocol", "the stream ended before the reply was complete")
-
-    def _read_json(self, response, reply: _Reply, check: Callable[[], None]) -> None:
-        self._guard(reply.add_chunk, _loads(b"".join(_body(response, check))))
-
-    def _guard(self, add, chunk) -> None:
-        """``add(chunk)`` with the API key taken out of any error message."""
-        try:
-            add(chunk)
-        except LlmError as e:
-            raise self._error(e.code, str(e), e.status) from None
 
     def _http_error(self, response: httpx.Response, check: Callable[[], None]) -> LlmError:
         data = b""
@@ -402,9 +406,77 @@ class ChatClient:
             text = _error_text(json.loads(text)) or text
         except (ValueError, RecursionError):
             pass
-        return self._error("http", f"HTTP {response.status_code}: {text}", response.status_code)
+        status = response.status_code
+        code = "unauthorized" if status == 401 else "http"
+        return self._error(code, f"HTTP {status}: {text}", status)
 
     def _error(self, code: ErrorCode, message: str, status: int | None = None) -> LlmError:
-        if self._api_key:
-            message = message.replace(self._api_key, "***")
-        return LlmError(code, message, status)
+        return LlmError(code, message, status, secret=self._api_key)
+
+
+class OllamaClient(HttpClient):
+    """The OpenAI-compatible ``/chat/completions`` API, as Ollama serves it."""
+
+    def __init__(self, base_url: str, model: str, *, extra_body: dict | None = None, **options):
+        super().__init__(base_url, model, **options)
+        self._extra_body = dict(extra_body or {})
+
+    def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        deadline: float,
+        on_text: Callable[[str], None] | None = None,
+        cancelled: Callable[[], bool] = lambda: False,
+    ) -> Completion:
+        """One completion, streamed. ``deadline`` is a ``time.monotonic()`` value; ``on_text``
+        gets the visible text as it arrives. ``cancelled`` is asked for every block received.
+        Only ``LlmError`` comes out; ``HttpClient._post`` says how far the deadline holds.
+
+        The lone ``</think>`` of a template that opens the span in the prompt drops the
+        reasoning before it from ``content``, but ``on_text`` has shown it by then."""
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "max_tokens": self._max_tokens,
+            **self._extra_body,
+        }
+        if tools:
+            body["tools"] = tools
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        reply = _Reply(on_text, self._api_key)
+
+        def read(response: httpx.Response, check: Callable[[], None]) -> None:
+            content_type = response.headers.get("content-type", "")
+            if "json" in content_type and "event-stream" not in content_type:
+                self._read_json(response, reply, check)
+            else:
+                self._read_stream(response, reply, check)
+
+        self._post(
+            f"{self.base_url}/chat/completions",
+            body,
+            headers,
+            deadline=deadline,
+            cancelled=cancelled,
+            read=read,
+        )
+        return reply.done()
+
+    def _read_stream(self, response, reply: _Reply, check: Callable[[], None]) -> None:
+        for line in _lines(response, check):
+            check()
+            if not line.startswith(b"data:"):
+                continue  # comments and other SSE fields
+            data = line[5:].strip()
+            if data == b"[DONE]":
+                return
+            reply.add_chunk(_loads(data))
+        if reply.finish_reason is None:
+            raise LlmError("protocol", "the stream ended before the reply was complete")
+
+    def _read_json(self, response, reply: _Reply, check: Callable[[], None]) -> None:
+        reply.add_chunk(_loads(b"".join(_body(response, check))))

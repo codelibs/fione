@@ -47,9 +47,8 @@ JAPANESE = (
 
 
 def settings(tmp_path, **values):
-    provider = "ollama" if OLLAMA else "openai"
     return make_settings(
-        tmp_path / "data", llm_base_url=BASE_URL, llm_model=MODEL, llm_provider=provider, **values
+        tmp_path / "data", llm_base_url=BASE_URL, llm_model=MODEL, llm_provider="ollama", **values
     )
 
 
@@ -123,7 +122,7 @@ def test_full_turn_on_iris(tmp_path, env):
     _, placeholder = store.start_turn(
         conn, conversation.id, "Which column predicts species best? Propose a training."
     )
-    monitor = LlmMonitor(s)
+    monitor = LlmMonitor(s, tmp_path / "fione.db")
     try:
         with ChatClient.from_settings(s) as client:
             run_turn(

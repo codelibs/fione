@@ -1,4 +1,4 @@
-"""Conversations, messages, proposals and the per-provider sample opt-ins."""
+"""Conversations, messages, proposals and the consent to a remote language model host."""
 
 import sqlite3
 
@@ -63,15 +63,15 @@ def test_migration_adds_the_tables(tmp_path, monkeypatch):
     conn = db.connect(tmp_path / "old.db")
     first = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE conversations" in sql)
     entry = db.MIGRATIONS[first]
-    assert all(f"CREATE TABLE {t}" in entry for t in (*TABLES, "llm_sample_optins"))
+    assert all(f"CREATE TABLE {t}" in entry for t in TABLES)
     with monkeypatch.context() as m:
         m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:first])
         db.migrate(conn)
-    names = "('conversations', 'chat_messages', 'chat_proposals', 'llm_sample_optins')"
+    names = "('conversations', 'chat_messages', 'chat_proposals')"
     query = f"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN {names}"
     assert conn.execute(query).fetchall() == []
     assert db.migrate(conn) == len(db.MIGRATIONS)
-    assert len(conn.execute(query).fetchall()) == 4
+    assert len(conn.execute(query).fetchall()) == 3
     indexes = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert indexes >= {
         "conversations_project_user",
@@ -317,28 +317,100 @@ def test_a_deleted_dataset_leaves_the_proposal_without_one(
     assert store.proposals_for(conn, conversation.id)[message.id].dataset_id is None
 
 
-def test_optin_is_per_normalized_base_url(conn, owner):
+def test_base_urls_are_normalized():
     assert store.normal_base_url("HTTP://Host:80/v1/") == "http://host/v1"
     assert store.normal_base_url("https://Host:443") == "https://host"
     assert store.normal_base_url("http://[::1]:11434/v1") == "http://[::1]:11434/v1"
-    assert not store.samples_allowed(conn, "http://host/v1")
-    store.set_samples_allowed(conn, "HTTP://Host:80/v1/", True, owner.id)
-    assert store.samples_allowed(conn, "http://host/v1")
-    assert not store.samples_allowed(conn, "http://host:8080/v1")
-    assert not store.samples_allowed(conn, "https://host/v1")
-    assert not store.samples_allowed(conn, "http://host/v2")
-    store.set_samples_allowed(conn, "http://host/v1", True, owner.id)  # again: still one row
-    assert conn.execute("SELECT COUNT(*) FROM llm_sample_optins").fetchone()[0] == 1
-    store.set_samples_allowed(conn, "http://HOST/v1/", False, owner.id)
-    assert not store.samples_allowed(conn, "http://host/v1")
 
 
-def test_deleting_the_user_who_enabled_samples_keeps_the_opt_in(conn):
+def test_consent_is_per_host(conn, owner):
+    assert not store.has_consent(conn, "https://llm.example.com/v1", provider="claude")
+    store.record_consent(
+        conn, owner, provider="claude", model="m1", base_url="HTTPS://LLM.example.com:443/v1/"
+    )
+    assert store.has_consent(conn, "https://llm.example.com/v1", provider="claude")
+    # the host, not the path
+    assert store.has_consent(conn, "https://llm.example.com/other", provider="claude")
+    assert not store.has_consent(conn, "https://other.example.com/v1", provider="claude")
+    assert not store.has_consent(conn, "http://llm.example.com/v1", provider="claude")
+    assert not store.has_consent(conn, "https://llm.example.com:8443/v1", provider="claude")
+    row = conn.execute("SELECT * FROM llm_consents").fetchone()
+    assert (row["host"], row["provider"], row["model"], row["consented_by"]) == (
+        "https://llm.example.com",
+        "claude",
+        "m1",
+        owner.id,
+    )
+
+
+@pytest.mark.parametrize(
+    "url", ["http://localhost:11434/v1", "http://127.0.0.1:11434", "http://ollama:11434/v1"]
+)
+def test_a_local_host_needs_no_consent(conn, url):
+    assert store.has_consent(conn, url, provider="ollama")
+    assert count(conn, "llm_consents") == 0
+
+
+@pytest.mark.parametrize("url", ["http://gateway:8080", "http://localhost:8080"])
+def test_claude_needs_consent_even_on_a_local_address(conn, owner, url):
+    assert store.consent_needed("claude", url)
+    assert not store.has_consent(conn, url, provider="claude")
+    store.record_consent(conn, owner, provider="claude", model="m", base_url=url)
+    assert store.has_consent(conn, url, provider="claude")
+
+
+@pytest.mark.parametrize("url", ["", "host", "ftp://host/v1", "http://"])
+def test_an_unusable_base_url_has_no_consent(conn, owner, url):
+    assert store.has_consent(conn, url, provider="ollama") is False
+    with pytest.raises(ValueError):
+        store.record_consent(conn, owner, provider="ollama", model="m", base_url=url)
+    assert count(conn, "llm_consents") == 0
+
+
+def test_consent_covers_the_host_and_the_provider(conn, owner):
+    url = "https://gateway.example.com"
+    store.record_consent(conn, owner, provider="ollama", model="m", base_url=url + "/v1")
+    assert store.has_consent(conn, url + "/v1", provider="ollama")
+    assert not store.has_consent(conn, url, provider="claude")  # a gateway on to Anthropic
+    store.record_consent(conn, owner, provider="claude", model="c", base_url=url)
+    assert store.has_consent(conn, url, provider="claude")
+    assert not store.has_consent(conn, url + "/v1", provider="ollama")
+    assert count(conn, "llm_consents") == 1
+    row = conn.execute("SELECT provider, model FROM llm_consents").fetchone()
+    assert tuple(row) == ("claude", "c")
+
+
+def test_recording_twice_keeps_one_row(conn, owner):
+    for model in ("m1", "m2"):
+        store.record_consent(
+            conn, owner, provider="ollama", model=model, base_url="http://gpu.example.com/v1"
+        )
+    assert count(conn, "llm_consents") == 1
+    assert store.has_consent(conn, "http://gpu.example.com/v1", provider="ollama")
+
+
+def test_deleting_the_consenting_user_keeps_the_consent(conn):
     user = auth.create_user(conn, "tmp", "pw-tmp-12345", Role.ADMIN)
     auth.create_user(conn, "keep", "pw-keep-1234", Role.ADMIN)
-    store.set_samples_allowed(conn, "http://host/v1", True, user.id)
+    store.record_consent(
+        conn, user, provider="claude", model="m", base_url="https://api.anthropic.com"
+    )
     auth.delete_user(conn, user.id)
-    assert store.samples_allowed(conn, "http://host/v1")
+    assert store.has_consent(conn, "https://api.anthropic.com", provider="claude")
+    assert conn.execute("SELECT consented_by FROM llm_consents").fetchone()[0] is None
+
+
+def test_migration_adds_the_consent_table(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "old.db")
+    first = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE llm_consents" in sql)
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:first])
+        db.migrate(conn)
+    query = "SELECT name FROM sqlite_master WHERE name = 'llm_consents'"
+    assert conn.execute(query).fetchall() == []
+    assert db.migrate(conn) == len(db.MIGRATIONS)
+    assert len(conn.execute(query).fetchall()) == 1
+    conn.close()
 
 
 def test_creating_a_conversation_needs_read_access(conn, owner, admin, project):
@@ -459,13 +531,9 @@ def test_add_proposal_checks_its_message(conn, owner, project, conversation):
 
 
 @pytest.mark.parametrize("url", ["", "host", "ftp://host/v1", "http://", "//host/v1", "http:///v1"])
-def test_an_unusable_base_url_is_never_allowed(conn, owner, url):
+def test_an_unusable_base_url_has_no_normal_form(url):
     with pytest.raises(ValueError):
         store.normal_base_url(url)
-    assert store.samples_allowed(conn, url) is False
-    with pytest.raises(ValueError):
-        store.set_samples_allowed(conn, url, True, owner.id)
-    assert count(conn, "llm_sample_optins") == 0
 
 
 def test_the_write_lock_is_held_between_the_check_and_the_insert(
@@ -477,7 +545,7 @@ def test_the_write_lock_is_held_between_the_check_and_the_insert(
 
     def probe():
         try:
-            other.execute("INSERT INTO llm_sample_optins (base_url) VALUES ('http://probe')")
+            other.execute("INSERT INTO llm_consents (host, provider, model) VALUES ('p', 'p', 'p')")
         except sqlite3.OperationalError as e:
             refusals.append(str(e))
 

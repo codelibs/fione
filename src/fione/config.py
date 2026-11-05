@@ -30,6 +30,14 @@ _LLM_URL = re.compile(
     r"(?P<path>(?:/[A-Za-z0-9._~%!$&'()*+,;=:@-]*)*)"
 )
 _LLM_MODEL = re.compile(r"[\x21-\x7e]{1,200}")
+_LLM_DEFAULT_URLS = {
+    "ollama": "http://host.docker.internal:11434/v1",
+    "claude": "https://api.anthropic.com",
+}
+# MLX models need a host-native Ollama on Apple Silicon; elsewhere use gemma4:12b.
+_LLM_DEFAULT_MODELS = {"ollama": "gemma4:12b-mlx", "claude": "claude-opus-5-5"}
+# (llm_max_tokens, llm_context_tokens) when unset: Claude always thinks, within max_tokens.
+_LLM_DEFAULT_TOKENS = {"ollama": (1024, 16384), "claude": (16000, 200000)}
 # The request body is Fione's; the extra body only adds to it.
 LLM_RESERVED_KEYS = ("model", "messages", "tools", "stream", "stream_options", "max_tokens")
 
@@ -71,20 +79,21 @@ class Settings(BaseSettings):
     # Fione's origin as browsers reach it (behind a TLS proxy Fione cannot know its scheme):
     # the MCP endpoint accepts browser requests from it.
     public_url: str | None = None
-    # LLM assistant (off unless llm_base_url is set): an OpenAI-compatible server, or Ollama.
-    llm_base_url: str | None = None
-    llm_provider: Literal["openai", "ollama"] = "openai"
+    # LLM assistant: Ollama, or Claude through the Anthropic API (which needs llm_api_key).
+    # An empty llm_base_url or llm_model is the provider's default.
+    llm_provider: Literal["ollama", "claude"] = "ollama"
+    llm_base_url: str = ""
     llm_api_key: SecretStr | None = None
-    # MLX models need a host-native Ollama on Apple Silicon; elsewhere use gemma4:12b.
-    llm_model: str = "gemma4:12b-mlx"
-    # Merged into every request; unset: no thinking output for ollama, nothing for openai.
+    llm_model: str = ""
+    # Merged into every request of ollama (unset: no thinking output); claude takes none.
     llm_extra_body: Annotated[dict | None, NoDecode] = None
     # ollama: pull the model when the server lacks it. Off: a host Ollama is the user's;
     # an administrator pulls on the system page.
     llm_auto_pull: bool = False
     # The read-only tools over MCP at /mcp, for an API token; off unless set.
     mcp_enabled: bool = False
-    llm_max_tokens: int = Field(1024, ge=64, le=8192)  # per completion
+    # Unset: the provider's default (_LLM_DEFAULT_TOKENS).
+    llm_max_tokens: int = Field(1024, ge=64, le=64000)  # per completion
     llm_context_tokens: int = Field(16384, le=262144)  # the budget of one request
     llm_max_tool_rounds: int = Field(6, ge=1, le=20)  # completions with tool calls per turn
     llm_turn_timeout_secs: int = Field(180, ge=10, le=1800)  # one turn, all its rounds
@@ -126,24 +135,39 @@ class Settings(BaseSettings):
             self.public_url = _normal_origin("public_url", self.public_url)
 
     def _check_llm(self) -> None:
-        """Empty values are unset; the base URL is kept without a trailing slash, and the
-        extra body defaults to what turns thinking off."""
+        """Empty values are unset and get the provider's default; the base URL is kept without
+        a trailing slash, and the extra body defaults to what turns thinking off."""
         if self.llm_api_key is not None and not self.llm_api_key.get_secret_value():
             self.llm_api_key = None
         if self.llm_api_key is not None and not _VISIBLE_ASCII.fullmatch(
             self.llm_api_key.get_secret_value()
         ):
             raise ValueError("FIONE_LLM_API_KEY must be visible ASCII characters")
+        if self.llm_provider == "claude" and self.llm_api_key is None:
+            raise ValueError("FIONE_LLM_API_KEY is required with FIONE_LLM_PROVIDER=claude")
+        self.llm_model = self.llm_model or _LLM_DEFAULT_MODELS[self.llm_provider]
+        max_tokens, context_tokens = _LLM_DEFAULT_TOKENS[self.llm_provider]
+        if "llm_max_tokens" not in self.model_fields_set:
+            self.llm_max_tokens = max_tokens
+        if "llm_context_tokens" not in self.model_fields_set:
+            self.llm_context_tokens = context_tokens
         if not _LLM_MODEL.fullmatch(self.llm_model):
             raise ValueError("FIONE_LLM_MODEL must be 1 to 200 visible ASCII characters")
         if self.llm_context_tokens - self.llm_max_tokens < MIN_PROMPT_TOKENS:
-            raise ValueError(
+            message = (
                 "FIONE_LLM_CONTEXT_TOKENS less FIONE_LLM_MAX_TOKENS must be at least"
                 f" {MIN_PROMPT_TOKENS}, the room the assistant's tools and instructions need."
-                " Even 4096, Ollama's default context, is too small for the tools: use"
-                " FIONE_LLM_CONTEXT_TOKENS=16384, and set OLLAMA_CONTEXT_LENGTH=16384 on the"
-                " Ollama server (Compose's ollama profile does; set it for an Ollama on the host)"
             )
+            if self.llm_provider == "ollama":
+                message += (
+                    " Even 4096, Ollama's default context, is too small for the tools: use"
+                    " FIONE_LLM_CONTEXT_TOKENS=16384, and set OLLAMA_CONTEXT_LENGTH=16384 on the"
+                    " Ollama server (Compose's ollama profile does; set it for an Ollama on the"
+                    " host)"
+                )
+            raise ValueError(message)
+        if self.llm_provider == "claude" and self.llm_extra_body:
+            raise ValueError("FIONE_LLM_EXTRA_BODY applies to FIONE_LLM_PROVIDER=ollama only")
         if self.llm_extra_body is None:
             self.llm_extra_body = (
                 {"reasoning_effort": "none"} if self.llm_provider == "ollama" else {}
@@ -151,10 +175,7 @@ class Settings(BaseSettings):
         reserved = sorted(set(self.llm_extra_body) & set(LLM_RESERVED_KEYS))
         if reserved:
             raise ValueError(f"FIONE_LLM_EXTRA_BODY must not set {', '.join(reserved)}")
-        if not self.llm_base_url:
-            self.llm_base_url = None
-            return
-        match = _match_llm_url(self.llm_base_url)
+        match = _match_llm_url(self.llm_base_url or _LLM_DEFAULT_URLS[self.llm_provider])
         if match is None:
             raise ValueError(
                 "FIONE_LLM_BASE_URL must be http(s)://host[:port][/path], no credentials,"

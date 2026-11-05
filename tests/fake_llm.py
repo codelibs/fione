@@ -1,4 +1,5 @@
-"""A fake OpenAI-compatible and Ollama server (stdlib only), for tests and the e2e stack.
+"""A fake OpenAI-compatible, Ollama and Anthropic Messages server (stdlib only), for tests and
+the e2e stack. ``url`` is the OpenAI-compatible base (``/v1``), ``origin`` the Anthropic one.
 
 Each chat request takes the next item of the script (when it runs out, the reply is the text
 "ok"). The one exception is the gullible rule, which stands in for a model that obeys
@@ -16,6 +17,19 @@ Script items (the keys combine, except ``status``)::
     {"whole_calls": True}                    each call in one delta, all at ``index`` 0
     {"status": int, "body": str, "content_type": str, "headers": dict, "chunks": int}
                                              a raw reply, its body sent in ``chunks`` pieces
+    {"stop_reason": str}                     Anthropic only: instead of tool_use or end_turn
+    {"error": str}                           Anthropic only: an ``error`` event after the text
+
+``POST /v1/messages`` reads Anthropic requests: the policies see them as OpenAI-shaped messages
+(``tool_use`` blocks as tool calls, ``tool_result`` blocks as tool messages), while
+``requests`` keeps them as sent. It and ``GET /v1/models/{id}`` (a 404 for an id not in
+``claude_models``, when that is set) need ``x-api-key`` and ``anthropic-version``; with
+``api_key`` set, another key is a 401. Every reply starts with
+a thinking block, as the models that always think send; its signature stands for the request
+before it (``system``, ``tools`` and the earlier messages). A thinking block sent back after
+that request changed is a 400, unless ``thinking.block_binding.prefix_mismatch_behavior`` is
+``drop_block`` (which needs the ``thinking-binding-controls-2026-08-01`` beta): then it and the
+thinking blocks after it are dropped and listed in ``input_transformations``.
 
 Run it with ``python fake_llm.py --port N --policy e2e [--missing] [--host H] [--pull-delay S]``
 (``--host 0.0.0.0`` inside a container; ``--pull-delay`` slows a pull down, to watch its
@@ -24,6 +38,7 @@ progress); the ``e2e`` policy is filled in with the end-to-end tests, until then
 """
 
 import argparse
+import hashlib
 import itertools
 import json
 import re
@@ -31,6 +46,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Literal
+from urllib.parse import unquote
 
 DEFAULT_MODEL = "gemma4:12b-mlx"  # Fione's default
 _FAKE_CALL = re.compile(r"FAKE_CALL:([A-Za-z_][A-Za-z0-9_]*):")
@@ -163,6 +179,7 @@ class FakeLlm:
         host: str = "127.0.0.1",
         pull_error: str | None = None,
         pull_garbage: int = 0,
+        api_key: str | None = None,
     ):
         self.script = list(script or [])
         self.policy = policy
@@ -174,6 +191,8 @@ class FakeLlm:
         self.host = host
         self.pull_error = pull_error  # the pull stops with this error line after its first step
         self.pull_garbage = pull_garbage  # bytes with no newline sent as a pull's first line
+        self.api_key = api_key  # the only x-api-key POST /v1/messages accepts, when set
+        self.claude_models: list[str] | None = None  # what GET /v1/models/{id} knows; None: all
         self.generate_status = 200  # of POST /api/generate, which loads the model
         self.generate_delay = 0.0  # seconds before it answers: the time a model takes to load
         self.generate_padding = 0  # bytes of filler in its answer
@@ -213,19 +232,25 @@ class FakeLlm:
         host = "127.0.0.1" if self.host == "0.0.0.0" else self.host  # noqa: S104
         return f"http://{host}:{self.port}/v1"
 
+    @property
+    def origin(self) -> str:
+        return self.url.removesuffix("/v1")
+
     def join(self) -> None:
         if self._thread is not None:
             self._thread.join()
 
     # --- what the handler asks for
 
-    def record_chat(self, body: dict, headers: dict) -> dict:
-        """Log a chat request and return the script item that answers it."""
+    def record_chat(self, body: dict, headers: dict, messages: list[dict] | None = None) -> dict:
+        """Log a chat request and return the script item that answers it; ``messages`` are its
+        messages in the OpenAI shape, when the body has another."""
         with self._lock:
             self.requests.append(body)
             self.request_headers.append(headers)
             self._served = body.get("model")
-            messages = body.get("messages") or []
+            if messages is None:
+                messages = body.get("messages") or []
             if (call := gullible_call(messages)) is not None:
                 return {"tool_calls": [{"name": call[0], "arguments": call[1]}]}
             if self.policy == "e2e":
@@ -257,8 +282,8 @@ class FakeLlm:
             if name not in self.models:
                 self.models.append(name)
 
-    def next_call_id(self) -> str:
-        return f"call_{next(self._call_ids)}"
+    def next_call_id(self, prefix: str = "call") -> str:
+        return f"{prefix}_{next(self._call_ids)}"
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -276,6 +301,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         self.llm.paths.append(f"GET {path}")
+        headers = {name.lower(): value for name, value in self.headers.items()}
         if path in self.llm.raw_replies:
             return self._send(200, "application/json", self.llm.raw_replies[path])
         if path == "/api/version":
@@ -284,6 +310,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"models": self.llm.installed_models()})
         elif path == "/api/ps":
             self._json({"models": self.llm.running_models()})
+        elif path.startswith("/v1/models/"):
+            self._model(unquote(path.removeprefix("/v1/models/")), headers)
         elif path == "/_requests":
             self._json(self.llm.requests)
         else:
@@ -293,9 +321,11 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         path = self.path.split("?")[0]
         self.llm.paths.append(f"POST {path}")
+        headers = {name.lower(): value for name, value in self.headers.items()}
         if path.endswith("/chat/completions"):
-            headers = {name.lower(): value for name, value in self.headers.items()}
             self._chat(body, self.llm.record_chat(body, headers))
+        elif path == "/v1/messages":
+            self._messages(body, headers)
         elif path == "/api/pull":
             self._pull(body)
         elif path == "/api/generate":
@@ -361,19 +391,21 @@ class _Handler(BaseHTTPRequestHandler):
         self.llm.add_model(name)
         self.wfile.write(b'{"status":"success"}\n')
 
+    def _raw(self, item: dict) -> None:
+        raw = str(item.get("body", ""))
+        kind, headers = item.get("content_type", "text/plain"), item.get("headers")
+        if "chunks" not in item:
+            return self._send(item["status"], kind, raw.encode(), headers)
+        self._send(item["status"], kind, headers=headers)
+        for piece in _pieces(raw, item["chunks"]):
+            self.wfile.write(piece.encode())
+            self.wfile.flush()
+            time.sleep(item.get("chunk_delay", 0))
+
     def _chat(self, body: dict, item: dict) -> None:
         time.sleep(item.get("delay", 0))
         if "status" in item:
-            raw = str(item.get("body", ""))
-            kind, headers = item.get("content_type", "text/plain"), item.get("headers")
-            if "chunks" not in item:
-                return self._send(item["status"], kind, raw.encode(), headers)
-            self._send(item["status"], kind, headers=headers)
-            for piece in _pieces(raw, item["chunks"]):
-                self.wfile.write(piece.encode())
-                self.wfile.flush()
-                time.sleep(item.get("chunk_delay", 0))
-            return
+            return self._raw(item)
         text = item.get("text", "")
         calls = [
             (self.llm.next_call_id(), call["name"], call.get("arguments", {}))
@@ -439,6 +471,163 @@ class _Handler(BaseHTTPRequestHandler):
             self._event(json.dumps(chunk))
             time.sleep(item.get("chunk_delay", 0))
         self._event("[DONE]")
+
+    def _authorized(self, headers: dict) -> bool:
+        """Check ``x-api-key`` and ``anthropic-version``; sends the error reply when they fail."""
+        key = headers.get("x-api-key")
+        if not key or (self.llm.api_key is not None and key != self.llm.api_key):
+            error = {"type": "authentication_error", "message": f"invalid x-api-key {key}"}
+            self._json({"type": "error", "error": error}, 401)
+            return False
+        if not headers.get("anthropic-version"):
+            error = {"type": "invalid_request_error", "message": "anthropic-version is required"}
+            self._json({"type": "error", "error": error}, 400)
+            return False
+        return True
+
+    def _model(self, model: str, headers: dict) -> None:
+        if not self._authorized(headers):
+            return
+        known = self.llm.claude_models
+        if known is not None and model not in known:
+            error = {"type": "not_found_error", "message": f"model: {model}"}
+            return self._json({"type": "error", "error": error}, 404)
+        self._json({"type": "model", "id": model, "display_name": model})
+
+    def _messages(self, body: dict, headers: dict) -> None:
+        if not self._authorized(headers):
+            return
+        beta = BINDING_BETA in (headers.get("anthropic-beta") or "").split(",")
+        binding = (body.get("thinking") or {}).get("block_binding")
+        if binding is not None and not beta:
+            message = "thinking.block_binding: Extra inputs are not permitted"
+            error = {"type": "invalid_request_error", "message": message}
+            return self._json({"type": "error", "error": error}, 400)
+        dropped = _drop_mismatched(body)
+        if dropped and (binding or {}).get("prefix_mismatch_behavior") != "drop_block":
+            message = (
+                f"{dropped[0]}: Invalid `signature` in `thinking` block. The block is bound to"
+                " a different conversation."
+            )
+            error = {"type": "invalid_request_error", "message": message}
+            return self._json({"type": "error", "error": error}, 400)
+        item = self.llm.record_chat(body, headers, openai_messages(body))
+        time.sleep(item.get("delay", 0))
+        if "status" in item:
+            return self._raw(item)
+        text = item.get("text", "")
+        calls = [
+            (self.llm.next_call_id("toolu"), call["name"], call.get("arguments", {}))
+            for call in item.get("tool_calls", [])
+        ]
+        prompt_tokens = item.get("prompt_tokens")
+        if prompt_tokens is None:
+            prompt_tokens = len(json.dumps(body.get("messages") or [])) // 4 + 1
+        stop = item.get("stop_reason") or ("tool_use" if calls else "end_turn")
+        usage = {"input_tokens": prompt_tokens}
+        message = {"id": "msg_fake", "type": "message", "role": "assistant", "usage": usage}
+        if beta:
+            message["input_transformations"] = [
+                {"type": "thinking_dropped", "path": path, "reason": "prefix_binding_mismatch"}
+                for path in dropped
+            ]
+        signature = _prefix_signature(body, len(body.get("messages") or []))
+        events = [{"type": "message_start", "message": message}]
+        blocks = [
+            ({"type": "thinking", "thinking": "", "signature": ""},
+             [{"type": "thinking_delta", "thinking": ""},
+              {"type": "signature_delta", "signature": signature}]),
+        ]  # fmt: skip
+        if text:
+            pieces = _pieces(text, item.get("chunks", 1))
+            blocks.append(
+                ({"type": "text", "text": ""}, [{"type": "text_delta", "text": p} for p in pieces])
+            )
+        for id_, name, arguments in calls:
+            raw = arguments if isinstance(arguments, str) else json.dumps(arguments)
+            deltas = [{"type": "input_json_delta", "partial_json": p} for p in _pieces(raw, 3)]
+            blocks.append(({"type": "tool_use", "id": id_, "name": name, "input": {}}, deltas))
+        for index, (block, deltas) in enumerate(blocks):
+            events.append({"type": "content_block_start", "index": index, "content_block": block})
+            events += [{"type": "content_block_delta", "index": index, "delta": d} for d in deltas]
+            events.append({"type": "content_block_stop", "index": index})
+        if "error" in item:
+            events.append(
+                {"type": "error", "error": {"type": "overloaded_error", "message": item["error"]}}
+            )
+        else:
+            events += [
+                {"type": "ping"},
+                {"type": "message_delta", "delta": {"stop_reason": stop},
+                 "usage": {"output_tokens": len(text) // 4 + 1}},
+                {"type": "message_stop"},
+            ]  # fmt: skip
+        self._send(200, "text/event-stream")
+        for event in events:
+            self.wfile.write(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode())
+            self.wfile.flush()
+            time.sleep(item.get("chunk_delay", 0))
+
+
+BINDING_BETA = "thinking-binding-controls-2026-08-01"
+
+
+def _prefix_signature(body: dict, count: int) -> str:
+    """The signature of a thinking block made after the first ``count`` messages of ``body``."""
+    prefix = [body.get("system"), body.get("tools"), (body.get("messages") or [])[:count]]
+    return "sig-" + hashlib.sha256(json.dumps(prefix, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _drop_mismatched(body: dict) -> list[str]:
+    """The paths of the thinking blocks of ``body`` from the first one whose request changed,
+    taken out of ``body``."""
+    messages = body.get("messages") or []
+    found, dropping = [], False
+    for at, message in enumerate(messages):
+        content = message.get("content")
+        if message.get("role") != "assistant" or not isinstance(content, list):
+            continue
+        for n, block in enumerate(content):
+            if block.get("type") == "thinking":
+                dropping = dropping or block.get("signature") != _prefix_signature(body, at)
+                if dropping:
+                    found.append((at, n))
+    for at, n in reversed(found):  # after every check: a drop changes what later blocks follow
+        del messages[at]["content"][n]
+    return [f"messages.{at}.content.{n}" for at, n in found]
+
+
+def openai_messages(body: dict) -> list[dict]:
+    """The messages of an Anthropic request in the OpenAI shape, for the policies."""
+    out = []
+    if body.get("system"):
+        out.append({"role": "system", "content": body["system"]})
+    for message in body.get("messages") or []:
+        content = message.get("content")
+        if isinstance(content, str):
+            out.append({"role": message.get("role"), "content": content})
+            continue
+        blocks = content if isinstance(content, list) else []
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        if message.get("role") == "assistant":
+            calls = [
+                {"id": b.get("id"), "type": "function",
+                 "function": {"name": b.get("name"), "arguments": json.dumps(b.get("input"))}}
+                for b in blocks
+                if b.get("type") == "tool_use"
+            ]  # fmt: skip
+            out.append({"role": "assistant", "content": text, "tool_calls": calls})
+            continue
+        for b in blocks:
+            if b.get("type") == "tool_result":
+                result = b.get("content")
+                if isinstance(result, list):
+                    result = "".join(r.get("text", "") for r in result)
+                id_ = b.get("tool_use_id")
+                out.append({"role": "tool", "tool_call_id": id_, "content": result})
+        if text:
+            out.append({"role": "user", "content": text})
+    return out
 
 
 def from_args(argv: list[str] | None = None) -> FakeLlm:

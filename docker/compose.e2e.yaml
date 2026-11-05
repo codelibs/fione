@@ -16,8 +16,9 @@ services:
       # The tests sign in with wrong passwords on purpose.
       FIONE_LOGIN_MAX_FAILURES: "1000"
       FIONE_LOGIN_MAX_FAILURES_PER_IP: "10000"
-      # The assistant against the fake LLM below, which downloads its model at once. These two
-      # values are for the tests only: compose.yaml has both off.
+      # The assistant (the ollama provider) against the fake LLM below, a local server that
+      # needs no consent and downloads its model at once. These values are for the tests only:
+      # compose.yaml uses the host's Ollama and pulls nothing unasked.
       FIONE_LLM_BASE_URL: http://fake-llm:11434/v1
       FIONE_LLM_MODEL: fake-model
       FIONE_LLM_AUTO_PULL: "true"

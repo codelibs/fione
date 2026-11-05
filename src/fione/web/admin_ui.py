@@ -5,6 +5,8 @@ Users: create, change the role, set a new password (which ends that user's sessi
 delete; the service refuses the last admin and one's own role or account, and the reason is
 shown on the page. System: what ``/api/v1/system/status`` reports plus failed jobs of the
 last day, the workers and the uptime; never a secret, a path, a URL or the environment.
+Assistant setup: the one-time consent a remote language model host needs; until it is given,
+an administrator's admin pages lead there.
 """
 
 import logging
@@ -26,7 +28,15 @@ from fione.auth.roles import Role
 from fione.auth.service import UserConflict, UsernameError, UserNotFound
 from fione.web.access import SmallForm, admin_only, field, form_auth, parse_id, signed_in
 from fione.web.easyml import STOP_POLLING
-from fione.web.views import UiError, language, render
+from fione.web.views import (
+    CONSENT_PAGE,
+    UiError,
+    language,
+    llm_status,
+    needs_consent,
+    render,
+    to_consent,
+)
 
 router = APIRouter(include_in_schema=False)
 log = logging.getLogger(__name__)
@@ -91,7 +101,8 @@ def _users_view(
 
 @router.get("/admin/users")
 def users(request: Request, conn: Conn) -> Response:
-    return _users_view(request, conn, _admin(request, conn))
+    auth = _admin(request, conn)
+    return to_consent(request, auth) or _users_view(request, conn, auth)
 
 
 def _password_ok(password: str) -> bool:
@@ -223,9 +234,9 @@ def _system_context(request: Request, conn) -> dict:
         "uptime": _uptime(time.monotonic() - state.started_at),
         "checked": time.time(),
         "poll_secs": POLL_SECS,
-        "llm_status": state.llm_monitor.snapshot(),
+        "llm_status": llm_status(request),
         "llm_context_tokens": settings.llm_context_tokens,
-        "llm_ollama": settings.llm_base_url is not None and settings.llm_provider == "ollama",
+        "llm_ollama": settings.llm_provider == "ollama",
     }
 
 
@@ -237,6 +248,8 @@ def system(request: Request, conn: Conn) -> Response:
     polling = bool(request.headers.get("hx-request"))
     try:
         auth = _admin(request, conn)
+        if not polling and (redirect := to_consent(request, auth)):
+            return redirect
         context = _system_context(request, conn)
     except UiError as e:
         if not polling or e.status == 401:
@@ -268,19 +281,46 @@ def llm_pull(request: Request, conn: Conn, form: SmallForm) -> Response:
     return RedirectResponse("/admin/system", 303)
 
 
-@router.post("/admin/system/llm/samples")
-def llm_samples(request: Request, conn: Conn, form: SmallForm) -> Response:
-    """Allow or forbid sending example column values to the configured LLM server. Allowing
-    needs the confirmation box; it is stored for that server's normalized URL."""
+# --- the consent a remote language model needs ---------------------------------------------
+
+
+@router.get(CONSENT_PAGE)
+def consent_page(request: Request, conn: Conn) -> Response:
+    """What the assistant sends to its remote host, and the button that allows it. Once it is
+    allowed, or for a local host, on to the System page."""
+    auth = _admin(request, conn)
+    if not needs_consent(request):
+        return RedirectResponse("/admin/system", 303)
+    return _consent_view(request, auth)
+
+
+def _consent_view(request: Request, auth: Auth, *, status: int = 200, **context) -> Response:
+    return render(
+        request,
+        "admin_setup_assistant.html",
+        auth,
+        status=status,
+        nav="system",
+        provider=request.app.state.settings.llm_provider,
+        llm=llm_status(request),
+        **context,
+    )
+
+
+@router.post(CONSENT_PAGE)
+def consent(request: Request, conn: Conn, form: SmallForm) -> Response:
+    """Record the administrator's consent for the configured host (once per host), when it is
+    the host the page showed; else the page again, with the host now configured."""
     auth = _post_admin(request, conn, form)
-    base_url = request.app.state.settings.llm_base_url
-    if base_url is None:
-        raise UiError(404, "error.not_found")
-    allowed = field(form, "allowed")
-    if allowed not in ("on", "off"):
-        raise UiError(400, "error.form")
-    if allowed == "off":
-        assistant_store.set_samples_allowed(conn, base_url, False, auth.user.id)
-    elif field(form, "confirm") == "on":
-        assistant_store.set_samples_allowed(conn, base_url, True, auth.user.id)
+    if needs_consent(request):
+        if field(form, "host") != llm_status(request).host:
+            return _consent_view(request, auth, status=409, changed=True)
+        settings = request.app.state.settings
+        assistant_store.record_consent(
+            conn,
+            auth.user,
+            provider=settings.llm_provider,
+            model=settings.llm_model,
+            base_url=settings.llm_base_url,
+        )
     return RedirectResponse("/admin/system", 303)

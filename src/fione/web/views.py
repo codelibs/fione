@@ -24,6 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fione import db, i18n
 from fione.api.deps import Auth, Conn, cookie_auth, effective_access, request_host
 from fione.api.security import SESSION_COOKIE, origin_matches, tokens_equal
+from fione.assistant.provider import LlmStatus
 from fione.auth import service as auth_service
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import Role
@@ -164,12 +165,36 @@ def render(
             "static": _static,
             "version": __version__,
             "mode": ui_mode(request),
-            # The assistant's place in a project's navigation and entry links: configured or not.
-            "assistant_link": request.app.state.settings.llm_base_url is not None,
+            # The assistant's state, read by the banner of a full page only.
+            "llm_snapshot": lambda: llm_status(request),
             **context,  # may override ``here``: where the language switch returns to
         },
         status_code=status,
     )
+
+
+CONSENT_PAGE = "/admin/setup/assistant"
+
+
+def llm_status(request: Request) -> LlmStatus:
+    """The language model's status, read once per request (until a consent is found, the
+    monitor looks it up in the database on each read)."""
+    if not hasattr(request.state, "llm_status"):
+        request.state.llm_status = request.app.state.llm_monitor.snapshot()
+    return request.state.llm_status
+
+
+def needs_consent(request: Request) -> bool:
+    """Whether the assistant waits for an administrator's consent to its remote host."""
+    return llm_status(request).state == "consent_required"
+
+
+def to_consent(request: Request, auth: Auth) -> RedirectResponse | None:
+    """For an administrator's page view while the consent is missing: on to the consent page,
+    as ``/login`` goes to ``/first-admin`` while there is no administrator."""
+    if auth.user.role == Role.ADMIN and needs_consent(request):
+        return RedirectResponse(CONSENT_PAGE, 303)
+    return None
 
 
 def to_login(request: Request) -> RedirectResponse:

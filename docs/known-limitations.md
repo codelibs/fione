@@ -216,9 +216,11 @@ What this release does not do, or does with a catch. Japanese summary at the end
 
 - **Answers can be wrong.** The default model is small. Check results you rely on; a training
   it suggests runs only after a person confirms it.
-- **Names and statistics reach the language model server.** Dataset and column names and
-  statistics are sent with each question; cell values only if an administrator allows
-  example values for that server. With a server outside this machine, every chat user is warned.
+- **Names, statistics and cell values reach the language model server.** Dataset and column
+  names, statistics and example values (the most frequent values of a column, class labels,
+  job messages) are sent with each question to the configured model; MCP clients never
+  receive example values. A server outside this machine needs an administrator's one-time
+  consent, and every chat user is warned.
 - **Text from the data can steer what the assistant says, not what it does.** The assistant can only
   read and propose, and a proposal starts nothing until a person confirms it.
 - **Calls to a real model's tools are checked only by an opt-in test.** The tests of the
@@ -283,4 +285,4 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 1 プロセス・1 ワーカーで動かしてください。イメージは約 1.65 GB / 1.7 GB で、まだ公開していません（リリースは amd64 のみ、タグは CI が通ったコミットにだけ付けてください）。ベースイメージはタグ固定で、ダイジェスト固定ではありません。
 - モデルはイメージのタグに結び付いています。古い版のモデルが新しい版で読み込める保証はありません。
 - ダークモードは Chrome / Edge 123 以降、Firefox 120 以降、Safari 17.5 以降が必要です。ログインには JavaScript が必要です。簡易・詳細の表示はブラウザごとに記憶されます。
-- アシスタントと MCP：答えは間違うことがあります（モデルは小さい）。学習の提案は人が確認して初めて動きます。名前と統計は言語モデルのサーバーに届きます（セルの値は管理者が許したときだけ）。データ内の文章はアシスタントの発言を左右できても、動作は左右できません。実モデルでのツール呼び出しは opt-in のテストでしか確かめていません。MCP は API トークンを使い、同時 2 呼び出しまでで、他のレート制限はなく、既定はオフです。長い会話は古い部分から黙って省かれます（新しい話題は新しい会話で）。回答中の再起動でその回答は失われます。macOS の Docker では Ollama は CPU だけで動くため、既定はホストの Ollama アプリです。Ollama のイメージは約 3.8 GB、モデルは約 8 GB です。会話は暗号化せずに保存され、管理者にも見えません。異常なモデルサーバーへの放棄された要求は、サーバーのタイムアウトまで共有の接続プール（約 100）を占めることがあります。ドットのないサーバー名は「ローカル」とみなされますが、リゾルバーの検索ドメインでリモートに届くことがあります。システムページのコンテキスト警告はモデルがロードされている間だけ出ます。
+- アシスタントと MCP：答えは間違うことがあります（モデルは小さい）。学習の提案は人が確認して初めて動きます。名前、統計、セルの値の例は設定した言語モデルのサーバーに届きます（MCP には値の例を渡しません）。このマシンの外のサーバーには管理者の一度だけの許可が必要です。データ内の文章はアシスタントの発言を左右できても、動作は左右できません。実モデルでのツール呼び出しは opt-in のテストでしか確かめていません。MCP は API トークンを使い、同時 2 呼び出しまでで、他のレート制限はなく、既定はオフです。長い会話は古い部分から黙って省かれます（新しい話題は新しい会話で）。回答中の再起動でその回答は失われます。macOS の Docker では Ollama は CPU だけで動くため、既定はホストの Ollama アプリです。Ollama のイメージは約 3.8 GB、モデルは約 8 GB です。会話は暗号化せずに保存され、管理者にも見えません。異常なモデルサーバーへの放棄された要求は、サーバーのタイムアウトまで共有の接続プール（約 100）を占めることがあります。ドットのないサーバー名は「ローカル」とみなされますが、リゾルバーの検索ドメインでリモートに届くことがあります。システムページのコンテキスト警告はモデルがロードされている間だけ出ます。

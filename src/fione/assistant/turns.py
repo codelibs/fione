@@ -29,7 +29,7 @@ from pathlib import Path
 
 from fione import db
 from fione.assistant import store
-from fione.assistant.client import ChatClient, Completion, LlmError
+from fione.assistant.client import ChatClient, Completion, LlmClient, LlmError
 from fione.assistant.prompt import (
     ContextTooSmall,
     budget_bytes,
@@ -72,6 +72,9 @@ ERROR_CODES = (
     "http",
     "protocol",
     "timeout",
+    "unauthorized",
+    "truncated",
+    "refused",
     "too_many_steps",
     "context_too_small",
     "forbidden",
@@ -82,7 +85,7 @@ ERROR_CODES = (
 
 
 class LlmUnavailable(Exception):
-    """No LLM is configured, or the provider is not ready (unreachable, pulling...)."""
+    """The provider is not ready (unreachable, pulling, waiting for consent...)."""
 
 
 class TooManyTurns(Exception):
@@ -124,7 +127,7 @@ class _Turn:
         conn: sqlite3.Connection,
         storage: Storage,
         settings: Settings,
-        client: ChatClient | None,
+        client: LlmClient,
         monitor: LlmMonitor,
         conversation_id: int,
         cancel: threading.Event,
@@ -175,8 +178,6 @@ class _Turn:
             log.exception("ending assistant message %d failed", self.row)
 
     def _rounds(self) -> None:
-        if self.client is None:
-            raise _Failed("unavailable")
         first = self.conn.execute(
             "SELECT MAX(id) FROM chat_messages WHERE conversation_id = ? AND role = 'user'"
             " AND id < ?",
@@ -193,6 +194,14 @@ class _Turn:
             if not store.update_message(self.conn, self.row, state="running"):
                 raise _Stop()
             completion = self._complete(project_id, first, refresh=rounds == 0)
+            if completion.finish_reason == "refusal":  # Claude declined: nothing of it runs
+                raise LlmError("refused", "the model declined to answer")
+            if completion.finish_reason == "length" and not (
+                completion.content or completion.tool_calls
+            ):
+                raise LlmError(
+                    "truncated", "the reply reached FIONE_LLM_MAX_TOKENS before any text"
+                )
             content = completion.content[:MAX_CONTENT_CHARS]
             if not completion.tool_calls:
                 store.finish_message(self.conn, self.row, "done", content=content)
@@ -349,7 +358,6 @@ class _Turn:
         assistant row in one transaction; the next row's id. Before each call, the turn stops
         at a cancel or the deadline, and the user's access is checked again; then nothing of
         the round is stored."""
-        allow_samples = store.samples_allowed(self.conn, self.settings.llm_base_url)
         calls: list[dict] = []
         runs: list[tuple[dict | None, dict]] = []
         for n, call in enumerate(completion.tool_calls[:MAX_CALLS_KEPT]):
@@ -377,7 +385,6 @@ class _Turn:
                     self.conn,
                     self.storage,
                     user,
-                    allow_samples=allow_samples,
                     project_id=project_id,
                     via="chat",
                 )
@@ -432,7 +439,7 @@ def run_turn(
     db_path: Path,
     storage: Storage,
     settings: Settings,
-    client: ChatClient | None,
+    client: LlmClient,
     monitor: LlmMonitor,
     conversation_id: int,
     assistant_id: int,
@@ -481,7 +488,7 @@ class TurnManager:
         self._storage = storage
         self._settings = settings
         self._monitor = monitor
-        self._client: ChatClient | None = client_factory(settings)
+        self._client: LlmClient = client_factory(settings)
         self._pool = ThreadPoolExecutor(
             settings.llm_max_concurrent_turns, thread_name_prefix="assistant-turn"
         )
@@ -504,7 +511,7 @@ class TurnManager:
         can read; ``LlmUnavailable`` unless the provider is ready; ``TooManyTurns`` past the
         limits; ``TurnBusy``, ``LimitReached`` and ``ValueError`` from ``store.start_turn``."""
         store.get_conversation(conn, user, project_id, conversation_id)
-        if self._client is None or self._monitor.snapshot().state != "ready":
+        if self._monitor.snapshot().state != "ready":
             raise LlmUnavailable()
         with self._lock:  # held while the turn is created, so the counts stay true
             entries = [e for e in self._turns.values() if not e.future.done()]
@@ -578,5 +585,4 @@ class TurnManager:
             with closing(db.connect(self._db_path)) as conn:
                 for row in never_started:
                     store.finish_message(conn, row, "failed", error_code="interrupted")
-        if self._client is not None:
-            self._client.close()
+        self._client.close()

@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from api_helpers import PW, add_user, connect, login
 from fione import i18n
 from fione.assistant import store as assistant_store
-from fione.assistant.provider import LlmStatus
+from fione.assistant.provider import LlmMonitor, LlmStatus
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
 from fione.jobs import store
@@ -281,7 +281,7 @@ def test_the_system_page_says_how_the_server_is(client):
     assert "Stopped" in stat("Job runner")
     assert re.fullmatch(r"\d+ min", stat("Up for"))
     assert "20.0.0" in stat("Version") and stat("Storage") == "Local disk"
-    assert "The assistant is off" in page and "FIONE_LLM_BASE_URL" in page
+    assert "LLM assistant" in page and "Not reachable" in page and "127.0.0.1:9" in page
     assert 'hx-trigger="every 10s"' in page and 'aria-live="polite"' in page
     assert "/static/js/system.js" in page
 
@@ -304,9 +304,7 @@ def test_the_system_page_in_japanese(client):
     login(client, "admin")
     client.cookies.set("fione_lang", "ja")
     page = client.get("/admin/system").text
-    assert (
-        "システムの状態" in page and "アシスタントは無効です" in page and "ローカルディスク" in page
-    )
+    assert "システムの状態" in page and "接続できません" in page and "ローカルディスク" in page
 
 
 def test_the_system_page_shows_no_secret_path_or_url(client):
@@ -483,7 +481,6 @@ def test_the_pull_button_is_there_until_the_model_is_ready(llm_client, state, sh
     button for when a pull then fails; pressing it during a pull does nothing."""
     page = llm_card(llm_client, state=state)
     assert ("/admin/system/llm/pull" in page) is shown
-    assert "/admin/system/llm/samples" in page
 
 
 def test_pull_button_calls_pull_now(llm_client):
@@ -499,61 +496,33 @@ def test_pull_button_calls_pull_now(llm_client):
     assert r.status_code == 403 and llm_client.app.state.llm_monitor.pulls == 1
 
 
-def samples_rows(client):
-    with closing(connect(client)) as conn:
-        return [
-            tuple(r) for r in conn.execute("SELECT base_url, enabled_by FROM llm_sample_optins")
-        ]
-
-
-def test_the_samples_opt_in_needs_the_admin_the_csrf_token_and_the_confirmation(llm_client):
-    llm_client.app.state.llm_monitor = StubMonitor()
-    url = "/admin/system/llm/samples"
-    csrf = login(llm_client, "ed")
-    forbidden = llm_client.post(url, data={"csrf_token": csrf, "allowed": "on", "confirm": "on"})
-    assert forbidden.status_code == 403
-    csrf = login(llm_client, "admin")
-    on = {"allowed": "on", "confirm": "on"}
-    assert llm_client.post(url, data=on, follow_redirects=False).status_code == 403  # no CSRF
-    foreign = llm_client.post(url, data={"csrf_token": csrf, **on}, headers=EVIL)
-    assert foreign.status_code == 403
-    assert samples_rows(llm_client) == []
-
-    r = llm_client.post(url, data={"csrf_token": csrf, "allowed": "on"}, follow_redirects=False)
-    assert r.status_code == 303 and samples_rows(llm_client) == []  # not confirmed: not enabled
-    assert llm_client.post(url, data={"csrf_token": csrf, "allowed": "x"}).status_code == 400
-
-    r = llm_client.post(url, data={"csrf_token": csrf, **on}, follow_redirects=False)
-    assert (r.status_code, r.headers["location"]) == (303, "/admin/system")
-    admin = user_id(llm_client, "admin")
-    assert samples_rows(llm_client) == [("http://127.0.0.1:9/v1", admin)]
-    with closing(connect(llm_client)) as conn:
-        assert assistant_store.samples_allowed(conn, "HTTP://127.0.0.1:9/v1/")
-    page = llm_client.get("/admin/system").text
-    assert 'name="allowed" value="off"' in page and "Turn off" in page
-
-    off = llm_client.post(url, data={"csrf_token": csrf, "allowed": "off"}, follow_redirects=False)
-    assert off.status_code == 303 and samples_rows(llm_client) == []
-    page = llm_client.get("/admin/system").text
-    assert 'name="allowed" value="on"' in page and 'name="confirm"' in page
-    assert "column values will be sent to ollama:11434" in page
-
-
-def test_the_llm_controls_are_absent_without_an_llm(client):
-    login(client, "admin")
-    page = client.get("/admin/system").text
-    assert "/admin/system/llm" not in page and "The assistant is off" in page
-    csrf = login(client, "admin")
-    r = client.post(
-        "/admin/system/llm/samples", data={"csrf_token": csrf, "allowed": "on", "confirm": "on"}
+def test_claude_has_no_pull_button(make_client, monkeypatch):
+    monkeypatch.setattr(LlmMonitor, "start", lambda self: None)  # the remote host is not probed
+    client = make_client(
+        llm_base_url="https://api.example.com", llm_provider="claude", llm_api_key="sk-test-0123"
     )
-    assert r.status_code == 404
-
-
-def test_openai_has_no_pull_button(make_client):
-    client = make_client(llm_base_url="https://api.example.com/v1")
-    add_user(client, "admin", Role.ADMIN)
+    admin = add_user(client, "admin", Role.ADMIN)
+    with closing(connect(client)) as conn:
+        assistant_store.record_consent(
+            conn, admin, provider="claude", model="m", base_url="https://api.example.com"
+        )
     login(client, "admin")
     page = client.get("/admin/system").text
-    assert "/admin/system/llm/pull" not in page and "/admin/system/llm/samples" in page
-    assert "not on this machine" in page  # the monitor's own status: remote, ready
+    assert "/admin/system/llm" not in page and "Checking" in page
+    assert "not on this machine" in page  # the monitor's own status: remote
+
+
+def test_the_llm_card_explains_a_key_that_is_not_accepted(llm_client):
+    page = llm_card(llm_client, state="error", error_code="unauthorized")
+    assert "did not accept the API key" in page and "FIONE_LLM_API_KEY" in page
+
+
+def test_the_llm_card_explains_a_model_the_key_cannot_use(llm_client):
+    page = llm_card(llm_client, state="error", error_code="model_not_found")
+    assert "not available to this API key" in page and "FIONE_LLM_MODEL" in page
+
+
+def test_the_llm_card_shows_a_missing_consent_in_the_poll(llm_client):
+    llm_card(llm_client, state="consent_required", local=False, host="api.example.com")
+    polled = llm_client.get("/admin/system", headers={"HX-Request": "true"}).text
+    assert "Setup needed" in polled and "sent to api.example.com" in polled

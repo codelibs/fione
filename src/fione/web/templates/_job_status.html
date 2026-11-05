@@ -43,7 +43,7 @@
         <p>{{ t('job.failed_hint') }}</p>
       </div>
     </div>
-    {% if assistant_link %}<p><a class="btn btn-ghost btn-sm" href="/projects/{{ pid }}/assistant?ask=job:{{ job.id }}">{{ t('assistant.ask_link') }}</a></p>{% endif %}
+    <p><a class="btn btn-ghost btn-sm" href="/projects/{{ pid }}/assistant?ask=job:{{ job.id }}">{{ t('assistant.ask_link') }}</a></p>
   {% elif job.status.value == "cancelled" %}
     {{ guide(t, t('job.cancelled_text'), "calm") }}
   {% endif %}

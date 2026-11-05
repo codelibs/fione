@@ -60,6 +60,21 @@ def test_failed_migration_rolls_back(conn, monkeypatch):
     assert conn.execute("SELECT name FROM sqlite_master WHERE name='t'").fetchone() is None
 
 
+def test_migration_drops_the_sample_opt_ins_and_keeps_other_data(conn, monkeypatch):
+    before = next(i for i, sql in enumerate(db.MIGRATIONS) if "DROP TABLE llm_sample_optins" in sql)
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:before])
+        db.migrate(conn)
+    conn.execute("INSERT INTO users (username, password_hash, role) VALUES ('u', 'x', 'admin')")
+    conn.execute("INSERT INTO llm_sample_optins (base_url, enabled_by) VALUES ('http://h/v1', 1)")
+    conn.execute("INSERT INTO llm_consents (host, provider, model) VALUES ('h', 'claude', 'm')")
+    assert db.migrate(conn) == len(db.MIGRATIONS)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "llm_sample_optins" not in tables
+    assert conn.execute("SELECT username FROM users").fetchall()[0][0] == "u"
+    assert conn.execute("SELECT host FROM llm_consents").fetchall()[0][0] == "h"
+
+
 def test_migration_keeps_existing_models(conn, monkeypatch):
     before = next(i for i, sql in enumerate(db.MIGRATIONS) if "diagnostics_json" in sql)
     with monkeypatch.context() as m:

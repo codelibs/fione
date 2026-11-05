@@ -58,11 +58,10 @@ def test_fione_reaches_the_host():
 
 def test_compose_defaults_to_the_host_ollama():
     env = SERVICES["fione"]["environment"]
-    assert (
-        env["FIONE_LLM_BASE_URL"] == "${FIONE_LLM_BASE_URL:-http://host.docker.internal:11434/v1}"
-    )
+    # empty: the provider's default, which Settings holds (host Ollama, its model)
+    assert env["FIONE_LLM_BASE_URL"] == "${FIONE_LLM_BASE_URL:-}"
     assert env["FIONE_LLM_PROVIDER"] == "${FIONE_LLM_PROVIDER:-ollama}"
-    assert env["FIONE_LLM_MODEL"] == "${FIONE_LLM_MODEL:-gemma4:12b-mlx}"
+    assert env["FIONE_LLM_MODEL"] == "${FIONE_LLM_MODEL:-}"
     assert env["FIONE_LLM_AUTO_PULL"] == "${FIONE_LLM_AUTO_PULL:-false}"
     assert env["FIONE_MCP_ENABLED"] == "${FIONE_MCP_ENABLED:-false}"
 

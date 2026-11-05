@@ -52,10 +52,12 @@ services:
       # FIONE_COOKIE_SECURE: "true"
       # Fione's origin as browsers reach it: the MCP endpoint accepts browser requests from it.
       FIONE_PUBLIC_URL: ${FIONE_PUBLIC_URL:-}
-      # The assistant: the language model server. Never `:?`; the stack runs without it.
-      FIONE_LLM_BASE_URL: ${FIONE_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      # The assistant: the language model, Ollama (default: the host's) or Claude. An empty
+      # base URL or model is the provider's default (host Ollama, gemma4:12b-mlx; Claude, the
+      # Anthropic API); Claude needs FIONE_LLM_API_KEY.
+      FIONE_LLM_BASE_URL: ${FIONE_LLM_BASE_URL:-}
       FIONE_LLM_PROVIDER: ${FIONE_LLM_PROVIDER:-ollama}
-      FIONE_LLM_MODEL: ${FIONE_LLM_MODEL:-gemma4:12b-mlx}
+      FIONE_LLM_MODEL: ${FIONE_LLM_MODEL:-}
       FIONE_LLM_API_KEY: ${FIONE_LLM_API_KEY:-}
       FIONE_LLM_AUTO_PULL: ${FIONE_LLM_AUTO_PULL:-false}
       FIONE_MCP_ENABLED: ${FIONE_MCP_ENABLED:-false}

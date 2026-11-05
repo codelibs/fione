@@ -1,5 +1,5 @@
 """The assistant's tables: conversations, their messages, the training proposals the model
-made, and the per-provider opt-in to send sample values.
+made, and the administrator's consent to a remote language model host.
 
 A conversation is private to its creator (admins included) and is visible only while its
 creator can still read the project. Only one turn runs per conversation: ``start_turn`` inserts
@@ -458,11 +458,11 @@ def dismiss_proposal(conn: sqlite3.Connection, proposal_id: int, user_id: int) -
     )
 
 
-# --- sample opt-ins ---------------------------------------------------------
+# --- consent keys -------------------------------------------------------------
 
 
 def normal_base_url(url: str) -> str:
-    """``url`` in the form opt-ins are keyed by: scheme and host in lower case, the default
+    """``url`` in the form consents are keyed by: scheme and host in lower case, the default
     port and any trailing ``/`` removed. ``ValueError`` unless it is an http(s) URL with a host."""
     parts = urlsplit(url.strip())
     scheme = parts.scheme.lower()
@@ -476,28 +476,49 @@ def normal_base_url(url: str) -> str:
     return f"{scheme}://{netloc}{parts.path.rstrip('/')}"
 
 
-def samples_allowed(conn: sqlite3.Connection, base_url: str) -> bool:
-    """Whether samples may be sent to ``base_url``; a URL that is not one is never allowed."""
+# --- consent for remote language models --------------------------------------
+
+
+def _consent_host(base_url: str) -> str:
+    """The scheme, host and port of ``base_url``, which with the provider is what a consent
+    covers (``ValueError`` for a URL that is not an http(s) URL with a host)."""
+    parts = urlsplit(normal_base_url(base_url))
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def consent_needed(provider: str, base_url: str) -> bool:
+    """Whether sending to ``base_url`` needs an administrator's consent: always for Claude (its
+    data reaches Anthropic even through a gateway next to Fione), and for any Ollama host that
+    is not local."""
+    from fione.assistant.provider import is_local_url  # provider imports this module
+
+    return provider == "claude" or not is_local_url(base_url)
+
+
+def has_consent(conn: sqlite3.Connection, base_url: str, *, provider: str) -> bool:
+    """Whether data may go to ``base_url``: without ``consent_needed`` at once, else only with
+    an administrator's recorded consent for its host and ``provider``. A URL that is not usable
+    is never consented."""
     try:
-        key = normal_base_url(base_url)
+        host = _consent_host(base_url)
     except ValueError:
         return False
-    return (
-        conn.execute("SELECT 1 FROM llm_sample_optins WHERE base_url = ?", (key,)).fetchone()
-        is not None
-    )
+    if not consent_needed(provider, base_url):
+        return True
+    row = conn.execute(
+        "SELECT 1 FROM llm_consents WHERE host = ? AND provider = ?", (host, provider)
+    ).fetchone()
+    return row is not None
 
 
-def set_samples_allowed(
-    conn: sqlite3.Connection, base_url: str, allowed: bool, user_id: int
+def record_consent(
+    conn: sqlite3.Connection, user: User, *, provider: str, model: str, base_url: str
 ) -> None:
-    key = normal_base_url(base_url)
-    if allowed:
-        conn.execute(
-            "INSERT INTO llm_sample_optins (base_url, enabled_by) VALUES (?, ?)"
-            " ON CONFLICT(base_url) DO UPDATE SET enabled_by = excluded.enabled_by,"
-            " enabled_at = CURRENT_TIMESTAMP",
-            (key, user_id),
-        )
-    else:
-        conn.execute("DELETE FROM llm_sample_optins WHERE base_url = ?", (key,))
+    """Record ``user``'s consent for the host of ``base_url`` and ``provider``. A host has one
+    record: a new consent for it replaces the old one, which a change of provider needs."""
+    conn.execute(
+        "INSERT INTO llm_consents (host, provider, model, consented_by) VALUES (?, ?, ?, ?)"
+        " ON CONFLICT(host) DO UPDATE SET provider = excluded.provider, model = excluded.model,"
+        " consented_by = excluded.consented_by, consented_at = CURRENT_TIMESTAMP",
+        (_consent_host(base_url), provider, model, user.id),
+    )

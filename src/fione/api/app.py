@@ -156,7 +156,7 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
             runner.recover_orphans()
             runner.start()
         app.state.runner = runner
-        app.state.llm_monitor.start()  # nothing to do unless FIONE_LLM_BASE_URL is set
+        app.state.llm_monitor.start()
         try:
             yield
         finally:
@@ -183,7 +183,7 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     # Models loaded for synchronous explanation requests (one at a time, at most two kept).
     app.state.live_models = LiveModels(app.state.storage, secret)
     app.state.runner = None
-    app.state.llm_monitor = LlmMonitor(settings)  # off unless FIONE_LLM_BASE_URL is set
+    app.state.llm_monitor = LlmMonitor(settings, db_path)
     app.state.turns = TurnManager(db_path, app.state.storage, settings, app.state.llm_monitor)
     app.state.mcp_slots = asyncio.Semaphore(MCP_MAX_CONCURRENT_CALLS)  # tool calls over MCP
     app.state.started_at = time.monotonic()  # the system page's uptime

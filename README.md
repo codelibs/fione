@@ -55,10 +55,11 @@ pandas frames, with an API token. See [sdk/README.md](sdk/README.md).
 ## The assistant
 
 The assistant answers questions about a project's datasets and models and suggests a training run
-that a person confirms; it only reads. It needs a language model server: the Ollama app on
-your Mac by default (`gemma4:12b-mlx`), an Ollama in Compose (profile `ollama`) on Linux, or any
-OpenAI-compatible server. The same read-only tools are available to MCP clients, off by
-default. See [The assistant](docs/assistant.md).
+that a person confirms; it only reads. It needs a language model: the Ollama app on
+your Mac by default (`gemma4:12b-mlx`), an Ollama in Compose (profile `ollama`) on Linux, or
+Claude through the Anthropic API (`FIONE_LLM_PROVIDER=claude` and an API key). A server outside
+this machine needs an administrator's one-time consent. The same read-only tools are available
+to MCP clients, off by default. See [The assistant](docs/assistant.md).
 
 ## Documentation
 

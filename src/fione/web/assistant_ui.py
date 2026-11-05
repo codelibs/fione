@@ -47,7 +47,7 @@ from fione.web.access import (
     same_site,
 )
 from fione.web.easyml import STOP_POLLING
-from fione.web.views import UiError, language, render
+from fione.web.views import UiError, language, llm_status, render, to_consent
 
 log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
@@ -152,17 +152,13 @@ def _thread(conn, conversation: Conversation) -> dict:
     }
 
 
-def _llm(request: Request, conn) -> dict:
-    """The provider's state for the banners and the form."""
-    settings = request.app.state.settings
-    status = request.app.state.llm_monitor.snapshot()
-    configured = settings.llm_base_url is not None
+def _llm(request: Request) -> dict:
+    """The provider's state for the explanations and the form."""
+    status = llm_status(request)
     return {
         "llm": status,
-        "llm_on": configured,
-        "llm_ready": configured and status.state == "ready",
-        "remote_host": status.host if configured and not status.local else None,
-        "samples_on": configured and store.samples_allowed(conn, settings.llm_base_url),
+        "llm_ready": status.state == "ready",
+        "remote_host": None if status.local else status.host,
     }
 
 
@@ -212,7 +208,7 @@ def conversation_page(
         "detail": detail,
         "text": text,
         "examples": EXAMPLES,
-        **_llm(request, conn),
+        **_llm(request),
     }
     if conversation is not None:
         context |= _thread(conn, conversation)
@@ -235,6 +231,8 @@ def _page_url(pid: str, cid: int | None = None) -> str:
 @router.get("/projects/{pid}/assistant")
 def assistant(request: Request, conn: Conn, pid: str) -> Response:
     ctx = page(request, conn, pid)
+    if redirect := to_consent(request, ctx.auth):
+        return redirect
     cid = request.query_params.get("c")
     if cid is not None:
         conversation = _conversation(conn, ctx, cid)

@@ -24,7 +24,7 @@ from web_helpers import make_proposal, make_world
 @pytest.fixture
 def setup(make_client, fake_llm):
     fake = fake_llm()
-    world = make_world(make_client(llm_base_url=fake.url, llm_provider="openai"))
+    world = make_world(make_client(llm_base_url=fake.url, llm_provider="ollama"))
     return fake, world
 
 
