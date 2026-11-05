@@ -4,8 +4,10 @@ It is given the OpenAI-shaped messages and tools the assistant builds and conver
 system messages become the top-level ``system``, an assistant's tool calls ``tool_use`` blocks,
 the results that follow them ``tool_result`` blocks of one user message, and each tool's
 ``parameters`` its ``input_schema``. The thinking blocks of a reply with tool calls are kept in
-memory, keyed by the calls' ids, and sent back unchanged with that assistant message, as the
-API asks within a turn of tool use; the stored messages never hold them.
+memory, keyed by the calls' ids, and sent back unchanged with that assistant message while it is
+in the current turn (after the last user message), as the API asks within a turn of tool use.
+Earlier turns go without thinking, which the API allows, so that dropping old rounds does not
+change what a sent thinking block was made after. The stored messages never hold them.
 """
 
 import json
@@ -216,7 +218,8 @@ class ClaudeClient(HttpClient):
         """The top-level ``system`` and the Anthropic messages of OpenAI-shaped ``messages``."""
         system: list[str] = []
         out: list[dict] = []
-        for message in messages:
+        turn = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=0)
+        for at, message in enumerate(messages):
             role, content = message.get("role"), message.get("content") or ""
             if role == "system":
                 system.append(content)
@@ -232,16 +235,19 @@ class ClaudeClient(HttpClient):
                 else:
                     out.append({"role": "user", "content": [result]})
             elif role == "assistant":
-                blocks = self._assistant_blocks(content, message.get("tool_calls") or [])
+                calls = message.get("tool_calls") or []
+                blocks = self._assistant_blocks(content, calls, kept=at > turn)
                 if blocks:
                     out.append({"role": "assistant", "content": blocks})
             else:
                 out.append({"role": "user", "content": content})
         return "\n\n".join(system), out
 
-    def _assistant_blocks(self, content: str, calls: list[dict]) -> list[dict]:
+    def _assistant_blocks(self, content: str, calls: list[dict], *, kept: bool) -> list[dict]:
+        """The blocks of an assistant message: the kept reply when ``kept`` (in the current
+        turn, whose thinking goes back), else built from the message."""
         ids = tuple(call.get("id") or "" for call in calls)
-        if calls:
+        if calls and kept:
             with self._lock:
                 kept = self._replies.get(ids)
             if kept is not None:

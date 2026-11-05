@@ -110,6 +110,12 @@ def test_claude_tool_use_round_trip(fake_llm):
         {"type": "tool_result", "tool_use_id": second.id, "content": "[]"},
     ]
 
+    # In a later turn the reply goes back without its thinking.
+    messages += [{"role": "assistant", "content": "Done."}, {"role": "user", "content": "more"}]
+    _complete(client, messages, tools=[TOOL])
+    later = fake.requests[-1]["messages"][1]["content"]
+    assert [b["type"] for b in later] == ["text", "tool_use", "tool_use"]
+
 
 def test_claude_history_without_a_kept_reply_is_converted(fake_llm):
     fake = fake_llm()
