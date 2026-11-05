@@ -22,6 +22,7 @@ from fione.schema import clean_text
 
 MAX_MESSAGE_CHARS = 4000
 MAX_USER_MESSAGES = 100  # per conversation
+NOTE_KINDS = ("model", "failed_job")  # what a note can be about
 MAX_CONVERSATIONS = 100  # per user and project
 MAX_TITLE_CHARS = 80
 TERMINAL_STATES = ("done", "failed", "cancelled")
@@ -59,7 +60,7 @@ class Conversation:
 class Note:
     id: int
     project_id: str
-    kind: str  # "model" or "failed_job"
+    kind: str  # what the comment is about: "model" or "failed_job" (set by the routes)
     subject_id: str
     language: str
     conversation_id: int
@@ -417,6 +418,8 @@ def create_note(
     message and a ``queued`` assistant placeholder, all in one transaction; or the note someone
     made first, with no placeholder. ``ConversationNotFound`` unless the user can read the
     project; ``ValueError`` for an unknown kind."""
+    if kind not in NOTE_KINDS:
+        raise ValueError(f"unknown note kind {kind!r}")
     with db.immediate(conn):
         if not can_access_project(conn, user, project_id, "read"):
             raise ConversationNotFound(project_id)
@@ -433,9 +436,7 @@ def create_note(
                 " conversation_id) VALUES (?, ?, ?, ?, ?)",
                 (project_id, kind, subject_id, language, conversation_id),
             ).lastrowid
-        except sqlite3.IntegrityError as e:
-            if "CHECK" in str(e):
-                raise ValueError(f"unknown note kind {kind!r}") from None
+        except sqlite3.IntegrityError:
             raise ConversationNotFound(project_id) from None  # no such project
         _, placeholder = _insert_turn(conn, conversation_id, text)
     row = conn.execute("SELECT * FROM assistant_notes WHERE id = ?", (note_id,)).fetchone()

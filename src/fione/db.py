@@ -201,7 +201,7 @@ MIGRATIONS: list[str] = [
     CREATE TABLE assistant_notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        kind TEXT NOT NULL CHECK (kind IN ('model', 'failed_job')),
+        kind TEXT NOT NULL,
         subject_id TEXT NOT NULL,
         language TEXT NOT NULL,
         conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
