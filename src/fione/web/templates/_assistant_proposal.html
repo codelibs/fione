@@ -1,5 +1,6 @@
 {# A training proposal of the assistant: the stored configuration and what the check found.
-   Every text is escaped; the warnings are the tool's own (English) sentences. Only a person
+   Every text is escaped; the warnings and reasons are translated from the tool's codes, and
+   only the rationale is the assistant's own words. Only a person
    who can write confirms or dismisses, and only while it is pending. #}
 {% set p = card.proposal %}
 {% set c = p.config %}
@@ -12,9 +13,9 @@
     <dt>{{ t('assistant.proposal.target') }}</dt>
     <dd>{{ c.target }}</dd>
     <dt>{{ t('assistant.proposal.task') }}</dt>
-    <dd>{{ c.task }}</dd>
+    <dd>{{ t('task.' ~ c.task) }}<br><span class="text-muted">{{ t('assistant.proposal.task_why.' ~ c.task) }}</span></dd>
     <dt>{{ t('assistant.proposal.max_runtime') }}</dt>
-    <dd>{{ c.max_runtime_secs }}</dd>
+    <dd>{{ c.max_runtime_secs }}<br><span class="text-muted">{{ t('assistant.proposal.runtime_why') }}</span></dd>
     {% if (c.decision | default("argmax")) != "argmax" %}
     <dt>{{ t('train.f.decision') }}</dt>
     <dd>{{ t('train.decision.' ~ c.decision) }}</dd>
@@ -33,7 +34,7 @@
     <p class="text-muted">{{ t('assistant.proposal.ignored_suggestions') }}</p>
     <ul>
       {% for s in p.details.ignored_suggestions %}
-      <li>{{ s.column }}: {{ s.reason }}</li>
+      <li>{{ s.column }}: {{ t('analysis.reason.' ~ s.code) if s.code else s.reason }}</li>
       {% endfor %}
     </ul>
   </div>
@@ -42,8 +43,8 @@
   <div class="text-sm">
     <p class="text-muted">{{ t('assistant.proposal.warnings') }}</p>
     <ul>
-      {% for w in p.details.warnings %}
-      <li>{{ w }}</li>
+      {% for text in card.warnings(lang) %}
+      <li>{{ text }}</li>
       {% endfor %}
     </ul>
   </div>

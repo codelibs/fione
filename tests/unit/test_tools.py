@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from fione import db
+from fione import db, i18n
 from fione.auth import service as auth
 from fione.auth.roles import ProjectAccess, Role
 from fione.data import profile
@@ -527,8 +527,13 @@ def test_propose_training_config(env):
     assert config["ignored_columns"] == ["ident", "const"]
     suggested = {s["column"]: s["reason"] for s in result["ignored_suggestions"]}
     assert set(suggested) == {"ident", "const", "leak"}
+    codes_of = {s["column"]: s["code"] for s in result["ignored_suggestions"]}
+    assert codes_of["ident"] == "id" and codes_of["const"] == "constant"
+    assert codes_of["leak"].startswith("leak_")
+    assert all(f"analysis.reason.{c}" in i18n.catalog("ja") for c in codes_of.values())
     assert "leak" not in config["ignored_columns"]
-    assert any("leak" in w for w in result["warnings"])
+    assert any("leak" in w["message"] for w in result["warnings"])
+    assert "leak_other" not in codes(result)  # every leak code has its translation
     regression = call(
         env, "propose_training_config", {"dataset_id": env.dataset.id, "target": "num"}
     )
@@ -582,9 +587,12 @@ def test_proposal_does_not_suggest_ignoring_score_suspects(env, scored):
     suggested = {s["column"] for s in result["ignored_suggestions"]}
     assert suggested == {"copy"}  # the exact copy only
     assert NOISY not in result["config"]["ignored_columns"]
-    warning = next(w for w in result["warnings"] if "noisy copy" in w)
+    found = next(w for w in result["warnings"] if "noisy copy" in w["message"])
+    warning = found["message"]
     assert "check that it is known at prediction time" in warning
     assert "may" in warning
+    assert found["code"] == "leak_predicts_alone"
+    assert found["params"]["column"] == "noisy copy"
     assert SECRET not in dump(result)
 
 
@@ -647,6 +655,14 @@ def test_propose_sets_only_the_settings_the_user_wanted(env):
         call(env, "propose_training_config", {**base, "decision": "other"})
 
 
+def codes(result):
+    """The warning codes of a proposal, each translated by the card in both languages."""
+    found = [w["code"] for w in result["warnings"]]
+    for lang in i18n.LANGUAGES:
+        assert all(f"assistant.warn.{c}" in i18n.catalog(lang) for c in found), (lang, found)
+    return found
+
+
 def test_propose_hints_at_settings_that_suit_the_target(env):
     rng = np.random.default_rng(0)
     frame = pd.DataFrame(
@@ -660,9 +676,13 @@ def test_propose_hints_at_settings_that_suit_the_target(env):
         env.storage, env.conn, env.project.id, "hints", DatasetType.TRAIN, [frame]
     )
     skewed = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "skewed"})
-    assert any("log1p" in w for w in skewed["warnings"])
+    assert any("log1p" in w["message"] for w in skewed["warnings"])
+    assert "skewed_target" in codes(skewed)
     rare = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "rare"})
-    assert any("balanced" in w and "5.0%" in w for w in rare["warnings"])
+    assert any("balanced" in w["message"] and "5.0%" in w["message"] for w in rare["warnings"])
+    assert next(w for w in rare["warnings"] if w["code"] == "rare_class")["params"] == {
+        "share": "5.0"
+    }
     assert rare["config"]["decision"] == "argmax"  # a hint, not a choice
 
 
@@ -702,7 +722,8 @@ def test_propose_warns_about_unusable_datasets(env):
         [env.frame[["num", "label"]]],
     )
     result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
-    assert any("predict dataset" in w for w in result["warnings"])
+    assert any("predict dataset" in w["message"] for w in result["warnings"])
+    assert "not_train" in codes(result)
 
 
 # --- limits ----------------------------------------------------------------
@@ -722,7 +743,8 @@ def test_more_than_200_columns_are_summarized(env):
     assert all(c["name"] != "c299" for c in result["columns"])
     proposal = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "c299"})
     assert proposal["config"]["target"] == "c299"
-    assert any("first 200" in w for w in proposal["warnings"])
+    assert any("first 200" in w["message"] for w in proposal["warnings"])
+    assert "many_columns" in codes(proposal)
 
 
 def test_a_wide_numeric_dataset_is_cut_to_the_size_cap(env):
@@ -1164,8 +1186,9 @@ def test_long_plain_names_are_valid_targets_and_ignored_columns(env):
     assert result["config"]["target"] == long_target
     assert result["config"]["ignored_columns"] == [long_const]
     assert TrainConfig.from_dict(result["config"]).validate()
-    assert not any(long_const[:70] in w for w in result["warnings"])
-    assert any("not plain text" in w for w in result["warnings"])
+    assert not any(long_const[:70] in w["message"] for w in result["warnings"])
+    assert any("not plain text" in w["message"] for w in result["warnings"])
+    assert "column_not_plain" in codes(result)
     with pytest.raises(ToolError, match="not plain text"):
         call(env, "propose_training_config", {"dataset_id": ds.id, "target": "bad\nname"})
 

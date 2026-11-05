@@ -14,6 +14,8 @@ from fione.assistant import store
 from fione.assistant.provider import LlmStatus
 from fione.assistant.turns import ERROR_CODES, TooManyTurns, TurnManager
 from fione.auth import service as auth_service
+from fione.jobs import store as jobs
+from fione.jobs.store import JobStatus
 from fione.tools import list_tools
 from fione.web.headers import CONTENT_SECURITY_POLICY
 from web_helpers import make_world
@@ -287,6 +289,73 @@ def test_entry_links_when_on(chat):
     assert f"{base}/assistant?ask=model:{ids['model']}" in summary
     analysis = chat.client.get(f"{base}/datasets/{ids['train']}/analyze").text
     assert f"{base}/assistant?ask=dataset:{ids['train']}" in analysis
+
+
+def finish_job(world, job_id, status):
+    with closing(connect(world.client)) as conn:
+        jobs.claim_job(conn, job_id, "token")
+        jobs.finish_job(conn, job_id, JobStatus(status), message="boom")
+
+
+def job_pages(world, job):
+    page = world.client.get(f"/projects/{world.p}/jobs/{job}").text
+    fragment = world.client.get(
+        f"/projects/{world.p}/jobs/{job}/status", headers={"HX-Request": "true"}
+    ).text
+    return page, fragment
+
+
+def test_failed_job_links_to_the_assistant(chat):
+    job = chat.ids[chat.p]["job"]
+    link = f"/projects/{chat.p}/assistant?ask=job:{job}"
+    assert all(link not in text for text in job_pages(chat, job))  # not failed yet
+    finish_job(chat, job, "failed")
+    assert all(link in text for text in job_pages(chat, job))
+    done = chat.ids[chat.q]["job"]
+    finish_job(chat, done, "done")
+    assert "?ask=job:" not in chat.client.get(f"/projects/{chat.q}/jobs/{done}").text
+
+
+def test_failed_job_has_no_assistant_link_when_off(make_client):
+    world = make_world(make_client())
+    world.login("ed")
+    job = world.ids[world.p]["job"]
+    finish_job(world, job, "failed")
+    assert all("/assistant" not in text for text in job_pages(world, job))
+
+
+def test_job_prefill_is_for_a_failed_job_of_the_project(chat):
+    job = chat.ids[chat.p]["job"]
+    assert textarea(page_of(chat, f"?ask=job:{job}").text) == ""  # not failed
+    finish_job(chat, job, "failed")
+    r = page_of(chat, f"?ask=job:{job}")
+    assert f"job {job}" in textarea(r.text) and chat.fake.requests == []
+    finish_job(chat, chat.ids[chat.q]["job"], "failed")
+    for query in (f"?ask=job:{chat.ids[chat.q]['job']}", "?ask=job:999999", "?ask=job:x"):
+        r = page_of(chat, query)
+        assert r.status_code == 200 and textarea(r.text) == "", query
+
+
+def test_examples_are_shown_on_an_empty_conversation_and_prefill(chat):
+    examples = [shown(f"assistant.example_{n}") for n in (1, 2, 3)]
+    r = page_of(chat)
+    assert all(f">{text}</a>" in r.text for text in examples)
+    for n, text in enumerate(examples, 1):
+        r = page_of(chat, f"?ask=example:{n}")
+        assert textarea(r.text) == text and chat.fake.requests == []
+    for query in ("?ask=example:4", "?ask=example:"):
+        assert textarea(page_of(chat, query).text) == ""
+    cid = new_conversation(chat)
+    r = page_of(chat, f"?c={cid}")
+    assert f"?c={cid}&amp;ask=example:2" in r.text
+    send(chat, cid)
+    poll(chat, cid)
+    assert "data-examples" not in page_of(chat, f"?c={cid}").text
+
+
+def test_examples_wait_until_the_assistant_can_answer(chat):
+    use_monitor(chat.client, state="pulling", completed=250, total=1000)
+    assert "data-examples" not in page_of(chat).text
 
 
 def test_ask_prefill_is_scoped(chat):

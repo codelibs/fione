@@ -31,16 +31,7 @@ from fione.api.routes_jobs import cancel
 from fione.api.routes_models import serving_bundle_of
 from fione.api.schemas import MAX_ID, event_out, job_out
 from fione.auth.roles import ProjectAccess, Role
-from fione.data.profile import (
-    CORRELATED,
-    DETERMINES,
-    IDENTICAL,
-    LEAK_STRONG,
-    ORDERED_BY_TARGET,
-    PREDICTS_ALONE,
-    SCORE_REASONS,
-    LeakCheck,
-)
+from fione.data.profile import LEAK_STRONG, SCORE_REASONS, LeakCheck, leak_code
 from fione.engine import explain
 from fione.engine.artifact import MODEL_FILE, UntrustedArtifactError, read_manifest
 from fione.engine.config import TargetError, TrainConfig
@@ -59,7 +50,9 @@ from fione.predict.batch import PREDICT, check_inputs
 from fione.projects import service as projects
 from fione.projects.ingest import read_dataset_rows, read_dataset_sample
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
+from fione.schema import clean_text
 from fione.tools.builtin import (
+    RARE_CLASS_SHARE,
     is_skewed_target,
     propose,
     rare_class_share,
@@ -107,15 +100,6 @@ PROFILE_MIN_ROWS = 500
 # stays under the 1 MiB limit of non-upload requests.
 MAX_FORM_FIELDS = 20_000
 STOP_POLLING = 286  # the HTMX status that ends hx-trigger polling
-# A leak suspect's reason (data.profile) -> the key of its explanation. Reasons in
-# SCORE_REASONS only warn: a legitimate strong column can score as high as a leak.
-LEAK_REASONS = {
-    IDENTICAL: "identical",
-    CORRELATED: "correlated",
-    DETERMINES: "determines",
-    PREDICTS_ALONE: "predicts_alone",
-    ORDERED_BY_TARGET: "ordered",
-}
 
 
 def _admin(ctx: Ctx) -> bool:
@@ -313,7 +297,7 @@ def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | 
     reasons = {col.name: col.kind for col in found.ignore}  # id, constant: unchecked
     warnings = {}  # score-based leak suspects: they stay checked
     for suspect in found.profile.leak_suspects:
-        key = "leak_" + LEAK_REASONS.get(suspect.reason, "other")
+        key = leak_code(suspect.reason)  # reasons in SCORE_REASONS only warn
         if suspect.reason in SCORE_REASONS:
             warnings[suspect.column] = (key, suspect.score)
         else:
@@ -791,8 +775,43 @@ def cancel_job(
 # --- prediction summary -------------------------------------------------------------------
 
 
+def _unit(value) -> float | None:
+    """A stored rate, or None when it is not a number from 0 to 1."""
+    ok = isinstance(value, int | float) and not isinstance(value, bool) and 0 <= value <= 1
+    return value if ok else None
+
+
+def _rare_class_sentence(diagnostics: dict | None) -> tuple[str, dict] | None:
+    """What the model finds of a binary target's rare class (under ``RARE_CLASS_SHARE`` of the
+    rows), from the stored per-class diagnostics; None when the classes are not that
+    unbalanced or the diagnostics cannot be read."""
+    try:
+        rows, labels = diagnostics["per_class"], diagnostics["labels"]
+        rare = min(rows, key=lambda row: row["support"])
+        share = rare["support"] / sum(row["support"] for row in rows)
+        index, recall, precision = rare["class"], _unit(rare["recall"]), _unit(rare["precision"])
+    except (TypeError, KeyError, ValueError, ZeroDivisionError):
+        return None
+    if (
+        len(rows) != 2
+        or not 0 < share < RARE_CLASS_SHARE
+        or not isinstance(labels, list)
+        or type(index) is not int
+        or not 0 <= index < len(labels)
+    ):
+        return None
+    params = {"label": clean_text(labels[index]), "share": _pct(share)}
+    if recall == 0:  # the precision is undefined when the model never predicts the class
+        return "summary.score.rare_none", params
+    if recall is None or precision is None:
+        return None
+    return "summary.score.rare", params | {"recall": _pct(recall), "precision": _pct(precision)}
+
+
 def _score_sentence(record: ModelRecord, rating: Rating, baseline) -> tuple[str, dict] | None:
     m = record.metrics
+    if record.task == "classification" and (rare := _rare_class_sentence(record.diagnostics)):
+        return rare
     if rating.metric == "accuracy" and rating.note != "single_class":
         return "summary.score.accuracy", {
             "pct": f"{m['accuracy'] * 100:.0f}",
@@ -807,6 +826,9 @@ def _score_sentence(record: ModelRecord, rating: Rating, baseline) -> tuple[str,
         }
     if rating.metric == "r2":
         return "summary.score.r2", {"pct": f"{max(0.0, m['r2']) * 100:.0f}"}
+    mae = m.get("mae")
+    if record.task == "regression" and isinstance(mae, int | float) and math.isfinite(mae):
+        return "summary.score.mae", {"error": _number(mae)}
     return None
 
 

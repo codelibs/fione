@@ -40,6 +40,7 @@ from fione.data.profile import (
     DatasetProfile,
     LeakCheck,
     leak_check,
+    leak_code,
     profile_dataset,
 )
 from fione.engine import diagnostics as diag
@@ -700,6 +701,12 @@ def sample_profile(
     return profile_dataset(frame, sample_rows=sample_rows)
 
 
+def _warning(code: str, message: str, **params) -> dict:
+    """A proposal's warning: ``message`` is English for the model; the card translates the
+    ``code`` with its ``params``."""
+    return {"code": code, "message": message, "params": params}
+
+
 def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     dataset = _dataset(ctx, args["dataset_id"])
     names = [name for name, _ in dataset.schema]
@@ -709,50 +716,92 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     found = propose(ctx.storage, dataset, target, names[:_MAX_COLUMNS])
     profile, task = found.profile, found.task
 
-    warnings: list[str] = []
+    warnings: list[dict] = []
     suggestions: list[dict] = []
     ignored: list[str] = []
     if dataset.type != DatasetType.TRAIN:
-        warnings.append(f"this is a {dataset.type.value} dataset; training needs a train dataset")
+        warnings.append(
+            _warning(
+                "not_train",
+                f"this is a {dataset.type.value} dataset; training needs a train dataset",
+            )
+        )
     if len(names) > _MAX_COLUMNS:
-        warnings.append(f"only the first {_MAX_COLUMNS} columns were examined")
+        warnings.append(
+            _warning(
+                "many_columns",
+                f"only the first {_MAX_COLUMNS} columns were examined",
+                n=_MAX_COLUMNS,
+            )
+        )
     ignore = {col.name for col in found.ignore}
     for col in profile.columns:
         if col.name == target:
             if col.kind in ("id", "constant"):
-                warnings.append(f"the target looks like a {col.kind} column; check the choice")
+                warnings.append(
+                    _warning(
+                        f"target_{col.kind}",
+                        f"the target looks like a {col.kind} column; check the choice",
+                    )
+                )
             if col.missing_rate > 0:
-                warnings.append("the target has missing values, which training refuses")
+                warnings.append(
+                    _warning(
+                        "target_missing", "the target has missing values, which training refuses"
+                    )
+                )
         elif col.name in ignore:
-            suggestions.append({"column": clean_text(col.name), "reason": f"{col.kind} column"})
+            suggestions.append(
+                {"column": clean_text(col.name), "reason": f"{col.kind} column", "code": col.kind}
+            )
             if _is_plain(col.name):
                 ignored.append(col.name)
             else:
+                column = clean_text(col.name)
                 warnings.append(
-                    f"column '{clean_text(col.name)}' is not plain text; ignore it by hand"
+                    _warning(
+                        "column_not_plain",
+                        f"column '{column}' is not plain text; ignore it by hand",
+                        column=column,
+                    )
                 )
     for suspect in profile.leak_suspects:
         name, reason = clean_text(suspect.column), clean_text(suspect.reason)
+        code = leak_code(suspect.reason)
         if suspect.reason in SCORE_REASONS:  # a strong legitimate column can score as high
             warnings.append(
-                f"column '{name}': {reason} (score {_r(suspect.score)}); it may be a target "
-                "leak, so check that it is known at prediction time"
+                _warning(
+                    code,
+                    f"column '{name}': {reason} (score {_r(suspect.score)}); it may be a target "
+                    "leak, so check that it is known at prediction time",
+                    column=name,
+                    score=_r(suspect.score),
+                )
             )
             continue
         reason = f"possible target leak: {reason}"
-        suggestions.append({"column": name, "reason": reason})
-        warnings.append(f"column '{name}': {reason}")
+        suggestions.append({"column": name, "reason": reason, "code": code})
+        warnings.append(_warning(code, f"column '{name}': {reason}", column=name))
     if profile.leak_partial:
-        warnings.append("the leak check ran out of time; some columns were not scored")
+        warnings.append(
+            _warning("leak_partial", "the leak check ran out of time; some columns were not scored")
+        )
     if is_skewed_target(found.y, task):
         warnings.append(
-            "the target is not negative and skewed; if the score is a relative error "
-            "(such as RMSLE), target_transform 'log1p' may help"
+            _warning(
+                "skewed_target",
+                "the target is not negative and skewed; if the score is a relative error "
+                "(such as RMSLE), target_transform 'log1p' may help",
+            )
         )
     if (share := rare_class_share(found.y, task)) is not None:
         warnings.append(
-            f"the rarest class is {share:.1%} of the rows; if the score treats every class "
-            "alike (such as balanced accuracy), decision 'balanced' may help"
+            _warning(
+                "rare_class",
+                f"the rarest class is {share:.1%} of the rows; if the score treats every class "
+                "alike (such as balanced accuracy), decision 'balanced' may help",
+                share=f"{max(share * 100, 0.1):.1f}",
+            )
         )
     overrides = {
         k: args[k] for k in ("max_runtime_secs", "decision", "target_transform") if k in args

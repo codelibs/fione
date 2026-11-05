@@ -62,7 +62,20 @@ PREDICTS_ALONE = "predicts the target on its own"
 ORDERED_BY_TARGET = "row order follows the target"
 # reasons that only warn: a legitimate strong column can score as high as a leak
 SCORE_REASONS = frozenset({CORRELATED, PREDICTS_ALONE, ORDERED_BY_TARGET})
+_LEAK_CODES = {
+    IDENTICAL: "identical",
+    CORRELATED: "correlated",
+    DETERMINES: "determines",
+    PREDICTS_ALONE: "predicts_alone",
+    ORDERED_BY_TARGET: "ordered",
+}
 LEAK_STRONG = 0.99
+
+
+def leak_code(reason: str) -> str:
+    """A leak suspect's reason as its stable code (``leak_correlated``, ...), the key of the
+    translated message about it."""
+    return "leak_" + _LEAK_CODES.get(reason, "other")
 
 
 @dataclass

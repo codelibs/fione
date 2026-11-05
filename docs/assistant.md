@@ -48,6 +48,14 @@ The model download is about 8 GB. The System page shows its progress; until the 
 the chat page says what is happening and its question box is disabled. Everything else in Fione
 keeps working while the language model is missing, being downloaded or out of reach.
 
+## Ways to ask
+
+Besides the **Assistant** page, **Ask the assistant** buttons on a model, its summary, a dataset's
+analysis and a failed training open the page with a question already typed in. Nothing is sent
+until you press **Send**, and you can change the text first. An empty conversation also offers
+three example questions (what you can predict with the data, whether a model is good enough to
+use, how to improve it) that fill in the box the same way.
+
 ## What is sent
 
 Each question goes to the language model server together with what the assistant needs to answer:
@@ -55,7 +63,9 @@ the project's and datasets' names, column names and kinds, statistics (missing r
 correlations), and the results of models. **Cell values are not sent** unless an administrator
 turns on "Send example column values" for that server on the System page; then the most
 frequent values of a column are included. The setting belongs to the server's address and is off
-again if the address changes.
+again if the address changes. For a job, the assistant reads its status and progress events;
+the failure message of a failed job is left out by default, because it can quote a value from
+your data, and is sent (cut to 200 characters) only when that setting is on.
 
 When the server is not on this machine, every chat user sees a warning with its host name.
 `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` of the Fione server apply to this traffic.
@@ -68,7 +78,9 @@ database and deleted with their project or user.
 
 When you ask for a training ("train a model to predict species"), the assistant checks the dataset
 and shows a **Training proposal** card: the dataset, the column to predict, the task, the time
-limit, the columns it suggests leaving out, and what to check. People who can edit the project
+limit (each with a plain reason), the columns it suggests leaving out, and what to check. The
+reasons and the things to check are written in plain words in the language of the page, not as
+technical terms. People who can edit the project
 press **Start training** (the job starts exactly as shown, once) or **Dismiss**. Viewers see the
 card without buttons. A decided proposal is final; open the job from its card.
 
@@ -110,6 +122,11 @@ get a proposed training configuration back, which is not saved. It cannot start 
 anything, and it never receives example values. A token has the same rights as you, so keep it secret.
 Behind a reverse proxy, block `/mcp` unless you want MCP clients outside your network. At most
 two tool calls run at once.
+
+The result of `propose_training_config` has the keys `proposal` (`true`), `config`,
+`ignored_suggestions`, `warnings` and `rationale`. Each warning is an object `{code, message, params}`: `message` is an English
+sentence, and `code` with `params` is what the Training proposal card translates. Each entry of
+`ignored_suggestions` is `{column, reason, code}`, with `reason` in English too.
 
 ## Troubleshooting
 

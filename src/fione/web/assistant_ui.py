@@ -10,6 +10,7 @@ ends the polling. The page never fails because the LLM cannot be used: it says w
 
 import logging
 from dataclasses import dataclass
+from string import Formatter
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
@@ -26,6 +27,7 @@ from fione.assistant.store import (
 )
 from fione.assistant.turns import ERROR_CODES, LlmUnavailable, TooManyTurns
 from fione.engine.config import TargetError, TrainConfig
+from fione.jobs.store import JobStatus
 from fione.models import service as models
 from fione.modules.registry import redact
 from fione.projects import service as projects
@@ -38,6 +40,7 @@ from fione.web.access import (
     action,
     dataset_in,
     field,
+    job_in,
     model_in,
     page,
     parse_id,
@@ -50,6 +53,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
 
 ACTIVE = ("queued", "running")
+EXAMPLES = ("1", "2", "3")  # the suggested questions of an empty conversation
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,23 @@ class Card:
 
     proposal: store.Proposal
     dataset_name: str | None  # None once the dataset is gone
+
+    def warnings(self, lang: str) -> list[str]:
+        """The warnings in ``lang``: a warning without a translation for its code, or without
+        the figures that translation needs, is shown as its own (English) message."""
+        texts = []
+        for w in self.proposal.details.get("warnings") or []:
+            if not isinstance(w, dict):
+                texts.append(str(w))
+                continue
+            key, params = f"assistant.warn.{w.get('code')}", w.get("params")
+            template = i18n.catalog(lang).get(key) or i18n.catalog(i18n.DEFAULT_LANGUAGE).get(key)
+            needed = {name for _, name, _, _ in Formatter().parse(template or "") if name}
+            if template is None or not isinstance(params, dict) or not needed <= params.keys():
+                texts.append(str(w.get("message", "")))
+            else:
+                texts.append(i18n.t(key, lang, **params))
+        return texts
 
 
 def _tool_names() -> set[str]:
@@ -146,8 +167,9 @@ def _llm(request: Request, conn) -> dict:
 
 
 def _prefill(request: Request, conn, ctx: Ctx) -> str:
-    """The question ``?ask=model:<id>`` or ``?ask=dataset:<id>`` suggests, for an object of
-    this project only; nothing is sent."""
+    """The question ``?ask=model:<id>``, ``?ask=dataset:<id>`` or ``?ask=job:<id>`` (a failed
+    job) suggests, for an object of this project only, or the example ``?ask=example:<n>``;
+    nothing is sent."""
     kind, _, oid = (request.query_params.get("ask") or "").partition(":")
     lang = language(request)
     try:
@@ -155,6 +177,10 @@ def _prefill(request: Request, conn, ctx: Ctx) -> str:
             return i18n.t("assistant.ask_model", lang, name=model_in(conn, ctx, oid).name)
         if kind == "dataset":
             return i18n.t("assistant.ask_dataset", lang, name=dataset_in(conn, ctx, oid).name)
+        if kind == "job" and (job := job_in(conn, ctx, oid)).status == JobStatus.FAILED:
+            return i18n.t("assistant.ask_job", lang, id=job.id)
+        if kind == "example" and oid in EXAMPLES:
+            return i18n.t(f"assistant.example_{oid}", lang)
     except UiError:
         pass
     return ""
@@ -185,6 +211,7 @@ def conversation_page(
         "notice": notice,
         "detail": detail,
         "text": text,
+        "examples": EXAMPLES,
         **_llm(request, conn),
     }
     if conversation is not None:
