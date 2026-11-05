@@ -29,7 +29,7 @@ from pathlib import Path
 
 from fione import db
 from fione.assistant import store
-from fione.assistant.client import ChatClient, Completion, LlmError
+from fione.assistant.client import ChatClient, Completion, LlmClient, LlmError
 from fione.assistant.prompt import (
     ContextTooSmall,
     budget_bytes,
@@ -124,7 +124,7 @@ class _Turn:
         conn: sqlite3.Connection,
         storage: Storage,
         settings: Settings,
-        client: ChatClient | None,
+        client: LlmClient | None,
         monitor: LlmMonitor,
         conversation_id: int,
         cancel: threading.Event,
@@ -432,7 +432,7 @@ def run_turn(
     db_path: Path,
     storage: Storage,
     settings: Settings,
-    client: ChatClient | None,
+    client: LlmClient | None,
     monitor: LlmMonitor,
     conversation_id: int,
     assistant_id: int,
@@ -481,7 +481,7 @@ class TurnManager:
         self._storage = storage
         self._settings = settings
         self._monitor = monitor
-        self._client: ChatClient | None = client_factory(settings)
+        self._client: LlmClient | None = client_factory(settings)
         self._pool = ThreadPoolExecutor(
             settings.llm_max_concurrent_turns, thread_name_prefix="assistant-turn"
         )

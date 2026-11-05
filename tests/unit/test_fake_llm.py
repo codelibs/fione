@@ -1,5 +1,7 @@
 """The fake LLM's command line and address, which the e2e stack runs inside a container."""
 
+import json
+import time
 import urllib.request
 
 from fake_llm import DEFAULT_MODEL, FakeLlm, from_args
@@ -35,5 +37,29 @@ def test_all_interfaces_are_reached_on_loopback():
         assert fake.url == f"http://127.0.0.1:{fake.port}/v1"
         with urllib.request.urlopen(f"http://127.0.0.1:{fake.port}/api/version", timeout=5) as r:
             assert r.status == 200
+    finally:
+        fake.stop()
+
+
+def test_anthropic_requests_reach_the_policies_in_the_openai_shape():
+    from fione.assistant.claude import ClaudeClient
+
+    fake = FakeLlm(policy="e2e", api_key="k").start()
+    try:
+        client = ClaudeClient(fake.origin, "claude-opus-5-5", api_key="k")
+        system = {"role": "system", "content": "project p1 named x"}
+        messages = [system, {"role": "user", "content": "describe"}]
+        deadline = time.monotonic() + 10
+        [call] = client.complete(messages, [], deadline=deadline).tool_calls
+        assert (call.name, json.loads(call.arguments)) == ("list_datasets", {"project_id": "p1"})
+        made = {"id": call.id, "type": "function",
+                "function": {"name": call.name, "arguments": call.arguments}}  # fmt: skip
+        messages += [
+            {"role": "assistant", "content": "", "tool_calls": [made]},
+            {"role": "tool", "tool_call_id": call.id, "content": '{"datasets": [{"id": 4}]}'},
+        ]
+        [call] = client.complete(messages, [], deadline=deadline).tool_calls
+        assert (call.name, json.loads(call.arguments)) == ("describe_dataset", {"dataset_id": 4})
+        assert fake.paths == ["POST /v1/messages"] * 2
     finally:
         fake.stop()

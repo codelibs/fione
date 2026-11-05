@@ -217,14 +217,14 @@ def test_effective_context(fake_llm, monitors):
     assert monitor.effective_context() == OLLAMA_DEFAULT_CONTEXT == 4096
     assert monitor.snapshot().server_context is None
 
-    from fione.assistant.client import ChatClient
+    from fione.assistant.client import OllamaClient
 
     fake = fake_llm(context_length=8192)
     monitor = monitors(fake.url)
     monitor.refresh_context()  # nothing loaded yet: unchanged
     assert monitor.effective_context() == 4096
     deadline = time.monotonic() + 5
-    ChatClient(fake.url, "gemma4:12b-mlx").complete(
+    OllamaClient(fake.url, "gemma4:12b-mlx").complete(
         [{"role": "user", "content": "hi"}], [], deadline=deadline
     )
     monitor.refresh_context()
@@ -233,7 +233,7 @@ def test_effective_context(fake_llm, monitors):
 
     big = fake_llm(context_length=32768)
     monitor = monitors(big.url)
-    ChatClient(big.url, "gemma4:12b-mlx").complete(
+    OllamaClient(big.url, "gemma4:12b-mlx").complete(
         [{"role": "user", "content": "hi"}], [], deadline=deadline
     )
     monitor.refresh_context()

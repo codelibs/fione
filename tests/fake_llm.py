@@ -1,4 +1,5 @@
-"""A fake OpenAI-compatible and Ollama server (stdlib only), for tests and the e2e stack.
+"""A fake OpenAI-compatible, Ollama and Anthropic Messages server (stdlib only), for tests and
+the e2e stack. ``url`` is the OpenAI-compatible base (``/v1``), ``origin`` the Anthropic one.
 
 Each chat request takes the next item of the script (when it runs out, the reply is the text
 "ok"). The one exception is the gullible rule, which stands in for a model that obeys
@@ -16,6 +17,14 @@ Script items (the keys combine, except ``status``)::
     {"whole_calls": True}                    each call in one delta, all at ``index`` 0
     {"status": int, "body": str, "content_type": str, "headers": dict, "chunks": int}
                                              a raw reply, its body sent in ``chunks`` pieces
+    {"stop_reason": str}                     Anthropic only: instead of tool_use or end_turn
+    {"error": str}                           Anthropic only: an ``error`` event after the text
+
+``POST /v1/messages`` reads Anthropic requests: the policies see them as OpenAI-shaped messages
+(``tool_use`` blocks as tool calls, ``tool_result`` blocks as tool messages), while
+``requests`` keeps them as sent. It needs ``x-api-key`` and ``anthropic-version``; with
+``api_key`` set, another key is a 401. Every reply starts with a thinking block, as the
+models that always think send.
 
 Run it with ``python fake_llm.py --port N --policy e2e [--missing] [--host H] [--pull-delay S]``
 (``--host 0.0.0.0`` inside a container; ``--pull-delay`` slows a pull down, to watch its
@@ -163,6 +172,7 @@ class FakeLlm:
         host: str = "127.0.0.1",
         pull_error: str | None = None,
         pull_garbage: int = 0,
+        api_key: str | None = None,
     ):
         self.script = list(script or [])
         self.policy = policy
@@ -174,6 +184,7 @@ class FakeLlm:
         self.host = host
         self.pull_error = pull_error  # the pull stops with this error line after its first step
         self.pull_garbage = pull_garbage  # bytes with no newline sent as a pull's first line
+        self.api_key = api_key  # the only x-api-key POST /v1/messages accepts, when set
         self.generate_status = 200  # of POST /api/generate, which loads the model
         self.generate_delay = 0.0  # seconds before it answers: the time a model takes to load
         self.generate_padding = 0  # bytes of filler in its answer
@@ -213,19 +224,25 @@ class FakeLlm:
         host = "127.0.0.1" if self.host == "0.0.0.0" else self.host  # noqa: S104
         return f"http://{host}:{self.port}/v1"
 
+    @property
+    def origin(self) -> str:
+        return self.url.removesuffix("/v1")
+
     def join(self) -> None:
         if self._thread is not None:
             self._thread.join()
 
     # --- what the handler asks for
 
-    def record_chat(self, body: dict, headers: dict) -> dict:
-        """Log a chat request and return the script item that answers it."""
+    def record_chat(self, body: dict, headers: dict, messages: list[dict] | None = None) -> dict:
+        """Log a chat request and return the script item that answers it; ``messages`` are its
+        messages in the OpenAI shape, when the body has another."""
         with self._lock:
             self.requests.append(body)
             self.request_headers.append(headers)
             self._served = body.get("model")
-            messages = body.get("messages") or []
+            if messages is None:
+                messages = body.get("messages") or []
             if (call := gullible_call(messages)) is not None:
                 return {"tool_calls": [{"name": call[0], "arguments": call[1]}]}
             if self.policy == "e2e":
@@ -257,8 +274,8 @@ class FakeLlm:
             if name not in self.models:
                 self.models.append(name)
 
-    def next_call_id(self) -> str:
-        return f"call_{next(self._call_ids)}"
+    def next_call_id(self, prefix: str = "call") -> str:
+        return f"{prefix}_{next(self._call_ids)}"
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -293,9 +310,11 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         path = self.path.split("?")[0]
         self.llm.paths.append(f"POST {path}")
+        headers = {name.lower(): value for name, value in self.headers.items()}
         if path.endswith("/chat/completions"):
-            headers = {name.lower(): value for name, value in self.headers.items()}
             self._chat(body, self.llm.record_chat(body, headers))
+        elif path == "/v1/messages":
+            self._messages(body, headers)
         elif path == "/api/pull":
             self._pull(body)
         elif path == "/api/generate":
@@ -361,19 +380,21 @@ class _Handler(BaseHTTPRequestHandler):
         self.llm.add_model(name)
         self.wfile.write(b'{"status":"success"}\n')
 
+    def _raw(self, item: dict) -> None:
+        raw = str(item.get("body", ""))
+        kind, headers = item.get("content_type", "text/plain"), item.get("headers")
+        if "chunks" not in item:
+            return self._send(item["status"], kind, raw.encode(), headers)
+        self._send(item["status"], kind, headers=headers)
+        for piece in _pieces(raw, item["chunks"]):
+            self.wfile.write(piece.encode())
+            self.wfile.flush()
+            time.sleep(item.get("chunk_delay", 0))
+
     def _chat(self, body: dict, item: dict) -> None:
         time.sleep(item.get("delay", 0))
         if "status" in item:
-            raw = str(item.get("body", ""))
-            kind, headers = item.get("content_type", "text/plain"), item.get("headers")
-            if "chunks" not in item:
-                return self._send(item["status"], kind, raw.encode(), headers)
-            self._send(item["status"], kind, headers=headers)
-            for piece in _pieces(raw, item["chunks"]):
-                self.wfile.write(piece.encode())
-                self.wfile.flush()
-                time.sleep(item.get("chunk_delay", 0))
-            return
+            return self._raw(item)
         text = item.get("text", "")
         calls = [
             (self.llm.next_call_id(), call["name"], call.get("arguments", {}))
@@ -439,6 +460,98 @@ class _Handler(BaseHTTPRequestHandler):
             self._event(json.dumps(chunk))
             time.sleep(item.get("chunk_delay", 0))
         self._event("[DONE]")
+
+    def _messages(self, body: dict, headers: dict) -> None:
+        key = headers.get("x-api-key")
+        if not key or (self.llm.api_key is not None and key != self.llm.api_key):
+            error = {"type": "authentication_error", "message": f"invalid x-api-key {key}"}
+            return self._json({"type": "error", "error": error}, 401)
+        if not headers.get("anthropic-version"):
+            error = {"type": "invalid_request_error", "message": "anthropic-version is required"}
+            return self._json({"type": "error", "error": error}, 400)
+        item = self.llm.record_chat(body, headers, openai_messages(body))
+        time.sleep(item.get("delay", 0))
+        if "status" in item:
+            return self._raw(item)
+        text = item.get("text", "")
+        calls = [
+            (self.llm.next_call_id("toolu"), call["name"], call.get("arguments", {}))
+            for call in item.get("tool_calls", [])
+        ]
+        prompt_tokens = item.get("prompt_tokens")
+        if prompt_tokens is None:
+            prompt_tokens = len(json.dumps(body.get("messages") or [])) // 4 + 1
+        stop = item.get("stop_reason") or ("tool_use" if calls else "end_turn")
+        usage = {"input_tokens": prompt_tokens}
+        message = {"id": "msg_fake", "type": "message", "role": "assistant", "usage": usage}
+        events = [{"type": "message_start", "message": message}]
+        blocks = [
+            ({"type": "thinking", "thinking": "", "signature": ""},
+             [{"type": "thinking_delta", "thinking": ""},
+              {"type": "signature_delta", "signature": f"sig-{len(self.llm.requests)}"}]),
+        ]  # fmt: skip
+        if text:
+            pieces = _pieces(text, item.get("chunks", 1))
+            blocks.append(
+                ({"type": "text", "text": ""}, [{"type": "text_delta", "text": p} for p in pieces])
+            )
+        for id_, name, arguments in calls:
+            raw = arguments if isinstance(arguments, str) else json.dumps(arguments)
+            deltas = [{"type": "input_json_delta", "partial_json": p} for p in _pieces(raw, 3)]
+            blocks.append(({"type": "tool_use", "id": id_, "name": name, "input": {}}, deltas))
+        for index, (block, deltas) in enumerate(blocks):
+            events.append({"type": "content_block_start", "index": index, "content_block": block})
+            events += [{"type": "content_block_delta", "index": index, "delta": d} for d in deltas]
+            events.append({"type": "content_block_stop", "index": index})
+        if "error" in item:
+            events.append(
+                {"type": "error", "error": {"type": "overloaded_error", "message": item["error"]}}
+            )
+        else:
+            events += [
+                {"type": "ping"},
+                {"type": "message_delta", "delta": {"stop_reason": stop},
+                 "usage": {"output_tokens": len(text) // 4 + 1}},
+                {"type": "message_stop"},
+            ]  # fmt: skip
+        self._send(200, "text/event-stream")
+        for event in events:
+            self.wfile.write(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode())
+            self.wfile.flush()
+            time.sleep(item.get("chunk_delay", 0))
+
+
+def openai_messages(body: dict) -> list[dict]:
+    """The messages of an Anthropic request in the OpenAI shape, for the policies."""
+    out = []
+    if body.get("system"):
+        out.append({"role": "system", "content": body["system"]})
+    for message in body.get("messages") or []:
+        content = message.get("content")
+        if isinstance(content, str):
+            out.append({"role": message.get("role"), "content": content})
+            continue
+        blocks = content if isinstance(content, list) else []
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        if message.get("role") == "assistant":
+            calls = [
+                {"id": b.get("id"), "type": "function",
+                 "function": {"name": b.get("name"), "arguments": json.dumps(b.get("input"))}}
+                for b in blocks
+                if b.get("type") == "tool_use"
+            ]  # fmt: skip
+            out.append({"role": "assistant", "content": text, "tool_calls": calls})
+            continue
+        for b in blocks:
+            if b.get("type") == "tool_result":
+                result = b.get("content")
+                if isinstance(result, list):
+                    result = "".join(r.get("text", "") for r in result)
+                id_ = b.get("tool_use_id")
+                out.append({"role": "tool", "tool_call_id": id_, "content": result})
+        if text:
+            out.append({"role": "user", "content": text})
+    return out
 
 
 def from_args(argv: list[str] | None = None) -> FakeLlm:
