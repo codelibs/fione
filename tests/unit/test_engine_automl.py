@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 
 from fione.engine import automl as automl_module
 from fione.engine import search
-from fione.engine.automl import FAMILY_ORDER, AutoML
+from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, AutoML
 from fione.engine.config import ConfigError, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
 from fione.engine.search import STARTUP_TRIALS
@@ -147,8 +147,12 @@ def test_every_family_is_listed_once():
     # FAMILIES, FAMILY_ORDER and FAMILY_WEIGHTS must agree.
     core = {"LightGBM", "XGBoost", "RandomForest", "ExtraTrees", "Linear", "DeepLearning"}
     assert core <= set(FAMILY_ORDER)
-    assert set(FAMILY_ORDER) == set(FAMILIES) == set(automl_module.FAMILY_WEIGHTS)
+    assert set(FAMILY_ORDER) | set(LATE_ORDER) == set(FAMILIES)
+    assert not set(FAMILY_ORDER) & set(LATE_ORDER)
+    assert set(FAMILY_ORDER) == set(automl_module.FAMILY_WEIGHTS)
+    assert set(LATE_ORDER) == set(automl_module.LATE_WEIGHTS)
     assert sum(automl_module.FAMILY_WEIGHTS.values()) == pytest.approx(1.0)
+    assert sum(automl_module.LATE_WEIGHTS.values()) == pytest.approx(1.0)
 
 
 def test_ignored_columns_are_not_features(iris):

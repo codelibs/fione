@@ -31,6 +31,10 @@ and TextLinear. Linear and DeepLearning read the ``linear`` view of Prep (one-ho
 standardised); their "rounds" are 1 and the epochs trained. TextLinear reads the ``text`` view
 (the linear view and the prose columns as text) and learns the word weights on each training
 fold, so its predictions out of fold are honest.
+
+TextLinearWide, TextLinearChar and TextLinearPlain are variants of TextLinear for the late
+phase of the search (``fione.engine.automl``): more words, word and character n-grams, and the
+text view without the derived features. They differ from it only in what they read.
 """
 
 import time
@@ -532,6 +536,13 @@ def by_feature(weights: np.ndarray, columns) -> np.ndarray:
     return np.bincount(owner, weights=weights, minlength=owner.max() + 1)
 
 
+def pad_features(values: np.ndarray, n_features: int) -> np.ndarray:
+    """``values`` with zeros added on the last axis up to ``n_features``: a model whose view
+    leaves out the last features (the derived ones) has nothing to say about them."""
+    short = n_features - values.shape[-1]
+    return np.pad(values, [(0, 0)] * (values.ndim - 1) + [(0, short)]) if short > 0 else values
+
+
 class Linear(FamilySpec):
     """L2-regularised logistic (classification) or ridge (regression) regression on the linear
     view. ``C`` is the inverse regularisation strength; ridge uses ``alpha = 1/C``.
@@ -683,6 +694,12 @@ class DeepLearning(FamilySpec):
 
 
 TEXT_WORDS = 30_000  # words and word pairs kept per text column
+TEXT_WORDS_WIDE = 100_000  # the same in TextLinearWide (more made the log loss worse)
+TEXT_CHARS = 100_000  # character n-grams kept per text column in TextLinearChar
+TEXT_CHAR_BUDGET = 5_000_000  # characters of text above which TextLinearChar is not tried
+# Mean characters per space-separated token above which a column counts as written without
+# spaces: a sentence is then one "word" and the character n-grams are far too many.
+TEXT_CHAR_TOKEN = 30
 TEXT_SUFFIX = "_t"  # ends the name of a text column of the text view
 
 
@@ -724,51 +741,66 @@ class TextModel:
 class TextLinear(FamilySpec):
     """Logistic (classification) or ridge (regression) regression on the TF-IDF word weights of
     the prose columns and the linear view. The words are learned on each training fold. ``C`` is
-    the inverse regularisation strength; ridge uses ``alpha = 1/C``."""
+    the inverse regularisation strength; ridge uses ``alpha = 1/C``.
+
+    The variants below change ``words``, ``chars`` (0: no character n-grams) or ``view``, and
+    ``cost``, the time of one of their fits relative to this family's (the late phase starts a
+    variant only when its first trial is expected to fit in the time left).
+    """
 
     name = "TextLinear"
     view = "text"
     seeded = False
     defaults = {"C": 30.0}
     max_iter = 300
+    words = TEXT_WORDS  # words and word pairs kept per text column
+    chars = 0  # character n-grams kept per text column
+    cost = 1.0
+    reference = "TextLinear"  # the family ``cost`` is relative to
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # The words do not depend on C: each training set is read once, however many trials.
-        self._words: dict[tuple, TfidfVectorizer] = {}
+        self._words: dict[tuple, list[TfidfVectorizer]] = {}
 
     def __getstate__(self):
         return {**self.__dict__, "_words": {}}  # the cache is for the search, not for the model
 
-    def _read(self, texts: pd.Series) -> TfidfVectorizer:
+    @classmethod
+    def applies(cls, prep, X: pd.DataFrame) -> bool:
+        """Whether this family reads anything of ``prep``'s data: it needs a prose column."""
+        return bool(prep.prose)
+
+    @classmethod
+    def coef_bytes(cls, prep, outputs: int) -> int:
+        """The most a model can take (see ``size_bytes``): every word kept, ``outputs`` weights
+        per word."""
+        words = len(prep.prose) * (cls.words + cls.chars)
+        return words * max(1, outputs) * 8 + words * 100 + 1024
+
+    def _read(self, texts: pd.Series) -> list[TfidfVectorizer]:
         key = (len(texts), int(pd.util.hash_pandas_object(texts, index=False).sum()))
         if key not in self._words:
-            self._words[key] = self._vectorizer(texts)
+            self._words[key] = self._vectorizers(texts)
         return self._words[key]
 
     def space(self, trial):
         return {"C": trial.suggest_float("C", 1e-2, 1e3, log=True)}
 
-    @staticmethod
-    def _vectorizer(texts: pd.Series) -> TfidfVectorizer:
-        for min_df in (2, 1):
-            vectorizer = TfidfVectorizer(
-                sublinear_tf=True,
-                min_df=min_df,
-                max_features=TEXT_WORDS,
-                ngram_range=(1, 2),
-                dtype=np.float32,
+    def _vectorizers(self, texts: pd.Series) -> list[TfidfVectorizer]:
+        found = [_tfidf(texts, max_features=self.words, ngram_range=(1, 2))]
+        if self.chars:
+            found.append(
+                _tfidf(texts, max_features=self.chars, analyzer="char_wb", ngram_range=(2, 5))
             )
-            try:
-                return vectorizer.fit(texts)
-            except ValueError:  # no words at all
-                continue
-        return TfidfVectorizer(vocabulary={"": 0}, dtype=np.float32).fit([""])
+        return found
 
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         dense = [c for c in X_tr.columns if not is_text_column(c)]
-        texts = [c for c in X_tr.columns if is_text_column(c)]
-        vectorizers = [self._read(X_tr[c]) for c in texts]
+        columns = [c for c in X_tr.columns if is_text_column(c)]
+        # A column read in several ways appears once per way.
+        read = [(c, v) for c in columns for v in self._read(X_tr[c])]
+        texts, vectorizers = [c for c, _ in read], [v for _, v in read]
         shell = TextModel(dense, texts, vectorizers, None, None)
         M = shell.matrix(X_tr)
         if self.classification:
@@ -797,6 +829,62 @@ class TextLinear(FamilySpec):
         return by_feature(weight, names)
 
 
+def _tfidf(texts: pd.Series, **options) -> TfidfVectorizer:
+    """TF-IDF of ``texts`` (a vocabulary of one empty word when they hold no words)."""
+    for min_df in (2, 1):
+        vectorizer = TfidfVectorizer(sublinear_tf=True, min_df=min_df, dtype=np.float32, **options)
+        try:
+            return vectorizer.fit(texts)
+        except ValueError:  # no words at all
+            continue
+    return TfidfVectorizer(vocabulary={"": 0}, dtype=np.float32).fit([""])
+
+
+class TextLinearWide(TextLinear):
+    """TextLinear with up to ``TEXT_WORDS_WIDE`` words and word pairs per text column."""
+
+    name = "TextLinearWide"
+    words = TEXT_WORDS_WIDE
+    cost = 1.5
+
+
+class TextLinearChar(TextLinear):
+    """TextLinear with the character n-grams (2 to 5, within words) of each text beside its
+    words. Fitting takes several times as long and the matrix has many more entries, so it is
+    left out when the text takes more than ``TEXT_CHAR_BUDGET`` characters (estimated on a
+    sample of the rows) or a column has no spaces (``TEXT_CHAR_TOKEN``)."""
+
+    name = "TextLinearChar"
+    chars = TEXT_CHARS
+    cost = 5.0
+
+    @classmethod
+    def applies(cls, prep, X: pd.DataFrame) -> bool:
+        if not super().applies(prep, X):
+            return False
+        sample = X[list(prep.prose)].sample(min(1000, len(X)), random_state=0)
+        chars = 0.0
+        for column in sample:
+            text = sample[column].fillna("").astype(str)
+            tokens = max(1.0, text.str.split().str.len().mean())
+            if text.str.len().mean() / tokens > TEXT_CHAR_TOKEN:
+                return False
+            chars += text.str.len().mean() * len(X)
+        return chars <= TEXT_CHAR_BUDGET
+
+
+class TextLinearPlain(TextLinear):
+    """TextLinear without the derived features: the text view of the input columns only. Without
+    derived features it would repeat TextLinear, so it is not tried."""
+
+    name = "TextLinearPlain"
+    view = "text_plain"
+
+    @classmethod
+    def applies(cls, prep, X: pd.DataFrame) -> bool:
+        return super().applies(prep, X) and bool(prep.groups)
+
+
 FAMILIES: dict[str, type[FamilySpec]] = {
     spec.name: spec
     for spec in (
@@ -808,5 +896,8 @@ FAMILIES: dict[str, type[FamilySpec]] = {
         DeepLearning,
         Linear,
         TextLinear,
+        TextLinearWide,
+        TextLinearChar,
+        TextLinearPlain,
     )
 }

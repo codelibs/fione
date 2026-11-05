@@ -33,6 +33,7 @@ from fione.engine.families import (
     LightGBM,
     Linear,
     TextLinear,
+    TextLinearChar,
     XGBoost,
 )
 from fione.jobs import automl_handler, explain_handler, store, worker
@@ -502,11 +503,15 @@ def test_cap_threads_leaves_models_without_a_thread_count_alone():
         Ridge().fit(X, y),
         MLPClassifier(max_iter=2).fit(X, y),
         TextLinear("classification", 2).fit(TextLinear.defaults, text, y, None, None, Deadline(30)),
+        TextLinearChar("classification", 2).fit(
+            TextLinearChar.defaults, text, y, None, None, Deadline(30)
+        ),
     ]
     specs = [
         Linear("regression", 0),
         DeepLearning("classification", 2),
         TextLinear("classification", 2),
+        TextLinearChar("classification", 2),
     ]
     model = SimpleNamespace(
         members=[SimpleNamespace(spec=s, models=[m]) for s, m in zip(specs, models, strict=True)]

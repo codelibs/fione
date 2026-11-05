@@ -149,6 +149,16 @@ columns beside them, learned again on each training fold. It joins the search an
 only for data with such a column, and its predictions are mixed with the other families' by the
 same cross-validation scores.
 
+Three variants of it are *late candidates*: TextLinearWide (up to 100,000 words and word pairs
+per column), TextLinearChar (the words and also the character n-grams of 2 to 5 letters; it is
+left out when the text is very large or has no spaces) and TextLinearPlain (without the derived features; it is
+tried only when derived features were added). They run after all the other families, in the
+search time that is left: for text data, 15% of the search time is kept for them (taken from
+the other families, not from TextLinear), and what the other families leave unused is added. Each takes a share of that time, and one that cannot finish
+a first trial in its share is skipped. A late candidate stays in the model
+only when its cross-validation scores improve the ensemble; otherwise it gets weight 0 and is
+dropped. They are not run for data without a text column.
+
 ## Learning a skewed target
 
 For a regression target of 0 or more that is skewed (prices, counts, durations) and is

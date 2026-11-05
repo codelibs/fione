@@ -181,7 +181,7 @@ def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
     spec = FAMILIES[name]("classification", 2)
     view = getattr(prep, spec.view)(X)
     model = spec.fit_full(spec.defaults, view, y, Deadline(30), rounds=7)
-    one_step = {"Linear": 1, "TextLinear": 1}  # fitted in one go: they have no rounds
+    one_step = {name: 1 for name in FAMILIES if "Linear" in name}  # fitted in one go: no rounds
     full = Forest.n_trees if issubclass(FAMILIES[name], Forest) else 7
     assert spec.rounds(model) == one_step.get(name, full)
     assert spec.predict(model, view).shape == (1_000, 2)

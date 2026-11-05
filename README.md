@@ -19,7 +19,7 @@ predictions and serve the model as a prediction API. It runs with one `docker co
   suspiciously well are flagged as possible leaks.
 - **Its own AutoML engine**: gradient boosting with LightGBM, XGBoost and CatBoost, random
   forest and extremely randomized trees, a linear model, a neural network and, for data with text
-  columns, a TF-IDF linear model, tuned with
+  columns, a TF-IDF linear model (and, when time is left, variants of it), tuned with
   Optuna and ensembled, within the run time you set. It also builds derived features (text parts and
   topics, counts, sums, group means), keeping only those that clearly improve a quick test model, and
   averages extra seeds of the best models when time is left.

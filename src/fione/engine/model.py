@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from fione.engine.config import ConfigError, TrainConfig
-from fione.engine.families import FamilySpec
+from fione.engine.families import FamilySpec, pad_features
 from fione.engine.metrics import choose
 from fione.engine.prep import Prep, Task
 
@@ -112,7 +112,10 @@ def feature_importance(members: list[Member], prep: Prep) -> pd.Series:
     """
     total = np.zeros(len(prep.sources))
     for member in members:
-        per_model = [_normalised(member.spec.importance(model)) for model in member.models]
+        per_model = [
+            _normalised(pad_features(member.spec.importance(model), len(prep.sources)))
+            for model in member.models
+        ]
         total += member.weight * np.mean(per_model, axis=0)
     by_column = pd.Series(attribution(prep) @ total, index=prep.columns)
     if by_column.sum() <= 0:
