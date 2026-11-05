@@ -1165,6 +1165,7 @@
   "assistant.tool.propose_training_config": "学習の提案",
   "assistant.tool.list_projects": "あなたのプロジェクト",
   "assistant.tool.list_datasets": "プロジェクトのデータセット",
+  "assistant.tool.find_table_links": "プロジェクトのデータセット間の関係",
   "assistant.tool.list_models": "プロジェクトのモデル",
   "assistant.tool.refused": "使えないツール（拒否しました）"
 }

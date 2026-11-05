@@ -1,6 +1,6 @@
 """The built-in frame operations, on pandas.
 
-Each takes one frame (``cbind``, ``concat`` and ``rbind`` a second one through
+Each takes one frame (``cbind``, ``concat``, ``join`` and ``rbind`` a second one through
 ``other_dataset_id``) and returns one frame. Column lists are JSON arrays of names.
 """
 
@@ -90,6 +90,72 @@ def rbind(df, params, ctx):
 def concat(df, params, ctx):
     other = _other(ctx)
     return _side_by_side(df, other) if params["axis"] == 1 else _stacked(df, other)
+
+
+_SUMMARIES = ("mean", "min", "max", "sum")
+_JOIN_KEY = "\0join_key"  # a name no column has
+
+
+def _summary(other: pd.DataFrame, key: str) -> pd.DataFrame:
+    """One row per value of ``key``: the number of rows, and per column the mean, minimum,
+    maximum and sum of a number, or the number of different values of anything else."""
+    others = [c for c in other.columns if c != key]
+    numeric = [c for c in others if pd.api.types.is_numeric_dtype(other[c])]
+    rest = [c for c in others if c not in numeric]
+    check_cells(other[key].nunique(), 1 + len(numeric) * len(_SUMMARIES) + len(rest))
+    groups = other.groupby(key)
+    parts = [groups.size().rename("rows").to_frame()]
+    if numeric:
+        stats = groups[numeric].agg(list(_SUMMARIES))
+        stats.columns = [f"{column}_{how}" for column, how in stats.columns]
+        parts.append(stats)
+    if rest:
+        parts.append(groups[rest].nunique().add_suffix("_nunique"))
+    summary = pd.concat(parts, axis=1)
+    # a summary column never takes the key's name (a key called "rows" is possible)
+    summary.columns = unique_names([str(key)] + [str(c) for c in summary.columns])[1:]
+    summary.insert(0, key, summary.index)
+    return summary.reset_index(drop=True)
+
+
+def _as_text(s: pd.Series) -> pd.Series:
+    """The values as text, a whole number the same whether it is stored as float or integer."""
+    if pd.api.types.is_float_dtype(s.dtype) and (s.dropna() == s.dropna().round()).all():
+        s = s.astype("Int64")
+    return s.astype(str).where(s.notna())
+
+
+def join(df, params, ctx):
+    """Add the columns of the other dataset to the rows with the same ``key`` (a left join: every
+    row stays, with missing values where the other dataset has no such key). The rows of the
+    other dataset must each have a different key, unless ``summarize`` replaces them by one row
+    per key (the number of rows, and the mean, minimum, maximum and sum of each number)."""
+    other = _other(ctx)
+    key = require_column(df, params["key"])
+    other_key = require_column(other, params["other_key"] or key)
+    if params["summarize"]:
+        other = _summary(other, other_key)
+    elif other[other_key].dropna().duplicated().any():
+        raise ModuleError(
+            f"the values of '{other_key}' repeat in the other dataset; "
+            "summarize it by that column, or the rows would multiply"
+        )
+    added = [c for c in other.columns if c != other_key]
+    names = unique_names([str(c) for c in df.columns] + [str(c) for c in added])[len(df.columns) :]
+    right = other[[other_key, *added]].set_axis([_JOIN_KEY, *names], axis=1)
+    right = right[right[_JOIN_KEY].notna()]  # a missing key matches nothing
+    left = df.assign(**{_JOIN_KEY: df[key]})
+    if pd.api.types.is_numeric_dtype(left[_JOIN_KEY]) != pd.api.types.is_numeric_dtype(
+        right[_JOIN_KEY]
+    ):  # 7 and "7" are the same key
+        left[_JOIN_KEY] = _as_text(left[_JOIN_KEY])
+        right = right.assign(**{_JOIN_KEY: _as_text(right[_JOIN_KEY])})
+    check_cells(len(df), len(df.columns) + len(added))
+    try:
+        merged = left.merge(right, how="left", on=_JOIN_KEY)
+    except ValueError as e:
+        raise ModuleError(f"the keys cannot be compared: {e}") from None
+    return merged.drop(columns=_JOIN_KEY)
 
 
 def cslice(df, params, ctx):
@@ -283,6 +349,18 @@ _op(
     fillna,
 )
 _op("floor", "Apply floor", {"columns": _NAMES}, (), floor)
+_op(
+    "join",
+    "Join datasets by a key column",
+    {
+        "other_dataset_id": _OTHER,
+        "key": _NAME,
+        "other_key": {**_NAME, "default": ""},
+        "summarize": {"type": "boolean", "default": False},
+    },
+    ("other_dataset_id", "key"),
+    join,
+)
 _op(
     "pivot",
     "Pivot table",

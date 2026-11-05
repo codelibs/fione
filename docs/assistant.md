@@ -89,6 +89,24 @@ what the assistant says, but not what it can do: it can only read and propose, a
 nothing until a person confirms it. Answers can still be wrong: the model is small, so check
 important results.
 
+## Several tables
+
+When a project holds more than one dataset, the assistant looks for the columns they share (the
+same name and mostly the same values) and says how they relate: one dataset has one row per
+value and the other several (a customer and their purchases), or both repeat (rows of two
+tables for the same day). Columns with fewer than 20 values are not reported when both sides
+repeat, since they are categories rather than keys. A dataset with several rows per key is
+added to the one with the column to predict by the **Join** module: choose the key and turn on
+`summarize`, which gives each key one row (the number of rows, and the mean, minimum, maximum
+and sum of each number). When both repeat, summarize the one that is not the base first. The
+assistant cannot join anything itself; it explains what to join, and suggests training once
+the joined dataset exists.
+
+Join only what is known when the model predicts: a summary of purchases that include the
+period to predict leaks the answer. Key columns are read whole up to 5 million rows; a larger
+dataset is sampled, and a link between two such datasets can be missed. Only the first 8
+datasets of a project are examined, and the search stops after 30 seconds (the result says so).
+
 ## Limits
 
 | Limit | Value |
