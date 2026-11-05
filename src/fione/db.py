@@ -195,6 +195,21 @@ MIGRATIONS: list[str] = [
     """
     DROP TABLE llm_sample_optins;
     """,
+    """
+    ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'
+        CHECK (kind IN ('chat', 'note'));
+    CREATE TABLE assistant_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('model', 'failed_job')),
+        subject_id TEXT NOT NULL,
+        language TEXT NOT NULL,
+        conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (project_id, kind, subject_id, language)
+    );
+    CREATE INDEX assistant_notes_conversation ON assistant_notes(conversation_id);
+    """,
 ]
 
 

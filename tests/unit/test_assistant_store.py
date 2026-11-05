@@ -576,3 +576,93 @@ def test_deleting_a_user_removes_their_conversations(conn, owner, member, projec
     auth.delete_user(conn, member.id)
     assert [count(conn, t) for t in TABLES] == [1, 0, 0]
     assert conn.execute("SELECT id FROM conversations").fetchone()["id"] == kept.id
+
+
+# --- notes --------------------------------------------------------------------
+
+
+def test_migration_adds_the_notes(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "old.db")
+    first = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE assistant_notes" in sql)
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:first])
+        db.migrate(conn)
+    owner = auth.create_user(conn, "owner", "pw-owner-1", Role.EDITOR)
+    project = projects.create_project(conn, owner, "old")
+    conn.execute(
+        "INSERT INTO conversations (project_id, user_id, title) VALUES (?, ?, 'old')",
+        (project.id, owner.id),
+    )
+    query = "SELECT name FROM sqlite_master WHERE name = 'assistant_notes'"
+    assert conn.execute(query).fetchall() == []
+    assert db.migrate(conn) == len(db.MIGRATIONS)
+    assert len(conn.execute(query).fetchall()) == 1
+    assert conn.execute("SELECT kind FROM conversations").fetchone()["kind"] == "chat"
+    assert [c.title for c in store.list_conversations(conn, owner, project.id)] == ["old"]
+    conn.close()
+
+
+def test_a_note_is_a_hidden_conversation_with_its_request(conn, owner, project):
+    note, placeholder = store.create_note(conn, owner, project.id, "model", "7", "en", "Explain")
+    assert (note.project_id, note.kind, note.subject_id, note.language) == (
+        project.id, "model", "7", "en",
+    )  # fmt: skip
+    rows = store.messages(conn, note.conversation_id)
+    assert [(m.role, m.content, m.state) for m in rows] == [
+        ("user", "Explain", "done"),
+        ("assistant", "", "queued"),
+    ]
+    assert placeholder == rows[-1]
+    assert store.get_note(conn, project.id, "model", "7", "en") == note
+    assert store.get_note(conn, project.id, "model", "7", "ja") is None
+    assert store.note_answer(conn, note.conversation_id) == placeholder
+    assert store.list_conversations(conn, owner, project.id) == []
+    kind = conn.execute("SELECT kind FROM conversations WHERE id = ?", (note.conversation_id,))
+    assert kind.fetchone()["kind"] == "note"
+
+
+def test_one_note_per_project_kind_subject_and_language(conn, owner, member, project):
+    note, _ = store.create_note(conn, owner, project.id, "model", "7", "en", "Explain")
+    again, placeholder = store.create_note(conn, member, project.id, "model", "7", "en", "x")
+    assert (again, placeholder) == (note, None)
+    assert count(conn, "conversations") == 1
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO assistant_notes (project_id, kind, subject_id, language,"
+            " conversation_id) VALUES (?, 'model', '7', 'en', ?)",
+            (project.id, note.conversation_id),
+        )
+    others = [
+        store.create_note(conn, owner, project.id, *key, "x")[0]
+        for key in (("model", "7", "ja"), ("model", "8", "en"), ("failed_job", "7", "en"))
+    ]
+    assert len({n.id for n in [note, *others]}) == 4
+    with pytest.raises(ValueError):
+        store.create_note(conn, owner, project.id, "dataset", "7", "en", "x")
+
+
+def test_a_note_needs_read_access(conn, owner, project):
+    stranger = auth.create_user(conn, "stranger", "pw-stranger-1", Role.EDITOR)
+    with pytest.raises(ConversationNotFound):
+        store.create_note(conn, stranger, project.id, "model", "7", "en", "x")
+    assert count(conn, "conversations") == 0
+
+
+def test_notes_do_not_count_toward_the_conversation_limit(conn, owner, project, monkeypatch):
+    monkeypatch.setattr(store, "MAX_CONVERSATIONS", 1)
+    store.create_note(conn, owner, project.id, "model", "1", "en", "x")
+    store.create_note(conn, owner, project.id, "model", "2", "en", "x")
+    store.create_conversation(conn, owner, project.id)
+    with pytest.raises(LimitReached):
+        store.create_conversation(conn, owner, project.id)
+
+
+def test_deleting_a_note_or_its_owner_removes_it(conn, owner, member, project):
+    note, _ = store.create_note(conn, member, project.id, "model", "7", "en", "x")
+    store.delete_note(conn, note)
+    assert store.get_note(conn, project.id, "model", "7", "en") is None
+    assert count(conn, "conversations") == 0
+    note, _ = store.create_note(conn, member, project.id, "model", "7", "en", "x")
+    auth.delete_user(conn, member.id)
+    assert store.get_note(conn, project.id, "model", "7", "en") is None
+    assert count(conn, "assistant_notes") == 0

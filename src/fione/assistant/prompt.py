@@ -58,6 +58,25 @@ SYSTEM_PROMPT = (
 )
 
 
+# The request of a note, by the kind of its subject.
+NOTE_REQUESTS = {
+    "model": (
+        "Explain the result of model {id} to a person with no machine learning knowledge. Use"
+        " the tools to read the leaderboard, the feature importance and the diagnostics. Say"
+        " first, in one sentence, whether the result is good, mediocre or poor against the"
+        " baseline. Then say what mostly drives the prediction, then any problem in the data,"
+        " then one to three next steps (propose a training configuration with"
+        " propose_training_config only when a change clearly helps). At most 150 words, no"
+        " headings, no tables. Answer in {language}."
+    ),
+    "failed_job": (
+        "Training job {id} failed. Use get_training_events to find out why, and explain the"
+        " cause in plain words and what the person can change. At most 100 words, no headings."
+        " Answer in {language}."
+    ),
+}
+
+
 class ContextTooSmall(Exception):
     """Not even the system prompt and the user's message fit the model's context."""
 
@@ -69,6 +88,15 @@ def system_prompt(language: str, project_id: str, project_name: str) -> str:
         project_name=json.dumps(
             clean_text(project_name, MAX_PROJECT_NAME_CHARS), ensure_ascii=False
         ),
+    )
+
+
+def note_request(kind: str, subject_id: str, language: str) -> str:
+    """The user message of a note about ``subject_id`` (``ValueError`` for an unknown kind)."""
+    if kind not in NOTE_REQUESTS:
+        raise ValueError(f"unknown note kind {kind!r}")
+    return NOTE_REQUESTS[kind].format(
+        id=subject_id, language=LANGUAGE_NAMES.get(language, "English")
     )
 
 

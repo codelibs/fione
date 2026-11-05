@@ -1253,3 +1253,79 @@ def test_interrupted_at_startup(tmp_path, make_client):
     finally:
         conn.close()
     assert (row.state, row.error_code) == ("failed", "interrupted")
+
+
+# --- notes --------------------------------------------------------------------
+
+
+def test_note_requests_name_the_subject_and_the_language():
+    model = prompt.note_request("model", "12", "ja")
+    assert "model 12" in model and "Japanese" in model and "baseline" in model
+    assert "propose_training_config" in model and "150 words" in model
+    job = prompt.note_request("failed_job", "34", "en")
+    assert "job 34" in job and "get_training_events" in job and "English" in job
+    with pytest.raises(ValueError):
+        prompt.note_request("dataset", "1", "en")
+
+
+def settled(env, manager_, user=None, kind="model", subject="1", language="en", timeout=10.0):
+    """``explain`` until the note is no longer being written; its view."""
+    end = time.monotonic() + timeout
+    while True:
+        view = manager_.explain(env.conn, user or env.owner, env.project.id, kind, subject,
+                                language)  # fmt: skip
+        if view.state != "writing" or time.monotonic() > end:
+            return view
+        time.sleep(0.05)
+
+
+def test_explain_writes_a_note_once_and_shares_it(env, manager):
+    one, fake = manager([{"text": "A good model."}, {"text": "良いモデルです。"}])
+    first = one.explain(env.conn, env.owner, env.project.id, "model", "1", "en")
+    assert first.state == "writing" and first.owner_id == env.owner.id
+    done = settled(env, one)
+    assert (done.state, done.text, done.error_code) == ("done", "A good model.", None)
+    assert done.conversation_id == first.conversation_id
+    assert settled(env, one, user=env.member) == done  # another reader, no second request
+    assert len(fake.requests) == 1
+    question = [m for m in fake.requests[0]["messages"] if m["role"] == "user"]
+    assert question[0]["content"] == prompt.note_request("model", "1", "en")
+    japanese = settled(env, one, user=env.member, language="ja")
+    assert japanese.text == "良いモデルです。" and japanese.owner_id == env.member.id
+    assert len(fake.requests) == 2
+    assert store.list_conversations(env.conn, env.owner, env.project.id) == [env.conversation]
+
+
+def test_a_failed_note_is_retried(env, manager):
+    one, fake = manager([{"status": 500, "body": "boom"}, {"text": "Fixed."}])
+    failed = settled(env, one, kind="failed_job", subject="5")
+    assert (failed.state, failed.error_code) == ("failed", "http")
+    again = one.retry(env.conn, env.owner, env.project.id, "failed_job", "5", "en")
+    assert again.state == "writing" and again.conversation_id != failed.conversation_id
+    assert settled(env, one, kind="failed_job", subject="5").text == "Fixed."
+    assert count(env.conn, "assistant_notes") == 1
+    assert count(env.conn, "conversations") == 2  # the chat and the new note
+    # a note that did not fail is kept as it is
+    kept = one.retry(env.conn, env.owner, env.project.id, "failed_job", "5", "en")
+    assert kept.text == "Fixed." and len(fake.requests) == 2
+
+
+def test_explain_needs_a_ready_assistant_but_shows_a_written_note(env, manager):
+    pulling, fake = manager(state="pulling")
+    with pytest.raises(LlmUnavailable):
+        pulling.explain(env.conn, env.owner, env.project.id, "model", "1", "en")
+    assert count(env.conn, "assistant_notes") == 0 and fake.requests == []
+    ready, _ = manager([{"text": "Written."}])
+    assert settled(env, ready).text == "Written."
+    assert settled(env, pulling).text == "Written."
+    with pytest.raises(store.ConversationNotFound):  # a reader of the project only
+        ready.explain(env.conn, env.owner, env.other.id + "x", "model", "1", "en")
+
+
+def test_explain_counts_toward_the_turns_of_a_user(env, manager):
+    one, _ = manager([{"text": "slow", "delay": 2}] * 4, llm_max_concurrent_turns=1)
+    for subject in range(turns.MAX_TURNS_PER_USER):
+        one.explain(env.conn, env.owner, env.project.id, "model", str(subject), "en")
+    with pytest.raises(turns.TooManyTurns):
+        one.explain(env.conn, env.owner, env.project.id, "model", "99", "en")
+    assert store.get_note(env.conn, env.project.id, "model", "99", "en") is None

@@ -34,6 +34,7 @@ from fione.assistant.prompt import (
     ContextTooSmall,
     budget_bytes,
     build_messages,
+    note_request,
     size,
     system_prompt,
 )
@@ -91,6 +92,22 @@ class LlmUnavailable(Exception):
 class TooManyTurns(Exception):
     """The user, or all users together, have as many answers running or waiting as allowed;
     the UI's code for it is ``too_many_turns``."""
+
+
+@dataclass(frozen=True)
+class NoteView:
+    """A note as its readers see it: ``writing``, ``done`` with its ``text``, or ``failed``
+    with the ``ERROR_CODES`` code of its turn."""
+
+    state: str
+    text: str
+    error_code: str | None
+    conversation_id: int
+    owner_id: int  # who may decide its training proposal
+
+
+class _Made(Exception):
+    """Another reader made the note first: there is no turn to start."""
 
 
 class _Stop(Exception):
@@ -511,6 +528,16 @@ class TurnManager:
         can read; ``LlmUnavailable`` unless the provider is ready; ``TooManyTurns`` past the
         limits; ``TurnBusy``, ``LimitReached`` and ``ValueError`` from ``store.start_turn``."""
         store.get_conversation(conn, user, project_id, conversation_id)
+        return self._start(
+            conn,
+            user,
+            language,
+            lambda: (conversation_id, store.start_turn(conn, conversation_id, text)[1]),
+        )
+
+    def _start(self, conn: sqlite3.Connection, user: User, language: str, begin) -> Message:
+        """Run a turn once the provider is ready and the limits allow it: ``begin()`` stores its
+        rows and returns the conversation's id and the ``queued`` assistant message."""
         if self._monitor.snapshot().state != "ready":
             raise LlmUnavailable()
         with self._lock:  # held while the turn is created, so the counts stay true
@@ -520,7 +547,7 @@ class TurnManager:
                 or len(entries) >= self._settings.llm_max_concurrent_turns + MAX_WAITING_TURNS
             ):
                 raise TooManyTurns()
-            _, placeholder = store.start_turn(conn, conversation_id, text)
+            conversation_id, placeholder = begin()
             deadline = time.monotonic() + self._settings.llm_turn_timeout_secs
             cancel = threading.Event()
             try:
@@ -532,6 +559,80 @@ class TurnManager:
                 raise LlmUnavailable() from None
             self._turns[conversation_id] = _Entry(cancel, future, user.id, placeholder.id)
         return placeholder
+
+    def explain(
+        self,
+        conn: sqlite3.Connection,
+        user: User,
+        project_id: str,
+        kind: str,
+        subject_id: str,
+        language: str,
+    ) -> NoteView:
+        """The note about the subject in ``language``, which a first call starts writing.
+
+        A written note is shown whatever the provider's state; a new one needs it ready
+        (``LlmUnavailable``) and a free turn of the user (``TooManyTurns``).
+        ``ConversationNotFound`` unless the user can read the project; the caller checks that
+        the subject belongs to it."""
+        if not can_access_project(conn, user, project_id, "read"):
+            raise store.ConversationNotFound(project_id)
+        note = store.get_note(conn, project_id, kind, subject_id, language)
+        if note is None:
+            text = note_request(kind, subject_id, language)
+            made: list[store.Note] = []
+
+            def begin():
+                note, placeholder = store.create_note(
+                    conn, user, project_id, kind, subject_id, language, text
+                )
+                made.append(note)
+                if placeholder is None:  # another reader made it first
+                    raise _Made()
+                return note.conversation_id, placeholder
+
+            try:
+                self._start(conn, user, language, begin)
+            except _Made:
+                pass
+            note = made[0]
+        return self._view(conn, note)
+
+    def retry(
+        self,
+        conn: sqlite3.Connection,
+        user: User,
+        project_id: str,
+        kind: str,
+        subject_id: str,
+        language: str,
+    ) -> NoteView:
+        """``explain``, after removing the note if it failed."""
+        if not can_access_project(conn, user, project_id, "read"):
+            raise store.ConversationNotFound(project_id)
+        note = store.get_note(conn, project_id, kind, subject_id, language)
+        if note is not None and self._view(conn, note).state == "failed":
+            store.delete_note(conn, note)
+        return self.explain(conn, user, project_id, kind, subject_id, language)
+
+    @staticmethod
+    def _view(conn: sqlite3.Connection, note: store.Note) -> NoteView:
+        owner = conn.execute(
+            "SELECT user_id FROM conversations WHERE id = ?", (note.conversation_id,)
+        ).fetchone()
+        answer = store.note_answer(conn, note.conversation_id)
+        state, text, code = "failed", "", "failed"
+        if answer is not None:
+            text = (answer.content or "").lstrip("\r\n")
+            if answer.state in ("queued", "running"):
+                state, code = "writing", None
+            elif answer.state == "done":
+                state, code = "done", None
+            elif answer.state == "cancelled":
+                code = "cancelled"
+            else:
+                code = answer.error_code if answer.error_code in ERROR_CODES else "failed"
+        return NoteView(state, text, code, note.conversation_id, owner["user_id"] if owner else 0)
 
     def _run(self, conversation_id, assistant_id, cancel: threading.Event, language, deadline):
         try:
