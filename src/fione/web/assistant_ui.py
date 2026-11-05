@@ -373,30 +373,44 @@ def delete(request: Request, conn: Conn, pid: str, cid: str, form: SmallForm) ->
 
 
 def _proposal(request: Request, conn, pid: str, prid: str, token: str):
-    """The signed-in user's own proposal and its conversation, for a person who can write to
-    the project (404 for anyone else's, other projects' and missing ones)."""
+    """The signed-in user's own proposal and its conversation (a chat or a note's), for a
+    person who can write to the project (404 for anyone else's, other projects' and missing
+    ones)."""
     same_site(request)
     ctx = action(request, conn, pid, token, need="write")
     try:
         proposal = store.get_proposal(conn, ctx.auth.user, pid, parse_id(prid))
-        conversation = store.get_conversation(conn, ctx.auth.user, pid, proposal.conversation_id)
+        conversation = store.get_conversation(
+            conn, ctx.auth.user, pid, proposal.conversation_id, kind=None
+        )
     except (ProposalNotFound, ConversationNotFound):
         raise UiError(404, "error.not_found") from None
     return ctx, proposal, conversation
 
 
+def _back(conn, pid: str, conversation: Conversation) -> RedirectResponse:
+    """Back to the proposal's conversation, or for a note's, to the page of its subject."""
+    if conversation.kind != "note":
+        return RedirectResponse(_page_url(pid, conversation.id), 303)
+    note = store.note_of(conn, conversation.id)
+    if note is None:
+        return RedirectResponse(_page_url(pid), 303)
+    path = "models" if note.kind == "model" else "jobs"
+    return RedirectResponse(f"/projects/{pid}/{path}/{note.subject_id}", 303)
+
+
 def _refused(request: Request, conn, ctx: Ctx, conversation, status, key, detail=""):
-    return conversation_page(
-        request, conn, ctx, conversation, status=status, notice=key, detail=detail
-    )
+    """The chat page with the refusal; a note's thread is not shown there."""
+    shown = None if conversation.kind == "note" else conversation
+    return conversation_page(request, conn, ctx, shown, status=status, notice=key, detail=detail)
 
 
 @router.post("/projects/{pid}/assistant/proposals/{prid}/confirm")
 def confirm(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) -> Response:
     """Start the training a proposal stores, once: the stored configuration is submitted, never
-    a posted one. A decided proposal only goes back to its conversation."""
+    a posted one. A decided proposal only goes back to its conversation (or note's subject)."""
     ctx, proposal, conversation = _proposal(request, conn, pid, prid, field(form, "csrf_token"))
-    back = RedirectResponse(_page_url(pid, conversation.id), 303)
+    back = _back(conn, pid, conversation)
     if proposal.state != "pending":
         return back
 
@@ -464,18 +478,18 @@ def dismiss(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
     ctx, proposal, conversation = _proposal(request, conn, pid, prid, field(form, "csrf_token"))
     with db.immediate(conn):
         store.dismiss_proposal(conn, proposal.id, ctx.auth.user.id)
-    return RedirectResponse(_page_url(pid, conversation.id), 303)
+    return _back(conn, pid, conversation)
 
 
 # --- the assistant's comments -----------------------------------------------
 
 
 def _note_subject(conn, ctx: Ctx, kind: str, sid) -> int:
-    """The id of the note's subject in the project: a model, or a job that failed."""
+    """The id of the note's subject in the project: a model, or a training job that failed."""
     if kind == "model":
         return model_in(conn, ctx, sid).id
     job = job_in(conn, ctx, sid)
-    if job.status != JobStatus.FAILED:
+    if job.kind != "automl" or job.status != JobStatus.FAILED:
         raise UiError(404, "error.not_found")
     return job.id
 
@@ -511,9 +525,15 @@ def _note_fragment(request: Request, conn, ctx: Ctx, kind: str, sid, *, retry=Fa
         if view.state == "failed":
             note["message"] = f"assistant.error.{view.error_code}"
         if view.state == "done":
-            cards = _cards(conn, view.conversation_id, pid)
-            note["card"] = next(iter(cards.values()), None)
             note["owner"] = view.owner_id == ctx.auth.user.id
+            try:
+                cards = _cards(conn, view.conversation_id, pid)
+            except Exception:  # the comment is still worth showing without its proposal
+                log.exception(
+                    "the proposal of the comment on %s %s could not be shown", kind, subject
+                )
+            else:
+                note["card"] = next(iter(cards.values()), None)
     return render(request, "_assistant_note.html", ctx.auth, ctx=ctx, note=note)
 
 

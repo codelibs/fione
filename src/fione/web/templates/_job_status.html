@@ -44,7 +44,7 @@
       </div>
     </div>
     <p><a class="btn btn-ghost btn-sm" href="/projects/{{ pid }}/assistant?ask=job:{{ job.id }}">{{ t('assistant.ask_link') }}</a></p>
-    <section class="card card-padded stack-tight assistant-note" id="assistant-note" hx-get="/projects/{{ pid }}/jobs/{{ job.id }}/comment" hx-trigger="load" hx-target="this" hx-swap="outerHTML"><p class="text-muted text-sm">{{ t('note.loading') }}</p></section>
+    {% if job.kind == "automl" %}<section class="card card-padded stack-tight assistant-note" id="assistant-note" hx-get="/projects/{{ pid }}/jobs/{{ job.id }}/comment" hx-trigger="load" hx-target="this" hx-swap="outerHTML"><p class="text-muted text-sm">{{ t('note.loading') }}</p></section>{% endif %}
   {% elif job.status.value == "cancelled" %}
     {{ guide(t, t('job.cancelled_text'), "calm") }}
   {% endif %}

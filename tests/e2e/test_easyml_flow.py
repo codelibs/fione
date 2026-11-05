@@ -29,6 +29,9 @@ def test_the_wizard_trains_rates_predicts_and_offers_serving(stack, admin, train
     expect(stars).to_be_visible()  # what the user sees: n of the five stars filled
     expect(stars.locator(".star-on")).to_have_count(n)
     expect(stars.locator(".star-off")).to_have_count(5 - n)
+    # the assistant's comment loads by itself (the fake model's answer)
+    note = page.locator("#assistant-note[data-note=done]")
+    expect(note).to_contain_text("(fake)", timeout=30_000)
     command = page.locator("#run-command").inner_text().strip()
     assert command.startswith("docker run ") and command.endswith(stack.serving_image)
 

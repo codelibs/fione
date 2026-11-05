@@ -786,3 +786,94 @@ def test_a_proposal_in_a_comment_is_decided_by_its_writer(chat):
     theirs = comment(chat, url).text
     assert "Try this." in theirs and "/confirm" not in theirs
     assert shown("note.proposal") in theirs
+
+
+def note_conversation(world) -> int:
+    with closing(connect(world.client)) as conn:
+        return conn.execute("SELECT conversation_id FROM assistant_notes").fetchone()[0]
+
+
+def test_the_chat_cannot_reach_a_comment(chat):
+    chat.fake.script = [{"text": "Note text."}, {"text": "PRIVATE"}]
+    url = model_comment(chat)
+    assert "Note text." in comment(chat, url).text
+    cid = note_conversation(chat)
+    assert page_of(chat, f"?c={cid}").status_code == 404
+    assert send(chat, cid, "my private question").status_code == 404
+    assert chat.client.get(f"/projects/{chat.p}/assistant/c/{cid}/thread").status_code == 404
+    for action in ("cancel", "delete"):
+        r = chat.client.post(
+            f"/projects/{chat.p}/assistant/c/{cid}/{action}",
+            data={"csrf_token": chat.csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 404, action
+    with closing(connect(chat.client)) as conn:  # a later turn never changes the shared text
+        store.add_message(conn, cid, "user", "a follow-up")
+        store.add_message(conn, cid, "assistant", "PRIVATE")
+    chat.login("vi")
+    shared = comment(chat, url).text
+    assert "Note text." in shared and "PRIVATE" not in shared
+    assert len(chat.fake.requests) == 1
+
+
+def proposing_comment(world, url):
+    train = world.ids[world.p]["train"]
+    world.fake.script = [
+        {"tool_calls": [{"name": "propose_training_config",
+                         "arguments": {"dataset_id": train, "target": "species"}}]},
+        {"text": "Try this."},
+    ]  # fmt: skip
+    html = comment(world, url).text
+    return html, int(re.search(r"/assistant/proposals/(\d+)/confirm", html)[1])
+
+
+def decide(world, prid, route):
+    return world.client.post(
+        f"/projects/{world.p}/assistant/proposals/{prid}/{route}",
+        data={"csrf_token": world.csrf},
+        follow_redirects=False,
+    )
+
+
+def test_deciding_a_proposal_in_a_comment_returns_to_its_subject(chat):
+    url = model_comment(chat)
+    _, prid = proposing_comment(chat, url)
+    for route in ("dismiss", "confirm"):  # confirming a decided one goes back too
+        r = decide(chat, prid, route)
+        assert r.status_code == 303 and r.headers["location"] == url.removesuffix("/comment")
+    job = chat.ids[chat.p]["job"]
+    finish_job(chat, job, "failed")
+    url = f"/projects/{chat.p}/jobs/{job}/comment"
+    _, prid = proposing_comment(chat, url)
+    with closing(connect(chat.client)) as conn:
+        conn.execute("UPDATE chat_proposals SET dataset_id = NULL WHERE id = ?", (prid,))
+    refused = decide(chat, prid, "confirm")
+    assert refused.status_code == 409 and shown("assistant.proposal.dataset_gone") in refused.text
+    assert "Try this." not in refused.text  # the chat page, without the comment's thread
+    r = decide(chat, prid, "dismiss")
+    assert r.headers["location"] == f"/projects/{chat.p}/jobs/{job}"
+
+
+def test_a_comment_survives_a_failing_proposal_lookup(chat, monkeypatch):
+    from fione.web import assistant_ui
+
+    url = model_comment(chat)
+    proposing_comment(chat, url)
+
+    def broken(*args):
+        raise RuntimeError("storage down")
+
+    monkeypatch.setattr(assistant_ui.projects, "get_dataset", broken)
+    r = comment(chat, url)
+    assert "Try this." in r.text and "/confirm" not in r.text
+
+
+def test_only_a_failed_training_has_a_comment(chat):
+    with closing(connect(chat.client)) as conn:
+        user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        job = jobs.enqueue(conn, "batch_predict", chat.p, user, {"model_id": 1}).id
+    finish_job(chat, job, "failed")
+    url = f"/projects/{chat.p}/jobs/{job}/comment"
+    assert chat.client.get(url).status_code == 404
+    assert all(url not in text for text in job_pages(chat, job))  # nor a loader for it
