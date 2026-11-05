@@ -68,11 +68,12 @@ class Prep:
 
     ``fit`` decides per column: constant and all-null columns are dropped; datetime and date
     columns are expanded into numeric parts; bool and non-numeric columns become categoricals, or
-    frequency encodings above ``HIGH_CARDINALITY`` categories; everything else is numeric. The
-    views put the features in ``feature_names`` order under positional names ``f0, f1, ...``,
-    because model libraries reject some characters in feature names. ``groups`` (see
-    ``fione.engine.features``) add derived numeric features after those; they are fitted on ``X``
-    alone and skipped when they read a column that is not used.
+    frequency encodings above ``HIGH_CARDINALITY`` categories (the share of the training rows
+    with the value; a value not seen in training gets the share of the rarest one); everything
+    else is numeric. The views put the features in ``feature_names`` order under positional
+    names ``f0, f1, ...``, because model libraries reject some characters in feature names.
+    ``groups`` (see ``fione.engine.features``) add derived numeric features after those; they are
+    fitted on ``X`` alone and skipped when they read a column that is not used.
     """
 
     groups: tuple = ()  # class-level defaults: models pickled before these existed still load
@@ -80,6 +81,7 @@ class Prep:
     prose: tuple = ()
     dayfirst: tuple = ()  # date string columns that put the day before the month
     timed: tuple = ()  # date columns that carry a time of day
+    _unseen: dict = {}  # frequency column -> share given to a value not seen in training (old: 0)
 
     def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
@@ -90,6 +92,7 @@ class Prep:
         ] = []  # (column, kind), kind: numeric/datetime/frequency/category
         self.categories: dict[str, list[str]] = {}
         self.frequencies: dict[str, dict[str, float]] = {}
+        self._unseen = {}
         for column in X.columns:
             s = X[column]
             if s.nunique(dropna=False) <= 1:
@@ -109,6 +112,7 @@ class Prep:
                 counts = _as_str(s).value_counts()
                 if len(counts) > HIGH_CARDINALITY:
                     self.frequencies[column] = (counts / len(s)).to_dict()
+                    self._unseen[column] = float(counts.min() / len(s))
                     self._plan.append((column, "frequency"))
                 else:
                     self.categories[column] = sorted(counts.index)
@@ -205,7 +209,10 @@ class Prep:
             elif kind == "frequency":
                 values = _as_str(s)
                 encoded = values.map(self.frequencies[column]).astype(float)
-                out.append(encoded.mask(encoded.isna() & values.notna(), 0.0))  # unseen: never seen
+                # An unseen value gets the share of the rarest value in training: 0 would lie
+                # outside the range the models were fitted on (a shift CV cannot see).
+                unseen = self._unseen.get(column, 0.0)
+                out.append(encoded.mask(encoded.isna() & values.notna(), unseen))
             else:
                 out.append(_as_str(s))
         for group in self.groups:
@@ -253,7 +260,7 @@ class Prep:
     def text(self, df: pd.DataFrame) -> pd.DataFrame:
         """The linear view without the prose columns' frequencies, and after it each prose column
         as its text (``f3_t``; missing is empty), for models that read words. The frequency of a
-        text says nothing but how often it was repeated, and is 0 for every text not seen."""
+        text says nothing but how often it was repeated."""
         out = self.linear(df)
         spots = {self.feature_names.index(column): column for column in self.prose}
         drop = [c for c in out.columns if int(c[1:].split("_")[0]) in spots]

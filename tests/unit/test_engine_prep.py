@@ -139,7 +139,7 @@ def test_transform_tolerates_unseen_categories_and_extra_columns():
     pref = tree.iloc[:, prep.feature_names.index("pref")]
     assert pref.isna().tolist() == [True, True, False]
     ids = tree.iloc[:, prep.feature_names.index("ids")].tolist()
-    assert ids[0] == 0.0 and np.isnan(ids[1]) and ids[2] > 0
+    assert ids[0] == pytest.approx(1 / 6000) and np.isnan(ids[1]) and ids[2] > 0
     assert prep.catboost(new).iloc[0, prep.feature_names.index("pref")] == "札幌"
     assert prep.dense(new).shape == (3, len(prep.feature_names))
 
@@ -435,3 +435,87 @@ def test_text_view_is_the_linear_view_plus_the_text_of_each_prose_column():
     assert list(view.columns) == [*kept, name]
     assert view[name].iloc[0] == frame["post"].iloc[0] and view[name].iloc[3] == ""
     assert Prep().fit(frame.drop(columns=["post"])).prose == ()
+
+
+# --- frequency encoding of unseen values ----------------------------------------------
+
+
+def _names(n, start=0):
+    """Near-unique strings: most values occur once, every twentieth twice."""
+    return [f"name-{start + i // 2 if i % 20 == 0 else start + i}" for i in range(n)]
+
+
+def _repeated(n=5200, start=0):
+    """260 levels, each in 20 rows: no value is seen once."""
+    return [f"level-{start + i % 260}" for i in range(n)]
+
+
+def _with(values, n):
+    return pd.DataFrame({"x": RNG.normal(size=n), "name": values})
+
+
+def test_an_unseen_string_gets_the_share_of_the_rarest_value_in_every_view():
+    train = _with(_names(1000), 1000)
+    prep = Prep().fit(train)
+    new = pd.DataFrame({"x": [0.0, 0.0, 0.0], "name": ["new-1", "new-2", None]})
+    at = prep.feature_names.index("name")
+    rarest = 1 / len(train)  # a value seen once
+    for view in (prep.tree(new), prep.dense(new)):
+        assert view.iloc[:2, at].tolist() == [rarest, rarest]
+    assert np.isnan(prep.tree(new).iloc[2, at])  # missing stays missing
+    assert prep.dense(new).iloc[2, at] == prep._medians[f"f{at}"]
+    repeating = _with(_repeated(), 5200)
+    assert Prep().fit(repeating)._unseen == {"name": 20 / 5200}
+
+
+@pytest.mark.parametrize(
+    ("train", "new"),
+    [
+        (_with(_names(1000), 1000), _with([f"new-{i}" for i in range(500)], 500)),
+        (_with(_repeated(), 5200), _with([f"new-{i}" for i in range(500)], 500)),
+    ],
+    ids=["near-unique", "every-level-repeats"],
+)
+def test_unseen_strings_stay_inside_the_training_range_of_the_linear_and_dense_views(train, new):
+    prep = Prep().fit(train)
+    at = prep.feature_names.index("name")
+    seen, fresh = prep.linear(train)[f"f{at}"], prep.linear(new)[f"f{at}"]
+    assert fresh.min() >= seen.min() and fresh.max() <= seen.max()
+    assert fresh.abs().max() < 4  # far from the clip at LINEAR_CLIP
+    dense_seen, dense_new = prep.dense(train)[f"f{at}"], prep.dense(new)[f"f{at}"]
+    assert dense_new.min() >= dense_seen.min() and dense_new.max() <= dense_seen.max()
+
+
+def test_a_linear_model_of_unrelated_names_predicts_all_new_names_like_old_ones():
+    from sklearn.linear_model import LogisticRegression
+
+    n = 2000
+    train = pd.DataFrame({"name": _names(n)})
+    y = RNG.integers(0, 2, n)  # unrelated to the name
+    prep = Prep().fit(train)
+    model = LogisticRegression().fit(prep.linear(train), y)
+    old = model.predict_proba(prep.linear(train))[:, 1]
+    new = model.predict_proba(prep.linear(pd.DataFrame({"name": _names(n, start=10**6)})))[:, 1]
+    assert abs(new.mean() - old.mean()) < 0.02
+
+
+def test_views_without_frequency_columns_do_not_read_the_unseen_share():
+    frame = _frame().drop(columns=["ids"])
+    prep = Prep().fit(frame)
+    assert prep.frequencies == {} and prep._unseen == {}
+    views = [prep.tree(frame), prep.catboost(frame), prep.dense(frame), prep.linear(frame)]
+    del prep.__dict__["_unseen"]  # what a model pickled without the field looks like
+    again = [prep.tree(frame), prep.catboost(frame), prep.dense(frame), prep.linear(frame)]
+    for view, same in zip(views, again, strict=True):
+        pd.testing.assert_frame_equal(view, same)
+
+
+def test_a_prep_pickled_without_the_unseen_share_still_loads_and_keeps_zero():
+    train = _with(_names(1000), 1000)
+    prep = Prep().fit(train)
+    assert prep._unseen == {"name": 1 / len(train)}
+    del prep.__dict__["_unseen"]
+    loaded = pickle.loads(pickle.dumps(prep))
+    assert loaded._unseen == {}
+    new = pd.DataFrame({"x": [0.0], "name": ["new-1"]})
+    assert loaded.tree(new).iloc[0, loaded.feature_names.index("name")] == 0.0

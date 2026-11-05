@@ -980,3 +980,25 @@ def test_text_linear_predicts_texts_it_has_never_seen():
     )
     pred = model.predict(new.drop(columns=["topic"]))
     assert (pred.to_numpy() == new["topic"].to_numpy()).mean() > 0.9
+
+
+def test_a_fit_without_high_cardinality_strings_does_not_depend_on_their_unseen_share(
+    monkeypatch,
+):
+    class NoUnseenShare(automl_module.Prep):
+        def fit(self, X, groups=()):
+            super().fit(X, groups)
+            self.__dict__.pop("_unseen", None)  # as a Prep pickled without the field
+            return self
+
+    df = _mixed(1_000).drop(columns=["ids"])
+
+    def run():
+        board = _fit(
+            df, families=["LightGBM", "ExtraTrees"], target="label", max_models=2, seed=3
+        ).leaderboard
+        return board[["model", "weight"]].reset_index(drop=True)
+
+    expected = run()
+    monkeypatch.setattr(automl_module, "Prep", NoUnseenShare)
+    pd.testing.assert_frame_equal(run(), expected)
