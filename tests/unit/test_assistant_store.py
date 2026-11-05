@@ -1,4 +1,4 @@
-"""Conversations, messages, proposals and the per-provider sample opt-ins."""
+"""Conversations, messages, proposals and the consent to a remote language model host."""
 
 import sqlite3
 

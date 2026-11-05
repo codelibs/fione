@@ -1,5 +1,5 @@
 """The assistant's tables: conversations, their messages, the training proposals the model
-made, and the per-provider opt-in to send sample values.
+made, and the administrator's consent to a remote language model host.
 
 A conversation is private to its creator (admins included) and is visible only while its
 creator can still read the project. Only one turn runs per conversation: ``start_turn`` inserts
@@ -458,11 +458,11 @@ def dismiss_proposal(conn: sqlite3.Connection, proposal_id: int, user_id: int) -
     )
 
 
-# --- sample opt-ins ---------------------------------------------------------
+# --- consent keys -------------------------------------------------------------
 
 
 def normal_base_url(url: str) -> str:
-    """``url`` in the form opt-ins are keyed by: scheme and host in lower case, the default
+    """``url`` in the form consents are keyed by: scheme and host in lower case, the default
     port and any trailing ``/`` removed. ``ValueError`` unless it is an http(s) URL with a host."""
     parts = urlsplit(url.strip())
     scheme = parts.scheme.lower()

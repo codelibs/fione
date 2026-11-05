@@ -6,12 +6,18 @@ to other programs over MCP.
 
 The assistant reads, and only reads. It cannot start a training, change a dataset or delete
 anything; a training it suggests starts only when someone who can edit the project presses
-the button on the suggestion. Everything else in Fione works without it.
+the button on the suggestion.
 
-## Enabling
+## Setting it up
 
-The assistant needs a language model server: an [Ollama](https://ollama.com) or any
-OpenAI-compatible server. Nothing is installed with Fione and no model is bundled.
+The assistant needs a language model, from one of two providers (`FIONE_LLM_PROVIDER`):
+
+- `ollama` (the default): an [Ollama](https://ollama.com) server.
+- `claude`: Claude through the Anthropic API, with an API key. The client is written for the
+  Claude 5 family of models (adaptive thinking; it sends the beta header that binds thinking
+  blocks to the request that made them).
+
+Nothing is installed with Fione and no model is bundled. Ways to set it up:
 
 - **macOS (the default).** Install the Ollama app on the Mac. The Compose stack reaches it at
   `http://host.docker.internal:11434/v1` and asks for `gemma4:12b-mlx`, which runs on the Mac's
@@ -24,29 +30,47 @@ OpenAI-compatible server. Nothing is installed with Fione and no model is bundle
   `FIONE_LLM_MODEL=gemma4:12b`, `FIONE_LLM_AUTO_PULL=true`) and start the stack as usual. It
   runs on the CPU only, so answers are slow, and the image (about 3.8 GB) and the model
   (about 8 GB) are downloaded on the first start.
-- **Another OpenAI-compatible server** (llama.cpp, vLLM, a cloud service): set
-  `FIONE_LLM_BASE_URL`, `FIONE_LLM_PROVIDER=openai`, `FIONE_LLM_MODEL` and, if it needs one,
-  `FIONE_LLM_API_KEY`. With Ollama, the assistant turns the model's reasoning output off; for
-  another server that has its own switch for that, pass it with `FIONE_LLM_EXTRA_BODY`. Without
-  Compose, the same settings are environment variables of the Fione process.
+- **Another Ollama server**: set `FIONE_LLM_BASE_URL` (ending in `/v1`) and `FIONE_LLM_MODEL`,
+  and `FIONE_LLM_API_KEY` if a proxy in front of it asks for one. The assistant turns the
+  model's reasoning output off; change that with `FIONE_LLM_EXTRA_BODY`.
+- **Claude.** Set `FIONE_LLM_PROVIDER=claude` and `FIONE_LLM_API_KEY` (Fione refuses to start
+  without the key). The base URL and the model default to the Anthropic API and a current Claude
+  model; set `FIONE_LLM_MODEL` to use another. `FIONE_LLM_EXTRA_BODY` does not apply.
+
+Without Compose, the same settings are environment variables of the Fione process.
 
 On Linux, the Ollama of the host is reached through the Docker host gateway, so it must listen
 beyond the loopback address (`OLLAMA_HOST=0.0.0.0`). Ollama has no authentication, so that opens
 it to your network: bind it to the Docker bridge address and
 firewall it, or use the Compose `ollama` profile, which is not published.
 
-All the settings are in [Configuration](configuration.md). The assistant appears in a project's
-menu once `FIONE_LLM_BASE_URL` is set.
+All the settings are in [Configuration](configuration.md).
 
 The default model, Gemma 4, is published under the Apache License 2.0 (checked 2026-10-29 on
 Google's licence page for Gemma 4, and in the licence text Ollama ships with the model). Fione
 only downloads it through Ollama; check the terms of any other model you choose.
 
+### The administrator's consent
+
+When the language model is not on this machine or next to Fione (Claude, or an Ollama on another
+host), an administrator must confirm once that Fione may send it data. Until then the assistant
+does not answer, and an administrator who opens a page is taken to **Assistant setup**. The page
+names the provider, the host and the model, lists what each question sends (column names,
+statistics, example values, results of models, messages of jobs), and says that the data files
+themselves are never sent and that an API key goes only to that host. **Allow sending to
+`<host>`** records the consent for that host; a different host asks again. Other people see a
+banner that the assistant can be used once an administrator finishes the setup. A local server
+(the host's Ollama, the `ollama` profile) needs no consent.
+
 ## The first start
 
-The model download is about 8 GB. The System page shows its progress; until the model is ready,
-the chat page says what is happening and its question box is disabled. Everything else in Fione
-keeps working while the language model is missing, being downloaded or out of reach.
+The model download is about 8 GB. The System page shows its progress.
+
+When the assistant cannot answer (the server is not reachable, the model is missing or being
+downloaded, the API key is refused, or the consent is missing), every signed-in person sees a
+banner on each page that says why, with a link to the System page (to the setup page for the
+consent) for administrators and to the assistant otherwise. The chat page explains it too, and
+its question box is disabled. Everything else in Fione keeps working.
 
 ## Ways to ask
 
@@ -134,5 +158,7 @@ sentence, and `code` with `params` is what the Training proposal card translates
 | "cannot reach its language model server" | Is Ollama running, and does `FIONE_LLM_BASE_URL` reach it from the Fione container (`host.docker.internal` on the Mac)? The System page shows the address in use. |
 | "model is not downloaded yet" | An administrator presses **Download the model** on the System page, or set `FIONE_LLM_AUTO_PULL=true`. |
 | "context is too small" | Start Ollama with `OLLAMA_CONTEXT_LENGTH=16384` and set `FIONE_LLM_CONTEXT_TOKENS=16384`. |
+| "can be used once an administrator finishes the assistant setup" | An administrator confirms the remote host on the **Assistant setup** page (linked from the banner). |
+| "did not accept the API key" (unauthorized, 401) | Check `FIONE_LLM_API_KEY` and that the key may use `FIONE_LLM_MODEL`. The System page shows the state. |
+| "The reply was cut off before it began" (truncated) | The model used its whole `FIONE_LLM_MAX_TOKENS` before it wrote anything, thinking included. Raise `FIONE_LLM_MAX_TOKENS`. |
 | An answer stops with "took too long" | Ask something smaller, or raise `FIONE_LLM_TURN_TIMEOUT_SECS`; on a CPU-only Ollama, answers are slow. |
-| No "Assistant" in the menu | `FIONE_LLM_BASE_URL` is not set. |

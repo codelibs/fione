@@ -47,7 +47,7 @@ from fione.web.access import (
     same_site,
 )
 from fione.web.easyml import STOP_POLLING
-from fione.web.views import UiError, language, render, to_consent
+from fione.web.views import UiError, language, llm_status, render, to_consent
 
 log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
@@ -154,7 +154,7 @@ def _thread(conn, conversation: Conversation) -> dict:
 
 def _llm(request: Request) -> dict:
     """The provider's state for the explanations and the form."""
-    status = request.app.state.llm_monitor.snapshot()
+    status = llm_status(request)
     return {
         "llm": status,
         "llm_ready": status.state == "ready",

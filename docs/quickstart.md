@@ -126,8 +126,8 @@ project sharing. Administrators also manage users, Python modules and the system
 that menu.
 
 To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.md)). To ask
-questions about your data and models in plain language, set up [the assistant](assistant.md)
-(opt-in; it needs a language model server).
+questions about your data and models in plain language, use [the assistant](assistant.md)
+(it needs a language model: Ollama or Claude).
 
 ## Choosing the predicted class
 

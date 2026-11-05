@@ -165,7 +165,7 @@ def render(
             "version": __version__,
             "mode": ui_mode(request),
             # The assistant's state, read by the banner of a full page only.
-            "llm_snapshot": request.app.state.llm_monitor.snapshot,
+            "llm_snapshot": lambda: llm_status(request),
             **context,  # may override ``here``: where the language switch returns to
         },
         status_code=status,
@@ -175,9 +175,17 @@ def render(
 CONSENT_PAGE = "/admin/setup/assistant"
 
 
+def llm_status(request: Request):
+    """The language model's status, read once per request (the consent is looked up in the
+    database on each read)."""
+    if not hasattr(request.state, "llm_status"):
+        request.state.llm_status = request.app.state.llm_monitor.snapshot()
+    return request.state.llm_status
+
+
 def needs_consent(request: Request) -> bool:
     """Whether the assistant waits for an administrator's consent to its remote host."""
-    return request.app.state.llm_monitor.snapshot().state == "consent_required"
+    return llm_status(request).state == "consent_required"
 
 
 def to_consent(request: Request, auth: Auth) -> RedirectResponse | None:

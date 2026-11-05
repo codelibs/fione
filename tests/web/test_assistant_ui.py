@@ -505,6 +505,9 @@ def test_admin_is_redirected_to_the_consent_page_for_a_remote_host(remote):
     home = remote.client.get("/")
     assert home.status_code == 200 and f'href="{SETUP}"' in banner(home.text)
     assert remote.client.get(SETUP).status_code == 200
+    cid = new_conversation(remote, "admin")  # a poll of the thread is a fragment: no redirect
+    thread = remote.client.get(f"/projects/{remote.p}/assistant/c/{cid}/thread")
+    assert thread.status_code == STOP_POLLING and "location" not in thread.headers
 
 
 def test_consent_post_records_it_and_unblocks_turns(remote, fake_llm):

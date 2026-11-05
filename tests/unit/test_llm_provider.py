@@ -347,6 +347,19 @@ def test_a_locked_database_counts_as_no_consent(monitors, db_path, monkeypatch, 
     assert "consent" in caplog.text
 
 
+def test_a_broken_database_counts_as_no_consent(monitors, db_path, monkeypatch, caplog):
+    monitor = monitors(REMOTE)
+    monitor._update(state="ready")
+
+    def broken(conn, base_url):
+        raise sqlite3.DatabaseError("file is not a database")
+
+    monkeypatch.setattr(provider, "has_consent", broken)
+    with caplog.at_level(logging.WARNING, logger="fione.assistant"):
+        assert monitor.snapshot().state == "consent_required"
+    assert "the consent for llm.example.com could not be read" in caplog.text
+
+
 def test_consent_covers_the_host_not_another(monitors, db_path):
     with closing(db.connect(db_path)) as conn:
         admin = auth.create_user(conn, "boss", "password-123", Role.ADMIN)

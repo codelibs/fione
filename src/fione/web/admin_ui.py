@@ -28,7 +28,15 @@ from fione.auth.roles import Role
 from fione.auth.service import UserConflict, UsernameError, UserNotFound
 from fione.web.access import SmallForm, admin_only, field, form_auth, parse_id, signed_in
 from fione.web.easyml import STOP_POLLING
-from fione.web.views import CONSENT_PAGE, UiError, language, needs_consent, render, to_consent
+from fione.web.views import (
+    CONSENT_PAGE,
+    UiError,
+    language,
+    llm_status,
+    needs_consent,
+    render,
+    to_consent,
+)
 
 router = APIRouter(include_in_schema=False)
 log = logging.getLogger(__name__)
@@ -226,7 +234,7 @@ def _system_context(request: Request, conn) -> dict:
         "uptime": _uptime(time.monotonic() - state.started_at),
         "checked": time.time(),
         "poll_secs": POLL_SECS,
-        "llm_status": state.llm_monitor.snapshot(),
+        "llm_status": llm_status(request),
         "llm_context_tokens": settings.llm_context_tokens,
         "llm_ollama": settings.llm_provider == "ollama",
     }
@@ -289,7 +297,7 @@ def consent_page(request: Request, conn: Conn) -> Response:
         auth,
         nav="system",
         provider=request.app.state.settings.llm_provider,
-        llm=request.app.state.llm_monitor.snapshot(),
+        llm=llm_status(request),
     )
 
 

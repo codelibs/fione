@@ -180,8 +180,8 @@ class LlmMonitor:
         try:
             with closing(db.connect(self._db_path)) as conn:
                 return has_consent(conn, self._settings.llm_base_url)
-        except sqlite3.OperationalError:
-            log.warning("the consent for %s could not be read", self._status.host)
+        except sqlite3.DatabaseError:
+            log.warning("the consent for %s could not be read", self._current().host)
             return False
 
     def effective_context(self) -> int:
