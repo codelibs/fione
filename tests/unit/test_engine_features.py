@@ -180,6 +180,22 @@ def test_date_parts_and_differences():
     assert DateDifferences(["a", "b"]).fit(X).sources == [("a", "b")]
 
 
+def test_date_parts_of_day_first_strings():
+    X = pd.DataFrame(
+        {
+            "a": ["25-12-2024 13:30", "02-10-2024 01:00"],
+            "b": ["24-12-2024 13:30", "30-09-2024 01:00"],
+        }
+    )
+    out = DateParts(["a"]).fit(X).transform(X)
+    assert out["a__hour"].tolist() == [13, 1] and out["a__dayofyear"].tolist() == [360, 276]
+    diff = DateDifferences(["a", "b"]).fit(X).transform(X)
+    assert diff["a - b"].tolist() == [86400.0, 2 * 86400.0]
+    fitted = DateParts(["a"]).fit(X)
+    one = fitted.transform(X.head(1).assign(a="03-11-2024 10:00"))
+    assert one["a__dayofyear"].tolist() == [308]  # 3 November: day first, as fitted
+
+
 def test_number_pairs_cover_each_operation_and_guard_division():
     X = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0], "b": [0.0, 2.0, 5.0, 8.0]})
     assert NumberPairs("sum", ["a", "b"]).fit(X).transform(X)["a + b"].tolist() == [1, 4, 8, 12]

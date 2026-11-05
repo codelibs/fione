@@ -178,9 +178,12 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   how common each repeated value is, and k-means clusters with the distance to the cluster
   centre.
 
-Date features need a column of the date or timestamp type (ISO dates are detected on upload;
-other formats stay text until their type is changed). Independently of this option, the linear
-model and the neural network log-transform non-negative numbers that are strongly skewed.
+Date features need a column of dates. ISO dates are detected on upload; a column of other date
+strings (`25-12-2024 09:00`, `Mar 5, 2024`) is recognised when a model is trained, and its
+dates are read with the day first when some first field is above 12 and no second field is
+(`02-10-2012` is then the 2nd of October), otherwise with the month first. Independently of
+this option, the linear model and the neural network log-transform non-negative numbers
+that are strongly skewed.
 
 Each group is tried on a small LightGBM over rows it samples, and kept only if the loss drops
 over paired cross-validation folds by more than three standard errors and by 0.1 % on average,
