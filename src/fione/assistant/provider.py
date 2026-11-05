@@ -4,7 +4,8 @@
 ``ollama`` it checks the server, finds out whether the model is there and pulls it when it is
 not (``llm_auto_pull``, or an administrator's request). For ``claude`` it asks the Models API
 for the model, which costs no tokens: ``unauthorized`` when the key is not accepted,
-``model_not_found`` when the key cannot use the model.
+``model_not_found`` when the API answers that the key cannot use the model (Anthropic's
+``not_found_error``; any other 404, such as a gateway without the route, is ``probe_failed``).
 
 Claude, and an Ollama host that is not ``is_local_url``, need an administrator's consent
 (``consent_needed``): ``snapshot`` reports ``consent_required`` until one is recorded. It looks
@@ -51,6 +52,7 @@ _BAD_ANSWER = (ValueError, RecursionError)  # JSON that is not JSON, too deep, o
 PULL_READ_TIMEOUT_SECS = 120.0  # a pull reports progress much more often than this
 LOAD_READ_TIMEOUT_SECS = 120.0  # loading a large model takes a while
 MAX_LOAD_ANSWER_BYTES = 64 * 1024
+MAX_ERROR_BYTES = 64 * 1024  # of a 404 from the Models API
 _SINGLE_LABEL = re.compile(r"[a-z][a-z0-9_-]*")  # not a number in disguise (3232235781, 0xc0...)
 
 
@@ -113,6 +115,20 @@ def _lines(response: httpx.Response):
         yield buffer.decode("utf-8", "replace")
 
 
+class _ModelNotFound(Exception):
+    """The Models API answered that the key cannot use the model."""
+
+
+def _is_not_found_error(data: bytes) -> bool:
+    """Whether ``data`` is Anthropic's ``not_found_error``."""
+    try:
+        body = json.loads(data)
+    except (ValueError, RecursionError):
+        return False
+    error = body.get("error") if isinstance(body, dict) else None
+    return isinstance(error, dict) and error.get("type") == "not_found_error"
+
+
 def _host(base_url: str) -> str:
     return urlsplit(normal_base_url(base_url)).netloc
 
@@ -138,6 +154,7 @@ class LlmMonitor:
         else:
             self._root = settings.llm_base_url.rstrip("/")
         self._headers = {}
+        self._api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else None
         if settings.llm_api_key is not None:
             key = settings.llm_api_key.get_secret_value()
             if self._ollama:
@@ -296,12 +313,13 @@ class LlmMonitor:
         except httpx.TransportError:
             self._update_idle(state="unreachable", error_code=None, completed=None, total=None)
             return self._recheck_secs
+        except _ModelNotFound:
+            self._update_idle(state="error", error_code="model_not_found")
+            return self._recheck_secs
         except (httpx.HTTPError, *_BAD_ANSWER) as e:
             status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else None
             if status == 401:
                 code = "unauthorized"
-            elif status == 404 and not self._ollama:
-                code = "model_not_found"
             else:
                 log.warning("the LLM server (%s) could not be queried", self._status.host)
                 code = "probe_failed"
@@ -324,15 +342,23 @@ class LlmMonitor:
         return self._recheck_secs
 
     def _key_accepted(self) -> bool:
-        """Ask the Models API for the model, which costs no tokens; ``httpx.HTTPStatusError``
-        (401 for a key it does not accept, 404 for a model the key cannot use) unless it
-        answers."""
+        """Ask the Models API for the model, which costs no tokens. ``_ModelNotFound`` for a 404
+        whose body is Anthropic's ``not_found_error``, ``httpx.HTTPStatusError`` for any other
+        error status (401 for a key it does not accept)."""
         with self._http.stream(
             "GET",
             f"{self._root}/v1/models/{quote(self._model, safe='')}",
             headers=self._headers,
             timeout=self._timeout(),
         ) as response:
+            if response.status_code == 404:
+                data = b""
+                for part in response.iter_bytes():
+                    data += part
+                    if len(data) > MAX_ERROR_BYTES:
+                        break
+                if _is_not_found_error(data[:MAX_ERROR_BYTES]):
+                    raise _ModelNotFound
             response.raise_for_status()
         return True
 
@@ -443,10 +469,13 @@ class LlmMonitor:
         if not isinstance(entry, dict):
             return None
         if entry.get("error"):
+            text = str(entry["error"])
+            if self._api_key:
+                text = text.replace(self._api_key, "***")
             log.warning(
                 "pulling the LLM model from %s failed: %s",
                 self._status.host,
-                clean_text(entry["error"], 200),
+                clean_text(text, 200),
             )
             return "failed"
         total, completed = entry.get("total"), entry.get("completed")

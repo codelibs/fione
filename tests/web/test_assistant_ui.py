@@ -435,7 +435,10 @@ def test_failed_turn_shows_the_code_text_not_the_provider_text(chat):
 def test_context_too_small_text_gives_the_remedy():
     for lang in i18n.LANGUAGES:
         text = i18n.t("assistant.error.context_too_small", lang)
-        assert "FIONE_LLM_CONTEXT_TOKENS=16384" in text and "OLLAMA_CONTEXT_LENGTH=16384" in text
+        assert "FIONE_LLM_MAX_TOKENS" in text and "FIONE_LLM_CONTEXT_TOKENS" in text
+        assert "Ollama" in text and "OLLAMA_CONTEXT_LENGTH=16384" in text
+        # Only the Ollama advice names 16384: Claude's reply alone may use 16000 tokens.
+        assert text.index("FIONE_LLM_CONTEXT_TOKENS=16384") > text.index("Ollama")
 
 
 def test_every_error_code_has_a_text():

@@ -1124,7 +1124,7 @@
   "assistant.error.unauthorized": "The language model server did not accept the API key. An administrator should check FIONE_LLM_API_KEY.",
   "assistant.error.truncated": "The reply was cut off before it began. An administrator can raise FIONE_LLM_MAX_TOKENS.",
   "assistant.error.refused": "The model declined to answer this question. Try asking it in other words.",
-  "assistant.error.context_too_small": "The language model's context is too small for the assistant's tools. An administrator should set FIONE_LLM_CONTEXT_TOKENS=16384 and, for Ollama, OLLAMA_CONTEXT_LENGTH=16384 on the Ollama server.",
+  "assistant.error.context_too_small": "The language model's context is too small for the assistant's tools. An administrator should make FIONE_LLM_CONTEXT_TOKENS larger than FIONE_LLM_MAX_TOKENS plus the room the assistant needs; for Ollama, set FIONE_LLM_CONTEXT_TOKENS=16384 and OLLAMA_CONTEXT_LENGTH=16384 on the Ollama server.",
   "assistant.error.forbidden": "You can no longer read this project, so the assistant stopped.",
   "assistant.error.interrupted": "Fione restarted while the assistant was answering. Please ask again.",
   "assistant.error.cancelled": "Stopped.",

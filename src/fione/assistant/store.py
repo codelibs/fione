@@ -480,8 +480,8 @@ def normal_base_url(url: str) -> str:
 
 
 def _consent_host(base_url: str) -> str:
-    """The scheme, host and port of ``base_url``, which is what a consent covers
-    (``ValueError`` for a URL that is not an http(s) URL with a host)."""
+    """The scheme, host and port of ``base_url``, which with the provider is what a consent
+    covers (``ValueError`` for a URL that is not an http(s) URL with a host)."""
     parts = urlsplit(normal_base_url(base_url))
     return f"{parts.scheme}://{parts.netloc}"
 
@@ -497,23 +497,28 @@ def consent_needed(provider: str, base_url: str) -> bool:
 
 def has_consent(conn: sqlite3.Connection, base_url: str, *, provider: str) -> bool:
     """Whether data may go to ``base_url``: without ``consent_needed`` at once, else only with
-    an administrator's recorded consent. A URL that is not usable is never consented."""
+    an administrator's recorded consent for its host and ``provider``. A URL that is not usable
+    is never consented."""
     try:
         host = _consent_host(base_url)
     except ValueError:
         return False
     if not consent_needed(provider, base_url):
         return True
-    return conn.execute("SELECT 1 FROM llm_consents WHERE host = ?", (host,)).fetchone() is not None
+    row = conn.execute(
+        "SELECT 1 FROM llm_consents WHERE host = ? AND provider = ?", (host, provider)
+    ).fetchone()
+    return row is not None
 
 
 def record_consent(
     conn: sqlite3.Connection, user: User, *, provider: str, model: str, base_url: str
 ) -> None:
-    """Record ``user``'s consent for the host of ``base_url``; a host already consented keeps
-    its first record."""
+    """Record ``user``'s consent for the host of ``base_url`` and ``provider``. A host has one
+    record: a new consent for it replaces the old one, which a change of provider needs."""
     conn.execute(
         "INSERT INTO llm_consents (host, provider, model, consented_by) VALUES (?, ?, ?, ?)"
-        " ON CONFLICT(host) DO NOTHING",
+        " ON CONFLICT(host) DO UPDATE SET provider = excluded.provider, model = excluded.model,"
+        " consented_by = excluded.consented_by, consented_at = CURRENT_TIMESTAMP",
         (_consent_host(base_url), provider, model, user.id),
     )

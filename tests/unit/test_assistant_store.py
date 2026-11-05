@@ -324,16 +324,16 @@ def test_base_urls_are_normalized():
 
 
 def test_consent_is_per_host(conn, owner):
-    assert not store.has_consent(conn, "https://llm.example.com/v1", provider="ollama")
+    assert not store.has_consent(conn, "https://llm.example.com/v1", provider="claude")
     store.record_consent(
         conn, owner, provider="claude", model="m1", base_url="HTTPS://LLM.example.com:443/v1/"
     )
-    assert store.has_consent(conn, "https://llm.example.com/v1", provider="ollama")
+    assert store.has_consent(conn, "https://llm.example.com/v1", provider="claude")
     # the host, not the path
-    assert store.has_consent(conn, "https://llm.example.com/other", provider="ollama")
-    assert not store.has_consent(conn, "https://other.example.com/v1", provider="ollama")
-    assert not store.has_consent(conn, "http://llm.example.com/v1", provider="ollama")
-    assert not store.has_consent(conn, "https://llm.example.com:8443/v1", provider="ollama")
+    assert store.has_consent(conn, "https://llm.example.com/other", provider="claude")
+    assert not store.has_consent(conn, "https://other.example.com/v1", provider="claude")
+    assert not store.has_consent(conn, "http://llm.example.com/v1", provider="claude")
+    assert not store.has_consent(conn, "https://llm.example.com:8443/v1", provider="claude")
     row = conn.execute("SELECT * FROM llm_consents").fetchone()
     assert (row["host"], row["provider"], row["model"], row["consented_by"]) == (
         "https://llm.example.com",
@@ -365,6 +365,19 @@ def test_an_unusable_base_url_has_no_consent(conn, owner, url):
     with pytest.raises(ValueError):
         store.record_consent(conn, owner, provider="ollama", model="m", base_url=url)
     assert count(conn, "llm_consents") == 0
+
+
+def test_consent_covers_the_host_and_the_provider(conn, owner):
+    url = "https://gateway.example.com"
+    store.record_consent(conn, owner, provider="ollama", model="m", base_url=url + "/v1")
+    assert store.has_consent(conn, url + "/v1", provider="ollama")
+    assert not store.has_consent(conn, url, provider="claude")  # a gateway on to Anthropic
+    store.record_consent(conn, owner, provider="claude", model="c", base_url=url)
+    assert store.has_consent(conn, url, provider="claude")
+    assert not store.has_consent(conn, url + "/v1", provider="ollama")
+    assert count(conn, "llm_consents") == 1
+    row = conn.execute("SELECT provider, model FROM llm_consents").fetchone()
+    assert tuple(row) == ("claude", "c")
 
 
 def test_recording_twice_keeps_one_row(conn, owner):

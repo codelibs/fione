@@ -60,10 +60,10 @@ project's Assistant page is taken to **Assistant setup**. The page names the pro
 and the model, lists what each question sends (the questions and the conversation so far, names
 of projects, datasets and models, column names, statistics, example values, results of models,
 messages of jobs), and says that the data files themselves are never sent and that an API key
-goes only to that host. **Allow sending to `<host>`** records the consent for that host; a
-different host asks again, and a server that changed after the page was shown shows the page
-again. Other people see a banner that the assistant can be used once an administrator finishes
-the setup. A local Ollama (the host's Ollama, the `ollama` profile) needs no consent.
+goes only to that host. **Allow sending to `<host>`** records the consent for that host and
+provider; a different host or provider asks again, and a server that changed after the page was
+shown shows the page again. Other people see a banner that the assistant can be used once an
+administrator finishes the setup. A local Ollama (the host's Ollama, the `ollama` profile) needs no consent.
 
 ## The first start
 
@@ -161,10 +161,10 @@ sentence, and `code` with `params` is what the Training proposal card translates
 |---|---|
 | "cannot reach its language model server" | Is Ollama running, and does `FIONE_LLM_BASE_URL` reach it from the Fione container (`host.docker.internal` on the Mac)? With Claude, can the Fione container reach the Anthropic API address (`https://api.anthropic.com`, or the gateway in `FIONE_LLM_BASE_URL`), through `HTTPS_PROXY` if one is needed? The System page shows the address in use. |
 | "model is not downloaded yet" | An administrator presses **Download the model** on the System page, or set `FIONE_LLM_AUTO_PULL=true`. |
-| "context is too small" | Start Ollama with `OLLAMA_CONTEXT_LENGTH=16384` and set `FIONE_LLM_CONTEXT_TOKENS=16384`. |
+| "context is too small" | Make `FIONE_LLM_CONTEXT_TOKENS` larger than `FIONE_LLM_MAX_TOKENS` plus the room the assistant needs. For Ollama, start it with `OLLAMA_CONTEXT_LENGTH=16384` and set `FIONE_LLM_CONTEXT_TOKENS=16384`. |
 | "can be used once an administrator finishes the assistant setup" | An administrator confirms the remote host on the **Assistant setup** page (linked from the banner). |
 | "did not accept the API key" (unauthorized, 401) | Check `FIONE_LLM_API_KEY`. The System page shows the state. |
-| "is not available to this API key" (model_not_found, 404) | The model name in `FIONE_LLM_MODEL` is not available to the key: check the name, and that the key's organization can use that model. |
+| "is not available to this API key" (model_not_found, 404) | The model name in `FIONE_LLM_MODEL` is not available to the key: check the name, and that the key's organization can use that model. A 404 without the Anthropic API's answer (a gateway without that address) shows as "answered with an error" instead. |
 | "The model declined to answer" (refused) | The model refused this question. Ask it in other words. |
 | "The reply was cut off before it began" (truncated) | The model used its whole `FIONE_LLM_MAX_TOKENS` before it wrote anything, thinking included. Raise `FIONE_LLM_MAX_TOKENS`. |
 | An answer stops with "took too long" | Ask something smaller, or raise `FIONE_LLM_TURN_TIMEOUT_SECS`; on a CPU-only Ollama, answers are slow. |

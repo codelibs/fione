@@ -164,6 +164,15 @@ def test_claude_model_the_key_cannot_use_is_model_not_found(fake_llm, monitors, 
     wait_for(monitor, "ready")
 
 
+def test_claude_404_from_a_gateway_is_probe_failed(fake_llm, monitors, db_path):
+    # The fake has no route under /gateway: a 404 whose body is not Anthropic's.
+    fake = fake_llm(api_key="sk-test-0123456789")
+    consent(db_path, fake.origin)
+    monitor = monitors(f"{fake.origin}/gateway", "claude", llm_api_key="sk-test-0123456789")
+    monitor.start()
+    assert wait_for(monitor, "error").error_code == "probe_failed"
+
+
 def test_ollama_404_is_not_model_not_found(fake_llm, monitors):
     fake = fake_llm()
     monitor = monitors(f"{fake.origin}/wrong/v1")
@@ -252,6 +261,16 @@ def test_unreachable_then_recovers(fake_llm, monitors):
     wait_for(monitor, "unreachable")
     fake_llm(port=port)
     wait_for(monitor, "ready")
+
+
+def test_pull_error_in_the_log_hides_the_key(fake_llm, monitors, caplog):
+    key = "sk-test-0123456789"
+    fake = fake_llm(models=[], pull_error="x" * 180 + key)
+    monitor = monitors(fake.url, llm_auto_pull=True, llm_api_key=key)
+    with caplog.at_level(logging.WARNING, logger="fione.assistant"):
+        monitor.start()
+        wait_for(monitor, "error")
+    assert key[:6] not in caplog.text and "***" in caplog.text
 
 
 def test_pull_error_is_a_code_not_text(fake_llm, monitors, caplog):

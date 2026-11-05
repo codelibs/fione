@@ -1124,7 +1124,7 @@
   "assistant.error.unauthorized": "言語モデルのサーバーが API キーを受け付けませんでした。管理者が FIONE_LLM_API_KEY を確認してください。",
   "assistant.error.truncated": "返答が始まる前に打ち切られました。管理者が FIONE_LLM_MAX_TOKENS を上げられます。",
   "assistant.error.refused": "モデルはこの質問への答えを断りました。別の言葉で聞いてみてください。",
-  "assistant.error.context_too_small": "言語モデルのコンテキストが アシスタントのツールには小さすぎます。管理者は FIONE_LLM_CONTEXT_TOKENS=16384 を設定し、Ollama ではそのサーバーに OLLAMA_CONTEXT_LENGTH=16384 を設定してください。",
+  "assistant.error.context_too_small": "言語モデルのコンテキストが アシスタントのツールには小さすぎます。管理者は FIONE_LLM_CONTEXT_TOKENS を、FIONE_LLM_MAX_TOKENS にアシスタントが必要とする分を足したより大きくしてください。Ollama では FIONE_LLM_CONTEXT_TOKENS=16384 を設定し、そのサーバーに OLLAMA_CONTEXT_LENGTH=16384 を設定してください。",
   "assistant.error.forbidden": "このプロジェクトを読めなくなったため、アシスタントは止まりました。",
   "assistant.error.interrupted": "アシスタントが答えている間に Fione が再起動しました。もう一度質問してください。",
   "assistant.error.cancelled": "止めました。",
