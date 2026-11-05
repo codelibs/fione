@@ -341,6 +341,73 @@ def test_deleting_the_user_who_enabled_samples_keeps_the_opt_in(conn):
     assert store.samples_allowed(conn, "http://host/v1")
 
 
+def test_consent_is_per_host(conn, owner):
+    assert not store.has_consent(conn, "https://llm.example.com/v1")
+    store.record_consent(
+        conn, owner, provider="claude", model="m1", base_url="HTTPS://LLM.example.com:443/v1/"
+    )
+    assert store.has_consent(conn, "https://llm.example.com/v1")
+    assert store.has_consent(conn, "https://llm.example.com/other")  # the host, not the path
+    assert not store.has_consent(conn, "https://other.example.com/v1")
+    assert not store.has_consent(conn, "http://llm.example.com/v1")
+    assert not store.has_consent(conn, "https://llm.example.com:8443/v1")
+    row = conn.execute("SELECT * FROM llm_consents").fetchone()
+    assert (row["host"], row["provider"], row["model"], row["consented_by"]) == (
+        "https://llm.example.com",
+        "claude",
+        "m1",
+        owner.id,
+    )
+
+
+@pytest.mark.parametrize(
+    "url", ["http://localhost:11434/v1", "http://127.0.0.1:11434", "http://ollama:11434/v1"]
+)
+def test_a_local_host_needs_no_consent(conn, url):
+    assert store.has_consent(conn, url)
+    assert count(conn, "llm_consents") == 0
+
+
+@pytest.mark.parametrize("url", ["", "host", "ftp://host/v1", "http://"])
+def test_an_unusable_base_url_has_no_consent(conn, owner, url):
+    assert store.has_consent(conn, url) is False
+    with pytest.raises(ValueError):
+        store.record_consent(conn, owner, provider="ollama", model="m", base_url=url)
+    assert count(conn, "llm_consents") == 0
+
+
+def test_recording_twice_keeps_one_row(conn, owner):
+    for model in ("m1", "m2"):
+        store.record_consent(
+            conn, owner, provider="ollama", model=model, base_url="http://gpu.example.com/v1"
+        )
+    assert count(conn, "llm_consents") == 1
+    assert store.has_consent(conn, "http://gpu.example.com/v1")
+
+
+def test_deleting_the_consenting_user_keeps_the_consent(conn):
+    user = auth.create_user(conn, "tmp", "pw-tmp-12345", Role.ADMIN)
+    auth.create_user(conn, "keep", "pw-keep-1234", Role.ADMIN)
+    store.record_consent(
+        conn, user, provider="claude", model="m", base_url="https://api.anthropic.com"
+    )
+    auth.delete_user(conn, user.id)
+    assert store.has_consent(conn, "https://api.anthropic.com")
+    assert conn.execute("SELECT consented_by FROM llm_consents").fetchone()[0] is None
+
+
+def test_migration_adds_the_consent_table(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "old.db")
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:-1])
+        db.migrate(conn)
+    query = "SELECT name FROM sqlite_master WHERE name = 'llm_consents'"
+    assert conn.execute(query).fetchall() == []
+    assert db.migrate(conn) == len(db.MIGRATIONS)
+    assert len(conn.execute(query).fetchall()) == 1
+    conn.close()
+
+
 def test_creating_a_conversation_needs_read_access(conn, owner, admin, project):
     stranger = auth.create_user(conn, "stranger", "pw-stranger-1", Role.EDITOR)
     with pytest.raises(ConversationNotFound):

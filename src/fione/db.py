@@ -183,6 +183,15 @@ MIGRATIONS: list[str] = [
         enabled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    CREATE TABLE llm_consents (
+        host TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        consented_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        consented_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 

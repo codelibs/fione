@@ -501,3 +501,39 @@ def set_samples_allowed(
         )
     else:
         conn.execute("DELETE FROM llm_sample_optins WHERE base_url = ?", (key,))
+
+
+# --- consent for remote language models --------------------------------------
+
+
+def _consent_host(base_url: str) -> str:
+    """The scheme, host and port of ``base_url``, which is what a consent covers
+    (``ValueError`` for a URL that is not an http(s) URL with a host)."""
+    parts = urlsplit(normal_base_url(base_url))
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def has_consent(conn: sqlite3.Connection, base_url: str) -> bool:
+    """Whether data may go to ``base_url``: a local host needs no consent, any other host needs
+    an administrator's recorded one. A URL that is not usable is never consented."""
+    from fione.assistant.provider import is_local_url  # provider imports this module
+
+    try:
+        host = _consent_host(base_url)
+    except ValueError:
+        return False
+    if is_local_url(base_url):
+        return True
+    return conn.execute("SELECT 1 FROM llm_consents WHERE host = ?", (host,)).fetchone() is not None
+
+
+def record_consent(
+    conn: sqlite3.Connection, user: User, *, provider: str, model: str, base_url: str
+) -> None:
+    """Record ``user``'s consent for the host of ``base_url``; a host already consented keeps
+    its first record."""
+    conn.execute(
+        "INSERT INTO llm_consents (host, provider, model, consented_by) VALUES (?, ?, ?, ?)"
+        " ON CONFLICT(host) DO NOTHING",
+        (_consent_host(base_url), provider, model, user.id),
+    )
