@@ -22,8 +22,9 @@ Script items (the keys combine, except ``status``)::
 
 ``POST /v1/messages`` reads Anthropic requests: the policies see them as OpenAI-shaped messages
 (``tool_use`` blocks as tool calls, ``tool_result`` blocks as tool messages), while
-``requests`` keeps them as sent. It and ``GET /v1/models`` (an empty list) need ``x-api-key``
-and ``anthropic-version``; with ``api_key`` set, another key is a 401. Every reply starts with
+``requests`` keeps them as sent. It and ``GET /v1/models/{id}`` (a 404 for an id not in
+``claude_models``, when that is set) need ``x-api-key`` and ``anthropic-version``; with
+``api_key`` set, another key is a 401. Every reply starts with
 a thinking block, as the models that always think send; its signature stands for the request
 before it (``system``, ``tools`` and the earlier messages). A thinking block sent back after
 that request changed is a 400, unless ``thinking.block_binding.prefix_mismatch_behavior`` is
@@ -45,6 +46,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Literal
+from urllib.parse import unquote
 
 DEFAULT_MODEL = "gemma4:12b-mlx"  # Fione's default
 _FAKE_CALL = re.compile(r"FAKE_CALL:([A-Za-z_][A-Za-z0-9_]*):")
@@ -190,6 +192,7 @@ class FakeLlm:
         self.pull_error = pull_error  # the pull stops with this error line after its first step
         self.pull_garbage = pull_garbage  # bytes with no newline sent as a pull's first line
         self.api_key = api_key  # the only x-api-key POST /v1/messages accepts, when set
+        self.claude_models: list[str] | None = None  # what GET /v1/models/{id} knows; None: all
         self.generate_status = 200  # of POST /api/generate, which loads the model
         self.generate_delay = 0.0  # seconds before it answers: the time a model takes to load
         self.generate_padding = 0  # bytes of filler in its answer
@@ -307,8 +310,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"models": self.llm.installed_models()})
         elif path == "/api/ps":
             self._json({"models": self.llm.running_models()})
-        elif path == "/v1/models":
-            self._models(headers)
+        elif path.startswith("/v1/models/"):
+            self._model(unquote(path.removeprefix("/v1/models/")), headers)
         elif path == "/_requests":
             self._json(self.llm.requests)
         else:
@@ -482,9 +485,14 @@ class _Handler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _models(self, headers: dict) -> None:
-        if self._authorized(headers):
-            self._json({"data": [], "has_more": False, "first_id": None, "last_id": None})
+    def _model(self, model: str, headers: dict) -> None:
+        if not self._authorized(headers):
+            return
+        known = self.llm.claude_models
+        if known is not None and model not in known:
+            error = {"type": "not_found_error", "message": f"model: {model}"}
+            return self._json({"type": "error", "error": error}, 404)
+        self._json({"type": "model", "id": model, "display_name": model})
 
     def _messages(self, body: dict, headers: dict) -> None:
         if not self._authorized(headers):

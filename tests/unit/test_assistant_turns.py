@@ -616,6 +616,28 @@ def test_a_reply_cut_before_any_text_is_truncated(env, fake_llm):
     assert (rows[-1].state, rows[-1].content) == ("done", "Part")
 
 
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"text": "I can", "stop_reason": "refusal"},
+        {"text": "", "stop_reason": "refusal",
+         "tool_calls": [{"name": "list_projects", "arguments": {}}]},
+    ],
+)  # fmt: skip
+def test_a_refusal_fails_the_turn_without_running_tools(env, fake_llm, item):
+    fake = fake_llm([item])
+    settings = make_settings(
+        env.tmp / "data",
+        llm_provider="claude",
+        llm_base_url=fake.origin,
+        llm_api_key="sk-test-0123456789",
+    )
+    rows = turn(env, settings)
+    assert [r.role for r in rows] == ["user", "assistant"]
+    assert (rows[-1].state, rows[-1].error_code) == ("failed", "refused")
+    assert len(fake.requests) == 1
+
+
 def test_an_unexpected_error_fails_the_turn(env, fake_llm, monkeypatch, caplog):
     def boom(*args, **kwargs):
         raise RuntimeError("boom")

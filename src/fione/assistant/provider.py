@@ -2,8 +2,9 @@
 
 ``LlmMonitor`` keeps a ``LlmStatus`` up to date in a daemon thread that ``stop`` ends. For
 ``ollama`` it checks the server, finds out whether the model is there and pulls it when it is
-not (``llm_auto_pull``, or an administrator's request). For ``claude`` it asks the Models API,
-which costs no tokens, whether the key is accepted (``unauthorized`` when it is not).
+not (``llm_auto_pull``, or an administrator's request). For ``claude`` it asks the Models API
+for the model, which costs no tokens: ``unauthorized`` when the key is not accepted,
+``model_not_found`` when the key cannot use the model.
 
 Claude, and an Ollama host that is not ``is_local_url``, need an administrator's consent
 (``consent_needed``): ``snapshot`` reports ``consent_required`` until one is recorded. It looks
@@ -24,7 +25,7 @@ from contextlib import closing
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -296,10 +297,14 @@ class LlmMonitor:
             self._update_idle(state="unreachable", error_code=None, completed=None, total=None)
             return self._recheck_secs
         except (httpx.HTTPError, *_BAD_ANSWER) as e:
-            unauthorized = isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 401
-            if not unauthorized:
+            status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else None
+            if status == 401:
+                code = "unauthorized"
+            elif status == 404 and not self._ollama:
+                code = "model_not_found"
+            else:
                 log.warning("the LLM server (%s) could not be queried", self._status.host)
-            code = "unauthorized" if unauthorized else "probe_failed"
+                code = "probe_failed"
             self._update_idle(state="error", error_code=code)
             return self._recheck_secs
         if present:
@@ -319,12 +324,12 @@ class LlmMonitor:
         return self._recheck_secs
 
     def _key_accepted(self) -> bool:
-        """Ask the Models API for one entry, which costs no tokens; ``httpx.HTTPStatusError``
-        (401 for a key it does not accept) unless it answers."""
+        """Ask the Models API for the model, which costs no tokens; ``httpx.HTTPStatusError``
+        (401 for a key it does not accept, 404 for a model the key cannot use) unless it
+        answers."""
         with self._http.stream(
             "GET",
-            f"{self._root}/v1/models",
-            params={"limit": 1},
+            f"{self._root}/v1/models/{quote(self._model, safe='')}",
             headers=self._headers,
             timeout=self._timeout(),
         ) as response:

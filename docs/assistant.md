@@ -163,6 +163,8 @@ sentence, and `code` with `params` is what the Training proposal card translates
 | "model is not downloaded yet" | An administrator presses **Download the model** on the System page, or set `FIONE_LLM_AUTO_PULL=true`. |
 | "context is too small" | Start Ollama with `OLLAMA_CONTEXT_LENGTH=16384` and set `FIONE_LLM_CONTEXT_TOKENS=16384`. |
 | "can be used once an administrator finishes the assistant setup" | An administrator confirms the remote host on the **Assistant setup** page (linked from the banner). |
-| "did not accept the API key" (unauthorized, 401) | Check `FIONE_LLM_API_KEY` and that the key may use `FIONE_LLM_MODEL`. The System page shows the state. |
+| "did not accept the API key" (unauthorized, 401) | Check `FIONE_LLM_API_KEY`. The System page shows the state. |
+| "is not available to this API key" (model_not_found, 404) | The model name in `FIONE_LLM_MODEL` is not available to the key: check the name, and that the key's organization can use that model. |
+| "The model declined to answer" (refused) | The model refused this question. Ask it in other words. |
 | "The reply was cut off before it began" (truncated) | The model used its whole `FIONE_LLM_MAX_TOKENS` before it wrote anything, thinking included. Raise `FIONE_LLM_MAX_TOKENS`. |
 | An answer stops with "took too long" | Ask something smaller, or raise `FIONE_LLM_TURN_TIMEOUT_SECS`; on a CPU-only Ollama, answers are slow. |

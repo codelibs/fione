@@ -134,7 +134,7 @@ def test_claude_is_ready_when_the_key_is_accepted(fake_llm, monitors, db_path):
     status = wait_for(monitor, "ready")
     assert (status.model, status.local, status.error_code) == ("m", False, None)
     assert status.host == f"127.0.0.1:{fake.port}"
-    assert fake.paths[0] == "GET /v1/models"  # no tokens: nothing is asked of the model
+    assert fake.paths[0] == "GET /v1/models/m"  # no tokens: nothing is asked of the model
     assert "POST /v1/messages" not in fake.paths
     assert monitor.pull_now() is False
     assert monitor.effective_context() == 200000  # the claude default, never probed
@@ -150,6 +150,25 @@ def test_claude_401_is_unauthorized(fake_llm, monitors, db_path):
     assert status.error_code == "unauthorized"
     assert "sk-wrong-0123456789" not in repr(status)
     assert monitor._thread.is_alive()
+
+
+def test_claude_model_the_key_cannot_use_is_model_not_found(fake_llm, monitors, db_path):
+    fake = fake_llm(api_key="sk-test-0123456789")
+    fake.claude_models = ["claude-other"]
+    consent(db_path, fake.origin)
+    monitor = monitors(fake.origin, "claude", llm_api_key="sk-test-0123456789", llm_model="a/b?c")
+    monitor.start()
+    assert wait_for(monitor, "error").error_code == "model_not_found"
+    assert fake.paths[0] == "GET /v1/models/a%2Fb%3Fc"
+    fake.claude_models.append("a/b?c")
+    wait_for(monitor, "ready")
+
+
+def test_ollama_404_is_not_model_not_found(fake_llm, monitors):
+    fake = fake_llm()
+    monitor = monitors(f"{fake.origin}/wrong/v1")
+    monitor.start()
+    assert wait_for(monitor, "error").error_code == "probe_failed"
 
 
 def test_claude_unreachable(fake_llm, monitors, db_path):

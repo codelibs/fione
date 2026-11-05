@@ -74,6 +74,7 @@ ERROR_CODES = (
     "timeout",
     "unauthorized",
     "truncated",
+    "refused",
     "too_many_steps",
     "context_too_small",
     "forbidden",
@@ -193,6 +194,8 @@ class _Turn:
             if not store.update_message(self.conn, self.row, state="running"):
                 raise _Stop()
             completion = self._complete(project_id, first, refresh=rounds == 0)
+            if completion.finish_reason == "refusal":  # Claude declined: nothing of it runs
+                raise LlmError("refused", "the model declined to answer")
             if completion.finish_reason == "length" and not (
                 completion.content or completion.tool_calls
             ):

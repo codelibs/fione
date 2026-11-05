@@ -517,6 +517,11 @@ def test_the_llm_card_explains_a_key_that_is_not_accepted(llm_client):
     assert "did not accept the API key" in page and "FIONE_LLM_API_KEY" in page
 
 
+def test_the_llm_card_explains_a_model_the_key_cannot_use(llm_client):
+    page = llm_card(llm_client, state="error", error_code="model_not_found")
+    assert "not available to this API key" in page and "FIONE_LLM_MODEL" in page
+
+
 def test_the_llm_card_shows_a_missing_consent_in_the_poll(llm_client):
     llm_card(llm_client, state="consent_required", local=False, host="api.example.com")
     polled = llm_client.get("/admin/system", headers={"HX-Request": "true"}).text
