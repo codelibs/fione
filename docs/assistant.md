@@ -83,6 +83,23 @@ until you press **Send**, and you can change the text first. An empty conversati
 three example questions (what you can predict with the data, whether a model is good enough to
 use, how to improve it) that fill in the box the same way.
 
+## Automatic comments
+
+A model's summary and model pages, and the page of a failed job, show an **Assistant's comment**:
+a short explanation in plain words. For a model it says whether the result is good, mediocre or
+poor against the baseline, what mostly drives the prediction, any problem in the data and one to
+three next steps; for a failed job, why it failed and what to change. When a change clearly
+helps, the comment can carry a training proposal, which only the person whose visit wrote the
+comment can confirm or dismiss; the others see its reason and can ask for their own with
+**Ask the assistant a follow-up**.
+
+A comment is written the first time a member of the project opens the page, in the language of
+that page, and then kept: every member who can read the project sees the same comment in that
+language, and nothing is sent again. It is written by the same model, with the same consent,
+tools and limits as a question in the chat (it counts as one of the opener's answers at once),
+and does not appear among anyone's conversations. Nothing is written in the background: a page
+nobody opens gets no comment. A comment that failed offers **Try again**.
+
 ## What is sent
 
 Each question goes to the language model server together with the conversation so far and what
@@ -185,4 +202,6 @@ sentence, and `code` with `params` is what the Training proposal card translates
 | "is not available to this API key" (model_not_found, 404) | The model name in `FIONE_LLM_MODEL` is not available to the key: check the name, and that the key's organization can use that model. A 404 without the Anthropic API's answer (a gateway without that address) shows as "answered with an error" instead. |
 | "The model declined to answer" (refused) | The model refused this question. Ask it in other words. |
 | "The reply was cut off before it began" (truncated) | The model used its whole `FIONE_LLM_MAX_TOKENS` before it wrote anything, thinking included. Raise `FIONE_LLM_MAX_TOKENS`. |
+| A comment says "The assistant is busy" | As many answers as allowed are running (see Limits). Wait a moment and press **Try again**. |
+| A comment shows only the assistant's state ("cannot reach", "not downloaded yet"...) | The assistant is not ready, so no comment is written; fix it as in the rows above and reload the page. A comment written earlier is still shown. |
 | An answer stops with "took too long" | Ask something smaller, or raise `FIONE_LLM_TURN_TIMEOUT_SECS`; on a CPU-only Ollama, answers are slow. |
