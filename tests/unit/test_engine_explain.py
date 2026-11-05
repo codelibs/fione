@@ -11,7 +11,7 @@ from scipy.special import expit, softmax
 from sklearn.tree import ExtraTreeClassifier, ExtraTreeRegressor
 
 from fione.engine import explain
-from fione.engine.automl import AutoML
+from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, AutoML
 from fione.engine.config import ConfigError, Deadline, TrainConfig
 from fione.engine.explain import (
     ICE_ROWS,
@@ -60,12 +60,37 @@ def _task_frame(task: str, frame: pd.DataFrame) -> pd.DataFrame:
     return frame.drop(columns=others)
 
 
+def _late_models(model: TrainedModel, frame: pd.DataFrame, name: str) -> list:
+    """Three fold-like models of a late family, fitted here: the search runs them only when
+    time is left, so the explanations are tested on models fitted directly."""
+    target = model.target
+    if model.task == "classification":
+        y = pd.Categorical(frame[target], categories=model.classes_).codes.astype(np.int64)
+    else:
+        y = frame[target].to_numpy(float)
+    n_classes = len(model.classes_) if model.classes_ is not None else 0
+    spec = FAMILIES[name](model.task, n_classes)
+    view = getattr(model.prep, spec.view)(frame.drop(columns=[target]))
+    cuts = [0, 100, 200, 300]
+    return [
+        spec.fit(spec.defaults, view.iloc[a:b], y[a:b], None, None, Deadline(60))
+        for a, b in zip(cuts, cuts[1:], strict=False)
+    ]
+
+
 @cache
 def _fit(task: str) -> TrainedModel:
     config = TrainConfig(
-        TARGETS[task], max_runtime_secs=30, max_models=len(FAMILIES), nfolds=3, keep_cv_models=True
+        TARGETS[task],
+        max_runtime_secs=30,
+        max_models=len(FAMILY_ORDER),
+        nfolds=3,
+        keep_cv_models=True,
     )
-    model = AutoML(config).fit(_task_frame(task, _frame()))
+    frame = _task_frame(task, _frame())
+    model = AutoML(config).fit(frame)
+    for name in LATE_ORDER:
+        model.cv_models[name] = _late_models(model, frame, name)
     assert sorted(model.cv_models) == sorted(FAMILIES), f"a family is missing: {model.cv_models}"
     return model
 

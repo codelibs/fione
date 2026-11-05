@@ -39,6 +39,7 @@ from fione.engine.families import (
     XGBoost,
     n_threads,
     owners,
+    pad_features,
 )
 from fione.engine.metrics import choose
 from fione.engine.model import TrainedModel, attribution
@@ -409,6 +410,7 @@ def contributions(model: TrainedModel, df: pd.DataFrame) -> Contributions:
             spec = member.spec
             for one in member.models:
                 one_phi, one_bias = _probability(spec, one, views[spec.view])
+                one_phi = pad_features(one_phi, phi.shape[2])  # a view without derived features
                 phi += member.weight / len(member.models) * one_phi
                 bias += member.weight / len(member.models) * one_bias
     if len(outputs) < k:  # binary: the positive class

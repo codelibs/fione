@@ -12,6 +12,14 @@ spec 5.1/5.7) and spends it in phases:
    family leaves unused flows to the next ones. The search scores trials with log loss / RMSE.
    Each family hands on its ``TOP_TRIALS`` best trials, as candidates ``Family``,
    ``Family#2`` and ``Family#3``.
+   After them come the *late* families (``LATE_ORDER``: variants of TextLinear, for data with
+   prose). When any applies, ``LATE_SHARE`` of the search time is kept for them: the base
+   families' shares are scaled to the other 0.85. The late families get what is left of the
+   search time (that and what the base families leave), never the time of the later phases:
+   each one the search time still left times its ``LATE_WEIGHTS`` share among the late families
+   not yet run, and only when its first trial is expected to fit in that share (``cost`` times
+   the first trial of TextLinear). A late family that does not apply to the data is not run and
+   changes nothing; one that does not improve the ensemble gets weight 0 from ``caruana``.
 3. Ensemble selection: ``caruana`` on the candidates' out-of-fold (OOF) predictions; cheap.
 4. Final refit: until the reserve (about 0.2 L when the search used its whole share; more when
    it ended early). Each member with weight > 0 is refit once on all rows with its best
@@ -46,7 +54,8 @@ keeping its best trial so far; a refit that raises falls back to the fold models
 else (time, ``max_models``, cancellation) ended the search. ``NoModelError`` lists every
 family's error and is chained to the last one when no family produced a model.
 
-``families`` restricts the search to some of ``FAMILY_ORDER`` (tests and advanced use).
+``families`` restricts the search to some of ``FAMILY_ORDER`` and ``LATE_ORDER`` (tests and
+advanced use).
 """
 
 import json
@@ -61,7 +70,7 @@ from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModel
 from fione.engine.diagnostics import diagnostics
 from fione.engine.ensemble import caruana
 from fione.engine.events import Event, EventSink, jsonable
-from fione.engine.families import FAMILIES, MAX_ROUNDS
+from fione.engine.families import FAMILIES, MAX_ROUNDS, FamilySpec
 from fione.engine.features import select_groups
 from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep, Task, infer_task, validate_target
@@ -94,6 +103,11 @@ FAMILY_WEIGHTS = {
     "DeepLearning": 0.096,
     "Linear": 0.048,
 }
+# Run after the others, in the search time they leave (see the module docstring); each only
+# when the data suits it (``FamilySpec.applies``) and a model of it would not be too big.
+LATE_ORDER = ("TextLinearChar", "TextLinearPlain", "TextLinearWide")
+LATE_WEIGHTS = {"TextLinearChar": 0.5, "TextLinearPlain": 0.25, "TextLinearWide": 0.25}
+LATE_SHARE = 0.15  # of the search time is kept for the late families, when any applies
 FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
 # A short run gets more: the choice needs about this long on a few thousand rows, and without it
 # the most useful candidates run out of time unconfirmed. Never over FEATURE_MAX_SHARE.
@@ -138,10 +152,12 @@ class AutoML:
         self.config = config.validate()
         self.emit = emit
         self.should_stop = should_stop
-        unknown = sorted(set(families or ()) - set(FAMILY_ORDER))
+        known = [*FAMILY_ORDER, *LATE_ORDER]
+        unknown = sorted(set(families or ()) - set(known))
         if unknown or families == []:
-            raise ConfigError(f"unknown families: {unknown}; choose from {list(FAMILY_ORDER)}")
+            raise ConfigError(f"unknown families: {unknown}; choose from {known}")
         self.families = [f for f in FAMILY_ORDER if families is None or f in families]
+        self.late = [f for f in LATE_ORDER if families is None or f in families]
 
     def _event(self, type: str, **data) -> None:
         self.emit(Event(type, data=jsonable(data)))
@@ -200,6 +216,9 @@ class AutoML:
         families = self._without_wide_linear_view(prep, len(X))
         # The words are read only from prose columns.
         families = [f for f in families if f != "TextLinear" or prep.prose] or families
+        # An explicit list of late families only is run as it is, like TextLinear above.
+        late = self._late_families(prep, X, y, task) if families else self.late
+        families = [*families, *late]
 
         left = deadline.remaining()
         reserve = max(MIN_RESERVE_SECS, RESERVE_SHARE * left)
@@ -336,7 +355,9 @@ class AutoML:
         (unless that leaves none)."""
         if n_rows * prep.linear_width <= LINEAR_MAX_CELLS:
             return self.families
-        kept = [name for name in self.families if FAMILIES[name].view not in ("linear", "text")]
+        kept = [
+            name for name in self.families if not FAMILIES[name].view.startswith(("linear", "text"))
+        ]
         if not kept or kept == self.families:
             return self.families
         left_out = [name for name in self.families if name not in kept]
@@ -348,27 +369,53 @@ class AutoML:
         )
         return kept
 
+    def _late_families(self, prep: Prep, X, y, task: Task) -> list[str]:
+        """The late families this data suits, whose models would not be too big, and whose view
+        is not too wide (see ``_without_wide_linear_view``)."""
+        if len(X) * prep.linear_width > LINEAR_MAX_CELLS:
+            return []
+        outputs = int(y.max()) + 1 if task == "classification" else 1
+        outputs = 1 if outputs == 2 else outputs
+        return [
+            name
+            for name in self.late
+            if FAMILIES[name].applies(prep, X)
+            and FAMILIES[name].coef_bytes(prep, outputs) <= SIZE_CAP
+        ]
+
     def _search(self, families, X, y, folds, task, prep, search: Deadline, stopping_score, weight):
-        """Run the families in order; returns (results with models, trial rows, end reason per
-        family, finished trial count, exception per failed family)."""
+        """Run the families in order, the late ones last; returns (results with models, trial
+        rows, end reason per family, finished trial count, exception per failed family)."""
         c = self.config
         results: dict[str, FamilyResult] = {}
         logs: list[dict] = []
         reasons: dict[str, str] = {}
         errors: dict[str, Exception] = {}
         finished = 0
+        # With late families to run, the base ones share the search time less ``LATE_SHARE``:
+        # their shares are scaled by 1 - LATE_SHARE; what they leave unused is left over too.
+        # With no base family (an explicit list of late ones) they have all of it.
+        keep = any(f in LATE_ORDER for f in families) and any(f not in LATE_ORDER for f in families)
+        base = search.child((1 - LATE_SHARE) * search.remaining()) if keep else search
         for i, name in enumerate(families):
             if self.should_stop():
                 reasons[name] = "cancelled"
                 break
-            rest = families[i:]
+            late = name in LATE_ORDER
+            # The late families take no trials from the others: a family only counts those of
+            # its own kind after it.
+            rest = [f for f in families[i:] if (f in LATE_ORDER) == late]
             max_trials = None
             if c.max_models is not None:
                 if finished >= c.max_models:
                     break
                 # Leave one trial for each family after this one.
                 max_trials = max(1, c.max_models - finished - (len(rest) - 1))
-            share = search.remaining() * FAMILY_WEIGHTS[name] / sum(FAMILY_WEIGHTS[f] for f in rest)
+            weights = LATE_WEIGHTS if late else FAMILY_WEIGHTS
+            left = search.remaining() if late else base.remaining()
+            share = left * weights[name] / sum(weights[f] for f in rest)
+            if late and not _late_fits(FAMILIES[name], share, results):
+                continue
             try:
                 result = run_family(
                     name,
@@ -377,7 +424,7 @@ class AutoML:
                     folds,
                     task,
                     prep,
-                    search.child(share),
+                    (search if late else base).child(share),
                     self.emit,
                     self.should_stop,
                     seed=c.seed,
@@ -389,7 +436,8 @@ class AutoML:
                     sample_weight=weight,
                 )
             except NoModelError:
-                reasons[name] = "time"
+                if not late:
+                    reasons[name] = "time"
                 continue
             except Exception as e:  # outside any trial, e.g. building the view
                 self.emit(error_notice("family_error", name, e))
@@ -398,7 +446,8 @@ class AutoML:
             if result.error is not None:
                 errors[name] = result.error
             finished += result.trials
-            reasons[name] = result.reason
+            if not (late and result.reason == "time"):  # a late family is meant to use what is left
+                reasons[name] = result.reason
             logs += [
                 {**{k: row[k] for k in TRIAL_COLUMNS[:-1]}, "params": json.dumps(row["params"])}
                 for row in result.log
@@ -523,6 +572,14 @@ class AutoML:
                 if sizes[name] + real <= SIZE_CAP and sum(sizes.values()) + real <= TOTAL_SIZE_CAP:
                     members_of[name].append(model)
                     sizes[name] += real
+
+
+def _late_fits(spec: type[FamilySpec], share: float, results: dict[str, FamilyResult]) -> bool:
+    """Whether the first trial of a late family is expected to fit in ``share``: ``spec.cost``
+    times the first trial of its reference family, when that one has run (a first trial is
+    never interrupted)."""
+    reference = results.get(spec.reference)
+    return reference is None or share >= spec.cost * reference.log[0]["elapsed"]
 
 
 def _mb(size: float) -> str:

@@ -262,6 +262,12 @@ class Prep:
             out[f"f{position}_t"] = _as_str(df[column]).fillna("")
         return out
 
+    def text_plain(self, df: pd.DataFrame) -> pd.DataFrame:
+        """The text view without the columns of the derived features (``groups``)."""
+        out = self.text(df)
+        base = len(self.feature_names) - sum(len(group.names) for group in self.groups)
+        return out[[c for c in out.columns if int(c[1:].split("_")[0]) < base]]
+
     @property
     def linear_width(self) -> int:
         """Columns of the linear view: one per number, one per kept level, one per flag."""
