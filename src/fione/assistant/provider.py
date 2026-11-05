@@ -5,9 +5,10 @@
 not (``llm_auto_pull``, or an administrator's request). For ``claude`` it asks the Models API,
 which costs no tokens, whether the key is accepted (``unauthorized`` when it is not).
 
-A remote host (not ``is_local_url``) needs an administrator's consent: ``snapshot`` reports
-``consent_required`` until one is recorded, and looks it up on each read, so a consent takes
-effect at once.
+Claude, and an Ollama host that is not ``is_local_url``, need an administrator's consent
+(``consent_needed``): ``snapshot`` reports ``consent_required`` until one is recorded. It looks
+the consent up on each read until it finds one, so a consent takes effect at once; a consent
+cannot be withdrawn, so once found it is not read again.
 
 A status never holds the base URL's path, the API key or text from the server: a failed pull
 is the code ``pull_failed`` here, and its cleaned text is in the log.
@@ -29,7 +30,7 @@ import httpx
 
 from fione import db
 from fione.assistant.claude import ANTHROPIC_VERSION
-from fione.assistant.store import has_consent, normal_base_url
+from fione.assistant.store import consent_needed, has_consent, normal_base_url
 from fione.config import Settings
 from fione.schema import clean_text
 
@@ -147,10 +148,11 @@ class LlmMonitor:
         self._thread: threading.Thread | None = None
         self._pulling = False
         self._pull_blocked = False  # a pull failed: only an administrator starts the next
+        self._consent_found = False  # the host, which never changes, has a consent
         self._status = LlmStatus(
             state="checking",
             model=settings.llm_model,
-            local=is_local_url(settings.llm_base_url),
+            local=not consent_needed(settings.llm_provider, settings.llm_base_url),
             host=_host(settings.llm_base_url),
             completed=None,
             total=None,
@@ -176,13 +178,19 @@ class LlmMonitor:
 
     def _consented(self) -> bool:
         """Whether the host has a consent; not while the database cannot be read (locked), so
-        that every page still shows."""
+        that every page still shows. A consent found is kept: it cannot be withdrawn."""
+        if self._consent_found:
+            return True
         try:
             with closing(db.connect(self._db_path)) as conn:
-                return has_consent(conn, self._settings.llm_base_url)
+                found = has_consent(
+                    conn, self._settings.llm_base_url, provider=self._settings.llm_provider
+                )
         except sqlite3.DatabaseError:
             log.warning("the consent for %s could not be read", self._current().host)
             return False
+        self._consent_found = found
+        return found
 
     def effective_context(self) -> int:
         """The tokens a request may use: the setting, and for Ollama no more than the context

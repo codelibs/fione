@@ -324,15 +324,16 @@ def test_base_urls_are_normalized():
 
 
 def test_consent_is_per_host(conn, owner):
-    assert not store.has_consent(conn, "https://llm.example.com/v1")
+    assert not store.has_consent(conn, "https://llm.example.com/v1", provider="ollama")
     store.record_consent(
         conn, owner, provider="claude", model="m1", base_url="HTTPS://LLM.example.com:443/v1/"
     )
-    assert store.has_consent(conn, "https://llm.example.com/v1")
-    assert store.has_consent(conn, "https://llm.example.com/other")  # the host, not the path
-    assert not store.has_consent(conn, "https://other.example.com/v1")
-    assert not store.has_consent(conn, "http://llm.example.com/v1")
-    assert not store.has_consent(conn, "https://llm.example.com:8443/v1")
+    assert store.has_consent(conn, "https://llm.example.com/v1", provider="ollama")
+    # the host, not the path
+    assert store.has_consent(conn, "https://llm.example.com/other", provider="ollama")
+    assert not store.has_consent(conn, "https://other.example.com/v1", provider="ollama")
+    assert not store.has_consent(conn, "http://llm.example.com/v1", provider="ollama")
+    assert not store.has_consent(conn, "https://llm.example.com:8443/v1", provider="ollama")
     row = conn.execute("SELECT * FROM llm_consents").fetchone()
     assert (row["host"], row["provider"], row["model"], row["consented_by"]) == (
         "https://llm.example.com",
@@ -346,13 +347,21 @@ def test_consent_is_per_host(conn, owner):
     "url", ["http://localhost:11434/v1", "http://127.0.0.1:11434", "http://ollama:11434/v1"]
 )
 def test_a_local_host_needs_no_consent(conn, url):
-    assert store.has_consent(conn, url)
+    assert store.has_consent(conn, url, provider="ollama")
     assert count(conn, "llm_consents") == 0
+
+
+@pytest.mark.parametrize("url", ["http://gateway:8080", "http://localhost:8080"])
+def test_claude_needs_consent_even_on_a_local_address(conn, owner, url):
+    assert store.consent_needed("claude", url)
+    assert not store.has_consent(conn, url, provider="claude")
+    store.record_consent(conn, owner, provider="claude", model="m", base_url=url)
+    assert store.has_consent(conn, url, provider="claude")
 
 
 @pytest.mark.parametrize("url", ["", "host", "ftp://host/v1", "http://"])
 def test_an_unusable_base_url_has_no_consent(conn, owner, url):
-    assert store.has_consent(conn, url) is False
+    assert store.has_consent(conn, url, provider="ollama") is False
     with pytest.raises(ValueError):
         store.record_consent(conn, owner, provider="ollama", model="m", base_url=url)
     assert count(conn, "llm_consents") == 0
@@ -364,7 +373,7 @@ def test_recording_twice_keeps_one_row(conn, owner):
             conn, owner, provider="ollama", model=model, base_url="http://gpu.example.com/v1"
         )
     assert count(conn, "llm_consents") == 1
-    assert store.has_consent(conn, "http://gpu.example.com/v1")
+    assert store.has_consent(conn, "http://gpu.example.com/v1", provider="ollama")
 
 
 def test_deleting_the_consenting_user_keeps_the_consent(conn):
@@ -374,7 +383,7 @@ def test_deleting_the_consenting_user_keeps_the_consent(conn):
         conn, user, provider="claude", model="m", base_url="https://api.anthropic.com"
     )
     auth.delete_user(conn, user.id)
-    assert store.has_consent(conn, "https://api.anthropic.com")
+    assert store.has_consent(conn, "https://api.anthropic.com", provider="claude")
     assert conn.execute("SELECT consented_by FROM llm_consents").fetchone()[0] is None
 
 

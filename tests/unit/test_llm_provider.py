@@ -65,6 +65,12 @@ def monitors(tmp_path, db_path):
         monitor.stop()
 
 
+def consent(db_path, url, provider="claude"):
+    with closing(db.connect(db_path)) as conn:
+        admin = auth.create_user(conn, "consenter", "password-123", Role.ADMIN)
+        store.record_consent(conn, admin, provider=provider, model="m", base_url=url)
+
+
 def wait_for(monitor, state, timeout=10.0):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
@@ -119,13 +125,14 @@ def test_native_root():
     assert native_root("http://h:11434") == "http://h:11434"
 
 
-def test_claude_is_ready_when_the_key_is_accepted(fake_llm, monitors):
+def test_claude_is_ready_when_the_key_is_accepted(fake_llm, monitors, db_path):
     fake = fake_llm(api_key="sk-test-0123456789")
+    consent(db_path, fake.origin)
     monitor = monitors(fake.origin, "claude", llm_api_key="sk-test-0123456789", llm_model="m")
     assert monitor.snapshot().state == "checking"
     monitor.start()
     status = wait_for(monitor, "ready")
-    assert (status.model, status.local, status.error_code) == ("m", True, None)
+    assert (status.model, status.local, status.error_code) == ("m", False, None)
     assert status.host == f"127.0.0.1:{fake.port}"
     assert fake.paths[0] == "GET /v1/models"  # no tokens: nothing is asked of the model
     assert "POST /v1/messages" not in fake.paths
@@ -134,8 +141,9 @@ def test_claude_is_ready_when_the_key_is_accepted(fake_llm, monitors):
     assert "GET /api/ps" not in fake.paths
 
 
-def test_claude_401_is_unauthorized(fake_llm, monitors):
+def test_claude_401_is_unauthorized(fake_llm, monitors, db_path):
     fake = fake_llm(api_key="sk-right-0123456789")
+    consent(db_path, fake.origin)
     monitor = monitors(fake.origin, "claude", llm_api_key="sk-wrong-0123456789")
     monitor.start()
     status = wait_for(monitor, "error")
@@ -144,21 +152,32 @@ def test_claude_401_is_unauthorized(fake_llm, monitors):
     assert monitor._thread.is_alive()
 
 
-def test_claude_unreachable(fake_llm, monitors):
+def test_claude_unreachable(fake_llm, monitors, db_path):
     fake = fake_llm()
     fake.stop()
+    consent(db_path, fake.origin)
     monitor = monitors(fake.origin, "claude", llm_api_key="sk-test-0123456789")
     monitor.start()
     assert wait_for(monitor, "unreachable").error_code is None
 
 
-def test_claude_rechecks_the_key_and_recovers(fake_llm, monitors):
+def test_claude_rechecks_the_key_and_recovers(fake_llm, monitors, db_path):
     fake = fake_llm(api_key="sk-right-0123456789")
+    consent(db_path, fake.origin)
     monitor = monitors(fake.origin, "claude", llm_api_key="sk-wrong-0123456789")
     monitor.start()
     wait_for(monitor, "error")
     fake.api_key = "sk-wrong-0123456789"  # the key is fixed on the server's side
     wait_for(monitor, "ready")
+
+
+@pytest.mark.parametrize("url", ["http://gateway:8080", "http://localhost:8080"])
+def test_claude_on_a_local_address_needs_consent(monitors, db_path, url):
+    monitor = monitors(url, "claude", llm_api_key="sk-test-0123456789")
+    status = monitor.snapshot()
+    assert (status.state, status.local) == ("consent_required", False)
+    consent(db_path, url)
+    assert monitor.snapshot().state == "checking"
 
 
 def test_a_present_model_is_ready(fake_llm, monitors):
@@ -331,27 +350,40 @@ def test_consent_required_hides_what_the_last_check_found(monitors):
 
 
 def test_a_locked_database_counts_as_no_consent(monitors, db_path, monkeypatch, caplog):
-    with closing(db.connect(db_path)) as conn:
-        admin = auth.create_user(conn, "boss", "password-123", Role.ADMIN)
-        store.record_consent(conn, admin, provider="ollama", model="m", base_url=REMOTE)
+    consent(db_path, REMOTE, "ollama")
     monitor = monitors(REMOTE)
     monitor._update(state="ready")
-    assert monitor.snapshot().state == "ready"
 
-    def locked(conn, base_url):
+    def locked(conn, base_url, *, provider):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(provider, "has_consent", locked)
-    with caplog.at_level(logging.WARNING, logger="fione.assistant"):
-        assert monitor.snapshot().state == "consent_required"
-    assert "consent" in caplog.text
+    with monkeypatch.context() as patched:
+        patched.setattr(provider, "has_consent", locked)
+        with caplog.at_level(logging.WARNING, logger="fione.assistant"):
+            assert monitor.snapshot().state == "consent_required"
+        assert "consent" in caplog.text
+    assert monitor.snapshot().state == "ready"  # once the database can be read again
+
+
+def test_a_found_consent_is_not_read_again(monitors, db_path, monkeypatch):
+    monitor = monitors(REMOTE)
+    monitor._update(state="ready")
+    assert monitor.snapshot().state == "consent_required"
+    consent(db_path, REMOTE, "ollama")
+    assert monitor.snapshot().state == "ready"
+
+    def unread(conn, base_url, *, provider):
+        raise AssertionError("the consent was read again")
+
+    monkeypatch.setattr(provider, "has_consent", unread)
+    assert monitor.snapshot().state == "ready"
 
 
 def test_a_broken_database_counts_as_no_consent(monitors, db_path, monkeypatch, caplog):
     monitor = monitors(REMOTE)
     monitor._update(state="ready")
 
-    def broken(conn, base_url):
+    def broken(conn, base_url, *, provider):
         raise sqlite3.DatabaseError("file is not a database")
 
     monkeypatch.setattr(provider, "has_consent", broken)

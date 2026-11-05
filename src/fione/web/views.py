@@ -24,6 +24,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fione import db, i18n
 from fione.api.deps import Auth, Conn, cookie_auth, effective_access, request_host
 from fione.api.security import SESSION_COOKIE, origin_matches, tokens_equal
+from fione.assistant.provider import LlmStatus
 from fione.auth import service as auth_service
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import Role
@@ -175,9 +176,9 @@ def render(
 CONSENT_PAGE = "/admin/setup/assistant"
 
 
-def llm_status(request: Request):
-    """The language model's status, read once per request (the consent is looked up in the
-    database on each read)."""
+def llm_status(request: Request) -> LlmStatus:
+    """The language model's status, read once per request (until a consent is found, the
+    monitor looks it up in the database on each read)."""
     if not hasattr(request.state, "llm_status"):
         request.state.llm_status = request.app.state.llm_monitor.snapshot()
     return request.state.llm_status

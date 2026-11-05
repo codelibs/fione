@@ -516,7 +516,8 @@ def test_consent_post_records_it_and_unblocks_turns(remote, fake_llm):
     assert send(remote, cid, "before").status_code == 503
 
     csrf = remote.login("admin")
-    r = remote.client.post(SETUP, data={"csrf_token": csrf}, follow_redirects=False)
+    form = {"csrf_token": csrf, "host": "llm.invalid"}
+    r = remote.client.post(SETUP, data=form, follow_redirects=False)
     assert (r.status_code, r.headers["location"]) == (303, "/admin/system")
     with closing(connect(remote.client)) as conn:
         admin = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()[0]
@@ -537,6 +538,16 @@ def test_consent_post_records_it_and_unblocks_turns(remote, fake_llm):
     remote.csrf = remote.login("ed")
     assert send(remote, cid, "after").status_code == 303
     assert "after" in poll(remote, cid).text and len(fake.requests) == 1
+
+
+@pytest.mark.parametrize("host", [None, "", "other.example.com"])
+def test_consent_post_for_another_host_shows_the_page_again(remote, host):
+    csrf = remote.login("admin")
+    form = {"csrf_token": csrf} if host is None else {"csrf_token": csrf, "host": host}
+    r = remote.client.post(SETUP, data=form, follow_redirects=False)
+    assert r.status_code == 409 and consents(remote) == []
+    assert shown("consent.changed") in r.text and "<code>llm.invalid</code>" in r.text
+    assert 'name="host" value="llm.invalid"' in r.text
 
 
 def test_viewer_sees_the_banner_not_the_page(remote):
@@ -613,12 +624,15 @@ def test_consent_page_names_provider_host_and_model(remote, lang):
         "consent.sent.examples",
         "consent.sent.models",
         "consent.sent.jobs",
+        "consent.sent.questions",
+        "consent.sent.names",
     ):
         assert str(escape(i18n.t(key, lang))) in page, key
     assert str(escape(i18n.t("consent.not_sent", lang, host="llm.invalid"))) in page
     assert "<code>llm.invalid</code>" in page and "<code>claude-opus-5-5</code>" in page
     form = re.search(rf'<form[^>]*action="{SETUP}".*?</form>', page, re.S).group(0)
     assert form.count("<button") == 1 and 'name="csrf_token"' in form
+    assert 'name="host" value="llm.invalid"' in form
     assert page.count(f'action="{SETUP}"') == 1 and "sk-test-0123456789" not in page
 
 

@@ -52,15 +52,18 @@ only downloads it through Ollama; check the terms of any other model you choose.
 
 ### The administrator's consent
 
-When the language model is not on this machine or next to Fione (Claude, or an Ollama on another
-host), an administrator must confirm once that Fione may send it data. Until then the assistant
-does not answer, and an administrator who opens a page is taken to **Assistant setup**. The page
-names the provider, the host and the model, lists what each question sends (column names,
-statistics, example values, results of models, messages of jobs), and says that the data files
-themselves are never sent and that an API key goes only to that host. **Allow sending to
-`<host>`** records the consent for that host; a different host asks again. Other people see a
-banner that the assistant can be used once an administrator finishes the setup. A local server
-(the host's Ollama, the `ollama` profile) needs no consent.
+With Claude, and with an Ollama that is not on this machine or next to Fione, an administrator
+must confirm once that Fione may send the language model data. Claude always needs it, even
+through a gateway on `localhost` or a Compose service, because the data reaches Anthropic. Until
+then the assistant does not answer, and an administrator who opens the Users, System or a
+project's Assistant page is taken to **Assistant setup**. The page names the provider, the host
+and the model, lists what each question sends (the questions and the conversation so far, names
+of projects, datasets and models, column names, statistics, example values, results of models,
+messages of jobs), and says that the data files themselves are never sent and that an API key
+goes only to that host. **Allow sending to `<host>`** records the consent for that host; a
+different host asks again, and a server that changed after the page was shown shows the page
+again. Other people see a banner that the assistant can be used once an administrator finishes
+the setup. A local Ollama (the host's Ollama, the `ollama` profile) needs no consent.
 
 ## The first start
 
@@ -69,7 +72,7 @@ The model download is about 8 GB. The System page shows its progress.
 When the assistant cannot answer (the server is not reachable, the model is missing or being
 downloaded, the API key is refused, or the consent is missing), every signed-in person sees a
 banner on each page that says why, with a link to the System page (to the setup page for the
-consent) for administrators and to the assistant otherwise. The chat page explains it too, and
+consent) for administrators and, inside a project, to its assistant for everyone else. The chat page explains it too, and
 its question box is disabled. Everything else in Fione keeps working.
 
 ## Ways to ask
@@ -82,15 +85,16 @@ use, how to improve it) that fill in the box the same way.
 
 ## What is sent
 
-Each question goes to the language model server together with what the assistant needs to answer:
-the project's and datasets' names, column names and kinds, statistics (missing rates, ranges,
-correlations), and the results of models, with example values from your datasets: the most
-frequent values of a column, the labels of a classification, the points of a curve, and the
-messages of a job, including the failure message of a failed job (cut to 200 characters). All of
-it goes to the configured model server. A server on another machine needs an administrator's
-one-time consent first. MCP clients never receive example values (see MCP).
+Each question goes to the language model server together with the conversation so far and what
+the assistant needs to answer: the names of the project, its datasets and models, column names and
+kinds, statistics (missing rates, ranges, correlations), and the results of models, with example
+values from your datasets: the most frequent values of a column, the labels of a classification,
+the points of a curve, and the messages of a job, including the failure message of a failed job
+(cut to 200 characters). All of it goes to the configured model server. Claude, and an Ollama on
+another machine, need an administrator's one-time consent first. MCP clients never receive
+example values (see MCP).
 
-When the server is not on this machine, every chat user sees a warning with its host name.
+With Claude, or an Ollama on another machine, every chat user sees a warning with its host name.
 `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` of the Fione server apply to this traffic.
 
 Conversations are private: only their creator sees them, administrators included, and a person
@@ -155,7 +159,7 @@ sentence, and `code` with `params` is what the Training proposal card translates
 
 | What you see | What to do |
 |---|---|
-| "cannot reach its language model server" | Is Ollama running, and does `FIONE_LLM_BASE_URL` reach it from the Fione container (`host.docker.internal` on the Mac)? The System page shows the address in use. |
+| "cannot reach its language model server" | Is Ollama running, and does `FIONE_LLM_BASE_URL` reach it from the Fione container (`host.docker.internal` on the Mac)? With Claude, can the Fione container reach the Anthropic API address (`https://api.anthropic.com`, or the gateway in `FIONE_LLM_BASE_URL`), through `HTTPS_PROXY` if one is needed? The System page shows the address in use. |
 | "model is not downloaded yet" | An administrator presses **Download the model** on the System page, or set `FIONE_LLM_AUTO_PULL=true`. |
 | "context is too small" | Start Ollama with `OLLAMA_CONTEXT_LENGTH=16384` and set `FIONE_LLM_CONTEXT_TOKENS=16384`. |
 | "can be used once an administrator finishes the assistant setup" | An administrator confirms the remote host on the **Assistant setup** page (linked from the banner). |

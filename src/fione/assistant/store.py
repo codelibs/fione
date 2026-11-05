@@ -486,16 +486,23 @@ def _consent_host(base_url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def has_consent(conn: sqlite3.Connection, base_url: str) -> bool:
-    """Whether data may go to ``base_url``: a local host needs no consent, any other host needs
-    an administrator's recorded one. A URL that is not usable is never consented."""
+def consent_needed(provider: str, base_url: str) -> bool:
+    """Whether sending to ``base_url`` needs an administrator's consent: always for Claude (its
+    data reaches Anthropic even through a gateway next to Fione), and for any Ollama host that
+    is not local."""
     from fione.assistant.provider import is_local_url  # provider imports this module
 
+    return provider == "claude" or not is_local_url(base_url)
+
+
+def has_consent(conn: sqlite3.Connection, base_url: str, *, provider: str) -> bool:
+    """Whether data may go to ``base_url``: without ``consent_needed`` at once, else only with
+    an administrator's recorded consent. A URL that is not usable is never consented."""
     try:
         host = _consent_host(base_url)
     except ValueError:
         return False
-    if is_local_url(base_url):
+    if not consent_needed(provider, base_url):
         return True
     return conn.execute("SELECT 1 FROM llm_consents WHERE host = ?", (host,)).fetchone() is not None
 

@@ -291,21 +291,30 @@ def consent_page(request: Request, conn: Conn) -> Response:
     auth = _admin(request, conn)
     if not needs_consent(request):
         return RedirectResponse("/admin/system", 303)
+    return _consent_view(request, auth)
+
+
+def _consent_view(request: Request, auth: Auth, *, status: int = 200, **context) -> Response:
     return render(
         request,
         "admin_setup_assistant.html",
         auth,
+        status=status,
         nav="system",
         provider=request.app.state.settings.llm_provider,
         llm=llm_status(request),
+        **context,
     )
 
 
 @router.post(CONSENT_PAGE)
 def consent(request: Request, conn: Conn, form: SmallForm) -> Response:
-    """Record the administrator's consent for the configured host (once per host)."""
+    """Record the administrator's consent for the configured host (once per host), when it is
+    the host the page showed; else the page again, with the host now configured."""
     auth = _post_admin(request, conn, form)
     if needs_consent(request):
+        if field(form, "host") != llm_status(request).host:
+            return _consent_view(request, auth, status=409, changed=True)
         settings = request.app.state.settings
         assistant_store.record_consent(
             conn,
