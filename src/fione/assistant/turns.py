@@ -72,6 +72,8 @@ ERROR_CODES = (
     "http",
     "protocol",
     "timeout",
+    "unauthorized",
+    "truncated",
     "too_many_steps",
     "context_too_small",
     "forbidden",

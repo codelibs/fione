@@ -232,6 +232,8 @@ ADMIN_ROUTES = {
     ("POST", "/admin/users/{uid}/delete"): (401, 403, 403, 303),
     ("GET", "/admin/system"): (303, 403, 403, 200),
     ("POST", "/admin/system/llm/pull"): (401, 403, 403, 303),
+    ("GET", "/admin/setup/assistant"): (303, 403, 403, 303),  # a local host: to the System page
+    ("POST", "/admin/setup/assistant"): (401, 403, 403, 303),
 }
 GLOBAL_FORMS = {
     "/account/password": {"current_password": PW, "new_password": "a-new-password-1"}

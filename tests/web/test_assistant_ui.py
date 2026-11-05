@@ -11,7 +11,7 @@ from markupsafe import escape
 from api_helpers import connect
 from fione import i18n
 from fione.assistant import store
-from fione.assistant.provider import LlmStatus
+from fione.assistant.provider import LlmMonitor, LlmStatus
 from fione.assistant.turns import ERROR_CODES, TooManyTurns, TurnManager
 from fione.auth import service as auth_service
 from fione.jobs import store as jobs
@@ -21,7 +21,12 @@ from fione.web.headers import CONTENT_SECURITY_POLICY
 from web_helpers import make_world
 
 STOP_POLLING = 286
-LLM_STATES = ("off", "checking", "unreachable", "missing", "pulling", "ready", "error")
+LLM_STATES = (
+    "checking", "unreachable", "missing", "pulling", "consent_required", "ready", "error"
+)  # fmt: skip
+NOT_READY = tuple(s for s in LLM_STATES if s != "ready")
+SETUP = "/admin/setup/assistant"
+XSS = "<img src=x onerror=alert(1)>"
 
 
 class StubMonitor:
@@ -228,7 +233,8 @@ def test_a_full_conversation_list_is_409(chat, monkeypatch):
     assert shown("assistant.error.conversation_limit") in r.text
 
 
-def test_remote_warning_names_the_host(make_client, fake_llm):
+def test_remote_warning_names_the_host(make_client, fake_llm, monkeypatch):
+    monkeypatch.setattr(LlmMonitor, "start", lambda self: None)  # the remote host is not probed
     client = make_client(
         llm_base_url="https://api.example.com",
         llm_provider="claude",
@@ -457,3 +463,168 @@ def test_unavailable_page_never_fails(make_client):
 def test_navigation_shows_the_assistant_in_the_simple_view(chat):
     nav = chat.client.get(f"/projects/{chat.p}/datasets").text
     assert f'href="/projects/{chat.p}/assistant"' in nav
+
+
+# --- the consent a remote host needs, and the banner ------------------------------------
+
+REMOTE = {
+    "llm_base_url": "https://llm.invalid",
+    "llm_provider": "claude",
+    "llm_api_key": "sk-test-0123456789",
+}
+
+
+@pytest.fixture
+def remote(make_client, monkeypatch):
+    """A world whose app uses Claude on a remote host nobody has consented to; the host is never
+    probed, and the monitor reports what a probe that the key passed would find."""
+    monkeypatch.setattr(LlmMonitor, "start", lambda self: None)
+    world = make_world(make_client(**REMOTE))
+    world.client.app.state.llm_monitor._update(state="ready")
+    return world
+
+
+def consents(world) -> list[tuple]:
+    with closing(connect(world.client)) as conn:
+        rows = conn.execute("SELECT host, provider, model, consented_by FROM llm_consents")
+        return [tuple(row) for row in rows]
+
+
+def banner(html: str) -> str | None:
+    match = re.search(r"<div[^>]*data-llm-banner[^>]*>(.*?)</div>", html, re.S)
+    return match.group(1) if match else None
+
+
+def test_admin_is_redirected_to_the_consent_page_for_a_remote_host(remote):
+    remote.login("admin")
+    for path in ("/admin/users", "/admin/system", f"/projects/{remote.p}/assistant"):
+        r = remote.client.get(path, follow_redirects=False)
+        assert (r.status_code, r.headers.get("location")) == (303, SETUP), path
+    polled = remote.client.get("/admin/system", headers={"HX-Request": "true"})
+    assert polled.status_code == 200 and 'id="system-status"' in polled.text  # no page in the card
+    home = remote.client.get("/")
+    assert home.status_code == 200 and f'href="{SETUP}"' in banner(home.text)
+    assert remote.client.get(SETUP).status_code == 200
+
+
+def test_consent_post_records_it_and_unblocks_turns(remote, fake_llm):
+    cid = new_conversation(remote)
+    remote.csrf = remote.login("ed")
+    assert send(remote, cid, "before").status_code == 503
+
+    csrf = remote.login("admin")
+    r = remote.client.post(SETUP, data={"csrf_token": csrf}, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/admin/system")
+    with closing(connect(remote.client)) as conn:
+        admin = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()[0]
+    assert consents(remote) == [("https://llm.invalid", "claude", "claude-opus-5-5", admin)]
+    assert remote.client.get("/admin/system", follow_redirects=False).status_code == 200
+    r = remote.client.get(SETUP, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (303, "/admin/system")
+    assert banner(remote.client.get("/").text) is None
+
+    # The same app's monitor decides; the turn itself goes to a fake server.
+    fake = fake_llm([{"text": "after"}])
+    state = remote.client.app.state
+    settings = state.settings.model_copy(
+        update={"llm_base_url": fake.url, "llm_provider": "ollama"}
+    )
+    state.turns.shutdown()
+    state.turns = TurnManager(state.db_path, state.storage, settings, state.llm_monitor)
+    remote.csrf = remote.login("ed")
+    assert send(remote, cid, "after").status_code == 303
+    assert "after" in poll(remote, cid).text and len(fake.requests) == 1
+
+
+def test_viewer_sees_the_banner_not_the_page(remote):
+    remote.login("vi")
+    assert remote.client.get(SETUP, follow_redirects=False).status_code == 403
+    r = page_of(remote)
+    assert r.status_code == 200
+    text = shown("assistant.state.consent_required")
+    assert text in banner(r.text) and text in r.text.replace(banner(r.text), "")
+    assert SETUP not in r.text
+    assert text in banner(remote.client.get("/").text)
+
+
+def test_local_host_has_no_consent_page_redirect(chat):
+    csrf = chat.login("admin")
+    for path in ("/admin/users", "/admin/system", f"/projects/{chat.p}/assistant"):
+        assert chat.client.get(path, follow_redirects=False).status_code == 200, path
+    for r in (
+        chat.client.get(SETUP, follow_redirects=False),
+        chat.client.post(SETUP, data={"csrf_token": csrf}, follow_redirects=False),
+    ):
+        assert (r.status_code, r.headers["location"]) == (303, "/admin/system")
+    assert consents(chat) == []
+
+
+@pytest.mark.parametrize("state", NOT_READY)
+def test_banner_shows_for_every_state_but_ready(chat, state):
+    use_monitor(chat.client, state=state)
+    for path in ("/", f"/projects/{chat.p}", f"/projects/{chat.p}/datasets"):
+        assert shown(f"assistant.state.{state}") in banner(chat.client.get(path).text), path
+
+
+def test_banner_shows_for_unreachable(chat):
+    use_monitor(chat.client, state="unreachable")
+    text = shown("assistant.state.unreachable")
+    page = chat.client.get(f"/projects/{chat.p}").text
+    assert text in banner(page) and f'href="/projects/{chat.p}/assistant"' in banner(page)
+    chat.login("admin")
+    assert 'href="/admin/system"' in banner(chat.client.get("/").text)
+    chat.client.cookies.clear()
+    assert banner(chat.client.get("/login").text) is None  # nothing for anonymous visitors
+    use_monitor(chat.client, state="ready")
+    chat.login("ed")
+    assert banner(chat.client.get("/").text) is None
+
+
+def test_consent_page_is_csrf_protected_and_admin_only(remote):
+    anonymous = remote.client.get(SETUP, follow_redirects=False)
+    assert anonymous.status_code == 303 and anonymous.headers["location"].startswith("/login?")
+    assert remote.client.post(SETUP, data={}, follow_redirects=False).status_code == 401
+    csrf = remote.login("ed")
+    assert remote.client.get(SETUP).status_code == 403
+    assert remote.client.post(SETUP, data={"csrf_token": csrf}).status_code == 403
+    csrf = remote.login("admin")
+    assert remote.client.post(SETUP, data={}).status_code == 403
+    r = remote.client.post(
+        SETUP, data={"csrf_token": csrf}, headers={"Origin": "https://evil.example"}
+    )
+    assert r.status_code == 403
+    assert consents(remote) == []
+    assert remote.client.app.state.llm_monitor.snapshot().state == "consent_required"
+
+
+@pytest.mark.parametrize("lang", ["en", "ja"])
+def test_consent_page_names_provider_host_and_model(remote, lang):
+    remote.login("admin")
+    remote.client.cookies.set("fione_lang", lang)
+    page = remote.client.get(SETUP).text
+    for key in (
+        "consent.title",
+        "consent.provider.claude",
+        "consent.sent.columns",
+        "consent.sent.stats",
+        "consent.sent.examples",
+        "consent.sent.models",
+        "consent.sent.jobs",
+    ):
+        assert str(escape(i18n.t(key, lang))) in page, key
+    assert str(escape(i18n.t("consent.not_sent", lang, host="llm.invalid"))) in page
+    assert "<code>llm.invalid</code>" in page and "<code>claude-opus-5-5</code>" in page
+    form = re.search(rf'<form[^>]*action="{SETUP}".*?</form>', page, re.S).group(0)
+    assert form.count("<button") == 1 and 'name="csrf_token"' in form
+    assert page.count(f'action="{SETUP}"') == 1 and "sk-test-0123456789" not in page
+
+
+def test_consent_page_and_banner_escape_hostile_text(remote):
+    use_monitor(remote.client, state="consent_required", local=False, host=XSS, model=XSS)
+    remote.login("admin")
+    page = remote.client.get(SETUP).text
+    assert str(escape(XSS)) in page and XSS not in page
+    remote.login("ed")
+    page = page_of(remote).text
+    assert str(escape(XSS)) in page and XSS not in page  # the remote warning names the host
+    assert XSS not in banner(page) and str(escape(XSS)) not in banner(page)

@@ -5,6 +5,8 @@ Users: create, change the role, set a new password (which ends that user's sessi
 delete; the service refuses the last admin and one's own role or account, and the reason is
 shown on the page. System: what ``/api/v1/system/status`` reports plus failed jobs of the
 last day, the workers and the uptime; never a secret, a path, a URL or the environment.
+Assistant setup: the one-time consent a remote language model host needs; until it is given,
+an administrator's admin pages lead there.
 """
 
 import logging
@@ -19,13 +21,14 @@ from fione.api.deps import Auth, Conn
 from fione.api.routes_system import system_status
 from fione.api.schemas import MAX_PASSWORD_LENGTH
 from fione.api.security import password_work
+from fione.assistant import store as assistant_store
 from fione.auth import service as auth_service
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import Role
 from fione.auth.service import UserConflict, UsernameError, UserNotFound
 from fione.web.access import SmallForm, admin_only, field, form_auth, parse_id, signed_in
 from fione.web.easyml import STOP_POLLING
-from fione.web.views import UiError, language, render
+from fione.web.views import CONSENT_PAGE, UiError, language, needs_consent, render, to_consent
 
 router = APIRouter(include_in_schema=False)
 log = logging.getLogger(__name__)
@@ -90,7 +93,8 @@ def _users_view(
 
 @router.get("/admin/users")
 def users(request: Request, conn: Conn) -> Response:
-    return _users_view(request, conn, _admin(request, conn))
+    auth = _admin(request, conn)
+    return to_consent(request, auth) or _users_view(request, conn, auth)
 
 
 def _password_ok(password: str) -> bool:
@@ -224,7 +228,7 @@ def _system_context(request: Request, conn) -> dict:
         "poll_secs": POLL_SECS,
         "llm_status": state.llm_monitor.snapshot(),
         "llm_context_tokens": settings.llm_context_tokens,
-        "llm_ollama": settings.llm_base_url is not None and settings.llm_provider == "ollama",
+        "llm_ollama": settings.llm_provider == "ollama",
     }
 
 
@@ -236,6 +240,8 @@ def system(request: Request, conn: Conn) -> Response:
     polling = bool(request.headers.get("hx-request"))
     try:
         auth = _admin(request, conn)
+        if not polling and (redirect := to_consent(request, auth)):
+            return redirect
         context = _system_context(request, conn)
     except UiError as e:
         if not polling or e.status == 401:
@@ -264,4 +270,40 @@ def llm_pull(request: Request, conn: Conn, form: SmallForm) -> Response:
     """Start pulling the Ollama model (nothing happens if a pull is running)."""
     _post_admin(request, conn, form)
     request.app.state.llm_monitor.pull_now()
+    return RedirectResponse("/admin/system", 303)
+
+
+# --- the consent a remote language model needs ---------------------------------------------
+
+
+@router.get(CONSENT_PAGE)
+def consent_page(request: Request, conn: Conn) -> Response:
+    """What the assistant sends to its remote host, and the button that allows it. Once it is
+    allowed, or for a local host, on to the System page."""
+    auth = _admin(request, conn)
+    if not needs_consent(request):
+        return RedirectResponse("/admin/system", 303)
+    return render(
+        request,
+        "admin_setup_assistant.html",
+        auth,
+        nav="system",
+        provider=request.app.state.settings.llm_provider,
+        llm=request.app.state.llm_monitor.snapshot(),
+    )
+
+
+@router.post(CONSENT_PAGE)
+def consent(request: Request, conn: Conn, form: SmallForm) -> Response:
+    """Record the administrator's consent for the configured host (once per host)."""
+    auth = _post_admin(request, conn, form)
+    if needs_consent(request):
+        settings = request.app.state.settings
+        assistant_store.record_consent(
+            conn,
+            auth.user,
+            provider=settings.llm_provider,
+            model=settings.llm_model,
+            base_url=settings.llm_base_url,
+        )
     return RedirectResponse("/admin/system", 303)

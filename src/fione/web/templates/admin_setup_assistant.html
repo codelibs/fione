@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}{{ t('consent.title') }}{% endblock %}
+{% block content %}
+<div class="container page">
+  <header class="page-header">
+    <h1 class="page-header__title">{{ t('consent.title') }}</h1>
+    <p class="page-header__lead text-muted">{{ t('consent.lead') }}</p>
+  </header>
+  <section class="card card-padded stack" aria-labelledby="consent-sent-title">
+    <dl class="facts facts-stacked">
+      <div><dt>{{ t('consent.provider') }}</dt><dd>{{ t('consent.provider.' ~ provider) }}</dd></div>
+      <div><dt>{{ t('system.llm_server') }}</dt><dd><code>{{ llm.host }}</code></dd></div>
+      <div><dt>{{ t('system.llm_model') }}</dt><dd><code>{{ llm.model }}</code></dd></div>
+    </dl>
+    <h2 class="section-header__title" id="consent-sent-title">{{ t('consent.sent_title', host=llm.host) }}</h2>
+    <p>{{ t('consent.sent_intro') }}</p>
+    <ul>
+      {% for item in ("columns", "stats", "examples", "models", "jobs") %}
+      <li>{{ t('consent.sent.' ~ item) }}</li>
+      {% endfor %}
+    </ul>
+    <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('consent.not_sent', host=llm.host) }}</span></div>
+    <p class="text-muted text-sm">{{ t('consent.once') }}</p>
+    <form method="post" action="/admin/setup/assistant">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button type="submit" class="btn btn-primary">{{ t('consent.confirm', host=llm.host) }}</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

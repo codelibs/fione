@@ -164,12 +164,28 @@ def render(
             "static": _static,
             "version": __version__,
             "mode": ui_mode(request),
-            # The assistant's place in a project's navigation and entry links: configured or not.
-            "assistant_link": request.app.state.settings.llm_base_url is not None,
+            # The assistant's state, read by the banner of a full page only.
+            "llm_snapshot": request.app.state.llm_monitor.snapshot,
             **context,  # may override ``here``: where the language switch returns to
         },
         status_code=status,
     )
+
+
+CONSENT_PAGE = "/admin/setup/assistant"
+
+
+def needs_consent(request: Request) -> bool:
+    """Whether the assistant waits for an administrator's consent to its remote host."""
+    return request.app.state.llm_monitor.snapshot().state == "consent_required"
+
+
+def to_consent(request: Request, auth: Auth) -> RedirectResponse | None:
+    """For an administrator's page view while the consent is missing: on to the consent page,
+    as ``/login`` goes to ``/first-admin`` while there is no administrator."""
+    if auth.user.role == Role.ADMIN and needs_consent(request):
+        return RedirectResponse(CONSENT_PAGE, 303)
+    return None
 
 
 def to_login(request: Request) -> RedirectResponse:

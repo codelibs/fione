@@ -14,20 +14,14 @@
     </div>
   </header>
 
-  {% if not llm_on %}
-  <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('assistant.off') }}</span></div>
-  {% else %}
   {% if remote_host %}
   <div class="alert alert-warning" role="note" data-remote-warning>{{ icon("alert") }}<span>{{ t('assistant.remote_warning', host=remote_host) }}</span></div>
-  {% endif %}
-  {% if samples_on %}
-  <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t('assistant.samples_on') }}</span></div>
   {% endif %}
   {% if not llm_ready %}
   <div class="alert alert-warning" role="status">
     {{ icon("alert") }}
     <div class="stack-tight">
-      <p>{{ t('assistant.state.' ~ llm.state) }}</p>
+      <p>{{ t('assistant.error.unauthorized' if llm.error_code == 'unauthorized' else 'assistant.state.' ~ llm.state) }}</p>
       {% if llm.state == "pulling" %}
       {% if llm.total %}
       <progress class="progress" max="{{ llm.total }}" value="{{ llm.completed or 0 }}" aria-label="{{ t('assistant.state.pulling') }}">{{ ((llm.completed or 0) * 100 / llm.total)|round|int }}%</progress>
@@ -39,18 +33,15 @@
     </div>
   </div>
   {% endif %}
-  {% endif %}
 
   <div class="chat-layout">
     <aside class="chat-side stack-tight" aria-labelledby="conversations-title">
       <h2 class="section-header__title" id="conversations-title">{{ t('assistant.conversations') }}</h2>
       <p class="text-muted text-sm">{{ t('assistant.private') }}</p>
-      {% if llm_on %}
       <form method="post" action="{{ chat }}/conversations">
         <input type="hidden" name="csrf_token" value="{{ csrf }}">
         <button type="submit" class="btn btn-secondary btn-sm">{{ icon("plus", "icon icon-sm") }}{{ t('assistant.new') }}</button>
       </form>
-      {% endif %}
       {% if conversations %}
       <ul class="chat-conversations" role="list">
         {% for c in conversations %}
@@ -67,7 +58,6 @@
       {% include "_assistant_thread.html" %}
       {% endif %}
 
-      {% if llm_on %}
       {% if notice %}
       <div class="alert alert-danger" role="alert" id="assistant-notice" tabindex="-1" autofocus>{{ icon("alert") }}<span>{{ t(notice) }}{% if detail %} {{ detail }}{% endif %}</span></div>
       {% endif %}
@@ -98,7 +88,6 @@
         <p><button type="submit" class="btn btn-primary"{% if not llm_ready %} disabled{% endif %}>{{ t('assistant.send') }}</button></p>
         {% endif %}
       </form>
-      {% endif %}
 
       {% if conversation is defined %}
       <details class="confirm" data-confirm-panel>
