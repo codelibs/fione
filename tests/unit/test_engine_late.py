@@ -106,8 +106,10 @@ def test_a_share_of_the_search_time_is_kept_for_the_late_families(monkeypatch):
     calls = _schedule(monkeypatch, reference_secs=0.1)
     base = [(name, secs) for name, secs, _ in calls if name in FAMILY_ORDER]
     for i, (name, secs) in enumerate(base):
-        # No time was used: the base families see 85 s, each takes its weight of what is left.
-        expected = 100 * (1 - share) * weights[name] / sum(weights[f] for f in FAMILY_ORDER[i:])
+        # No time was used: each takes its weight of what is left. TextLinear (the family the
+        # late ones vary) sees all 100 s, as without late families, the others 85 s.
+        left = 100 if name == "TextLinear" else 100 * (1 - share)
+        expected = left * weights[name] / sum(weights[f] for f in FAMILY_ORDER[i:])
         assert secs == pytest.approx(expected, rel=0.01)
     assert base[-1][1] == pytest.approx(85, rel=0.01)  # the last one: all that the base may use
     # Each uses its whole share: the base families spend 85% of 2 s, the late ones get the rest.
@@ -115,6 +117,16 @@ def test_a_share_of_the_search_time_is_kept_for_the_late_families(monkeypatch):
     shares = {name: secs for name, secs, _ in calls}
     assert shares["TextLinearChar"] == pytest.approx(0.5 * 0.3, rel=0.25)
     assert [name for name, _, _ in calls][-3:] == list(LATE_ORDER)  # and they all ran
+    others = sum(secs for name, secs, _ in calls if name in FAMILY_ORDER and name != "TextLinear")
+    assert others <= (1 - share) * 2.0 * 1.02  # the others together never pass 85% of the time
+
+
+def test_textlinear_keeps_the_share_it_has_without_late_families(monkeypatch):
+    with_late = _schedule(monkeypatch, reference_secs=0.001, spend=2.0)
+    without = _schedule(monkeypatch, reference_secs=0.001, spend=2.0, late=())
+    share = {name: secs for name, secs, _ in with_late}["TextLinear"]
+    # LightGBM ran under a smaller share, so more of the time is left for TextLinear.
+    assert share >= {name: secs for name, secs, _ in without}["TextLinear"] * 0.99
 
 
 def test_late_families_alone_have_the_whole_search_time(monkeypatch):

@@ -13,9 +13,10 @@ spec 5.1/5.7) and spends it in phases:
    Each family hands on its ``TOP_TRIALS`` best trials, as candidates ``Family``,
    ``Family#2`` and ``Family#3``.
    After them come the *late* families (``LATE_ORDER``: variants of TextLinear, for data with
-   prose). When any applies, ``LATE_SHARE`` of the search time is kept for them: the base
-   families' shares are scaled to the other 0.85. The late families get what is left of the
-   search time (that and what the base families leave), never the time of the later phases:
+   prose). When any applies, ``LATE_SHARE`` of the search time is kept for them, taken from
+   the base families' shares (scaled to 0.85) except TextLinear's, which is as without them.
+   The late families get what is left of the search time (that and what the base families
+   leave), never the time of the later phases:
    each one the search time still left times its ``LATE_WEIGHTS`` share among the late families
    not yet run, and only when its first trial is expected to fit in that share (``cost`` times
    the first trial of TextLinear). A late family that does not apply to the data is not run and
@@ -395,9 +396,11 @@ class AutoML:
         finished = 0
         # With late families to run, the base ones share the search time less ``LATE_SHARE``:
         # their shares are scaled by 1 - LATE_SHARE; what they leave unused is left over too.
+        # The family a late one is a variant of keeps its share as without late families.
         # With no base family (an explicit list of late ones) they have all of it.
         keep = any(f in LATE_ORDER for f in families) and any(f not in LATE_ORDER for f in families)
         base = search.child((1 - LATE_SHARE) * search.remaining()) if keep else search
+        references = {FAMILIES[f].reference for f in families if f in LATE_ORDER}
         for i, name in enumerate(families):
             if self.should_stop():
                 reasons[name] = "cancelled"
@@ -413,7 +416,8 @@ class AutoML:
                 # Leave one trial for each family after this one.
                 max_trials = max(1, c.max_models - finished - (len(rest) - 1))
             weights = LATE_WEIGHTS if late else FAMILY_WEIGHTS
-            left = search.remaining() if late else base.remaining()
+            own = search if late or name in references else base
+            left = own.remaining()
             share = left * weights[name] / sum(weights[f] for f in rest)
             if late and not _late_fits(FAMILIES[name], share, results, self.explicit):
                 continue
@@ -425,7 +429,7 @@ class AutoML:
                     folds,
                     task,
                     prep,
-                    (search if late else base).child(share),
+                    own.child(share),
                     self.emit,
                     self.should_stop,
                     seed=c.seed,
