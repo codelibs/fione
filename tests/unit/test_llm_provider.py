@@ -114,7 +114,7 @@ def test_claude_provider_is_ready_without_probing(fake_llm, monitors):
     monitor.refresh_context()
     time.sleep(0.2)
     assert fake.requests == [] and fake.paths == []
-    assert monitor.effective_context() == 16384
+    assert monitor.effective_context() == 200000  # the claude default, never probed
 
 
 def test_a_present_model_is_ready(fake_llm, monitors):

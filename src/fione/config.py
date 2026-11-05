@@ -36,6 +36,8 @@ _LLM_DEFAULT_URLS = {
 }
 # MLX models need a host-native Ollama on Apple Silicon; elsewhere use gemma4:12b.
 _LLM_DEFAULT_MODELS = {"ollama": "gemma4:12b-mlx", "claude": "claude-opus-5-5"}
+# (llm_max_tokens, llm_context_tokens) when unset: Claude always thinks, within max_tokens.
+_LLM_DEFAULT_TOKENS = {"ollama": (1024, 16384), "claude": (16000, 200000)}
 # The request body is Fione's; the extra body only adds to it.
 LLM_RESERVED_KEYS = ("model", "messages", "tools", "stream", "stream_options", "max_tokens")
 
@@ -90,7 +92,8 @@ class Settings(BaseSettings):
     llm_auto_pull: bool = False
     # The read-only tools over MCP at /mcp, for an API token; off unless set.
     mcp_enabled: bool = False
-    llm_max_tokens: int = Field(1024, ge=64, le=8192)  # per completion
+    # Unset: the provider's default (_LLM_DEFAULT_TOKENS).
+    llm_max_tokens: int = Field(1024, ge=64, le=64000)  # per completion
     llm_context_tokens: int = Field(16384, le=262144)  # the budget of one request
     llm_max_tool_rounds: int = Field(6, ge=1, le=20)  # completions with tool calls per turn
     llm_turn_timeout_secs: int = Field(180, ge=10, le=1800)  # one turn, all its rounds
@@ -143,6 +146,11 @@ class Settings(BaseSettings):
         if self.llm_provider == "claude" and self.llm_api_key is None:
             raise ValueError("FIONE_LLM_API_KEY is required with FIONE_LLM_PROVIDER=claude")
         self.llm_model = self.llm_model or _LLM_DEFAULT_MODELS[self.llm_provider]
+        max_tokens, context_tokens = _LLM_DEFAULT_TOKENS[self.llm_provider]
+        if "llm_max_tokens" not in self.model_fields_set:
+            self.llm_max_tokens = max_tokens
+        if "llm_context_tokens" not in self.model_fields_set:
+            self.llm_context_tokens = context_tokens
         if not _LLM_MODEL.fullmatch(self.llm_model):
             raise ValueError("FIONE_LLM_MODEL must be 1 to 200 visible ASCII characters")
         if self.llm_context_tokens - self.llm_max_tokens < MIN_PROMPT_TOKENS:

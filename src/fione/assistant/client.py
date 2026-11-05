@@ -26,7 +26,9 @@ MAX_ERROR_BODY_BYTES = 4096
 MAX_RESPONSE_BYTES = 16 * 2**20
 MAX_LINE_BYTES = 2**20  # of a line that has not ended yet
 
-ErrorCode = Literal["unreachable", "timeout", "http", "unauthorized", "protocol", "cancelled"]
+ErrorCode = Literal[
+    "unreachable", "timeout", "http", "unauthorized", "protocol", "truncated", "cancelled"
+]
 
 
 class LlmError(Exception):

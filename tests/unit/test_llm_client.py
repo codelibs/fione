@@ -249,6 +249,27 @@ def test_a_stream_that_stops_short_is_a_protocol_error(fake_llm):
     assert raised.value.code == "protocol"
 
 
+def test_token_defaults_follow_the_provider(tmp_path, monkeypatch):
+    def tokens(**values):
+        settings = make_settings(tmp_path, **values)
+        return settings.llm_max_tokens, settings.llm_context_tokens
+
+    claude = {"llm_provider": "claude", "llm_base_url": "", "llm_api_key": KEY}
+    assert tokens() == (1024, 16384)
+    assert tokens(**claude) == (16000, 200000)
+    assert tokens(**claude, llm_max_tokens=2000) == (2000, 200000)
+    assert tokens(**claude, llm_context_tokens=50000) == (16000, 50000)
+    assert tokens(llm_max_tokens=20000, llm_context_tokens=100000) == (20000, 100000)
+    assert tokens(**claude, llm_max_tokens=64000) == (64000, 200000)
+    monkeypatch.setenv("FIONE_LLM_MAX_TOKENS", "3000")
+    assert tokens(**claude) == (3000, 200000)
+    monkeypatch.delenv("FIONE_LLM_MAX_TOKENS")
+    with pytest.raises(ValidationError):
+        tokens(**claude, llm_max_tokens=64001)
+    with pytest.raises(ValidationError):  # Ollama's default context has no room for it
+        tokens(llm_max_tokens=20000)
+
+
 def test_settings_rules(tmp_path, monkeypatch):
     def check(**values):
         return make_settings(tmp_path, **values)

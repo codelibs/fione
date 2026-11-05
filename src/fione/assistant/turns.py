@@ -193,6 +193,12 @@ class _Turn:
             if not store.update_message(self.conn, self.row, state="running"):
                 raise _Stop()
             completion = self._complete(project_id, first, refresh=rounds == 0)
+            if completion.finish_reason == "length" and not (
+                completion.content or completion.tool_calls
+            ):
+                raise LlmError(
+                    "truncated", "the reply reached FIONE_LLM_MAX_TOKENS before any text"
+                )
             content = completion.content[:MAX_CONTENT_CHARS]
             if not completion.tool_calls:
                 store.finish_message(self.conn, self.row, "done", content=content)

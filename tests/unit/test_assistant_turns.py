@@ -591,6 +591,19 @@ def test_provider_text_is_not_stored(env, fake_llm, caplog):
     assert "\nFORGED" not in caplog.text  # one record, one line
 
 
+def test_a_reply_cut_before_any_text_is_truncated(env, fake_llm):
+    cut = 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n'
+    fake = fake_llm([{"status": 200, "body": cut, "content_type": "text/event-stream"}])
+    rows = turn(env, settings_for(env, fake))
+    assert (rows[-1].state, rows[-1].error_code, rows[-1].content) == ("failed", "truncated", "")
+
+    # Text cut at the limit is still an answer.
+    fake.script = [{"status": 200, "content_type": "text/event-stream",
+                    "body": cut.replace('"delta":{}', '"delta":{"content":"Part"}')}]  # fmt: skip
+    rows = turn(env, settings_for(env, fake))
+    assert (rows[-1].state, rows[-1].content) == ("done", "Part")
+
+
 def test_an_unexpected_error_fails_the_turn(env, fake_llm, monkeypatch, caplog):
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
