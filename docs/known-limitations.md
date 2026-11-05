@@ -105,6 +105,12 @@ What this release does not do, or does with a catch. Japanese summary at the end
   more, so short runs may add none. The gate judges on a sample of at most 20,000 rows and a
   small LightGBM, so a feature that only a neural network or a linear model would use is not
   found; target encoding and categorical crosses as categories are not built.
+- **A text column with more than 200 distinct values is read by the models as how often each
+  value occurs** (its share of the training rows); a name, a code or an id that is nearly unique
+  therefore carries almost no signal by itself. Its parts and its text are read only through the
+  derived features (and TextLinear for running text), when the choice of them keeps them. A value
+  not seen in training gets the share of the rarest value in training, so new rows stay inside
+  the range the models were fitted on.
 - **Extra seeds make a model bigger and slower to predict.** Time left after the final refits
   buys up to four more refits of each boosting or forest member; their predictions, importances
   and contributions are averaged, so each costs that many times more (the size limits still
