@@ -1,9 +1,13 @@
 """The LLM provider's status for the system page and the assistant.
 
-``LlmMonitor`` keeps a ``LlmStatus`` up to date. For ``ollama`` it checks the server, finds out
-whether the model is there and pulls it when it is not (``llm_auto_pull``, or an
-administrator's request), in a daemon thread that ``stop`` ends. For ``openai`` there is
-nothing to ask: the provider is ``ready`` and each turn reports its own failures.
+``LlmMonitor`` keeps a ``LlmStatus`` up to date in a daemon thread that ``stop`` ends. For
+``ollama`` it checks the server, finds out whether the model is there and pulls it when it is
+not (``llm_auto_pull``, or an administrator's request). For ``claude`` it asks the Models API,
+which costs no tokens, whether the key is accepted (``unauthorized`` when it is not).
+
+A remote host (not ``is_local_url``) needs an administrator's consent: ``snapshot`` reports
+``consent_required`` until one is recorded, and looks it up on each read, so a consent takes
+effect at once.
 
 A status never holds the base URL's path, the API key or text from the server: a failed pull
 is the code ``pull_failed`` here, and its cleaned text is in the log.
@@ -14,19 +18,25 @@ import json
 import logging
 import re
 import threading
+from contextlib import closing
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
 
-from fione.assistant.store import normal_base_url
+from fione import db
+from fione.assistant.claude import ANTHROPIC_VERSION
+from fione.assistant.store import has_consent, normal_base_url
 from fione.config import Settings
 from fione.schema import clean_text
 
 log = logging.getLogger("fione.assistant")
 
-LlmState = Literal["off", "checking", "unreachable", "missing", "pulling", "ready", "error"]
+LlmState = Literal[
+    "checking", "unreachable", "missing", "pulling", "consent_required", "ready", "error"
+]
 
 OLLAMA_DEFAULT_CONTEXT = 4096  # what Ollama serves unless it is configured otherwise
 READY_RECHECK_SECS = 300.0
@@ -108,31 +118,39 @@ class LlmMonitor:
     def __init__(
         self,
         settings: Settings,
+        db_path: Path,
         *,
         http: httpx.Client | None = None,
         recheck_secs: float = 30.0,
     ):
         self._settings = settings
+        self._db_path = db_path  # where the consents are
         self._recheck_secs = recheck_secs
         self._http = http or httpx.Client()
         self._owns_http = http is None
         self._model = settings.llm_model
-        configured = settings.llm_base_url is not None
-        self._ollama = configured and settings.llm_provider == "ollama"
-        self._root = native_root(settings.llm_base_url) if self._ollama else None
+        self._ollama = settings.llm_provider == "ollama"
+        if self._ollama:
+            self._root = native_root(settings.llm_base_url)
+        else:
+            self._root = settings.llm_base_url.rstrip("/")
         self._headers = {}
         if settings.llm_api_key is not None:
-            self._headers = {"Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}"}
+            key = settings.llm_api_key.get_secret_value()
+            if self._ollama:
+                self._headers = {"Authorization": f"Bearer {key}"}
+            else:
+                self._headers = {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION}
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._pulling = False
         self._pull_blocked = False  # a pull failed: only an administrator starts the next
         self._status = LlmStatus(
-            state="off" if not configured else ("checking" if self._ollama else "ready"),
-            model=settings.llm_model if configured else None,
-            local=configured and is_local_url(settings.llm_base_url),
-            host=_host(settings.llm_base_url) if configured else None,
+            state="checking",
+            model=settings.llm_model,
+            local=is_local_url(settings.llm_base_url),
+            host=_host(settings.llm_base_url),
             completed=None,
             total=None,
             error_code=None,
@@ -142,8 +160,19 @@ class LlmMonitor:
     # --- what others ask
 
     def snapshot(self) -> LlmStatus:
+        """The status; ``consent_required`` while a remote host has no consent."""
+        status = self._current()
+        if not status.local and not self._consented():
+            return replace(status, state="consent_required")
+        return status
+
+    def _current(self) -> LlmStatus:
         with self._lock:
             return self._status
+
+    def _consented(self) -> bool:
+        with closing(db.connect(self._db_path)) as conn:
+            return has_consent(conn, self._settings.llm_base_url)
 
     def effective_context(self) -> int:
         """The tokens a request may use: the setting, and for Ollama no more than the context
@@ -151,12 +180,12 @@ class LlmMonitor:
         limit = self._settings.llm_context_tokens
         if not self._ollama:
             return limit
-        known = self.snapshot().server_context
+        known = self._current().server_context
         return min(limit, OLLAMA_DEFAULT_CONTEXT if known is None else known)
 
     def context_known(self) -> bool:
         """False while Ollama has not reported the context of the loaded model."""
-        return not self._ollama or self.snapshot().server_context is not None
+        return not self._ollama or self._current().server_context is not None
 
     def refresh_context(self) -> None:
         """Read the loaded model's context from ``/api/ps``. When the model is not loaded, the
@@ -217,7 +246,7 @@ class LlmMonitor:
     # --- the thread
 
     def start(self) -> None:
-        if self._ollama and self._thread is None:
+        if self._thread is None:
             self._thread = threading.Thread(target=self._run, name="llm-monitor", daemon=True)
             self._thread.start()
 
@@ -244,13 +273,16 @@ class LlmMonitor:
     def _check(self) -> float:
         """One look at the server; the seconds until the next."""
         try:
-            present = self._model_present()
+            present = self._model_present() if self._ollama else self._key_accepted()
         except httpx.TransportError:
             self._update_idle(state="unreachable", error_code=None, completed=None, total=None)
             return self._recheck_secs
-        except (httpx.HTTPError, *_BAD_ANSWER):
-            log.warning("the LLM server (%s) could not be queried", self._status.host)
-            self._update_idle(state="error", error_code="probe_failed")
+        except (httpx.HTTPError, *_BAD_ANSWER) as e:
+            unauthorized = isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 401
+            if not unauthorized:
+                log.warning("the LLM server (%s) could not be queried", self._status.host)
+            code = "unauthorized" if unauthorized else "probe_failed"
+            self._update_idle(state="error", error_code=code)
             return self._recheck_secs
         if present:
             with self._lock:
@@ -267,6 +299,19 @@ class LlmMonitor:
         if not pulling and self._settings.llm_auto_pull and self._begin_pull(forced=False):
             self._pull()
         return self._recheck_secs
+
+    def _key_accepted(self) -> bool:
+        """Ask the Models API for one entry, which costs no tokens; ``httpx.HTTPStatusError``
+        (401 for a key it does not accept) unless it answers."""
+        with self._http.stream(
+            "GET",
+            f"{self._root}/v1/models",
+            params={"limit": 1},
+            headers=self._headers,
+            timeout=self._timeout(),
+        ) as response:
+            response.raise_for_status()
+        return True
 
     def _is_model(self, *names) -> bool:
         wanted = {self._model}

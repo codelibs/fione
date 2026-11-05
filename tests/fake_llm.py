@@ -22,13 +22,13 @@ Script items (the keys combine, except ``status``)::
 
 ``POST /v1/messages`` reads Anthropic requests: the policies see them as OpenAI-shaped messages
 (``tool_use`` blocks as tool calls, ``tool_result`` blocks as tool messages), while
-``requests`` keeps them as sent. It needs ``x-api-key`` and ``anthropic-version``; with
-``api_key`` set, another key is a 401. Every reply starts with a thinking block, as the
-models that always think send; its signature stands for the request before it (``system``,
-``tools`` and the earlier messages). A thinking block sent back after that request changed is
-a 400, unless ``thinking.block_binding.prefix_mismatch_behavior`` is ``drop_block`` (which
-needs the ``thinking-binding-controls-2026-08-01`` beta): then it and the thinking blocks after
-it are dropped and listed in ``input_transformations``.
+``requests`` keeps them as sent. It and ``GET /v1/models`` (an empty list) need ``x-api-key``
+and ``anthropic-version``; with ``api_key`` set, another key is a 401. Every reply starts with
+a thinking block, as the models that always think send; its signature stands for the request
+before it (``system``, ``tools`` and the earlier messages). A thinking block sent back after
+that request changed is a 400, unless ``thinking.block_binding.prefix_mismatch_behavior`` is
+``drop_block`` (which needs the ``thinking-binding-controls-2026-08-01`` beta): then it and the
+thinking blocks after it are dropped and listed in ``input_transformations``.
 
 Run it with ``python fake_llm.py --port N --policy e2e [--missing] [--host H] [--pull-delay S]``
 (``--host 0.0.0.0`` inside a container; ``--pull-delay`` slows a pull down, to watch its
@@ -298,6 +298,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         self.llm.paths.append(f"GET {path}")
+        headers = {name.lower(): value for name, value in self.headers.items()}
         if path in self.llm.raw_replies:
             return self._send(200, "application/json", self.llm.raw_replies[path])
         if path == "/api/version":
@@ -306,6 +307,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"models": self.llm.installed_models()})
         elif path == "/api/ps":
             self._json({"models": self.llm.running_models()})
+        elif path == "/v1/models":
+            self._models(headers)
         elif path == "/_requests":
             self._json(self.llm.requests)
         else:
@@ -466,14 +469,26 @@ class _Handler(BaseHTTPRequestHandler):
             time.sleep(item.get("chunk_delay", 0))
         self._event("[DONE]")
 
-    def _messages(self, body: dict, headers: dict) -> None:
+    def _authorized(self, headers: dict) -> bool:
+        """Check ``x-api-key`` and ``anthropic-version``; sends the error reply when they fail."""
         key = headers.get("x-api-key")
         if not key or (self.llm.api_key is not None and key != self.llm.api_key):
             error = {"type": "authentication_error", "message": f"invalid x-api-key {key}"}
-            return self._json({"type": "error", "error": error}, 401)
+            self._json({"type": "error", "error": error}, 401)
+            return False
         if not headers.get("anthropic-version"):
             error = {"type": "invalid_request_error", "message": "anthropic-version is required"}
-            return self._json({"type": "error", "error": error}, 400)
+            self._json({"type": "error", "error": error}, 400)
+            return False
+        return True
+
+    def _models(self, headers: dict) -> None:
+        if self._authorized(headers):
+            self._json({"data": [], "has_more": False, "first_id": None, "last_id": None})
+
+    def _messages(self, body: dict, headers: dict) -> None:
+        if not self._authorized(headers):
+            return
         beta = BINDING_BETA in (headers.get("anthropic-beta") or "").split(",")
         binding = (body.get("thinking") or {}).get("block_binding")
         if binding is not None and not beta:

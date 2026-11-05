@@ -29,8 +29,9 @@ def make_settings(data_dir, **overrides) -> Settings:
         "cookie_secure": False,
         "trust_proxy": False,
         "explain_after_training": False,
-        # A local Ollama address nothing listens on; tests that need a server pass the fake's.
-        "llm_base_url": "http://127.0.0.1:11434/v1",
+        # A local address nothing listens on (a real Ollama is never probed); tests that need a
+        # server pass the fake's.
+        "llm_base_url": "http://127.0.0.1:9/v1",
         "llm_provider": "ollama",
         **overrides,
     }

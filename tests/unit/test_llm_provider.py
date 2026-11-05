@@ -1,16 +1,19 @@
 """The LLM provider's status: which URLs are local, the monitor that checks an Ollama server
-and pulls its model, and the context the server really gives."""
+and pulls its model or a Claude key, the consent a remote host needs, and the context the
+server really gives."""
 
 import json
 import logging
 import time
+from contextlib import closing
 
 import httpx
 import pytest
 
 from api_helpers import make_settings
 from fake_llm import FakeLlm
-from fione.assistant import provider
+from fione import db
+from fione.assistant import provider, store
 from fione.assistant.provider import (
     OLLAMA_DEFAULT_CONTEXT,
     LlmMonitor,
@@ -18,6 +21,8 @@ from fione.assistant.provider import (
     is_local_url,
     native_root,
 )
+from fione.auth import service as auth
+from fione.auth.roles import Role
 
 
 @pytest.fixture
@@ -35,12 +40,22 @@ def fake_llm():
 
 
 @pytest.fixture
-def monitors(tmp_path):
+def db_path(tmp_path):
+    path = tmp_path / "fione.db"
+    with closing(db.connect(path)) as conn:
+        db.migrate(conn)
+    return path
+
+
+@pytest.fixture
+def monitors(tmp_path, db_path):
     made = []
 
-    def factory(url, provider="ollama", recheck_secs=0.05, **settings):
+    def factory(url, provider="ollama", recheck_secs=0.05, http=None, **settings):
         values = {"llm_base_url": url, "llm_provider": provider, **settings}
-        monitor = LlmMonitor(make_settings(tmp_path, **values), recheck_secs=recheck_secs)
+        monitor = LlmMonitor(
+            make_settings(tmp_path, **values), db_path, http=http, recheck_secs=recheck_secs
+        )
         made.append(monitor)
         return monitor
 
@@ -103,18 +118,46 @@ def test_native_root():
     assert native_root("http://h:11434") == "http://h:11434"
 
 
-def test_claude_provider_is_ready_without_probing(fake_llm, monitors):
-    fake = fake_llm()
-    monitor = monitors(fake.url, "claude", llm_api_key="sk-test-0123456789", llm_model="m")
+def test_claude_is_ready_when_the_key_is_accepted(fake_llm, monitors):
+    fake = fake_llm(api_key="sk-test-0123456789")
+    monitor = monitors(fake.origin, "claude", llm_api_key="sk-test-0123456789", llm_model="m")
+    assert monitor.snapshot().state == "checking"
     monitor.start()
-    status = monitor.snapshot()
-    assert (status.state, status.model, status.local) == ("ready", "m", True)
+    status = wait_for(monitor, "ready")
+    assert (status.model, status.local, status.error_code) == ("m", True, None)
     assert status.host == f"127.0.0.1:{fake.port}"
+    assert fake.paths[0] == "GET /v1/models"  # no tokens: nothing is asked of the model
+    assert "POST /v1/messages" not in fake.paths
     assert monitor.pull_now() is False
-    monitor.refresh_context()
-    time.sleep(0.2)
-    assert fake.requests == [] and fake.paths == []
     assert monitor.effective_context() == 200000  # the claude default, never probed
+    assert "GET /api/ps" not in fake.paths
+
+
+def test_claude_401_is_unauthorized(fake_llm, monitors):
+    fake = fake_llm(api_key="sk-right-0123456789")
+    monitor = monitors(fake.origin, "claude", llm_api_key="sk-wrong-0123456789")
+    monitor.start()
+    status = wait_for(monitor, "error")
+    assert status.error_code == "unauthorized"
+    assert "sk-wrong-0123456789" not in repr(status)
+    assert monitor._thread.is_alive()
+
+
+def test_claude_unreachable(fake_llm, monitors):
+    fake = fake_llm()
+    fake.stop()
+    monitor = monitors(fake.origin, "claude", llm_api_key="sk-test-0123456789")
+    monitor.start()
+    assert wait_for(monitor, "unreachable").error_code is None
+
+
+def test_claude_rechecks_the_key_and_recovers(fake_llm, monitors):
+    fake = fake_llm(api_key="sk-right-0123456789")
+    monitor = monitors(fake.origin, "claude", llm_api_key="sk-wrong-0123456789")
+    monitor.start()
+    wait_for(monitor, "error")
+    fake.api_key = "sk-wrong-0123456789"  # the key is fixed on the server's side
+    wait_for(monitor, "ready")
 
 
 def test_a_present_model_is_ready(fake_llm, monitors):
@@ -244,8 +287,58 @@ def test_effective_context(fake_llm, monitors):
     assert monitor.snapshot().server_context == 32768
 
 
+REMOTE = "https://llm.example.com/v1"
+
+
+def an_ollama_that_has_the_model():
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": "gemma4:12b-mlx"}]})
+        return httpx.Response(200, json={"models": []})
+
+    return httpx.Client(transport=httpx.MockTransport(answer))
+
+
+def test_remote_host_without_consent_is_consent_required(monitors):
+    monitor = monitors(REMOTE)
+    status = monitor.snapshot()
+    assert status.state == "consent_required"
+    assert (status.local, status.host, status.model) == (False, "llm.example.com", "gemma4:12b-mlx")
+
+
+def test_consent_makes_it_ready_without_restart(monitors, db_path):
+    monitor = monitors(REMOTE, http=an_ollama_that_has_the_model())
+    monitor.start()
+    time.sleep(0.2)  # the server answers, but nobody has consented
+    assert monitor.snapshot().state == "consent_required"
+    with closing(db.connect(db_path)) as conn:
+        admin = auth.create_user(conn, "boss", "password-123", Role.ADMIN)
+        store.record_consent(conn, admin, provider="ollama", model="m", base_url=REMOTE)
+    wait_for(monitor, "ready")
+
+
+def test_consent_covers_the_host_not_another(monitors, db_path):
+    with closing(db.connect(db_path)) as conn:
+        admin = auth.create_user(conn, "boss", "password-123", Role.ADMIN)
+        store.record_consent(conn, admin, provider="ollama", model="m", base_url=REMOTE)
+    assert monitors("https://llm.example.com:8443/v1").snapshot().state == "consent_required"
+
+
+def test_local_host_never_needs_consent(fake_llm, tmp_path):
+    never = tmp_path / "unused" / "fione.db"  # a read of it would create the file
+    settings = make_settings(tmp_path, llm_base_url=fake_llm().url, llm_provider="ollama")
+    monitor = LlmMonitor(settings, never, recheck_secs=0.05)
+    try:
+        monitor.start()
+        wait_for(monitor, "ready")
+        assert monitor.snapshot().state == "ready"
+    finally:
+        monitor.stop()
+    assert not never.exists()
+
+
 def test_snapshot_is_frozen_and_complete():
-    status = LlmStatus("off", None, False, None, None, None, None, None)
+    status = LlmStatus("checking", None, False, None, None, None, None, None)
     with pytest.raises(AttributeError):
         status.state = "ready"
 

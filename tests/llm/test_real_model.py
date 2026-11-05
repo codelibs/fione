@@ -122,7 +122,7 @@ def test_full_turn_on_iris(tmp_path, env):
     _, placeholder = store.start_turn(
         conn, conversation.id, "Which column predicts species best? Propose a training."
     )
-    monitor = LlmMonitor(s)
+    monitor = LlmMonitor(s, tmp_path / "fione.db")
     try:
         with ChatClient.from_settings(s) as client:
             run_turn(

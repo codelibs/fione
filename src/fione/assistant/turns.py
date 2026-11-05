@@ -82,7 +82,7 @@ ERROR_CODES = (
 
 
 class LlmUnavailable(Exception):
-    """No LLM is configured, or the provider is not ready (unreachable, pulling...)."""
+    """The provider is not ready (unreachable, pulling, waiting for consent...)."""
 
 
 class TooManyTurns(Exception):
@@ -124,7 +124,7 @@ class _Turn:
         conn: sqlite3.Connection,
         storage: Storage,
         settings: Settings,
-        client: LlmClient | None,
+        client: LlmClient,
         monitor: LlmMonitor,
         conversation_id: int,
         cancel: threading.Event,
@@ -175,8 +175,6 @@ class _Turn:
             log.exception("ending assistant message %d failed", self.row)
 
     def _rounds(self) -> None:
-        if self.client is None:
-            raise _Failed("unavailable")
         first = self.conn.execute(
             "SELECT MAX(id) FROM chat_messages WHERE conversation_id = ? AND role = 'user'"
             " AND id < ?",
@@ -438,7 +436,7 @@ def run_turn(
     db_path: Path,
     storage: Storage,
     settings: Settings,
-    client: LlmClient | None,
+    client: LlmClient,
     monitor: LlmMonitor,
     conversation_id: int,
     assistant_id: int,
@@ -487,7 +485,7 @@ class TurnManager:
         self._storage = storage
         self._settings = settings
         self._monitor = monitor
-        self._client: LlmClient | None = client_factory(settings)
+        self._client: LlmClient = client_factory(settings)
         self._pool = ThreadPoolExecutor(
             settings.llm_max_concurrent_turns, thread_name_prefix="assistant-turn"
         )
@@ -510,7 +508,7 @@ class TurnManager:
         can read; ``LlmUnavailable`` unless the provider is ready; ``TooManyTurns`` past the
         limits; ``TurnBusy``, ``LimitReached`` and ``ValueError`` from ``store.start_turn``."""
         store.get_conversation(conn, user, project_id, conversation_id)
-        if self._client is None or self._monitor.snapshot().state != "ready":
+        if self._monitor.snapshot().state != "ready":
             raise LlmUnavailable()
         with self._lock:  # held while the turn is created, so the counts stay true
             entries = [e for e in self._turns.values() if not e.future.done()]
@@ -584,5 +582,4 @@ class TurnManager:
             with closing(db.connect(self._db_path)) as conn:
                 for row in never_started:
                     store.finish_message(conn, row, "failed", error_code="interrupted")
-        if self._client is not None:
-            self._client.close()
+        self._client.close()

@@ -100,7 +100,7 @@ def start(env, settings, text="Hello?", *, conversation=None, cancel=None, monit
     conversation = conversation or env.conversation
     _, placeholder = store.start_turn(env.conn, conversation.id, text)
     if monitor is None:
-        monitor = LlmMonitor(settings)
+        monitor = LlmMonitor(settings, env.db_path)
         env.monitors.append(monitor)
 
     def run():
@@ -572,8 +572,9 @@ def test_no_access_at_the_start(env, fake_llm):
     fake = fake_llm()
     settings = settings_for(env, fake)
     with ChatClient.from_settings(settings) as client:
+        monitor = LlmMonitor(settings, env.db_path)
         run_turn(
-            env.db_path, env.storage, settings, client, LlmMonitor(settings), conversation.id,
+            env.db_path, env.storage, settings, client, monitor, conversation.id,
             placeholder.id, threading.Event(), language="en",
         )  # fmt: skip
     last = store.messages(env.conn, conversation.id)[-1]
@@ -613,17 +614,6 @@ def test_an_unexpected_error_fails_the_turn(env, fake_llm, monkeypatch, caplog):
     rows = turn(env, settings_for(env, fake))
     assert (rows[-1].state, rows[-1].error_code) == ("failed", "failed")
     assert "boom" in caplog.text
-
-
-def test_no_client_is_unavailable(env):
-    settings = make_settings(env.tmp / "data")
-    _, placeholder = store.start_turn(env.conn, env.conversation.id, "Hi")
-    run_turn(
-        env.db_path, env.storage, settings, None, LlmMonitor(settings), env.conversation.id,
-        placeholder.id, threading.Event(), language="en",
-    )  # fmt: skip
-    last = store.messages(env.conn, env.conversation.id)[-1]
-    assert (last.state, last.error_code) == ("failed", "unavailable")
 
 
 # --- the request budget -----------------------------------------------------
@@ -750,7 +740,7 @@ def test_an_unknown_context_loads_the_model_first(env, fake_llm):
     assert len(QUESTION_JA.encode()) > budget_bytes(4096, 1024, list_tools()) - 560
     fake = fake_llm([{"text": "ok"}], context_length=16384)
     settings = settings_for(env, fake, llm_provider="ollama")
-    monitor = LlmMonitor(settings)
+    monitor = LlmMonitor(settings, env.db_path)
     env.monitors.append(monitor)
     rows = turn(env, settings, QUESTION_JA, monitor=monitor)
     assert (rows[-1].state, rows[-1].content) == ("done", "ok")
@@ -780,7 +770,7 @@ def test_the_context_follows_the_server_down(env, fake_llm, monkeypatch):
     monkeypatch.setattr(turns, "budget_bytes", spy)
     fake = fake_llm([{"text": "a" * 3000}, {"text": "ok"}, {"text": "ok"}], context_length=8192)
     settings = settings_for(env, fake, llm_provider="ollama", llm_max_tokens=256)
-    monitor = LlmMonitor(settings)
+    monitor = LlmMonitor(settings, env.db_path)
     env.monitors.append(monitor)
     turn(env, settings, monitor=monitor)
     assert monitor.snapshot().server_context == 8192

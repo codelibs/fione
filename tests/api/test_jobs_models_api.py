@@ -21,6 +21,7 @@ from api_helpers import (
     wait_job,
 )
 from fione.assistant import store as assistant_store
+from fione.assistant.provider import LlmMonitor
 from fione.auth.roles import Role
 from fione.engine.events import Event
 from fione.jobs import store
@@ -858,7 +859,7 @@ def test_system_status_names_no_secret_path_or_credential(make_client):
     assert body["storage"] == "s3" and body["is_admin"] is False
     assert body["runner"] == "stopped" and body["jobs"] == {"queued": 0, "running": 0}
     assert "ollama" not in body
-    assert body["llm"] == {"configured": False, "state": "off", "model": None, "local": False}
+    assert set(body["llm"]) == {"state", "model", "local"}  # there is always a language model
     secret = client.app.state.secret
     data_dir = str(client.app.state.settings.data_dir)
     for leaked in (
@@ -876,7 +877,8 @@ def test_system_status_names_no_secret_path_or_credential(make_client):
     assert client.get("/api/v1/system/status").status_code == 401
 
 
-def test_system_status_reports_the_llm_without_url_path_key_or_error(make_client):
+def test_system_status_reports_the_llm_without_url_path_key_or_error(make_client, monkeypatch):
+    monkeypatch.setattr(LlmMonitor, "start", lambda self: None)  # no probing of the remote host
     key = "sk-llm-key-0123456789"
     client = make_client(
         llm_base_url="https://llm.example.com:8443/private/prefix/v1",
@@ -886,24 +888,33 @@ def test_system_status_reports_the_llm_without_url_path_key_or_error(make_client
     viewer = add_user(client, "someone")
     admin = add_user(client, "boss", Role.ADMIN)
     r = client.get("/api/v1/system/status", headers=bearer(client, viewer.id))
-    assert r.json()["llm"] == {
-        "configured": True,
-        "state": "ready",
-        "model": "big-model",
-        "local": False,
-    }
+    assert r.json()["llm"] == {"state": "consent_required", "model": "big-model", "local": False}
     r = client.get("/api/v1/system/status", headers=bearer(client, admin.id))
     llm = r.json()["llm"]
-    assert llm["host"] == "llm.example.com:8443" and llm["samples_allowed"] is False
+    assert llm["host"] == "llm.example.com:8443" and llm["state"] == "consent_required"
     assert (llm["completed"], llm["total"]) == (None, None)
     with closing(connect(client)) as conn:
-        assistant_store.set_samples_allowed(
-            conn, "HTTPS://LLM.example.com:8443/private/prefix/v1/", True, admin.id
+        assistant_store.record_consent(
+            conn,
+            admin,
+            provider="ollama",
+            model="big-model",
+            base_url="HTTPS://LLM.example.com:8443/private/prefix/v1/",
         )
     r = client.get("/api/v1/system/status", headers=bearer(client, admin.id))
-    assert r.json()["llm"]["samples_allowed"] is True
+    assert r.json()["llm"]["state"] == "checking"  # the consent counts at once
     for leaked in (key, "private/prefix"):
         assert leaked not in r.text
+
+
+def test_status_has_no_configured_field(client):
+    admin = add_user(client, "boss", Role.ADMIN)
+    llm = client.get("/api/v1/system/status", headers=bearer(client, admin.id)).json()["llm"]
+    assert "configured" not in llm and "samples_allowed" not in llm
+    assert llm["state"] != "off"
+    viewer = add_user(client, "someone")
+    llm = client.get("/api/v1/system/status", headers=bearer(client, viewer.id)).json()["llm"]
+    assert set(llm) == {"state", "model", "local"}
 
 
 def test_system_status_counts_the_queue(env):

@@ -4,7 +4,6 @@ from fastapi import APIRouter, Request
 
 from fione.api.deps import Conn, CurrentUser
 from fione.api.schemas import user_out
-from fione.assistant import store as assistant_store
 from fione.auth.roles import Role
 from fione.jobs.store import JobStatus
 from fione.version import __version__
@@ -42,15 +41,13 @@ def system_status(request: Request, conn, *, admin: bool = False) -> dict:
         "storage": {"file": "local", "s3": "s3"}.get(scheme, "unknown"),
         "runner": "running" if request.app.state.runner is not None else "stopped",
         "jobs": {s.value: counts.get(s.value, 0) for s in (JobStatus.QUEUED, JobStatus.RUNNING)},
-        "llm": _llm_status(request, conn, admin),
+        "llm": _llm_status(request, admin),
     }
 
 
-def _llm_status(request: Request, conn, admin: bool) -> dict:
-    settings = request.app.state.settings
+def _llm_status(request: Request, admin: bool) -> dict:
     snapshot = request.app.state.llm_monitor.snapshot()
     info = {
-        "configured": settings.llm_base_url is not None,
         "state": snapshot.state,
         "model": snapshot.model,
         "local": snapshot.local,
@@ -60,7 +57,5 @@ def _llm_status(request: Request, conn, admin: bool) -> dict:
             "host": snapshot.host,
             "completed": snapshot.completed,
             "total": snapshot.total,
-            "samples_allowed": settings.llm_base_url is not None
-            and assistant_store.samples_allowed(conn, settings.llm_base_url),
         }
     return info
