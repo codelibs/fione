@@ -308,6 +308,20 @@ def test_a_second_dataset_reaches_the_module(conn, run_job, owner, project, data
     ].tolist() == list(range(30))
 
 
+def test_join_summarizes_a_second_dataset_by_its_key(
+    conn, run_job, owner, project, dataset, storage
+):
+    base = add_dataset(conn, storage, project, pd.DataFrame({"id": [1, 2, 3], "y": [0, 1, 0]}))
+    buys = pd.DataFrame({"id": [1, 1, 2], "amount": [10.0, 30.0, 5.0]})
+    extra = add_dataset(conn, storage, project, buys, "purchases")
+    params = {"other_dataset_id": extra.id, "key": "id", "summarize": True}
+    done = run_job(submit(conn, owner, project, base, "join", params))
+    assert done.status is JobStatus.DONE, done.message
+    out = read_dataset(storage, projects.get_dataset(conn, done.result["dataset_id"]))
+    assert out["rows"].fillna(0).tolist() == [2, 1, 0]
+    assert out["amount_sum"].fillna(-1).tolist() == [40.0, 5.0, -1.0]
+
+
 def test_the_module_sees_the_same_integers_with_gaps(conn, run_job, owner, project, storage):
     ids = pd.array([2**60 + 1, None, 3], dtype="Int64")
     data = add_dataset(conn, storage, project, pd.DataFrame({"id": ids, "v": [1.0, 2.0, 3.0]}))

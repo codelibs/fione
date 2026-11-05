@@ -29,6 +29,7 @@ training and the explain job stored; none of them loads a model or computes anyt
 
 import dataclasses
 import math
+import time
 from datetime import datetime
 
 import pandas as pd
@@ -783,6 +784,120 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     }
 
 
+# --- links between the datasets of a project -------------------------------
+
+_LINK_DATASETS = 8
+_FLOAT_TYPES = ("halffloat", "float", "double")  # Arrow's names, as the schema keeps them
+_LINK_FULL_ROWS = 5_000_000  # a key column of up to this many rows is read whole, else sampled
+_LINK_SAMPLE_ROWS = 200_000
+_LINK_SECS = 30.0  # the reading stops after this long, and the result says so
+_MIN_SHARED = 0.5
+_MIN_REPEATED_KEYS = 20  # keys that repeat on both sides need this many values to be reported
+_MAX_LINKS = 20
+_MAX_REPEATING_LINKS = 5  # links where both sides repeat come last and are the least certain
+
+
+def _key_set(frame: pd.DataFrame, column: str) -> tuple[set[str], bool] | None:
+    """The distinct values of the column as text and whether each appears once, or None if the
+    column cannot be a key: constant, or a float that is not a whole number (a whole-number
+    column with gaps is read as float)."""
+    s = frame[column].dropna()
+    if pd.api.types.is_float_dtype(s.dtype):
+        if not (s == s.round()).all():
+            return None
+        s = s.astype("int64")
+    distinct = s.drop_duplicates()
+    if len(distinct) < 2:
+        return None
+    return set(distinct.astype(str)), len(distinct) == len(s)
+
+
+def _read_keys(ctx: ToolContext, dataset: Dataset, columns: list[str]) -> tuple[pd.DataFrame, bool]:
+    """The columns of the dataset, whole when it is small enough, else a sample spread over
+    the file; and whether it is a sample."""
+    if dataset.n_rows <= _LINK_FULL_ROWS:
+        return ingest.read_dataset(ctx.storage, dataset, columns), False
+    return ingest.read_dataset_spread(ctx.storage, dataset, _LINK_SAMPLE_ROWS, columns), True
+
+
+def _find_table_links(ctx: ToolContext, args: dict) -> dict:
+    project_id = args["project_id"]
+    _authorize(ctx, project_id)
+    every = projects.list_datasets(ctx.conn, project_id)
+    datasets = every[:_LINK_DATASETS]
+    # a column stored as a float cannot be a key (the file's types are in the schema)
+    names = {
+        d.id: {clean_text(n).lower(): n for n, kind in d.schema if kind not in _FLOAT_TYPES}
+        for d in datasets
+    }
+    wanted: dict[int, set[str]] = {d.id: set() for d in datasets}
+    pairs = []
+    for i, a in enumerate(datasets):
+        for b in datasets[i + 1 :]:
+            for lower in names[a.id].keys() & names[b.id].keys():
+                pairs.append((a, b, names[a.id][lower], names[b.id][lower]))
+                wanted[a.id].add(names[a.id][lower])
+                wanted[b.id].add(names[b.id][lower])
+    keys: dict[tuple[int, str], tuple[set[str], bool] | None] = {}
+    sampled = cut = False
+    started = time.monotonic()
+    for d in datasets:
+        if not wanted[d.id]:
+            continue
+        if time.monotonic() - started > _LINK_SECS:
+            cut = True
+            break
+        frame, was_sample = _read_keys(ctx, d, sorted(wanted[d.id]))
+        sampled = sampled or was_sample
+        for column in wanted[d.id]:
+            keys[d.id, column] = _key_set(frame, column)
+        del frame
+    links = []
+    for a, b, column_a, column_b in pairs:
+        left, right = keys.get((a.id, column_a)), keys.get((b.id, column_b))
+        if left is None or right is None:
+            continue
+        (values_a, unique_a), (values_b, unique_b) = left, right
+        # the share of the smaller set of values that the larger one has
+        shared = len(values_a & values_b) / min(len(values_a), len(values_b))
+        if shared < _MIN_SHARED:
+            continue
+        if not (unique_a or unique_b) and min(len(values_a), len(values_b)) < _MIN_REPEATED_KEYS:
+            continue  # few values on both sides: a category such as a label, not a key
+        links.append(
+            {
+                "dataset_a": a.id,
+                "column_a": clean_text(column_a),
+                "dataset_b": b.id,
+                "column_b": clean_text(column_b),
+                "shared_values": _r(shared),
+                "relation": "one_to_one"
+                if unique_a and unique_b
+                else "one_to_many"
+                if unique_a or unique_b
+                else "many_to_many",
+                "one_row_per_key": a.id if unique_a else b.id if unique_b else None,
+            }
+        )
+    links.sort(key=lambda link: (link["relation"] == "many_to_many", -link["shared_values"]))
+    repeating = 0
+    shown = []
+    for link in links:
+        repeating += link["relation"] == "many_to_many"
+        if repeating <= _MAX_REPEATING_LINKS:
+            shown.append(link)
+    result = {
+        "datasets": [_dataset_block(d) for d in datasets],
+        "links": shown[:_MAX_LINKS],
+        "sampled": sampled,
+    }
+    if len(every) > len(datasets):
+        result["n_datasets_not_examined"] = len(every) - len(datasets)
+    if cut:
+        result["truncated"] = True  # the time ran out before every dataset was read
+    return result
+
+
 # --- listings -------------------------------------------------------------
 
 
@@ -966,6 +1081,16 @@ for _tool in (
         ),
         True,
         _propose_training_config,
+    ),
+    Tool(
+        "find_table_links",
+        "Find datasets of a project that can be joined: columns with the same name and mostly "
+        "the same values; 'one_row_per_key' names a dataset with one row per value (none: both "
+        "repeat, so one must be summarized first). Large datasets are sampled; nothing is "
+        "joined.",
+        _schema({"project_id": _PROJECT}, ["project_id"]),
+        True,
+        _find_table_links,
     ),
     Tool(
         "list_projects",
