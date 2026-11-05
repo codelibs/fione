@@ -351,6 +351,11 @@ def trained(stack, browser, admin, data) -> Trained:
     page.goto(project + "/upload")
     upload(page, data["iris"])
     page.wait_for_url("**/analyze")
+    # the assistant comments on the upload by itself (the fake model's answer)
+    from playwright.sync_api import expect
+
+    note = page.locator("#assistant-note[data-note=done]")
+    expect(note).to_contain_text("(fake)", timeout=30_000)
     assert page.locator("#target-select").input_value() == "species"
     assert page.locator("#task-classification").is_checked()
     page.check("#runtime-1")

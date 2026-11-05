@@ -72,7 +72,8 @@ This writes `iris.csv`: 150 rows, four measurements and the `species` column.
    which columns to learn from. Columns that are a copy of the answer, or whose value decides
    it, and columns that only identify rows are unchecked, with the reason. A column that only
    predicts the answer suspiciously well stays checked, with a warning: check that its value is
-   known when you make predictions.
+   known when you make predictions. Above it, the Assistant comments on the data in plain
+   words and may propose a training you can start with one button.
 4. Under **Maximum run time** choose **1 min**, then press **Run**.
 5. The progress page shows what is being tried. When training ends, the
    **Prediction summary** opens: the best model, a rating from 1 to 5 stars, what the score
