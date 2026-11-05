@@ -2,8 +2,10 @@
 the factory that picks the client of the configured provider."""
 
 import json
+import logging
 import time
 
+import httpx
 import pytest
 
 from api_helpers import make_settings
@@ -203,6 +205,11 @@ def test_claude_request_has_required_headers(fake_llm):
     headers = fake.request_headers[-1]
     assert headers["x-api-key"] == KEY
     assert headers["anthropic-version"] == ANTHROPIC_VERSION
+    assert headers["anthropic-beta"] == "thinking-binding-controls-2026-08-01"
+    assert fake.requests[-1]["thinking"] == {
+        "type": "adaptive",
+        "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+    }
     assert headers["content-type"] == "application/json"
     assert "authorization" not in headers
     assert fake.paths[-1] == "POST /v1/messages"
@@ -234,3 +241,42 @@ def test_factory_picks_the_provider(fake_llm, tmp_path):
     assert fake.requests[-1]["model"] == "claude-opus-5-5"
     with ChatClient.from_settings(make_settings(tmp_path, llm_base_url=fake.url)) as client:
         assert isinstance(client, OllamaClient)
+
+
+def test_claude_changed_prefix_drops_the_thinking_block(fake_llm, caplog):
+    fake = fake_llm([{"tool_calls": [{"name": "list_projects", "arguments": {}}]}, {"text": "ok"}])
+    client = _client(fake)
+    system, history = (
+        HELLO[0],
+        [
+            {"role": "user", "content": "earlier"},
+            {"role": "assistant", "content": "answer"},
+        ],
+    )
+    turn = [{"role": "user", "content": "hello"}]
+    [call] = _complete(client, [system, *history, *turn]).tool_calls
+    made = {"id": call.id, "type": "function",
+            "function": {"name": call.name, "arguments": call.arguments}}  # fmt: skip
+    turn += [
+        {"role": "assistant", "content": "", "tool_calls": [made]},
+        {"role": "tool", "tool_call_id": call.id, "content": "[]"},
+    ]
+    # The history no longer fits and goes: the kept reply now follows another request.
+    sent_system, converted = client._convert([system, *turn])
+    assert converted[1]["content"][0]["type"] == "thinking"
+    with caplog.at_level(logging.DEBUG, logger="fione.assistant.claude"):
+        assert _complete(client, [system, *turn]).content == "ok"
+    assert [b["type"] for b in fake.requests[-1]["messages"][1]["content"]] == ["tool_use"]
+    assert "prefix_binding_mismatch" in caplog.text
+
+    # Without drop_block, the same request is refused.
+    headers = {
+        "x-api-key": KEY,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "anthropic-beta": "thinking-binding-controls-2026-08-01",
+    }
+    body = {"model": "claude-opus-5-5", "max_tokens": 1024, "system": sent_system,
+            "thinking": {"type": "adaptive"}, "messages": converted}  # fmt: skip
+    response = httpx.post(f"{fake.origin}/v1/messages", json=body, headers=headers)
+    assert response.status_code == 400
+    assert "bound to a different conversation" in response.json()["error"]["message"]

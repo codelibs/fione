@@ -24,7 +24,11 @@ Script items (the keys combine, except ``status``)::
 (``tool_use`` blocks as tool calls, ``tool_result`` blocks as tool messages), while
 ``requests`` keeps them as sent. It needs ``x-api-key`` and ``anthropic-version``; with
 ``api_key`` set, another key is a 401. Every reply starts with a thinking block, as the
-models that always think send.
+models that always think send; its signature stands for the request before it (``system``,
+``tools`` and the earlier messages). A thinking block sent back after that request changed is
+a 400, unless ``thinking.block_binding.prefix_mismatch_behavior`` is ``drop_block`` (which
+needs the ``thinking-binding-controls-2026-08-01`` beta): then it and the thinking blocks after
+it are dropped and listed in ``input_transformations``.
 
 Run it with ``python fake_llm.py --port N --policy e2e [--missing] [--host H] [--pull-delay S]``
 (``--host 0.0.0.0`` inside a container; ``--pull-delay`` slows a pull down, to watch its
@@ -33,6 +37,7 @@ progress); the ``e2e`` policy is filled in with the end-to-end tests, until then
 """
 
 import argparse
+import hashlib
 import itertools
 import json
 import re
@@ -469,6 +474,20 @@ class _Handler(BaseHTTPRequestHandler):
         if not headers.get("anthropic-version"):
             error = {"type": "invalid_request_error", "message": "anthropic-version is required"}
             return self._json({"type": "error", "error": error}, 400)
+        beta = BINDING_BETA in (headers.get("anthropic-beta") or "").split(",")
+        binding = (body.get("thinking") or {}).get("block_binding")
+        if binding is not None and not beta:
+            message = "thinking.block_binding: Extra inputs are not permitted"
+            error = {"type": "invalid_request_error", "message": message}
+            return self._json({"type": "error", "error": error}, 400)
+        dropped = _drop_mismatched(body)
+        if dropped and (binding or {}).get("prefix_mismatch_behavior") != "drop_block":
+            message = (
+                f"{dropped[0]}: Invalid `signature` in `thinking` block. The block is bound to"
+                " a different conversation."
+            )
+            error = {"type": "invalid_request_error", "message": message}
+            return self._json({"type": "error", "error": error}, 400)
         item = self.llm.record_chat(body, headers, openai_messages(body))
         time.sleep(item.get("delay", 0))
         if "status" in item:
@@ -484,11 +503,17 @@ class _Handler(BaseHTTPRequestHandler):
         stop = item.get("stop_reason") or ("tool_use" if calls else "end_turn")
         usage = {"input_tokens": prompt_tokens}
         message = {"id": "msg_fake", "type": "message", "role": "assistant", "usage": usage}
+        if beta:
+            message["input_transformations"] = [
+                {"type": "thinking_dropped", "path": path, "reason": "prefix_binding_mismatch"}
+                for path in dropped
+            ]
+        signature = _prefix_signature(body, len(body.get("messages") or []))
         events = [{"type": "message_start", "message": message}]
         blocks = [
             ({"type": "thinking", "thinking": "", "signature": ""},
              [{"type": "thinking_delta", "thinking": ""},
-              {"type": "signature_delta", "signature": f"sig-{len(self.llm.requests)}"}]),
+              {"type": "signature_delta", "signature": signature}]),
         ]  # fmt: skip
         if text:
             pieces = _pieces(text, item.get("chunks", 1))
@@ -519,6 +544,34 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode())
             self.wfile.flush()
             time.sleep(item.get("chunk_delay", 0))
+
+
+BINDING_BETA = "thinking-binding-controls-2026-08-01"
+
+
+def _prefix_signature(body: dict, count: int) -> str:
+    """The signature of a thinking block made after the first ``count`` messages of ``body``."""
+    prefix = [body.get("system"), body.get("tools"), (body.get("messages") or [])[:count]]
+    return "sig-" + hashlib.sha256(json.dumps(prefix, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _drop_mismatched(body: dict) -> list[str]:
+    """The paths of the thinking blocks of ``body`` from the first one whose request changed,
+    taken out of ``body``."""
+    messages = body.get("messages") or []
+    found, dropping = [], False
+    for at, message in enumerate(messages):
+        content = message.get("content")
+        if message.get("role") != "assistant" or not isinstance(content, list):
+            continue
+        for n, block in enumerate(content):
+            if block.get("type") == "thinking":
+                dropping = dropping or block.get("signature") != _prefix_signature(body, at)
+                if dropping:
+                    found.append((at, n))
+    for at, n in reversed(found):  # after every check: a drop changes what later blocks follow
+        del messages[at]["content"][n]
+    return [f"messages.{at}.content.{n}" for at, n in found]
 
 
 def openai_messages(body: dict) -> list[dict]:

@@ -8,9 +8,15 @@ memory, keyed by the calls' ids, and sent back unchanged with that assistant mes
 in the current turn (after the last user message), as the API asks within a turn of tool use.
 Earlier turns go without thinking, which the API allows, so that dropping old rounds does not
 change what a sent thinking block was made after. The stored messages never hold them.
+
+Every request sets ``thinking.block_binding.prefix_mismatch_behavior`` to ``drop_block`` (beta
+``thinking-binding-controls-2026-08-01``): when the request before a sent thinking block has
+changed since the block was made (old rounds dropped, a tool result cut to fit), the API drops
+that block and the ones after it instead of refusing the request.
 """
 
 import json
+import logging
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
@@ -28,8 +34,12 @@ from fione.assistant.client import (
 )
 
 ANTHROPIC_VERSION = "2026-10-21"
+ANTHROPIC_BETA = "thinking-binding-controls-2026-08-01"
+THINKING = {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
 MAX_KEPT_REPLIES = 256  # replies whose thinking blocks are kept for the next request
 STOP_REASONS = {"tool_use": "tool_calls", "end_turn": "stop", "max_tokens": "length"}
+
+log = logging.getLogger(__name__)
 
 
 def claude_tools(tools: list[dict]) -> list[dict]:
@@ -66,6 +76,7 @@ class _Reply:
         self.finish_reason: str | None = None
         self.prompt_tokens: int | None = None
         self.stopped = False
+        self.transformations: list = []  # what the API changed in the request
 
     def add_event(self, event) -> None:
         if not isinstance(event, dict):
@@ -74,7 +85,10 @@ class _Reply:
         if kind == "error":
             raise LlmError("protocol", f"the server reported an error: {_error_text(event)}")
         if kind == "message_start":
-            usage = (event.get("message") or {}).get("usage") or {}
+            message = event.get("message") or {}
+            if isinstance(message.get("input_transformations"), list):
+                self.transformations = message["input_transformations"]
+            usage = message.get("usage") or {}
             counts = [
                 usage.get(k)
                 for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
@@ -170,13 +184,14 @@ class ClaudeClient(HttpClient):
             "model": self.model,
             "max_tokens": self._max_tokens,
             "stream": True,
+            "thinking": THINKING,
             "messages": converted,
         }
         if system:
             body["system"] = system
         if tools:
             body["tools"] = claude_tools(tools)
-        headers = {"anthropic-version": ANTHROPIC_VERSION}
+        headers = {"anthropic-version": ANTHROPIC_VERSION, "anthropic-beta": ANTHROPIC_BETA}
         if self._api_key:
             headers["x-api-key"] = self._api_key
         reply = _Reply(on_text)
@@ -200,6 +215,12 @@ class ClaudeClient(HttpClient):
         )
         if reply.finish_reason is None:
             raise LlmError("protocol", "the stream ended without a stop reason")
+        if reply.transformations:
+            log.debug(
+                "the API changed the request: %s",
+                [(t.get("type"), t.get("reason"), t.get("path")) for t in reply.transformations
+                 if isinstance(t, dict)],
+            )  # fmt: skip
         completion, blocks = self._guarded_done(reply)
         if completion.tool_calls:
             with self._lock:
