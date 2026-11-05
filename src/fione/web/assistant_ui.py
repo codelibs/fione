@@ -152,7 +152,7 @@ def _thread(conn, conversation: Conversation) -> dict:
     }
 
 
-def _llm(request: Request, conn) -> dict:
+def _llm(request: Request) -> dict:
     """The provider's state for the banners and the form."""
     settings = request.app.state.settings
     status = request.app.state.llm_monitor.snapshot()
@@ -162,7 +162,6 @@ def _llm(request: Request, conn) -> dict:
         "llm_on": configured,
         "llm_ready": configured and status.state == "ready",
         "remote_host": status.host if configured and not status.local else None,
-        "samples_on": configured and store.samples_allowed(conn, settings.llm_base_url),
     }
 
 
@@ -212,7 +211,7 @@ def conversation_page(
         "detail": detail,
         "text": text,
         "examples": EXAMPLES,
-        **_llm(request, conn),
+        **_llm(request),
     }
     if conversation is not None:
         context |= _thread(conn, conversation)

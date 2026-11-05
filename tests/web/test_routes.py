@@ -232,7 +232,6 @@ ADMIN_ROUTES = {
     ("POST", "/admin/users/{uid}/delete"): (401, 403, 403, 303),
     ("GET", "/admin/system"): (303, 403, 403, 200),
     ("POST", "/admin/system/llm/pull"): (401, 403, 403, 303),
-    ("POST", "/admin/system/llm/samples"): (401, 403, 403, 303),
 }
 GLOBAL_FORMS = {
     "/account/password": {"current_password": PW, "new_password": "a-new-password-1"}
@@ -241,7 +240,6 @@ GLOBAL_FORMS = {
     "/admin/users": {"username": "newbie", "password": PW, "role": "viewer"},
     "/role": {"role": "viewer"},
     "/password": {"password": "a-new-password-1"},
-    "/llm/samples": {"allowed": "off"},
 }
 # Project sharing x the AutoML personas: the owner's (and admins') only, 403 for the
 # project's other readers.

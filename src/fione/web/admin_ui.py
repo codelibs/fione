@@ -19,7 +19,6 @@ from fione.api.deps import Auth, Conn
 from fione.api.routes_system import system_status
 from fione.api.schemas import MAX_PASSWORD_LENGTH
 from fione.api.security import password_work
-from fione.assistant import store as assistant_store
 from fione.auth import service as auth_service
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import Role
@@ -265,22 +264,4 @@ def llm_pull(request: Request, conn: Conn, form: SmallForm) -> Response:
     """Start pulling the Ollama model (nothing happens if a pull is running)."""
     _post_admin(request, conn, form)
     request.app.state.llm_monitor.pull_now()
-    return RedirectResponse("/admin/system", 303)
-
-
-@router.post("/admin/system/llm/samples")
-def llm_samples(request: Request, conn: Conn, form: SmallForm) -> Response:
-    """Allow or forbid sending example column values to the configured LLM server. Allowing
-    needs the confirmation box; it is stored for that server's normalized URL."""
-    auth = _post_admin(request, conn, form)
-    base_url = request.app.state.settings.llm_base_url
-    if base_url is None:
-        raise UiError(404, "error.not_found")
-    allowed = field(form, "allowed")
-    if allowed not in ("on", "off"):
-        raise UiError(400, "error.form")
-    if allowed == "off":
-        assistant_store.set_samples_allowed(conn, base_url, False, auth.user.id)
-    elif field(form, "confirm") == "on":
-        assistant_store.set_samples_allowed(conn, base_url, True, auth.user.id)
     return RedirectResponse("/admin/system", 303)

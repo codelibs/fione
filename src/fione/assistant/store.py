@@ -476,33 +476,6 @@ def normal_base_url(url: str) -> str:
     return f"{scheme}://{netloc}{parts.path.rstrip('/')}"
 
 
-def samples_allowed(conn: sqlite3.Connection, base_url: str) -> bool:
-    """Whether samples may be sent to ``base_url``; a URL that is not one is never allowed."""
-    try:
-        key = normal_base_url(base_url)
-    except ValueError:
-        return False
-    return (
-        conn.execute("SELECT 1 FROM llm_sample_optins WHERE base_url = ?", (key,)).fetchone()
-        is not None
-    )
-
-
-def set_samples_allowed(
-    conn: sqlite3.Connection, base_url: str, allowed: bool, user_id: int
-) -> None:
-    key = normal_base_url(base_url)
-    if allowed:
-        conn.execute(
-            "INSERT INTO llm_sample_optins (base_url, enabled_by) VALUES (?, ?)"
-            " ON CONFLICT(base_url) DO UPDATE SET enabled_by = excluded.enabled_by,"
-            " enabled_at = CURRENT_TIMESTAMP",
-            (key, user_id),
-        )
-    else:
-        conn.execute("DELETE FROM llm_sample_optins WHERE base_url = ?", (key,))
-
-
 # --- consent for remote language models --------------------------------------
 
 

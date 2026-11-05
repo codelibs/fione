@@ -248,13 +248,6 @@ def test_remote_warning_names_the_host(make_client, fake_llm):
     assert "data-remote-warning" not in page_of(local).text
 
 
-def test_samples_on_is_said(chat):
-    with closing(connect(chat.client)) as conn:
-        admin = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()[0]
-        store.set_samples_allowed(conn, chat.fake.url, True, admin)
-    assert shown("assistant.samples_on") in page_of(chat).text
-
-
 def test_pulling_disables_input_and_shows_progress(chat):
     use_monitor(chat.client, state="pulling", completed=250, total=1000)
     new_conversation(chat)

@@ -192,6 +192,9 @@ MIGRATIONS: list[str] = [
         consented_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    DROP TABLE llm_sample_optins;
+    """,
 ]
 
 

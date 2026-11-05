@@ -1,10 +1,11 @@
 """The built-in assistant tools (spec section 9): read schema, statistics and results, or
 propose a training configuration. None of them writes anything or starts a job.
 
-Privacy matrix, ``allow_samples=False`` (the default) / ``True``:
+Privacy matrix, ``ToolContext.allow_samples``: ``True`` for the assistant, which sends example
+values to the configured model, ``False`` for MCP, which never gets them:
 
 =====================  ====================================  ================================
-what                    off                                   on
+what                    False (MCP)                           True (assistant)
 =====================  ====================================  ================================
 category top values     removed (``top_values_hidden``)        up to 10, each cut to 50 chars
 class labels            only ``n_classes``                     up to 50, each cut to 50 chars

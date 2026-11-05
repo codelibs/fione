@@ -53,7 +53,7 @@ class ToolContext:
     conn: sqlite3.Connection
     storage: Storage
     user: User
-    allow_samples: bool = False  # whether raw cell values may reach the model
+    allow_samples: bool = True  # raw cell values reach the model; MCP passes False
     project_id: str | None = None  # when set, no tool reaches an object of any other project
     via: Literal["chat", "mcp", "test"] = "test"  # the channel, for the log
 

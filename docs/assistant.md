@@ -60,12 +60,11 @@ use, how to improve it) that fill in the box the same way.
 
 Each question goes to the language model server together with what the assistant needs to answer:
 the project's and datasets' names, column names and kinds, statistics (missing rates, ranges,
-correlations), and the results of models. **Cell values are not sent** unless an administrator
-turns on "Send example column values" for that server on the System page; then the most
-frequent values of a column are included. The setting belongs to the server's address and is off
-again if the address changes. For a job, the assistant reads its status and progress events;
-the failure message of a failed job is left out by default, because it can quote a value from
-your data, and is sent (cut to 200 characters) only when that setting is on.
+correlations), and the results of models, with example values from your datasets: the most
+frequent values of a column, the labels of a classification, the points of a curve, and the
+messages of a job, including the failure message of a failed job (cut to 200 characters). All of
+it goes to the configured model server. A server on another machine needs an administrator's
+one-time consent first. MCP clients never receive example values (see MCP).
 
 When the server is not on this machine, every chat user sees a warning with its host name.
 `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` of the Fione server apply to this traffic.

@@ -353,7 +353,6 @@ class _Turn:
         assistant row in one transaction; the next row's id. Before each call, the turn stops
         at a cancel or the deadline, and the user's access is checked again; then nothing of
         the round is stored."""
-        allow_samples = store.samples_allowed(self.conn, self.settings.llm_base_url)
         calls: list[dict] = []
         runs: list[tuple[dict | None, dict]] = []
         for n, call in enumerate(completion.tool_calls[:MAX_CALLS_KEPT]):
@@ -381,7 +380,6 @@ class _Turn:
                     self.conn,
                     self.storage,
                     user,
-                    allow_samples=allow_samples,
                     project_id=project_id,
                     via="chat",
                 )

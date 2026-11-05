@@ -63,15 +63,15 @@ def test_migration_adds_the_tables(tmp_path, monkeypatch):
     conn = db.connect(tmp_path / "old.db")
     first = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE conversations" in sql)
     entry = db.MIGRATIONS[first]
-    assert all(f"CREATE TABLE {t}" in entry for t in (*TABLES, "llm_sample_optins"))
+    assert all(f"CREATE TABLE {t}" in entry for t in TABLES)
     with monkeypatch.context() as m:
         m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:first])
         db.migrate(conn)
-    names = "('conversations', 'chat_messages', 'chat_proposals', 'llm_sample_optins')"
+    names = "('conversations', 'chat_messages', 'chat_proposals')"
     query = f"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN {names}"
     assert conn.execute(query).fetchall() == []
     assert db.migrate(conn) == len(db.MIGRATIONS)
-    assert len(conn.execute(query).fetchall()) == 4
+    assert len(conn.execute(query).fetchall()) == 3
     indexes = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert indexes >= {
         "conversations_project_user",
@@ -317,28 +317,10 @@ def test_a_deleted_dataset_leaves_the_proposal_without_one(
     assert store.proposals_for(conn, conversation.id)[message.id].dataset_id is None
 
 
-def test_optin_is_per_normalized_base_url(conn, owner):
+def test_base_urls_are_normalized():
     assert store.normal_base_url("HTTP://Host:80/v1/") == "http://host/v1"
     assert store.normal_base_url("https://Host:443") == "https://host"
     assert store.normal_base_url("http://[::1]:11434/v1") == "http://[::1]:11434/v1"
-    assert not store.samples_allowed(conn, "http://host/v1")
-    store.set_samples_allowed(conn, "HTTP://Host:80/v1/", True, owner.id)
-    assert store.samples_allowed(conn, "http://host/v1")
-    assert not store.samples_allowed(conn, "http://host:8080/v1")
-    assert not store.samples_allowed(conn, "https://host/v1")
-    assert not store.samples_allowed(conn, "http://host/v2")
-    store.set_samples_allowed(conn, "http://host/v1", True, owner.id)  # again: still one row
-    assert conn.execute("SELECT COUNT(*) FROM llm_sample_optins").fetchone()[0] == 1
-    store.set_samples_allowed(conn, "http://HOST/v1/", False, owner.id)
-    assert not store.samples_allowed(conn, "http://host/v1")
-
-
-def test_deleting_the_user_who_enabled_samples_keeps_the_opt_in(conn):
-    user = auth.create_user(conn, "tmp", "pw-tmp-12345", Role.ADMIN)
-    auth.create_user(conn, "keep", "pw-keep-1234", Role.ADMIN)
-    store.set_samples_allowed(conn, "http://host/v1", True, user.id)
-    auth.delete_user(conn, user.id)
-    assert store.samples_allowed(conn, "http://host/v1")
 
 
 def test_consent_is_per_host(conn, owner):
@@ -398,8 +380,9 @@ def test_deleting_the_consenting_user_keeps_the_consent(conn):
 
 def test_migration_adds_the_consent_table(tmp_path, monkeypatch):
     conn = db.connect(tmp_path / "old.db")
+    first = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE llm_consents" in sql)
     with monkeypatch.context() as m:
-        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:-1])
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:first])
         db.migrate(conn)
     query = "SELECT name FROM sqlite_master WHERE name = 'llm_consents'"
     assert conn.execute(query).fetchall() == []
@@ -526,13 +509,9 @@ def test_add_proposal_checks_its_message(conn, owner, project, conversation):
 
 
 @pytest.mark.parametrize("url", ["", "host", "ftp://host/v1", "http://", "//host/v1", "http:///v1"])
-def test_an_unusable_base_url_is_never_allowed(conn, owner, url):
+def test_an_unusable_base_url_has_no_normal_form(url):
     with pytest.raises(ValueError):
         store.normal_base_url(url)
-    assert store.samples_allowed(conn, url) is False
-    with pytest.raises(ValueError):
-        store.set_samples_allowed(conn, url, True, owner.id)
-    assert count(conn, "llm_sample_optins") == 0
 
 
 def test_the_write_lock_is_held_between_the_check_and_the_insert(
@@ -544,7 +523,7 @@ def test_the_write_lock_is_held_between_the_check_and_the_insert(
 
     def probe():
         try:
-            other.execute("INSERT INTO llm_sample_optins (base_url) VALUES ('http://probe')")
+            other.execute("INSERT INTO llm_consents (host, provider, model) VALUES ('p', 'p', 'p')")
         except sqlite3.OperationalError as e:
             refusals.append(str(e))
 
