@@ -37,6 +37,7 @@ from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import log_loss
 
+from fione.data.frames import is_day_first
 from fione.engine.config import Deadline
 from fione.engine.families import n_threads
 from fione.engine.prep import Prep, Task, _as_str, _datetimes, is_prose
@@ -252,18 +253,28 @@ class DateParts(Group):
     """Hour, minute, week, quarter, day of the year and weekend flag of date columns."""
 
     _PARTS = ("hour", "minute", "week", "quarter", "dayofyear", "is_weekend")
+    # class-level defaults: models pickled before them still load
+    _dayfirst: frozenset = frozenset()
+    _base_hours: frozenset = frozenset()
 
-    def __init__(self, columns: list[str]):
+    def __init__(self, columns: list[str], base_hours=()):
+        """``base_hours``: the columns whose hour the base view already holds."""
         self.label, self.columns = "more parts of dates", tuple(columns)
+        self._base_hours = frozenset(base_hours)
+
+    def _parts(self, column):
+        return [p for p in self._PARTS if not (p == "hour" and column in self._base_hours)]
 
     def _fit(self, X):
-        self._sources = {f"{c}__{p}": (c,) for c in self.columns for p in self._PARTS}
+        self._dayfirst = frozenset(c for c in self.columns if is_day_first(X[c]))
+        self._sources = {f"{c}__{p}": (c,) for c in self.columns for p in self._parts(c)}
 
     def _compute(self, df):
         out = {}
         for c in self.columns:
-            when = _datetimes(df[c])
-            out[f"{c}__hour"] = when.dt.hour
+            when = _datetimes(df[c], c in self._dayfirst)
+            if "hour" in self._parts(c):
+                out[f"{c}__hour"] = when.dt.hour
             out[f"{c}__minute"] = when.dt.minute
             out[f"{c}__week"] = when.dt.isocalendar().week
             out[f"{c}__quarter"] = when.dt.quarter
@@ -275,15 +286,18 @@ class DateParts(Group):
 class DateDifferences(Group):
     """Seconds between each two date columns."""
 
+    _dayfirst: frozenset = frozenset()
+
     def __init__(self, columns: list[str]):
         self.label, self.columns = "differences between dates", tuple(columns)
         self._pairs = list(itertools.combinations(columns, 2))
 
     def _fit(self, X):
+        self._dayfirst = frozenset(c for c in self.columns if is_day_first(X[c]))
         self._sources = {f"{a} - {b}": (a, b) for a, b in self._pairs}
 
     def _compute(self, df):
-        whens = {c: _datetimes(df[c]) for c in self.columns}
+        whens = {c: _datetimes(df[c], c in self._dayfirst) for c in self.columns}
         out = {f"{a} - {b}": (whens[a] - whens[b]).dt.total_seconds() for a, b in self._pairs}
         return pd.DataFrame(out, index=df.index).astype(float)
 
@@ -485,7 +499,7 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
         found.append(CategoryFrequency(categories))
     found.append(RowCounts(columns, prep.numeric_columns))
     if dates:
-        found.append(DateParts(dates))
+        found.append(DateParts(dates, prep.timed))
     if len(dates) > 1:
         found.append(DateDifferences(dates[:MAX_PAIR_COLUMNS]))
     if small and numbers:

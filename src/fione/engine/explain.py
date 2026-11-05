@@ -465,7 +465,7 @@ def _spread(values: np.ndarray, size: int, integral: bool) -> np.ndarray:
     return np.unique(np.round(points)) if integral else points
 
 
-def _grid(s: pd.Series, kind: str, size: int) -> tuple[list, np.ndarray]:
+def _grid(s: pd.Series, kind: str, size: int, dayfirst: bool = False) -> tuple[list, np.ndarray]:
     """The grid as JSON values, and as the values set into the column; empty when ``s`` has
     no values the model can read."""
     if kind == "numeric":
@@ -478,7 +478,7 @@ def _grid(s: pd.Series, kind: str, size: int) -> tuple[list, np.ndarray]:
         grid = [int(p) for p in points] if integral else [float(p) for p in points]
         return grid, np.asarray(grid)
     if kind == "datetime":
-        seconds = (_datetimes(s) - _EPOCH).dt.total_seconds().dropna().to_numpy()
+        seconds = (_datetimes(s, dayfirst) - _EPOCH).dt.total_seconds().dropna().to_numpy()
         if not len(seconds):
             return [], seconds
         stamps = pd.to_datetime(_spread(seconds, size, integral=True), unit="s")
@@ -527,7 +527,7 @@ def partial_dependence(
         _check_int("class_index", class_index, 0, len(outputs) - 1)
     grid, values = [], None
     if column in background.columns:
-        grid, values = _grid(background[column], kind, grid_size)
+        grid, values = _grid(background[column], kind, grid_size, column in model.prep.dayfirst)
     if not grid:
         raise ValueError(f"the column {column!r} has no values in the background")
     rows = np.random.default_rng(seed).permutation(len(background))[:max_rows]

@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 from pandas.api import types as pdt
 
-from fione.data.frames import parse_datetimes
+from fione.data.frames import looks_like_dates, parse_datetimes
 from fione.engine.prep import Task, infer_task
 
 Kind = Literal["numeric", "categorical", "text", "datetime", "id", "constant"]
@@ -45,17 +45,6 @@ _HISTOGRAM_BINS = 20
 _TOP_VALUES = 10
 _TOP_CORRELATIONS = 20
 _ID_MIN_ROWS = 20
-_DATE_SAMPLE = 1000
-_DATE_MIN_PARSED = 0.95
-_DATE_MIN_VALUES = 5
-_DATE_MIN_SIGNAL = 0.5
-_PLAIN_NUMBER = r"^\s*(?:[-+]?\d+(?:\.\d+)?|\d+/\d+)\s*$"
-_DATE_SIGNAL = (
-    r"(?<!\d)(?:19|20)\d{2}(?!\d)"
-    r"|(?i:\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
-    r"|\d+月"
-    r"|\d{1,2}:\d{2}:\d{2}"
-)
 _CORR_MIN_PERIODS = 10
 _LEAK_CORRELATION = 0.99
 _LEAK_MIN_ROWS = 20
@@ -121,20 +110,6 @@ def _as_float(s: pd.Series) -> np.ndarray:
     return np.where(np.isfinite(arr), arr, np.nan)
 
 
-def _looks_like_dates(nonnull: pd.Series) -> bool:
-    n = len(nonnull)
-    if n < _DATE_MIN_VALUES:
-        return False
-    # spread over the whole column: the head of a sorted file is not representative
-    picks = np.linspace(0, n - 1, min(n, _DATE_SAMPLE)).astype(int)
-    sample = nonnull.iloc[picks].astype(str)
-    if sample.str.contains(_DATE_SIGNAL, regex=True).mean() < _DATE_MIN_SIGNAL:
-        return False
-    plain = sample.str.match(_PLAIN_NUMBER)
-    parsed = parse_datetimes(sample)
-    return bool((parsed.notna() & ~plain).mean() >= _DATE_MIN_PARSED)
-
-
 def _infer_kind(nonnull: pd.Series, n_unique: int) -> Kind:
     n = len(nonnull)
     if n_unique <= 1:
@@ -151,7 +126,7 @@ def _infer_kind(nonnull: pd.Series, n_unique: int) -> Kind:
             if n_unique <= 10 and n_unique / n <= 0.05:
                 return "categorical"
         return "numeric"
-    if _looks_like_dates(nonnull):
+    if looks_like_dates(nonnull):
         return "datetime"
     if n_unique == n and n >= _ID_MIN_ROWS:
         return "id"

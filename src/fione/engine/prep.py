@@ -7,7 +7,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from fione.data.frames import parse_datetimes
+from fione.data.frames import is_day_first, looks_like_dates, parse_datetimes
 from fione.engine.config import ConfigError, TargetError
 from fione.engine.events import Event, EventSink
 
@@ -21,7 +21,7 @@ LINEAR_SKEW = 2.0  # non-negative numbers more skewed than this are log-transfor
 PROSE_WORDS = 5  # a column whose median value has this many words is prose, not a label or name
 MAX_PROSE = 3  # prose columns the text view reads (the first ones)
 _LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code has no words
-# ordinal: seconds since the Unix epoch
+# ordinal: seconds since the Unix epoch; the hour is added for columns that carry a time of day
 _DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
 _EPOCH = pd.Timestamp("1970-01-01")
 
@@ -47,10 +47,17 @@ def is_prose(s: pd.Series) -> bool:
     return bool(len(values) and values.str.count(_LETTERS.pattern).median() >= PROSE_WORDS)
 
 
-def _datetimes(s: pd.Series) -> pd.Series:
-    """``s`` as naive (UTC for tz-aware input) datetimes; unparseable values become NaT."""
+def _holds_date_strings(s: pd.Series) -> bool:
+    """Whether ``s`` is a column of strings that are dates (``2012-10-02 09:00``)."""
+    strings = s.dtype == object or pd.api.types.is_string_dtype(s.dtype)
+    return bool(strings and looks_like_dates(s.dropna(), need_year=True))
+
+
+def _datetimes(s: pd.Series, dayfirst: bool = False) -> pd.Series:
+    """``s`` as naive (UTC for tz-aware input) datetimes; unparseable values become NaT.
+    ``dayfirst``: ``02-10-2012`` is the 2nd of October (found on the training data)."""
     if not pd.api.types.is_datetime64_any_dtype(s.dtype):
-        s = parse_datetimes(s)
+        s = parse_datetimes(s, dayfirst)
     if isinstance(s.dtype, pd.DatetimeTZDtype):
         s = s.dt.tz_convert("UTC").dt.tz_localize(None)
     return s
@@ -71,9 +78,13 @@ class Prep:
     groups: tuple = ()  # class-level defaults: models pickled before these existed still load
     _logged: tuple = ()
     prose: tuple = ()
+    dayfirst: tuple = ()  # date string columns that put the day before the month
+    timed: tuple = ()  # date columns that carry a time of day
 
     def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
+        self.dayfirst = ()
+        self.timed = ()
         self._plan: list[
             tuple[str, str]
         ] = []  # (column, kind), kind: numeric/datetime/frequency/category
@@ -83,8 +94,17 @@ class Prep:
             s = X[column]
             if s.nunique(dropna=False) <= 1:
                 self.dropped.append(column)
-            elif pd.api.types.is_datetime64_any_dtype(s.dtype) or _holds_dates(s):
+            elif (
+                pd.api.types.is_datetime64_any_dtype(s.dtype)
+                or _holds_dates(s)
+                or _holds_date_strings(s)
+            ):
                 self._plan.append((column, "datetime"))
+                if is_day_first(s):
+                    self.dayfirst += (column,)
+                when = _datetimes(s, column in self.dayfirst)
+                if (when.notna() & (when != when.dt.normalize())).any():
+                    self.timed += (column,)
             elif _is_categorical(s):
                 counts = _as_str(s).value_counts()
                 if len(counts) > HIGH_CARDINALITY:
@@ -110,8 +130,9 @@ class Prep:
             if kind == "category":
                 self._category_at[f"f{len(self.feature_names)}"] = column
             if kind == "datetime":
-                self.feature_names += [f"{column}__{part}" for part in _DATE_PARTS]
-                self.sources += [(column,)] * len(_DATE_PARTS)
+                parts = _DATE_PARTS + (("hour",) if column in self.timed else ())
+                self.feature_names += [f"{column}__{part}" for part in parts]
+                self.sources += [(column,)] * len(parts)
             else:
                 self.feature_names.append(column)
                 self.sources.append((column,))
@@ -176,9 +197,11 @@ class Prep:
                 values = pd.to_numeric(s, errors="coerce").astype(float)
                 out.append(values.replace([np.inf, -np.inf], np.nan))
             elif kind == "datetime":
-                when = _datetimes(s)
+                when = _datetimes(s, column in self.dayfirst)
                 out += [when.dt.year, when.dt.month, when.dt.day, when.dt.day_of_week]
                 out.append((when - _EPOCH).dt.total_seconds())
+                if column in self.timed:
+                    out.append(when.dt.hour.astype(float))
             elif kind == "frequency":
                 values = _as_str(s)
                 encoded = values.map(self.frequencies[column]).astype(float)

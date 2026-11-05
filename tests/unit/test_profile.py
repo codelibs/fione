@@ -15,7 +15,7 @@ from sklearn.datasets import (
 )
 
 from fione.data import profile as profile_module
-from fione.data.frames import change_column_type
+from fione.data.frames import change_column_type, is_day_first, parse_datetimes
 from fione.data.profile import (
     CORRELATED,
     LEAK_STRONG,
@@ -837,3 +837,45 @@ def test_date_detection_samples_beyond_the_head_of_a_sorted_column():
     # head looks like dates, the rest like pairs: a head-only sample would say datetime
     values = ["2024-03-05"] * 1000 + ["1-2"] * 3000
     assert _kind(pd.Series(values)) != "datetime"
+
+
+def test_dates_in_mixed_formats_are_read_value_by_value():
+    mixed = pd.Series(["2024-01-05", "5 Mar 2024", "2024/02/03 10:00", "bad", None] * 4)
+    parsed = parse_datetimes(mixed).iloc[:5]
+    assert parsed.tolist()[:3] == [
+        pd.Timestamp("2024-01-05"),
+        pd.Timestamp("2024-03-05"),
+        pd.Timestamp("2024-02-03 10:00"),
+    ]
+    assert parsed.isna().tolist() == [False, False, False, True, True]
+
+
+def test_day_first_dates_are_read_by_their_fields():
+    day_first = pd.Series(["25-12-2024", "02-10-2024", "13/01/2024"])
+    assert is_day_first(day_first)
+    assert parse_datetimes(day_first).tolist()[1] == pd.Timestamp("2024-10-02")
+    month_first = pd.Series(["12/25/2024", "02/10/2024"])
+    assert not is_day_first(month_first)
+    assert parse_datetimes(month_first).tolist()[1] == pd.Timestamp("2024-02-10")
+    assert not is_day_first(pd.Series(["2024-10-02", "2024-12-25"]))  # ISO
+    assert not is_day_first(pd.Series(["01-02-2024", "03-04-2024"]))  # no field above 12
+
+
+def test_reading_dates_does_not_depend_on_the_batch_or_the_order_of_values():
+    month_first = pd.Series(["06/07/2012", "06/18/2012"])
+    assert parse_datetimes(month_first, dayfirst=False).tolist()[0] == pd.Timestamp("2012-06-07")
+    # a mixed-convention column, read month first as fitted: the same value in any batch
+    for batch in (["06/07/2012"], ["25/07/2012", "06/07/2012"], ["06/07/2012", "25/07/2012"]):
+        got = parse_datetimes(pd.Series(batch), dayfirst=False)
+        assert got[batch.index("06/07/2012")] == pd.Timestamp("2012-06-07")
+    # a value that starts with the year is never read day first
+    day_first = parse_datetimes(pd.Series(["2012-06-07", "25-06-2012"]), dayfirst=True)
+    assert day_first.tolist() == [pd.Timestamp("2012-06-07"), pd.Timestamp("2012-06-25")]
+    alone = parse_datetimes(pd.Series(["2012-06-07"]), dayfirst=True)
+    assert alone.tolist() == [pd.Timestamp("2012-06-07")]
+
+
+def test_dates_keep_their_index_and_missing_values():
+    s = pd.Series(["02-10-2012 09:00", None, "25-10-2012 10:00"], index=[5, 5, 9])
+    out = parse_datetimes(s, dayfirst=True)
+    assert out.index.tolist() == [5, 5, 9] and out.isna().tolist() == [False, True, False]

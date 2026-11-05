@@ -1,3 +1,5 @@
+import pickle
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -62,7 +64,7 @@ def test_fit_expands_datetime_columns():
 def test_feature_names_follow_column_order():
     prep = Prep().fit(_frame())
     assert prep.feature_names[:3] == ["num", "ids", "pref"]
-    assert prep.feature_names[-1] == "when__ordinal"
+    assert prep.feature_names[-2:] == ["when__ordinal", "when__hour"]  # it carries a time
 
 
 # --- views ------------------------------------------------------------------
@@ -163,6 +165,66 @@ def test_transform_coerces_numeric_and_datetime_strings():
     assert dense["f0"].tolist() == [4.0, 1.5, 6.0]  # median of the finite fitted values
     assert prep.tree(new)["f2"].tolist()[:2] == [3, 3]  # month
     assert prep.tree(df)["f0"].isna().tolist() == [False, False, True]  # inf becomes NaN
+
+
+def _stamps(n=300):
+    return pd.Series(
+        pd.date_range(pd.Timestamp("2012-10-02 09:00"), periods=n, freq="7h")
+    ).dt.strftime("%d-%m-%Y %H:%M")
+
+
+def test_date_strings_become_date_parts_and_read_day_first():
+    df = pd.DataFrame({"n": RNG.normal(size=300), "stamp": _stamps()})
+    prep = Prep().fit(df)
+    assert prep.kind_of("stamp") == "datetime" and prep.dayfirst == ("stamp",)
+    # one row of a later batch: the day-first reading is the one found when fitting
+    one = prep.tree(pd.DataFrame({"n": [0.0], "stamp": ["03-11-2012 10:00"]}))
+    assert one["f2"].tolist() == [11] and one["f3"].tolist() == [3]  # month, day
+
+
+def test_date_strings_month_first_and_iso_are_not_read_day_first():
+    iso = pd.Series(pd.date_range("2012-10-02", periods=300, freq="D").strftime("%Y-%m-%d"))
+    us = pd.Series(pd.date_range("2012-10-02", periods=300, freq="D").strftime("%m/%d/%Y"))
+    for column in (iso, us):
+        prep = Prep().fit(pd.DataFrame({"n": RNG.normal(size=300), "d": column}))
+        assert prep.kind_of("d") == "datetime" and prep.dayfirst == ()
+        assert prep.tree(pd.DataFrame({"n": [0.0], "d": [column[1]]}))["f2"].tolist() == [10]
+
+
+def test_the_hour_is_a_base_feature_only_for_dates_with_a_time():
+    stamps = _stamps()
+    days = pd.Series(pd.date_range("2012-10-02", periods=300, freq="D").strftime("%Y-%m-%d"))
+    prep = Prep().fit(pd.DataFrame({"n": RNG.normal(size=300), "stamp": stamps, "day": days}))
+    assert prep.timed == ("stamp",)
+    assert "stamp__hour" in prep.feature_names and "day__hour" not in prep.feature_names
+    hour = prep.tree(
+        pd.DataFrame({"n": [0.0], "stamp": ["03-11-2012 10:00"], "day": ["2012-11-03"]})
+    )
+    assert hour[f"f{prep.feature_names.index('stamp__hour')}"].tolist() == [10.0]
+
+
+def test_times_and_months_alone_are_not_dates():
+    """Dated by today's clock they would shift between training and prediction."""
+    times = pd.Series(["09:15:00", "17:40:00", "08:00:01", "23:59:59"] * 75)
+    months = pd.Series(["Jan", "Feb", "Mar", "Apr", "May", "Jun"] * 50)
+    prep = Prep().fit(pd.DataFrame({"n": RNG.normal(size=300), "t": times, "m": months}))
+    assert prep.kind_of("t") != "datetime" and prep.kind_of("m") != "datetime"
+
+
+def test_the_hour_is_not_repeated_by_the_date_parts_group():
+    from fione.engine.features import DateParts
+
+    df = pd.DataFrame({"n": RNG.normal(size=300), "stamp": _stamps()})
+    prep = Prep().fit(df, groups=[DateParts(["stamp"], base_hours=("stamp",))])
+    assert len(prep.feature_names) == len(set(prep.feature_names))
+    assert "stamp__hour" in prep.feature_names and "stamp__week" in prep.feature_names
+
+
+def test_a_prep_pickled_without_dayfirst_still_loads():
+    prep = Prep().fit(pd.DataFrame({"n": RNG.normal(size=300), "stamp": _stamps()}))
+    del prep.__dict__["dayfirst"], prep.__dict__["timed"]
+    loaded = pickle.loads(pickle.dumps(prep))
+    assert loaded.dayfirst == () and loaded.timed == ()
 
 
 @pytest.mark.parametrize(
