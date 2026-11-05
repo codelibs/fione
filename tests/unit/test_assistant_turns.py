@@ -1072,6 +1072,33 @@ def final(env, conversation_id, timeout=10.0):
         reader.close()
 
 
+def test_manager_waits_for_the_consent_of_a_remote_host(env, fake_llm):
+    fake = fake_llm([{"text": "Hello"}])
+    remote = make_settings(
+        env.tmp / "remote",
+        llm_base_url="https://llm.invalid",
+        llm_provider="claude",
+        llm_api_key="sk-test-0123456789",
+    )
+    monitor = LlmMonitor(remote, env.db_path)  # never started: the host is not probed
+    env.monitors.append(monitor)
+    monitor._update(state="ready")  # what a check the key passed finds
+    manager = TurnManager(env.db_path, env.storage, settings_for(env, fake), monitor)
+    try:
+        args = (env.conn, env.owner, env.project.id, env.conversation.id, "Hi")
+        with pytest.raises(LlmUnavailable):
+            manager.submit(*args, language="en")
+        assert store.messages(env.conn, env.conversation.id) == [] and fake.requests == []
+        store.record_consent(
+            env.conn, env.admin, provider="claude", model=remote.llm_model,
+            base_url=remote.llm_base_url,
+        )  # fmt: skip
+        manager.submit(*args, language="en")
+        assert final(env, env.conversation.id).content == "Hello" and len(fake.requests) == 1
+    finally:
+        manager.shutdown()
+
+
 def test_manager_refuses_when_not_ready_and_one_at_a_time(env, manager):
     pulling, _ = manager(state="pulling")
     with pytest.raises(LlmUnavailable):

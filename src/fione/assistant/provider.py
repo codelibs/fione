@@ -17,6 +17,7 @@ import ipaddress
 import json
 import logging
 import re
+import sqlite3
 import threading
 from contextlib import closing
 from dataclasses import dataclass, replace
@@ -160,10 +161,13 @@ class LlmMonitor:
     # --- what others ask
 
     def snapshot(self) -> LlmStatus:
-        """The status; ``consent_required`` while a remote host has no consent."""
+        """The status; ``consent_required`` while a remote host has no consent (without what
+        the last check found, which is for a host that may be used)."""
         status = self._current()
         if not status.local and not self._consented():
-            return replace(status, state="consent_required")
+            return replace(
+                status, state="consent_required", error_code=None, completed=None, total=None
+            )
         return status
 
     def _current(self) -> LlmStatus:
@@ -171,8 +175,14 @@ class LlmMonitor:
             return self._status
 
     def _consented(self) -> bool:
-        with closing(db.connect(self._db_path)) as conn:
-            return has_consent(conn, self._settings.llm_base_url)
+        """Whether the host has a consent; not while the database cannot be read (locked), so
+        that every page still shows."""
+        try:
+            with closing(db.connect(self._db_path)) as conn:
+                return has_consent(conn, self._settings.llm_base_url)
+        except sqlite3.OperationalError:
+            log.warning("the consent for %s could not be read", self._status.host)
+            return False
 
     def effective_context(self) -> int:
         """The tokens a request may use: the setting, and for Ollama no more than the context

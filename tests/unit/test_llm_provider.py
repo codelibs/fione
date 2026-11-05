@@ -4,6 +4,7 @@ server really gives."""
 
 import json
 import logging
+import sqlite3
 import time
 from contextlib import closing
 
@@ -309,12 +310,41 @@ def test_remote_host_without_consent_is_consent_required(monitors):
 def test_consent_makes_it_ready_without_restart(monitors, db_path):
     monitor = monitors(REMOTE, http=an_ollama_that_has_the_model())
     monitor.start()
-    time.sleep(0.2)  # the server answers, but nobody has consented
+    end = time.monotonic() + 10
+    while monitor._current().state != "ready" and time.monotonic() < end:
+        time.sleep(0.01)
+    assert monitor._current().state == "ready"  # the server answers, but nobody has consented
     assert monitor.snapshot().state == "consent_required"
     with closing(db.connect(db_path)) as conn:
         admin = auth.create_user(conn, "boss", "password-123", Role.ADMIN)
         store.record_consent(conn, admin, provider="ollama", model="m", base_url=REMOTE)
     wait_for(monitor, "ready")
+
+
+def test_consent_required_hides_what_the_last_check_found(monitors):
+    monitor = monitors(REMOTE)
+    monitor._update(state="error", error_code="probe_failed", completed=1, total=2)
+    status = monitor.snapshot()
+    assert (status.state, status.error_code, status.completed, status.total) == (
+        "consent_required", None, None, None
+    )  # fmt: skip
+
+
+def test_a_locked_database_counts_as_no_consent(monitors, db_path, monkeypatch, caplog):
+    with closing(db.connect(db_path)) as conn:
+        admin = auth.create_user(conn, "boss", "password-123", Role.ADMIN)
+        store.record_consent(conn, admin, provider="ollama", model="m", base_url=REMOTE)
+    monitor = monitors(REMOTE)
+    monitor._update(state="ready")
+    assert monitor.snapshot().state == "ready"
+
+    def locked(conn, base_url):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(provider, "has_consent", locked)
+    with caplog.at_level(logging.WARNING, logger="fione.assistant"):
+        assert monitor.snapshot().state == "consent_required"
+    assert "consent" in caplog.text
 
 
 def test_consent_covers_the_host_not_another(monitors, db_path):
