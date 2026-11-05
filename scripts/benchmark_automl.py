@@ -15,8 +15,9 @@ the task and the metric that scores the fit, and may drop columns such as an ID:
     {"mydata": {"file": "mydata/train.csv", "target": "y", "task": "classification",
                 "metric": "auc", "drop": ["id"]}}
 
-The metric is one of ``accuracy``, ``balanced_accuracy``, ``auc`` (two classes), ``rmse`` and
-``rmsle``; it goes to the ``metric`` and ``score`` columns beside the log loss / RMSE of ``loss``.
+The metric is one of ``accuracy``, ``balanced_accuracy``, ``auc``, ``average_precision`` and ``f1``
+(the last three for two classes; ``f1`` is of the second class), ``rmse`` and ``rmsle``;
+it goes to the ``metric`` and ``score`` columns beside the log loss / RMSE of ``loss``.
 Keep the spec, the data and the results out of the repository.
 
 ``run`` fits every dataset on ``--splits`` random 80/20 splits (the split number is the seed) and
@@ -37,7 +38,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.datasets import fetch_openml
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    balanced_accuracy_score,
+    f1_score,
+    log_loss,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 
 # name -> (task, columns to drop). The target is OpenML's default target.
@@ -75,7 +83,7 @@ COLUMNS = [
     "score",
     "members",
 ]
-METRICS = {"accuracy", "balanced_accuracy", "auc", "rmse", "rmsle"}
+METRICS = {"accuracy", "balanced_accuracy", "auc", "average_precision", "f1", "rmse", "rmsle"}
 
 
 def load_spec(path: str | None) -> dict[str, dict]:
@@ -134,9 +142,19 @@ def score(
         if len(classes) != 2:
             raise SystemExit("auc needs exactly two classes")
         return float(roc_auc_score(y == classes[1], pred[classes[1]].to_numpy()))
+    if metric == "average_precision":
+        if len(classes) != 2:
+            raise SystemExit("average_precision needs exactly two classes")
+        return float(average_precision_score(y == classes[1], pred[classes[1]].to_numpy()))
     labels = pred.idxmax(axis=1).to_numpy() if labels is None else labels
     if metric == "balanced_accuracy":
         return float(balanced_accuracy_score(y, labels))
+    if metric == "f1":
+        if len(classes) != 2:
+            raise SystemExit("f1 needs exactly two classes")
+        return float(f1_score(y == classes[1], labels == classes[1]))
+    if metric != "accuracy":
+        raise SystemExit(f"unknown metric {metric}")
     return float(accuracy_score(y, labels))
 
 
