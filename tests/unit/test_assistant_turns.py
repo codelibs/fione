@@ -1324,8 +1324,50 @@ def test_explain_needs_a_ready_assistant_but_shows_a_written_note(env, manager):
 
 def test_explain_counts_toward_the_turns_of_a_user(env, manager):
     one, _ = manager([{"text": "slow", "delay": 2}] * 4, llm_max_concurrent_turns=1)
-    for subject in range(turns.MAX_TURNS_PER_USER):
-        one.explain(env.conn, env.owner, env.project.id, "model", str(subject), "en")
+    chats = [env.conversation] + [
+        store.create_conversation(env.conn, env.owner, env.project.id, f"c{i}") for i in range(2)
+    ]
+    for chat in chats:
+        one.submit(env.conn, env.owner, env.project.id, chat.id, "Hi", language="en")
     with pytest.raises(turns.TooManyTurns):
         one.explain(env.conn, env.owner, env.project.id, "model", "99", "en")
     assert store.get_note(env.conn, env.project.id, "model", "99", "en") is None
+
+
+def test_one_note_at_a_time_per_user(env, manager):
+    one, _ = manager([{"text": "slow", "delay": 1}] * 4)
+    assert one.explain(env.conn, env.owner, env.project.id, "model", "1", "en").state == "writing"
+    with pytest.raises(turns.TooManyTurns):
+        one.explain(env.conn, env.owner, env.project.id, "model", "2", "en")
+    assert store.get_note(env.conn, env.project.id, "model", "2", "en") is None
+    # the chat and other users keep their turns
+    one.submit(env.conn, env.owner, env.project.id, env.conversation.id, "Hi", language="en")
+    view = one.explain(env.conn, env.member, env.project.id, "model", "2", "en")
+    assert view.state == "writing"
+    assert settled(env, one).text == "slow"
+
+    def next_note():  # once the user's note has ended, another may start
+        try:
+            return one.explain(env.conn, env.owner, env.project.id, "model", "3", "en")
+        except turns.TooManyTurns:
+            return None
+
+    wait_until(next_note)
+
+
+def test_a_note_made_meanwhile_is_shown_instead_of_a_refusal(env, manager, monkeypatch):
+    one, _ = manager([{"text": "Written."}])
+    assert settled(env, one).text == "Written."
+    real = store.get_note
+    calls = []
+
+    def first_misses(*args):  # the note appears between the look-up and the start
+        calls.append(args)
+        return None if len(calls) == 1 else real(*args)
+
+    monkeypatch.setattr(store, "get_note", first_misses)
+    busy, _ = manager(state="pulling")
+    assert busy.explain(env.conn, env.member, env.project.id, "model", "1", "en").text == "Written."
+    calls.clear()
+    monkeypatch.setattr(turns, "MAX_TURNS_PER_USER", 0)
+    assert one.explain(env.conn, env.member, env.project.id, "model", "1", "en").text == "Written."

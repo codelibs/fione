@@ -191,12 +191,18 @@ def list_conversations(conn: sqlite3.Connection, user: User, project_id: str) ->
 
 
 def get_conversation(
-    conn: sqlite3.Connection, user: User, project_id: str, conversation_id: int
+    conn: sqlite3.Connection,
+    user: User,
+    project_id: str,
+    conversation_id: int,
+    kind: str | None = "chat",
 ) -> Conversation:
-    """The user's conversation in ``project_id``, if the user can read the project now."""
+    """The user's conversation of ``kind`` (``None``: any) in ``project_id``, if the user can
+    read the project now."""
     row = conn.execute(
-        "SELECT * FROM conversations WHERE id = ? AND project_id = ? AND user_id = ?",
-        (conversation_id, project_id, user.id),
+        "SELECT * FROM conversations WHERE id = ? AND project_id = ? AND user_id = ?"
+        " AND kind = COALESCE(?, kind)",
+        (conversation_id, project_id, user.id, kind),
     ).fetchone()
     if row is None or not can_access_project(conn, user, project_id, "read"):
         raise ConversationNotFound(conversation_id)
@@ -436,13 +442,24 @@ def create_note(
     return _note(row), placeholder
 
 
+def note_of(conn: sqlite3.Connection, conversation_id: int) -> Note | None:
+    """The note a conversation holds, if it is a note's."""
+    row = conn.execute(
+        "SELECT * FROM assistant_notes WHERE conversation_id = ?", (conversation_id,)
+    ).fetchone()
+    return None if row is None else _note(row)
+
+
 def note_answer(conn: sqlite3.Connection, conversation_id: int) -> Message | None:
-    """The last assistant message of a note's conversation, whoever owns it: the callers check
-    that the reader can read the project."""
+    """The last assistant message of the first turn of a note's conversation, whoever owns it:
+    the callers check that the reader can read the project. Nothing written after that turn
+    can change the shared text."""
     row = conn.execute(
         "SELECT * FROM chat_messages WHERE conversation_id = ? AND role = 'assistant'"
+        " AND id < COALESCE((SELECT id FROM chat_messages WHERE conversation_id = ?"
+        " AND role = 'user' ORDER BY id LIMIT 1 OFFSET 1), 9223372036854775807)"
         " ORDER BY id DESC LIMIT 1",
-        (conversation_id,),
+        (conversation_id, conversation_id),
     ).fetchone()
     return None if row is None else _message(row)
 
@@ -503,12 +520,13 @@ def proposals_for(conn: sqlite3.Connection, conversation_id: int) -> dict[int, P
 def get_proposal(
     conn: sqlite3.Connection, user: User, project_id: str, proposal_id: int
 ) -> Proposal:
-    """The proposal, only through a conversation the user can see (``get_conversation``)."""
+    """The proposal, only through a conversation the user can see (``get_conversation``),
+    a note's included."""
     row = conn.execute("SELECT * FROM chat_proposals WHERE id = ?", (proposal_id,)).fetchone()
     if row is None:
         raise ProposalNotFound(proposal_id)
     try:
-        get_conversation(conn, user, project_id, row["conversation_id"])
+        get_conversation(conn, user, project_id, row["conversation_id"], kind=None)
     except ConversationNotFound:
         raise ProposalNotFound(proposal_id) from None
     return _proposal(row)

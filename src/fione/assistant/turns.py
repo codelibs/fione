@@ -52,6 +52,7 @@ log = logging.getLogger("fione.assistant")
 
 MAX_CALLS_PER_ROUND = 4  # run; the others are refused
 MAX_TURNS_PER_USER = 3  # running or waiting, across the user's conversations
+MAX_NOTES_PER_USER = 1  # of those, the notes being written
 MAX_WAITING_TURNS = 8  # waiting for a free slot of the pool, all users together
 MAX_CALLS_KEPT = 16  # stored and answered; a reply with more loses the rest
 MAX_CONTENT_CHARS = 20_000  # of an assistant message
@@ -484,6 +485,7 @@ class _Entry:
     future: Future
     user_id: int
     assistant_id: int
+    note: bool = False
 
 
 class TurnManager:
@@ -535,15 +537,19 @@ class TurnManager:
             lambda: (conversation_id, store.start_turn(conn, conversation_id, text)[1]),
         )
 
-    def _start(self, conn: sqlite3.Connection, user: User, language: str, begin) -> Message:
+    def _start(
+        self, conn: sqlite3.Connection, user: User, language: str, begin, *, note: bool = False
+    ) -> Message:
         """Run a turn once the provider is ready and the limits allow it: ``begin()`` stores its
         rows and returns the conversation's id and the ``queued`` assistant message."""
         if self._monitor.snapshot().state != "ready":
             raise LlmUnavailable()
         with self._lock:  # held while the turn is created, so the counts stay true
             entries = [e for e in self._turns.values() if not e.future.done()]
+            mine = [e for e in entries if e.user_id == user.id]
             if (
-                sum(e.user_id == user.id for e in entries) >= MAX_TURNS_PER_USER
+                len(mine) >= MAX_TURNS_PER_USER
+                or (note and sum(e.note for e in mine) >= MAX_NOTES_PER_USER)
                 or len(entries) >= self._settings.llm_max_concurrent_turns + MAX_WAITING_TURNS
             ):
                 raise TooManyTurns()
@@ -557,7 +563,7 @@ class TurnManager:
             except RuntimeError:  # shut down
                 store.finish_message(conn, placeholder.id, "failed", error_code="unavailable")
                 raise LlmUnavailable() from None
-            self._turns[conversation_id] = _Entry(cancel, future, user.id, placeholder.id)
+            self._turns[conversation_id] = _Entry(cancel, future, user.id, placeholder.id, note)
         return placeholder
 
     def explain(
@@ -572,7 +578,8 @@ class TurnManager:
         """The note about the subject in ``language``, which a first call starts writing.
 
         A written note is shown whatever the provider's state; a new one needs it ready
-        (``LlmUnavailable``) and a free turn of the user (``TooManyTurns``).
+        (``LlmUnavailable``) and a free turn of the user, who writes one note at a time
+        (``TooManyTurns``).
         ``ConversationNotFound`` unless the user can read the project; the caller checks that
         the subject belongs to it."""
         if not can_access_project(conn, user, project_id, "read"):
@@ -592,9 +599,15 @@ class TurnManager:
                 return note.conversation_id, placeholder
 
             try:
-                self._start(conn, user, language, begin)
+                self._start(conn, user, language, begin, note=True)
             except _Made:
                 pass
+            except (LlmUnavailable, TooManyTurns):
+                # another reader may have made it meanwhile: theirs is shown, not the refusal
+                note = store.get_note(conn, project_id, kind, subject_id, language)
+                if note is None:
+                    raise
+                return self._view(conn, note)
             note = made[0]
         return self._view(conn, note)
 

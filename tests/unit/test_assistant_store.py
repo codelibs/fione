@@ -666,3 +666,30 @@ def test_deleting_a_note_or_its_owner_removes_it(conn, owner, member, project):
     auth.delete_user(conn, member.id)
     assert store.get_note(conn, project.id, "model", "7", "en") is None
     assert count(conn, "assistant_notes") == 0
+
+
+def test_a_note_is_no_chat_conversation(conn, owner, project):
+    note, placeholder = store.create_note(conn, owner, project.id, "model", "7", "en", "x")
+    with pytest.raises(ConversationNotFound):
+        store.get_conversation(conn, owner, project.id, note.conversation_id)
+    with pytest.raises(ConversationNotFound):
+        store.delete_conversation(conn, owner, project.id, note.conversation_id)
+    found = store.get_conversation(conn, owner, project.id, note.conversation_id, kind=None)
+    assert found.kind == "note"
+    assert store.note_of(conn, note.conversation_id) == note
+    chat = store.create_conversation(conn, owner, project.id)
+    assert store.note_of(conn, chat.id) is None
+    reply = store.add_message(conn, chat.id, "assistant", "x")
+    proposal = store.add_proposal(conn, reply.id, chat.id, None, {}, {})
+    assert store.get_proposal(conn, owner, project.id, proposal.id) == proposal
+    store.finish_message(conn, placeholder.id, "done", content="first")
+    proposal = store.add_proposal(conn, placeholder.id, note.conversation_id, None, {}, {})
+    assert store.get_proposal(conn, owner, project.id, proposal.id) == proposal
+
+
+def test_the_text_of_a_note_is_its_first_answer(conn, owner, project):
+    note, placeholder = store.create_note(conn, owner, project.id, "model", "7", "en", "x")
+    store.finish_message(conn, placeholder.id, "done", content="first")
+    store.add_message(conn, note.conversation_id, "user", "a follow-up")
+    store.add_message(conn, note.conversation_id, "assistant", "second")
+    assert store.note_answer(conn, note.conversation_id).content == "first"

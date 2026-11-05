@@ -85,10 +85,10 @@ use, how to improve it) that fill in the box the same way.
 
 ## Automatic comments
 
-A model's summary and model pages, and the page of a failed job, show an **Assistant's comment**:
+A model's summary and model pages, and the page of a failed training, show an **Assistant's comment**:
 a short explanation in plain words. For a model it says whether the result is good, mediocre or
 poor against the baseline, what mostly drives the prediction, any problem in the data and one to
-three next steps; for a failed job, why it failed and what to change. When a change clearly
+three next steps; for a failed training, why it failed and what to change. When a change clearly
 helps, the comment can carry a training proposal, which only the person whose visit wrote the
 comment can confirm or dismiss; the others see its reason and can ask for their own with
 **Ask the assistant a follow-up**.
@@ -159,6 +159,7 @@ datasets of a project are examined, and the search stops after 30 seconds (the r
 | Conversations | 100 per person and project |
 | One answer | At most 6 rounds of reading (`FIONE_LLM_MAX_TOOL_ROUNDS`), 180 seconds (`FIONE_LLM_TURN_TIMEOUT_SECS`) |
 | Answers at once | 2 on the server (`FIONE_LLM_MAX_CONCURRENT_TURNS`), 3 per person, 8 waiting |
+| Comments being written | 1 per person at a time (it counts toward their 3 answers); another page shows "busy" until it is done |
 | A tool result | Cut to 32 KB, and the cut is reported to the model |
 
 An answer that is still running when Fione restarts ends as interrupted; ask again.
