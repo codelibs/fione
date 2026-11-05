@@ -175,7 +175,7 @@ def test_tools_list_matches_the_registry(mcp):
 
 def test_call_reads_and_hides_samples(make_client, fake_llm):
     fake = fake_llm()
-    client = make_client(mcp_enabled=True, llm_base_url=fake.url, llm_provider="openai")
+    client = make_client(mcp_enabled=True, llm_base_url=fake.url, llm_provider="ollama")
     user = add_user(client, "ed", Role.EDITOR)
     _, dataset = iris_dataset(client, user)
     with closing(connect(client)) as conn:  # the chat's provider may be sent example values

@@ -12,7 +12,7 @@ from api_helpers import make_settings
 from fake_llm import FakeLlm
 from fione.assistant import client as client_module
 from fione.assistant.client import ChatClient, Completion, LlmError, ToolCall, _Reply
-from fione.config import MIN_PROMPT_TOKENS
+from fione.config import MIN_PROMPT_TOKENS, Settings
 
 KEY = "sk-test-0123456789"
 HELLO = [{"role": "user", "content": "hello"}]
@@ -191,10 +191,6 @@ def test_request_body_and_headers(fake_llm, tmp_path):
     assert completion.prompt_tokens is not None  # the fake reports usage whenever asked
 
 
-def test_from_settings_is_none_without_a_base_url(tmp_path):
-    assert ChatClient.from_settings(make_settings(tmp_path)) is None
-
-
 def test_http_error_hides_the_key(fake_llm):
     fake = fake_llm(
         [
@@ -261,6 +257,9 @@ def test_settings_rules(tmp_path, monkeypatch):
         {"llm_base_url": "http://host:11434", "llm_provider": "ollama"},
         {"llm_base_url": "http://host/v10", "llm_provider": "ollama"},
         {"llm_base_url": "ftp://host/v1"},
+        {"llm_provider": "openai"},
+        {"llm_provider": "claude"},  # no API key
+        {"llm_provider": "claude", "llm_api_key": ""},
         {"llm_base_url": "http://host/v1?key=1"},
         {"llm_base_url": "http://host/v1#frag"},
         {"llm_base_url": "http://user:pw@host/v1"},
@@ -273,7 +272,6 @@ def test_settings_rules(tmp_path, monkeypatch):
         {"llm_base_url": "http://host/ v1"},
         {"llm_extra_body": {"model": "x"}},
         {"llm_extra_body": {"stream_options": {}}},
-        {"llm_model": ""},
         {"llm_model": "a b"},
         {"llm_model": "é"},
         {"llm_model": "m" * 201},
@@ -299,23 +297,23 @@ def test_settings_rules(tmp_path, monkeypatch):
 
     settings = check(llm_base_url="https://api.example.com/v1/", llm_provider="ollama")
     assert settings.llm_base_url == "https://api.example.com/v1"
-    assert check(llm_base_url="http://h:1234").llm_base_url == "http://h:1234"
+    claude = check(llm_provider="claude", llm_api_key=KEY, llm_base_url="http://h:1234")
+    assert claude.llm_base_url == "http://h:1234"
     for url in ("http://[::1]:11434/v1", "http://my_ollama:11434/v1"):
         assert check(llm_base_url=url, llm_provider="ollama").llm_base_url == url
-    assert check().llm_base_url is None
     assert (check().llm_model, check().llm_auto_pull) == ("gemma4:12b-mlx", False)
-    assert check().llm_extra_body == {}
+    assert check(llm_provider="claude", llm_api_key=KEY).llm_extra_body == {}
     assert settings.llm_extra_body == {"reasoning_effort": "none"}
     assert check(llm_provider="ollama", llm_extra_body={}).llm_extra_body == {}
 
     monkeypatch.setenv("FIONE_LLM_BASE_URL", "")
     monkeypatch.setenv("FIONE_LLM_API_KEY", "")
     monkeypatch.setenv("FIONE_LLM_EXTRA_BODY", "")
-    settings = check()
+    settings = Settings(data_dir=tmp_path)  # the environment, not make_settings' defaults
     assert (settings.llm_base_url, settings.llm_api_key, settings.llm_extra_body) == (
+        "http://host.docker.internal:11434/v1",
         None,
-        None,
-        {},
+        {"reasoning_effort": "none"},
     )
     monkeypatch.setenv("FIONE_LLM_EXTRA_BODY", '{"top_p": 0.5}')
     assert check().llm_extra_body == {"top_p": 0.5}
@@ -328,8 +326,39 @@ def test_settings_rules(tmp_path, monkeypatch):
     assert settings.llm_api_key.get_secret_value() == KEY
     assert KEY not in repr(settings) and KEY not in str(settings)
     with pytest.raises(ValidationError) as raised:
-        check(llm_api_key=KEY, llm_model="")
+        check(llm_api_key=KEY, llm_model="a b")
     assert KEY not in str(raised.value)
+
+
+def test_claude_requires_an_api_key(tmp_path):
+    with pytest.raises(ValidationError, match="FIONE_LLM_API_KEY"):
+        make_settings(tmp_path, llm_provider="claude")
+    settings = make_settings(tmp_path, llm_provider="claude", llm_api_key=KEY)
+    assert settings.llm_api_key.get_secret_value() == KEY
+
+
+def test_claude_rejects_extra_body(tmp_path):
+    with pytest.raises(ValidationError, match="FIONE_LLM_EXTRA_BODY"):
+        make_settings(
+            tmp_path, llm_provider="claude", llm_api_key=KEY, llm_extra_body={"top_p": 0.5}
+        )
+    claude = make_settings(tmp_path, llm_provider="claude", llm_api_key=KEY)
+    assert claude.llm_extra_body == {}
+
+
+def test_the_default_base_url_follows_the_provider(tmp_path):
+    ollama = make_settings(tmp_path, llm_base_url="", llm_provider="ollama")
+    assert ollama.llm_base_url == "http://host.docker.internal:11434/v1"
+    claude = make_settings(tmp_path, llm_base_url="", llm_provider="claude", llm_api_key=KEY)
+    assert claude.llm_base_url == "https://api.anthropic.com"
+    assert (ollama.llm_model, claude.llm_model) == ("gemma4:12b-mlx", "claude-opus-5-5")
+    chosen = make_settings(tmp_path, llm_provider="claude", llm_api_key=KEY, llm_model="m")
+    assert chosen.llm_model == "m"
+
+
+def test_openai_is_rejected(tmp_path):
+    with pytest.raises(ValidationError, match="llm_provider"):
+        make_settings(tmp_path, llm_provider="openai", llm_base_url="http://h:1/v1")
 
 
 def test_fake_serves_the_ollama_endpoints(fake_llm):

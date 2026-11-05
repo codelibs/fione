@@ -103,18 +103,9 @@ def test_native_root():
     assert native_root("http://h:11434") == "http://h:11434"
 
 
-def test_the_monitor_is_off_without_a_base_url(tmp_path):
-    monitor = LlmMonitor(make_settings(tmp_path))
-    monitor.start()
-    status = monitor.snapshot()
-    assert (status.state, status.model, status.host) == ("off", None, None)
-    assert monitor.pull_now() is False
-    monitor.stop()
-
-
-def test_openai_provider_is_ready_without_probing(fake_llm, monitors):
+def test_claude_provider_is_ready_without_probing(fake_llm, monitors):
     fake = fake_llm()
-    monitor = monitors(fake.url, "openai", llm_model="m")
+    monitor = monitors(fake.url, "claude", llm_api_key="sk-test-0123456789", llm_model="m")
     monitor.start()
     status = monitor.snapshot()
     assert (status.state, status.model, status.local) == ("ready", "m", True)
@@ -273,10 +264,6 @@ def test_the_app_starts_the_monitor_and_stops_it_on_exit(fake_llm, tmp_path):
         assert thread.is_alive()
     assert not thread.is_alive()
 
-    with TestClient(create_app(make_settings(tmp_path / "off"))) as client:
-        assert client.app.state.llm_monitor.snapshot().state == "off"
-        assert client.app.state.llm_monitor._thread is None
-
 
 WRONG_SHAPES = [
     b"[]",
@@ -345,7 +332,8 @@ def test_loading_the_model_reads_a_bounded_answer(fake_llm, monitors, monkeypatc
     assert monitor.snapshot().server_context == 8192
     fake.generate_padding = 5000
     assert monitor.load_model() is False
-    assert monitors(fake_llm().url, "openai").load_model() is False
+    claude = monitors(fake_llm().url, "claude", llm_api_key="sk-test-0123456789")
+    assert claude.load_model() is False
 
 
 def test_an_oversized_answer_is_refused(fake_llm, monitors, monkeypatch):

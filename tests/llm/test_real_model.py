@@ -47,9 +47,8 @@ JAPANESE = (
 
 
 def settings(tmp_path, **values):
-    provider = "ollama" if OLLAMA else "openai"
     return make_settings(
-        tmp_path / "data", llm_base_url=BASE_URL, llm_model=MODEL, llm_provider=provider, **values
+        tmp_path / "data", llm_base_url=BASE_URL, llm_model=MODEL, llm_provider="ollama", **values
     )
 
 

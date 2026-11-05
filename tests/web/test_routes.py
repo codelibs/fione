@@ -232,7 +232,7 @@ ADMIN_ROUTES = {
     ("POST", "/admin/users/{uid}/delete"): (401, 403, 403, 303),
     ("GET", "/admin/system"): (303, 403, 403, 200),
     ("POST", "/admin/system/llm/pull"): (401, 403, 403, 303),
-    ("POST", "/admin/system/llm/samples"): (401, 403, 403, 404),  # 404: no LLM configured
+    ("POST", "/admin/system/llm/samples"): (401, 403, 403, 303),
 }
 GLOBAL_FORMS = {
     "/account/password": {"current_password": PW, "new_password": "a-new-password-1"}
@@ -364,7 +364,7 @@ def test_table_covers_every_ui_route():
 @pytest.mark.parametrize("route", sorted(ASSISTANT_ROUTES))
 def test_assistant_route(make_client, fake_llm, route, persona):
     fake = fake_llm()
-    world = make_world(make_client(llm_base_url=fake.url, llm_provider="openai"))
+    world = make_world(make_client(llm_base_url=fake.url, llm_provider="ollama"))
     username = AUTOML_PERSONAS[persona]
     own = username not in (None, "st")
     with closing(connect(world.client)) as conn:

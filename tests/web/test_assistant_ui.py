@@ -68,7 +68,7 @@ def use_monitor(client, **status):
 def chat(make_client, fake_llm):
     """A world whose app talks to a ready fake LLM, with ``ed`` signed in."""
     fake = fake_llm()
-    world = make_world(make_client(llm_base_url=fake.url, llm_provider="openai"))
+    world = make_world(make_client(llm_base_url=fake.url, llm_provider="ollama"))
     world.fake = fake
     world.csrf = world.login("ed")
     return world
@@ -229,7 +229,11 @@ def test_a_full_conversation_list_is_409(chat, monkeypatch):
 
 
 def test_remote_warning_names_the_host(make_client, fake_llm):
-    client = make_client(llm_base_url="https://api.example.com/v1", llm_provider="openai")
+    client = make_client(
+        llm_base_url="https://api.example.com",
+        llm_provider="claude",
+        llm_api_key="sk-test-0123456789",
+    )
     world = make_world(client)
     world.login("ed")
     r = page_of(world)
@@ -259,24 +263,6 @@ def test_pulling_disables_input_and_shows_progress(chat):
     assert "<progress" in r.text and 'value="250"' in r.text
     assert shown("assistant.state.pulling") in r.text
     assert re.search(r"<textarea[^>]*disabled", r.text)
-
-
-def test_off_hides_the_nav_and_entry_links(make_client):
-    world = make_world(make_client())
-    world.login("ed")
-    ids = world.ids[world.p]
-    pages = [
-        f"/projects/{world.p}",
-        f"/projects/{world.p}/models/{ids['model']}",
-        f"/projects/{world.p}/models/{ids['model']}/summary",
-        f"/projects/{world.p}/datasets/{ids['train']}/analyze",
-    ]
-    for path in pages:
-        text = world.client.get(path).text
-        assert f"/projects/{world.p}/assistant" not in text, path
-    r = page_of(world)
-    assert r.status_code == 200
-    assert shown("assistant.off") in r.text and "<textarea" not in r.text
 
 
 def test_entry_links_when_on(chat):
@@ -314,14 +300,6 @@ def test_failed_job_links_to_the_assistant(chat):
     done = chat.ids[chat.q]["job"]
     finish_job(chat, done, "done")
     assert "?ask=job:" not in chat.client.get(f"/projects/{chat.q}/jobs/{done}").text
-
-
-def test_failed_job_has_no_assistant_link_when_off(make_client):
-    world = make_world(make_client())
-    world.login("ed")
-    job = world.ids[world.p]["job"]
-    finish_job(world, job, "failed")
-    assert all("/assistant" not in text for text in job_pages(world, job))
 
 
 def test_job_prefill_is_for_a_failed_job_of_the_project(chat):
