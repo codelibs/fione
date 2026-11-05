@@ -154,13 +154,18 @@ class Settings(BaseSettings):
         if not _LLM_MODEL.fullmatch(self.llm_model):
             raise ValueError("FIONE_LLM_MODEL must be 1 to 200 visible ASCII characters")
         if self.llm_context_tokens - self.llm_max_tokens < MIN_PROMPT_TOKENS:
-            raise ValueError(
+            message = (
                 "FIONE_LLM_CONTEXT_TOKENS less FIONE_LLM_MAX_TOKENS must be at least"
                 f" {MIN_PROMPT_TOKENS}, the room the assistant's tools and instructions need."
-                " Even 4096, Ollama's default context, is too small for the tools: use"
-                " FIONE_LLM_CONTEXT_TOKENS=16384, and set OLLAMA_CONTEXT_LENGTH=16384 on the"
-                " Ollama server (Compose's ollama profile does; set it for an Ollama on the host)"
             )
+            if self.llm_provider == "ollama":
+                message += (
+                    " Even 4096, Ollama's default context, is too small for the tools: use"
+                    " FIONE_LLM_CONTEXT_TOKENS=16384, and set OLLAMA_CONTEXT_LENGTH=16384 on the"
+                    " Ollama server (Compose's ollama profile does; set it for an Ollama on the"
+                    " host)"
+                )
+            raise ValueError(message)
         if self.llm_provider == "claude" and self.llm_extra_body:
             raise ValueError("FIONE_LLM_EXTRA_BODY applies to FIONE_LLM_PROVIDER=ollama only")
         if self.llm_extra_body is None:

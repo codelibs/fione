@@ -67,10 +67,12 @@ def _input(arguments) -> dict:
 
 
 class _Reply:
-    """What the events of one streamed message add up to."""
+    """What the events of one streamed message add up to; ``secret`` (the API key) is taken
+    out of an error the server reports."""
 
-    def __init__(self, on_text: Callable[[str], None] | None):
+    def __init__(self, on_text: Callable[[str], None] | None, secret: str | None = None):
         self._on_text = on_text
+        self._secret = secret
         self._blocks: dict[int, dict] = {}  # by ``index``, as the API sent them
         self._json: dict[int, list[str]] = {}  # the ``partial_json`` of each tool_use block
         self.finish_reason: str | None = None
@@ -83,7 +85,11 @@ class _Reply:
             raise LlmError("protocol", "the server sent an unexpected event")
         kind = event.get("type")
         if kind == "error":
-            raise LlmError("protocol", f"the server reported an error: {_error_text(event)}")
+            raise LlmError(
+                "protocol",
+                f"the server reported an error: {_error_text(event)}",
+                secret=self._secret,
+            )
         if kind == "message_start":
             message = event.get("message") or {}
             if isinstance(message.get("input_transformations"), list):
@@ -194,13 +200,13 @@ class ClaudeClient(HttpClient):
         headers = {"anthropic-version": ANTHROPIC_VERSION, "anthropic-beta": ANTHROPIC_BETA}
         if self._api_key:
             headers["x-api-key"] = self._api_key
-        reply = _Reply(on_text)
+        reply = _Reply(on_text, self._api_key)
 
         def read(response: httpx.Response, check: Callable[[], None]) -> None:
             for line in _lines(response, check):
                 check()
                 if line.startswith(b"data:"):  # ``event:`` names the same type as the data
-                    self._guard(reply.add_event, _loads(line[5:].strip()))
+                    reply.add_event(_loads(line[5:].strip()))
                     if reply.stopped:
                         return
             raise LlmError("protocol", "the stream ended before the reply was complete")
@@ -221,19 +227,13 @@ class ClaudeClient(HttpClient):
                 [(t.get("type"), t.get("reason"), t.get("path")) for t in reply.transformations
                  if isinstance(t, dict)],
             )  # fmt: skip
-        completion, blocks = self._guarded_done(reply)
+        completion, blocks = reply.done()
         if completion.tool_calls:
             with self._lock:
                 self._replies[tuple(c.id for c in completion.tool_calls)] = blocks
                 while len(self._replies) > MAX_KEPT_REPLIES:
                     self._replies.popitem(last=False)
         return completion
-
-    def _guarded_done(self, reply: _Reply) -> tuple[Completion, list[dict]]:
-        try:
-            return reply.done()
-        except LlmError as e:
-            raise self._error(e.code, str(e), e.status) from None
 
     def _convert(self, messages: list[dict]) -> tuple[str, list[dict]]:
         """The top-level ``system`` and the Anthropic messages of OpenAI-shaped ``messages``."""

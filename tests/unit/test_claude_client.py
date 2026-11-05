@@ -186,6 +186,14 @@ def test_claude_error_event_becomes_llm_error(fake_llm):
     assert pieces == ["par"]
 
 
+def test_claude_error_event_hides_a_key_that_straddles_the_cut(fake_llm):
+    # "the server reported an error: " and the filler put the key across the 200th character.
+    fake = fake_llm([{"text": "", "error": "x" * 160 + KEY}])
+    with pytest.raises(LlmError) as raised:
+        _complete(_client(fake))
+    assert KEY[:6] not in str(raised.value) and str(raised.value).endswith("***")
+
+
 def test_claude_stream_that_stops_short_is_a_protocol_error(fake_llm):
     events = [
         {"type": "message_start", "message": {"usage": {"input_tokens": 3}}},

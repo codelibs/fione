@@ -39,9 +39,14 @@ ErrorCode = Literal[
 
 
 class LlmError(Exception):
-    """A failed completion. The message is short, safe to show, and free of the API key."""
+    """A failed completion. The message is short, safe to show, and free of the API key:
+    ``secret`` is replaced in it before it is cut to ``MAX_MESSAGE_CHARS``."""
 
-    def __init__(self, code: ErrorCode, message: str, status: int | None = None):
+    def __init__(
+        self, code: ErrorCode, message: str, status: int | None = None, *, secret: str | None = None
+    ):
+        if secret:
+            message = message.replace(secret, "***")
         super().__init__(clean_text(message, MAX_MESSAGE_CHARS))
         self.code = code
         self.status = status
@@ -120,10 +125,12 @@ def _partial_tag_length(text: str, tag: str) -> int:
 
 
 class _Reply:
-    """What the chunks of one completion add up to."""
+    """What the chunks of one completion add up to; ``secret`` (the API key) is taken out of
+    an error the server reports."""
 
-    def __init__(self, on_text: Callable[[str], None] | None):
+    def __init__(self, on_text: Callable[[str], None] | None, secret: str | None = None):
         self._on_text = on_text
+        self._secret = secret
         self._think = _ThinkFilter()
         self._text: list[str] = []
         self._calls: list[dict] = []  # in the order they began
@@ -135,7 +142,11 @@ class _Reply:
         if not isinstance(chunk, dict):
             raise LlmError("protocol", "the server sent an unexpected chunk")
         if chunk.get("error"):
-            raise LlmError("protocol", f"the server reported an error: {_error_text(chunk)}")
+            raise LlmError(
+                "protocol",
+                f"the server reported an error: {_error_text(chunk)}",
+                secret=self._secret,
+            )
         usage = chunk.get("usage")
         if isinstance(usage, dict) and isinstance(usage.get("prompt_tokens"), int):
             self.prompt_tokens = usage["prompt_tokens"]
@@ -381,13 +392,6 @@ class HttpClient:
         if time.monotonic() >= deadline:
             raise LlmError("timeout", "the LLM server did not answer in time")
 
-    def _guard(self, add, chunk) -> None:
-        """``add(chunk)`` with the API key taken out of any error message."""
-        try:
-            add(chunk)
-        except LlmError as e:
-            raise self._error(e.code, str(e), e.status) from None
-
     def _http_error(self, response: httpx.Response, check: Callable[[], None]) -> LlmError:
         data = b""
         try:
@@ -407,9 +411,7 @@ class HttpClient:
         return self._error(code, f"HTTP {status}: {text}", status)
 
     def _error(self, code: ErrorCode, message: str, status: int | None = None) -> LlmError:
-        if self._api_key:
-            message = message.replace(self._api_key, "***")
-        return LlmError(code, message, status)
+        return LlmError(code, message, status, secret=self._api_key)
 
 
 class OllamaClient(HttpClient):
@@ -445,7 +447,7 @@ class OllamaClient(HttpClient):
         if tools:
             body["tools"] = tools
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
-        reply = _Reply(on_text)
+        reply = _Reply(on_text, self._api_key)
 
         def read(response: httpx.Response, check: Callable[[], None]) -> None:
             content_type = response.headers.get("content-type", "")
@@ -472,9 +474,9 @@ class OllamaClient(HttpClient):
             data = line[5:].strip()
             if data == b"[DONE]":
                 return
-            self._guard(reply.add_chunk, _loads(data))
+            reply.add_chunk(_loads(data))
         if reply.finish_reason is None:
             raise LlmError("protocol", "the stream ended before the reply was complete")
 
     def _read_json(self, response, reply: _Reply, check: Callable[[], None]) -> None:
-        self._guard(reply.add_chunk, _loads(b"".join(_body(response, check))))
+        reply.add_chunk(_loads(b"".join(_body(response, check))))

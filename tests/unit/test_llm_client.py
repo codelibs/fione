@@ -191,6 +191,17 @@ def test_request_body_and_headers(fake_llm, tmp_path):
     assert completion.prompt_tokens is not None  # the fake reports usage whenever asked
 
 
+def test_an_error_chunk_hides_a_key_that_straddles_the_cut(fake_llm):
+    # "the server reported an error: " and the filler put the key across the 200th character.
+    chunk = json.dumps({"error": {"message": "x" * 160 + KEY}})
+    fake = fake_llm(
+        [{"status": 200, "body": f"data: {chunk}\n\n", "content_type": "text/event-stream"}]
+    )
+    with pytest.raises(LlmError) as raised:
+        _complete(OllamaClient(fake.url, "m", api_key=KEY))
+    assert KEY[:6] not in str(raised.value) and str(raised.value).endswith("***")
+
+
 def test_http_error_hides_the_key(fake_llm):
     fake = fake_llm(
         [
@@ -309,6 +320,11 @@ def test_settings_rules(tmp_path, monkeypatch):
     text = str(raised.value)
     assert "FIONE_LLM_CONTEXT_TOKENS" in text and "FIONE_LLM_MAX_TOKENS" in text
     assert str(MIN_PROMPT_TOKENS) in text and "OLLAMA_CONTEXT_LENGTH=16384" in text
+    with pytest.raises(ValidationError) as raised:
+        check(llm_provider="claude", llm_api_key=KEY, llm_context_tokens=17000)
+    text = str(raised.value)
+    assert str(MIN_PROMPT_TOKENS) in text and "FIONE_LLM_MAX_TOKENS" in text
+    assert "Ollama" not in text and "16384" not in text
     assert check(llm_context_tokens=MIN_PROMPT_TOKENS + 1024).llm_context_tokens == (
         MIN_PROMPT_TOKENS + 1024
     )
