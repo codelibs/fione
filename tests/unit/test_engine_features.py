@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -149,12 +151,20 @@ def test_constant_outputs_are_dropped():
     assert "t__length" not in names and "t__words" not in names
 
 
-def test_category_frequency_unseen_is_zero_and_missing_stays_missing():
+def test_category_frequency_unseen_is_the_rarest_share_and_missing_stays_missing():
     X = pd.DataFrame({"c": ["a"] * 6 + ["b"] * 3 + [None]})
     group = CategoryFrequency(["c"]).fit(X)
     out = group.transform(pd.DataFrame({"c": ["a", "b", "zzz", None]}))["c__frequency"]
-    assert out.iloc[:3].tolist() == pytest.approx([6 / 9, 3 / 9, 0.0])  # of the non-missing rows
+    assert out.iloc[:3].tolist() == pytest.approx([6 / 9, 3 / 9, 3 / 9])  # of the non-missing rows
     assert np.isnan(out.iloc[3])
+
+
+def test_category_frequency_pickled_without_the_unseen_share_keeps_zero():
+    X = pd.DataFrame({"c": ["a"] * 6 + ["b"] * 3})
+    group = CategoryFrequency(["c"]).fit(X)
+    del group.__dict__["_unseen"]
+    loaded = pickle.loads(pickle.dumps(group))
+    assert loaded.transform(pd.DataFrame({"c": ["zzz"]}))["c__frequency"].tolist() == [0.0]
 
 
 def test_row_counts_count_missing_and_zero_values():

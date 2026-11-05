@@ -210,7 +210,10 @@ class TextTopics(Group):
 
 
 class CategoryFrequency(Group):
-    """The share of the training rows with the same category, for each categorical column."""
+    """The share of the training rows with the same category, for each categorical column; a
+    category not seen in training gets the share of the rarest one."""
+
+    _unseen: dict = {}  # class-level default: groups pickled before it existed still load (0)
 
     def __init__(self, columns: list[str]):
         self.label, self.columns = "frequencies of categories", tuple(columns)
@@ -219,6 +222,7 @@ class CategoryFrequency(Group):
         self._shares = {
             c: _as_str(X[c]).value_counts(normalize=True).to_dict() for c in self.columns
         }
+        self._unseen = {c: min(shares.values(), default=0.0) for c, shares in self._shares.items()}
         self._sources = {f"{c}__frequency": (c,) for c in self.columns}
 
     def _compute(self, df):
@@ -226,7 +230,8 @@ class CategoryFrequency(Group):
         for c in self.columns:
             s = _as_str(df[c])
             share = s.map(self._shares[c]).astype(float)
-            out[f"{c}__frequency"] = share.mask(share.isna() & s.notna(), 0.0)  # unseen: never seen
+            unseen = self._unseen.get(c, 0.0)
+            out[f"{c}__frequency"] = share.mask(share.isna() & s.notna(), unseen)
         return pd.DataFrame(out, index=df.index)
 
 
