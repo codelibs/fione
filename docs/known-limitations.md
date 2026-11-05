@@ -104,7 +104,9 @@ What this release does not do, or does with a catch. Japanese summary at the end
   but were not yet confirmed by the last check are dropped, unless they saved 5 % of the loss or
   more, so short runs may add none. The gate judges on a sample of at most 20,000 rows and a
   small LightGBM, so a feature that only a neural network or a linear model would use is not
-  found; target encoding and categorical crosses as categories are not built.
+  found; target encoding and categorical crosses as categories are not built. The group size of
+  an identifier counts training rows only, so a row of a training group counts itself and a new
+  row does not, and rows that arrive later are not counted.
 - **A text column with more than 200 distinct values is read by the models as how often each
   value occurs** (its share of the training rows); a name, a code or an id that is nearly unique
   therefore carries almost no signal by itself. Its parts and its text are read only through the

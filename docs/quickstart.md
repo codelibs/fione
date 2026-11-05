@@ -170,6 +170,12 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   of five words or more) also 32 *topics*, the main directions of word use found by an SVD of
   the word weights (TF-IDF);
 - categories: how common each is, and how common each pair is;
+- identifiers: a string column (two of them at most) with at least 12 distinct values and no
+  spaces, whose values (the first 1,000 non-missing ones are judged) split by `_`, `/`, `-`, `:`
+  or `.` into the same two to four fields on at least 95 % of them (`0001_01`, `B/0/P`), gets
+  one feature per field, the number for a numeric field and how common the value is otherwise,
+  and the number of training rows that share the first field (the size of a group). A value not
+  seen in training gives a missing feature, not zero. This group is tried last;
 - rows: the number of missing values and of zeros;
 - dates: hour, minute, week, quarter, day of the year, weekend, and the seconds between date
   columns;

@@ -15,6 +15,7 @@ from fione.engine.features import (
     DateDifferences,
     DateParts,
     GroupMeans,
+    IdParts,
     NumberPairs,
     RowCounts,
     TextShape,
@@ -682,3 +683,136 @@ def test_value_frequency_stores_only_repeated_values_up_to_the_cap(monkeypatch):
 )
 def test_a_short_run_gives_the_feature_choice_a_minimum_of_time(left, secs):
     assert AutoML._feature_secs(left) == pytest.approx(secs)
+
+
+def _id_frame(n=60):
+    # groups of 1, 2 and 3 members, and decks that are not equally common
+    pid = [f"{g:04d}_{m:02d}" for g in range(1, n) for m in range(1, (g - 1) % 3 + 2)][:n]
+    deck = "ABBCCCDDDD"
+    return pd.DataFrame(
+        {
+            "pid": pid,
+            "cabin": [f"{deck[i % 10]}/{i % 17}/{'S' if i % 3 == 0 else 'P'}" for i in range(n)],
+            "x": np.arange(n, dtype=float),
+        }
+    )
+
+
+def test_id_parts_read_numbers_frequencies_and_the_group_size():
+    X = _id_frame()
+    group = IdParts(["pid", "cabin"]).fit(X)
+    assert group.names == [
+        "pid__part1",
+        "pid__part2",
+        "pid__group_size",
+        "cabin__part2",
+        "cabin__part3_frequency",
+        "cabin__group_size",
+    ]
+    out = group.transform(X)
+    assert out["pid__part1"].iloc[:4].tolist() == [1, 2, 2, 3]
+    assert out["pid__part2"].iloc[:4].tolist() == [1, 1, 2, 1]
+    assert out["pid__group_size"].iloc[:4].tolist() == [1, 2, 2, 3]
+    assert out["cabin__group_size"].iloc[0] == 6  # the deck is the first field: A in 6 rows
+    assert out["cabin__part2"].iloc[:3].tolist() == [0, 1, 2]
+    assert out["cabin__part3_frequency"].iloc[0] == pytest.approx(20 / 60)  # side S
+    assert group.sources == [("pid",)] * 3 + [("cabin",)] * 3
+
+
+def test_id_parts_give_missing_for_unseen_values_and_do_not_depend_on_the_batch():
+    X = _id_frame()
+    group = IdParts(["pid", "cabin"]).fit(X)
+    new = pd.DataFrame(
+        {
+            "pid": ["0002_01", "9999_01", None, "oops", "0003_x"],
+            "cabin": ["B/3/P", "Z/3/P", None, "B/3", "B/3/Q"],
+        }
+    )
+    out = group.transform(new)
+    assert out["pid__group_size"].iloc[0] == 2
+    assert out["pid__group_size"].iloc[1:4].isna().all()  # unseen, missing, not splitting
+    assert out["pid__part1"].iloc[1] == 9999 and np.isnan(out["pid__part1"].iloc[3])
+    assert np.isnan(out["pid__part2"].iloc[4])  # not a number
+    assert out["cabin__group_size"].iloc[0] > 0 and np.isnan(out["cabin__group_size"].iloc[1])
+    assert out["cabin__part3_frequency"].iloc[0] > 0
+    assert np.isnan(out["cabin__part3_frequency"].iloc[4])
+    assert out["cabin__group_size"].isna().iloc[[1, 2, 3]].all()  # unseen deck: not zero
+    for i in range(len(new)):  # one row at a time gives the same values
+        pd.testing.assert_frame_equal(group.transform(new.iloc[[i]]), out.iloc[[i]])
+    assert len(group.transform(new.head(0))) == 0
+
+
+def test_id_parts_are_offered_last_and_only_for_identifier_columns():
+    X = _id_frame()
+    prep = Prep().fit(X)
+    labels = [g.label for g in features.candidates(prep, X, ["x"])]
+    assert labels[-1] == "parts of identifiers"
+    ids = features.candidates(prep, X, [])[-1]
+    assert ids.columns == ("pid", "cabin")
+    # without such a column the candidates are the ones there are without this group
+    plain = X.assign(
+        pid=[f"id{i}" for i in range(len(X))],  # no delimiter
+        cabin=[f"{'ABCDE'[i % 5]}/{i % 17}/{'PS'[i % 2]}/{i % 3}/q" for i in range(len(X))],  # 5
+    )
+    plain_labels = [g.label for g in features.candidates(Prep().fit(plain), plain, [])]
+    assert "parts of identifiers" not in plain_labels
+    expected = [g.label for g in features.candidates(prep, X, [])][:-1]
+    assert [g.label for g in features.candidates(prep, X, [])][-1] == "parts of identifiers"
+    assert expected  # the other candidates stay as they are
+
+
+def test_candidates_are_unchanged_when_no_column_is_an_identifier(monkeypatch):
+    rng = np.random.default_rng(0)
+    n = 300
+    X = pd.DataFrame(
+        {
+            "name": [f"Smith{i % 40}, Mr. John{i}" for i in range(n)],
+            "town": rng.choice([f"Town{chr(97 + i)}" for i in range(20)], n),
+            "mixed": [f"{'ABCDE'[i % 5]}{i % 99}" for i in range(n)],
+            "a": rng.normal(size=n),
+            "b": rng.normal(size=n),
+        }
+    )
+    before = [(type(g).__name__, g.label) for g in features.candidates(Prep().fit(X), X, [])]
+    assert "IdParts" not in [name for name, _ in before]
+    monkeypatch.setattr(features, "IdParts", None)  # would fail if it were ever built
+    after = [(type(g).__name__, g.label) for g in features.candidates(Prep().fit(X), X, [])]
+    assert after == before
+
+
+def test_id_layout_needs_a_common_field_count_and_many_distinct_values():
+    layout = features._id_layout
+    assert layout(pd.Series([f"{i}_{i % 3}" for i in range(50)])) == ("_", 2)
+    assert layout(pd.Series([f"{i}.{i % 3}.{i % 5}" for i in range(50)])) == (".", 3)
+    assert layout(pd.Series([f"a:{i}" for i in range(50)])) == (":", 2)
+    assert layout(pd.Series([f"{i}" for i in range(50)])) is None  # one field
+    assert layout(pd.Series([f"{i}_{i}_{i}_{i}_{i}" for i in range(50)])) is None  # five fields
+    assert layout(pd.Series(["a_b", "c_d", "e_f"] * 20)) is None  # three distinct values
+    mostly = [f"{i}_{i % 3}" for i in range(97)] + ["x", "y", "z"]
+    assert layout(pd.Series(mostly)) == ("_", 2)  # 97 % split alike
+    assert layout(pd.Series(mostly[:90] + ["x"] * 10)) is None  # 90 %
+    assert layout(pd.Series([None] * 20)) is None
+
+
+def test_id_parts_pickle_with_a_prep_and_transform_alike():
+    import pickle
+
+    X = _id_frame()
+    prep = Prep().fit(X, [IdParts(["pid", "cabin"])])
+    clone = pickle.loads(pickle.dumps(prep))  # noqa: S301 - a frame this test built
+    for view in ("tree", "dense", "catboost", "linear"):
+        pd.testing.assert_frame_equal(getattr(prep, view)(X), getattr(clone, view)(X))
+    assert not prep.linear(X.head(1)).isna().any().any()  # the linear view fills the gaps
+
+
+def test_id_parts_skip_fields_that_act_as_a_row_index():
+    n = 100
+    X = pd.DataFrame(
+        {
+            "user": [f"user_{1000 + i}" for i in range(n)],  # a running number
+            "mixed": [f"g{min(i // 3, 20)}_{i % 4}_{i}" for i in range(n)],  # unique last field
+        }
+    )
+    group = IdParts(["user", "mixed"]).fit(X)
+    assert group.names == ["mixed__part2", "mixed__group_size"]
+    assert group.transform(X.head(1)).columns.tolist() == group.names

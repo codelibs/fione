@@ -2,7 +2,8 @@
 
 A ``Group`` is a family of derived numeric features that read raw input columns: shape, tokens
 and topics of text columns, frequencies of categories, row-wise counts, date parts and
-differences, pairwise arithmetic of numbers, group means, frequencies of category pairs.
+differences, pairwise arithmetic of numbers, group means, frequencies of category pairs, parts
+of structured identifiers.
 ``Prep.fit`` fits the groups it is given on the training features alone, so they never see the
 target: a model can be scored on out-of-fold predictions without leaking, however many groups exist.
 
@@ -68,6 +69,18 @@ TOPIC_ROWS = 20_000  # rows the topics are fitted on
 TOKENS = 8  # tokens kept per text column
 TOKEN_SUPPORT = 0.02  # share of the rows a token must occur in (and at least 5 rows)
 MAX_PAIR_COLUMNS = 5  # numbers or dates combined pairwise
+ID_DELIMITERS = (
+    "_",
+    "/",
+    "-",
+    ":",
+    ".",
+)  # what the fields of a structured identifier are joined by
+ID_FIELDS = (2, 4)  # fewest and most fields of an identifier
+ID_SHARE = 0.95  # of the values must split into the same number of fields
+MAX_ID_COLUMNS = 2  # identifier columns that get parts
+ID_UNIQUE = 0.5  # a field with more distinct values per row than this acts as a row index
+ID_GROUPED = 0.9  # the first field gives a group size only when it has fewer distinct values
 MAX_GROUP_CATEGORIES = 50  # levels of a category that group means are taken over
 MIN_GROUP_ROWS = 5  # rows a level needs for its mean
 _TOKEN = re.compile(r"[^\W\d_]+")  # runs of letters, so "C85" gives "c" and "PC 17599" gives "pc"
@@ -468,6 +481,88 @@ class CategoryPairs(Group):
         return pd.DataFrame(out, index=df.index)
 
 
+def _id_layout(s: pd.Series) -> tuple[str, int] | None:
+    """The delimiter and the number of fields of a string column whose values are identifiers
+    made of two to four fields ("0001_01", "B/0/P"): at least ``ID_SHARE`` of the values split
+    into the same number of fields, and the values are not a handful of categories nor text
+    (a name or a sentence has spaces)."""
+    values = _as_str(s).dropna().head(1000)
+    if values.nunique() < TEXT_MIN_DISTINCT or values.str.contains(r"\s").mean() > 1 - ID_SHARE:
+        return None
+    for delimiter in ID_DELIMITERS:
+        sizes = (values.str.count(re.escape(delimiter)) + 1).value_counts(normalize=True)
+        if ID_FIELDS[0] <= sizes.index[0] <= ID_FIELDS[1] and sizes.iloc[0] >= ID_SHARE:
+            return delimiter, int(sizes.index[0])
+    return None
+
+
+class IdParts(Group):
+    """The fields of structured identifiers (a group id and a member number joined by an
+    underscore, a deck, number and side joined by slashes). For each field a number is read as
+    one and any other field becomes how common its value is among the training rows; the first
+    field also gives how many training rows share it (the size of the group). Fields that are
+    nearly unique per row give nothing (the first gives a size unless it is almost unique). A
+    value the training rows did not have gives a missing feature, never a count of zero. Values
+    that do not split into the field count of the column are missing in every part."""
+
+    def __init__(self, columns: list[str]):
+        self.label, self.columns = "parts of identifiers", tuple(columns)
+
+    @staticmethod
+    def _fields(s: pd.Series, delimiter: str, n: int) -> list[pd.Series]:
+        s = _as_str(s)
+        rows = [v.split(delimiter) if isinstance(v, str) else [] for v in s]
+        return [
+            pd.Series(
+                [r[i] or None if len(r) == n else None for r in rows], index=s.index, dtype=object
+            )
+            for i in range(n)
+        ]
+
+    def _fit(self, X):
+        self._layouts, self._kinds, self._shares, self._sizes = {}, {}, {}, {}
+        self._sources = {}
+        for c in self.columns:
+            layout = _id_layout(X[c])
+            if layout is None:
+                continue
+            fields = self._fields(X[c], *layout)
+            counts = [f.value_counts() for f in fields]
+            # A field that is nearly unique per row (a running number) acts as a row index and
+            # would fall out of range on new rows: it gives no feature, and the first field
+            # gives only a size when it actually groups rows.
+            unique = [len(k) > ID_UNIQUE * len(X) for k in counts]
+            kinds = []
+            for i, f in enumerate(fields):
+                number = bool(f.notna().any()) and (
+                    _number(f).notna().sum() >= ID_SHARE * f.notna().sum()
+                )
+                kinds.append(None if unique[i] else "number" if number else "share" if i else None)
+            self._layouts[c], self._kinds[c] = layout, kinds
+            self._shares[c] = [(k / k.sum()).to_dict() if len(k) else {} for k in counts]
+            self._sizes[c] = counts[0].to_dict() if len(counts[0]) <= ID_GROUPED * len(X) else None
+            for i, kind in enumerate(kinds):
+                if kind == "number":
+                    self._sources[f"{c}__part{i + 1}"] = (c,)
+                elif kind:
+                    self._sources[f"{c}__part{i + 1}_frequency"] = (c,)
+            if self._sizes[c] is not None:
+                self._sources[f"{c}__group_size"] = (c,)
+
+    def _compute(self, df):
+        out = {}
+        for c, layout in self._layouts.items():
+            fields = self._fields(df[c], *layout)
+            for i, field in enumerate(fields):
+                if self._kinds[c][i] == "number":
+                    out[f"{c}__part{i + 1}"] = _number(field)
+                elif self._kinds[c][i]:
+                    out[f"{c}__part{i + 1}_frequency"] = field.map(self._shares[c][i])
+            if self._sizes[c] is not None:
+                out[f"{c}__group_size"] = fields[0].map(self._sizes[c])
+        return pd.DataFrame(out, index=df.index).astype(float)
+
+
 def _repeats(s: pd.Series) -> bool:
     """Whether a number column has many distinct values of which some occur more than once."""
     values = _number(s).dropna()
@@ -525,6 +620,9 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
     cluster_columns = by_rank(prep.numeric_columns)[:MAX_CLUSTER_COLUMNS]
     if len(cluster_columns) > 1:
         found.append(ClusterDistances(cluster_columns))
+    identifiers = [c for c in by_rank(strings) if _id_layout(X[c])]
+    if identifiers:  # last: the most specific, built only for data that has such a column
+        found.append(IdParts(identifiers[:MAX_ID_COLUMNS]))
     return found[:MAX_CANDIDATES]
 
 
