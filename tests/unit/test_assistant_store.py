@@ -634,11 +634,16 @@ def test_one_note_per_project_kind_subject_and_language(conn, owner, member, pro
         )
     others = [
         store.create_note(conn, owner, project.id, *key, "x")[0]
-        for key in (("model", "7", "ja"), ("model", "8", "en"), ("failed_job", "7", "en"))
+        for key in (
+            ("model", "7", "ja"),
+            ("model", "8", "en"),
+            ("failed_job", "7", "en"),
+            ("dataset", "7", "en"),
+        )  # fmt: skip
     ]
-    assert len({n.id for n in [note, *others]}) == 4
+    assert len({n.id for n in [note, *others]}) == 5
     with pytest.raises(ValueError):
-        store.create_note(conn, owner, project.id, "dataset", "7", "en", "x")
+        store.create_note(conn, owner, project.id, "column", "7", "en", "x")
 
 
 def test_a_note_needs_read_access(conn, owner, project):
