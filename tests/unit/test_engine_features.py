@@ -236,6 +236,22 @@ def test_category_pairs_share_of_the_combination():
     assert out.tolist() == [0.5, 0.5, 0.25, 0.25]
 
 
+def test_category_pairs_give_an_unseen_pair_the_rarest_share():
+    X = pd.DataFrame({"a": ["x", "x", "y", "y"], "b": ["p", "p", "p", "q"]})
+    group = CategoryPairs(["a", "b"]).fit(X)
+    new = pd.DataFrame({"a": ["x", "z"], "b": ["q", "p"]})  # a new combination, a new category
+    assert group.transform(new)["a x b frequency"].tolist() == [0.25, 0.25]
+
+
+def test_category_pairs_pickled_without_the_unseen_share_keep_zero():
+    X = pd.DataFrame({"a": ["x", "x", "y", "y"], "b": ["p", "p", "p", "q"]})
+    group = CategoryPairs(["a", "b"]).fit(X)
+    del group.__dict__["_unseen"]
+    loaded = pickle.loads(pickle.dumps(group))
+    out = loaded.transform(pd.DataFrame({"a": ["z"], "b": ["p"]}))["a x b frequency"]
+    assert out.tolist() == [0.0]
+
+
 def test_prep_adds_groups_after_the_plain_features_and_names_their_sources():
     X, _ = people()
     plain = Prep().fit(X)
@@ -305,12 +321,22 @@ def test_linear_view_log_transforms_skewed_non_negative_numbers_only():
     assert view["f1"].corr(X["even"]) > 0.999
 
 
-def test_value_frequency_counts_repeated_numbers_and_treats_unseen_as_a_single_row():
+def test_value_frequency_counts_repeated_numbers_and_gives_unseen_the_rarest_share():
     X = pd.DataFrame({"fare": [7.25] * 6 + [10.0] * 3 + [None]})
     group = ValueFrequency(["fare"]).fit(X)
     out = group.transform(pd.DataFrame({"fare": [7.25, 10.0, 99.0, None]}))["fare__value_frequency"]
-    assert out.iloc[:3].tolist() == pytest.approx([6 / 9, 3 / 9, 1 / 9])  # unseen = single row
+    assert out.iloc[:3].tolist() == pytest.approx([6 / 9, 3 / 9, 3 / 9])  # unseen = rarest
     assert np.isnan(out.iloc[3])
+    singles = pd.DataFrame({"fare": [7.25] * 6 + [10.0] * 3 + [1.0]})
+    out = ValueFrequency(["fare"]).fit(singles).transform(pd.DataFrame({"fare": [99.0]}))
+    assert out["fare__value_frequency"].tolist() == pytest.approx([1 / 10])  # one row's share
+
+
+def test_value_frequency_pickles_with_its_unseen_share():
+    X = pd.DataFrame({"fare": [7.25] * 6 + [10.0] * 3})
+    loaded = pickle.loads(pickle.dumps(ValueFrequency(["fare"]).fit(X)))
+    out = loaded.transform(pd.DataFrame({"fare": [99.0]}))["fare__value_frequency"]
+    assert out.tolist() == pytest.approx([3 / 9])
 
 
 def test_cluster_distances_assign_a_cluster_and_a_distance_to_every_row():

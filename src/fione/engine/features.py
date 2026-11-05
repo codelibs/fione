@@ -376,13 +376,13 @@ class ValueFrequency(Group):
 
     def _fit(self, X):
         # Only values that repeat are stored, the most common ``MAX_REPEATED_VALUES`` of them;
-        # every other value, seen once or not at all, gets the share of a single row.
+        # every other value, seen once or not at all, gets the share of the rarest value.
         self._shares, self._single = {}, {}
         for c in self.columns:
             counts = _number(X[c]).value_counts()
             n = int(counts.sum())
             self._shares[c] = (counts[counts > 1].head(MAX_REPEATED_VALUES) / n).to_dict()
-            self._single[c] = 1 / n if n else 0.0
+            self._single[c] = int(counts.min()) / n if n else 0.0
         self._sources = {f"{c}__value_frequency": (c,) for c in self.columns}
 
     def _compute(self, df):
@@ -435,7 +435,10 @@ class ClusterDistances(Group):
 
 
 class CategoryPairs(Group):
-    """The share of the training rows with the same pair of categories."""
+    """The share of the training rows with the same pair of categories; a pair not seen in
+    training gets the share of the rarest one."""
+
+    _unseen: dict = {}  # class-level default: groups pickled before it existed still load (0)
 
     def __init__(self, columns: list[str]):
         self.label, self.columns = "frequencies of category pairs", tuple(columns)
@@ -449,6 +452,9 @@ class CategoryPairs(Group):
             (a, b): self._key(X, a, b).value_counts(normalize=True).to_dict()
             for a, b in self._pairs
         }
+        self._unseen = {
+            pair: min(shares.values(), default=0.0) for pair, shares in self._shares.items()
+        }
         self._sources = {f"{a} x {b} frequency": (a, b) for a, b in self._pairs}
 
     def _compute(self, df):
@@ -456,7 +462,7 @@ class CategoryPairs(Group):
             f"{a} x {b} frequency": self._key(df, a, b)
             .map(self._shares[a, b])
             .astype(float)
-            .fillna(0.0)
+            .fillna(self._unseen.get((a, b), 0.0))
             for a, b in self._pairs
         }
         return pd.DataFrame(out, index=df.index)
