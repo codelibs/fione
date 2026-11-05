@@ -11,6 +11,8 @@ from fione.api.app import create_app
 from fione.assistant import store as assistant_store
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
+from fione.jobs import store as jobs_store
+from fione.jobs.store import JobStatus
 from fione.models import service as models_service
 from fione.models.transfer import export_model
 from fione.modules import service as modules_service
@@ -263,7 +265,8 @@ SHARING_PATHS = {
 # their creator's alone, so each signed-in persona uses one of its own; anonymous visitors
 # and the stranger use the owner's. The thread of a conversation with no active turn is the
 # poller's last fragment (286). A proposal is its conversation's creator's too; the personas
-# without a conversation or write access of their own use the owner's pending proposal.
+# without a conversation or write access of their own use the owner's pending proposal. The
+# assistant's comment on a model or a failed job is a fragment for every reader (200).
 CHAT = P + "/assistant"
 ASSISTANT_ROUTES = {
     ("GET", CHAT): READ,
@@ -274,6 +277,10 @@ ASSISTANT_ROUTES = {
     ("POST", CHAT + "/c/{cid}/delete"): (401, 303, 303, 303, 404, 303),
     ("POST", CHAT + "/proposals/{prid}/confirm"): WRITE_POST,
     ("POST", CHAT + "/proposals/{prid}/dismiss"): WRITE_POST,
+    ("GET", P + "/models/{model}/comment"): READ,
+    ("POST", P + "/models/{model}/comment/retry"): (401, 200, 200, 200, 404, 200),
+    ("GET", P + "/jobs/{job}/comment"): READ,  # the job has failed
+    ("POST", P + "/jobs/{job}/comment/retry"): (401, 200, 200, 200, 404, 200),
 }
 ASSISTANT_PATHS = {
     "/projects/{pid}/assistant": CHAT,
@@ -284,6 +291,10 @@ ASSISTANT_PATHS = {
     "/projects/{pid}/assistant/c/{cid}/delete": CHAT + "/c/{cid}/delete",
     "/projects/{pid}/assistant/proposals/{prid}/confirm": CHAT + "/proposals/{prid}/confirm",
     "/projects/{pid}/assistant/proposals/{prid}/dismiss": CHAT + "/proposals/{prid}/dismiss",
+    "/projects/{pid}/models/{mid}/comment": P + "/models/{model}/comment",
+    "/projects/{pid}/models/{mid}/comment/retry": P + "/models/{model}/comment/retry",
+    "/projects/{pid}/jobs/{jid}/comment": P + "/jobs/{job}/comment",
+    "/projects/{pid}/jobs/{jid}/comment/retry": P + "/jobs/{job}/comment/retry",
 }
 
 
@@ -378,6 +389,11 @@ def test_assistant_route(make_client, fake_llm, route, persona):
         train = world.ids[world.p]["train"]
         proposal = make_proposal(world.client, fake, username if own else "ed", world.p, train)
         template = template.replace("{prid}", str(proposal.id))
+    if "/jobs/{job}/comment" in template:  # a comment is on a job that failed
+        with closing(connect(world.client)) as conn:
+            job = world.ids[world.p]["job"]
+            jobs_store.claim_job(conn, job, "token")
+            jobs_store.finish_job(conn, job, JobStatus.FAILED, message="boom")
     path = world.path(template)
     if method == "GET":
         r = world.client.get(path, follow_redirects=False)

@@ -6,6 +6,11 @@ Conversations are their creator's alone, so every conversation id goes through
 with it. Messages are escaped plain text; a tool row only names what was read. While a turn
 is active, HTMX polls the thread; its last answer (and any failure to show it) is 286, which
 ends the polling. The page never fails because the LLM cannot be used: it says why.
+
+The assistant's comments (notes) on a model and on a failed job are fragments their pages
+load: any reader of the project sees the one note of the subject in their language, which
+the first of them to open the page starts. Whatever the assistant's state, the fragment is a
+200 that says it.
 """
 
 import logging
@@ -25,7 +30,7 @@ from fione.assistant.store import (
     ProposalNotFound,
     TurnBusy,
 )
-from fione.assistant.turns import ERROR_CODES, LlmUnavailable, TooManyTurns
+from fione.assistant.turns import ERROR_CODES, LlmUnavailable, NoteView, TooManyTurns
 from fione.engine.config import TargetError, TrainConfig
 from fione.jobs.store import JobStatus
 from fione.models import service as models
@@ -105,11 +110,11 @@ def _error_key(message: store.Message) -> str | None:
     return None
 
 
-def _cards(conn, conversation: Conversation) -> dict[int, Card]:
+def _cards(conn, conversation_id: int, project_id: str) -> dict[int, Card]:
     """The conversation's proposals by message id, each with its dataset's name (only for a
     dataset of the conversation's own project)."""
     cards = {}
-    for message_id, proposal in store.proposals_for(conn, conversation.id).items():
+    for message_id, proposal in store.proposals_for(conn, conversation_id).items():
         name = None
         if proposal.dataset_id is not None:
             try:
@@ -117,7 +122,7 @@ def _cards(conn, conversation: Conversation) -> dict[int, Card]:
             except DatasetNotFound:
                 pass
             else:
-                if dataset.project_id == conversation.project_id:
+                if dataset.project_id == project_id:
                     name = dataset.name
         cards[message_id] = Card(proposal, name)
     return cards
@@ -147,7 +152,7 @@ def _thread(conn, conversation: Conversation) -> dict:
     messages = store.messages(conn, conversation.id)
     return {
         "conversation": conversation,
-        "lines": _lines(messages, _cards(conn, conversation)),
+        "lines": _lines(messages, _cards(conn, conversation.id, conversation.project_id)),
         "active": any(m.state in ACTIVE for m in messages),
     }
 
@@ -460,3 +465,81 @@ def dismiss(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
     with db.immediate(conn):
         store.dismiss_proposal(conn, proposal.id, ctx.auth.user.id)
     return RedirectResponse(_page_url(pid, conversation.id), 303)
+
+
+# --- the assistant's comments -----------------------------------------------
+
+
+def _note_subject(conn, ctx: Ctx, kind: str, sid) -> int:
+    """The id of the note's subject in the project: a model, or a job that failed."""
+    if kind == "model":
+        return model_in(conn, ctx, sid).id
+    job = job_in(conn, ctx, sid)
+    if job.status != JobStatus.FAILED:
+        raise UiError(404, "error.not_found")
+    return job.id
+
+
+def _note_fragment(request: Request, conn, ctx: Ctx, kind: str, sid, *, retry=False) -> Response:
+    subject = _note_subject(conn, ctx, kind, sid)
+    pid = ctx.project.id
+    path, ask = ("models", "model") if kind == "model" else ("jobs", "job")
+    note = {
+        "url": f"/projects/{pid}/{path}/{subject}/comment",
+        "ask": f"/projects/{pid}/assistant?ask={ask}:{subject}",
+    }
+    manager = request.app.state.turns
+    write = manager.retry if retry else manager.explain
+    try:
+        view: NoteView = write(conn, ctx.auth.user, pid, kind, str(subject), language(request))
+    except LlmUnavailable:
+        status = llm_status(request)
+        if status.error_code == "unauthorized":
+            message = "assistant.error.unauthorized"
+        elif status.state != "ready":
+            message = f"assistant.state.{status.state}"
+        else:
+            message = "assistant.error.unavailable"
+        note |= {"state": "unavailable", "message": message}
+    except TooManyTurns:
+        note |= {"state": "busy"}
+    except Exception:
+        log.exception("the assistant's comment on %s %s could not be shown", kind, subject)
+        note |= {"state": "failed", "message": "assistant.error.failed"}
+    else:
+        note |= {"state": view.state, "text": view.text}
+        if view.state == "failed":
+            note["message"] = f"assistant.error.{view.error_code}"
+        if view.state == "done":
+            cards = _cards(conn, view.conversation_id, pid)
+            note["card"] = next(iter(cards.values()), None)
+            note["owner"] = view.owner_id == ctx.auth.user.id
+    return render(request, "_assistant_note.html", ctx.auth, ctx=ctx, note=note)
+
+
+@router.get("/projects/{pid}/models/{mid}/comment")
+def model_comment(request: Request, conn: Conn, pid: str, mid: str) -> Response:
+    return _note_fragment(request, conn, page(request, conn, pid), "model", mid)
+
+
+@router.get("/projects/{pid}/jobs/{jid}/comment")
+def job_comment(request: Request, conn: Conn, pid: str, jid: str) -> Response:
+    return _note_fragment(request, conn, page(request, conn, pid), "failed_job", jid)
+
+
+@router.post("/projects/{pid}/models/{mid}/comment/retry")
+def retry_model_comment(
+    request: Request, conn: Conn, pid: str, mid: str, form: SmallForm
+) -> Response:
+    same_site(request)
+    ctx = action(request, conn, pid, field(form, "csrf_token"), need="read")
+    return _note_fragment(request, conn, ctx, "model", mid, retry=True)
+
+
+@router.post("/projects/{pid}/jobs/{jid}/comment/retry")
+def retry_job_comment(
+    request: Request, conn: Conn, pid: str, jid: str, form: SmallForm
+) -> Response:
+    same_site(request)
+    ctx = action(request, conn, pid, field(form, "csrf_token"), need="read")
+    return _note_fragment(request, conn, ctx, "failed_job", jid, retry=True)

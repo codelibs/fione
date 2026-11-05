@@ -648,3 +648,141 @@ def test_consent_page_and_banner_escape_hostile_text(remote):
     page = page_of(remote).text
     assert str(escape(XSS)) in page and XSS not in page  # the remote warning names the host
     assert XSS not in banner(page) and str(escape(XSS)) not in banner(page)
+
+
+# --- the assistant's comments -------------------------------------------------
+
+WRITING = 'hx-trigger="load delay:2s"'
+
+
+def comment(world, path, timeout=10.0):
+    """Load the comment fragment as HTMX does until it is no longer being written."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        r = world.client.get(path, headers={"HX-Request": "true"})
+        assert r.status_code == 200, r.text
+        assert 'id="assistant-note"' in r.text
+        if WRITING not in r.text:
+            return r
+        time.sleep(0.05)
+    raise AssertionError("the comment was still being written")
+
+
+def model_comment(world, project=None):
+    project = project or world.p
+    return f"/projects/{world.p}/models/{world.ids[project]['model']}/comment"
+
+
+def test_result_pages_load_the_comment(chat):
+    url = model_comment(chat)
+    base = url.removesuffix("/comment")
+    for page in (base + "/summary", base):
+        html = chat.client.get(page).text
+        assert re.search(rf'hx-get="{url}" hx-trigger="load"', html), page
+        assert shown("note.loading") in html
+    assert chat.fake.requests == []  # nothing is written before the fragment is asked for
+
+
+def test_comment_is_written_once_and_shared(chat):
+    chat.fake.script = [{"text": XSS + " A good model.", "delay": 0.3}]
+    url = model_comment(chat)
+    first = chat.client.get(url, headers={"HX-Request": "true"})
+    assert first.status_code == 200 and WRITING in first.text
+    assert shown("note.writing") in first.text
+    done = comment(chat, url)
+    assert shown("note.title") in done.text
+    assert str(escape(XSS)) in done.text and XSS not in done.text
+    assert f"/projects/{chat.p}/assistant?ask=model:{chat.ids[chat.p]['model']}" in done.text
+    assert shown("note.follow_up") in done.text
+    chat.login("vi")  # another member: the same text, no new request
+    assert str(escape(XSS)) in comment(chat, url).text
+    assert len(chat.fake.requests) == 1
+    with closing(connect(chat.client)) as conn:  # hidden from the chat of whoever wrote it
+        user = auth_service.get_user(
+            conn, conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        )
+        assert store.list_conversations(conn, user, chat.p) == []
+
+
+def test_comment_needs_the_project_and_a_subject_of_it(chat):
+    other_model = model_comment(chat, chat.q)
+    assert chat.client.get(other_model).status_code == 404
+    job = chat.ids[chat.p]["job"]
+    assert chat.client.get(f"/projects/{chat.p}/jobs/{job}/comment").status_code == 404
+    other_job = chat.ids[chat.q]["job"]
+    finish_job(chat, other_job, "failed")
+    assert chat.client.get(f"/projects/{chat.p}/jobs/{other_job}/comment").status_code == 404
+    chat.login("st")
+    assert chat.client.get(model_comment(chat)).status_code == 404
+    chat.login(None)
+    r = chat.client.get(model_comment(chat), follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/login?next=")
+    assert chat.fake.requests == []
+
+
+def test_comment_when_the_assistant_is_not_ready(chat):
+    use_monitor(chat.client, state="unreachable")
+    r = comment(chat, model_comment(chat))
+    assert shown("assistant.state.unreachable") in r.text
+    assert "/comment/retry" not in r.text
+    assert chat.fake.requests == []
+
+
+def test_comment_when_the_assistant_is_busy(chat, monkeypatch):
+    def busy(*args, **kwargs):
+        raise TooManyTurns()
+
+    monkeypatch.setattr(TurnManager, "explain", busy)
+    url = model_comment(chat)
+    r = comment(chat, url)
+    assert shown("note.busy") in r.text
+    assert f'hx-get="{url}"' in r.text and shown("note.retry") in r.text
+
+
+def test_failed_comment_can_be_tried_again(chat):
+    chat.fake.script = [{"status": 500, "body": "secret-provider-detail"}, {"text": "Second try."}]
+    url = model_comment(chat)
+    failed = comment(chat, url)
+    assert shown("assistant.error.http") in failed.text
+    assert "secret-provider-detail" not in failed.text
+    assert f'action="{url}/retry"' in failed.text and chat.csrf in failed.text
+    r = chat.client.post(
+        url + "/retry", data={"csrf_token": chat.csrf}, headers={"HX-Request": "true"}
+    )
+    assert r.status_code == 200 and WRITING in r.text
+    assert "Second try." in comment(chat, url).text
+    bad = chat.client.post(url + "/retry", data={"csrf_token": "wrong"})
+    assert bad.status_code == 403
+
+
+def test_failed_job_shows_its_comment_once(chat):
+    job = chat.ids[chat.p]["job"]
+    url = f"/projects/{chat.p}/jobs/{job}/comment"
+    assert all(url not in text for text in job_pages(chat, job))
+    finish_job(chat, job, "failed")
+    for text in job_pages(chat, job):
+        assert text.count(f'hx-get="{url}"') == 1
+        assert 'hx-trigger="every 2s"' not in text  # the status is no longer polled
+    chat.fake.script = [{"text": "The data had a problem."}]
+    r = comment(chat, url)
+    assert "The data had a problem." in r.text
+    assert f"/projects/{chat.p}/assistant?ask=job:{job}" in r.text
+    asked = [m for m in chat.fake.requests[0]["messages"] if m["role"] == "user"]
+    assert f"job {job} failed" in asked[0]["content"]
+
+
+def test_a_proposal_in_a_comment_is_decided_by_its_writer(chat):
+    train = chat.ids[chat.p]["train"]
+    chat.fake.script = [
+        {"tool_calls": [{"name": "propose_training_config",
+                         "arguments": {"dataset_id": train, "target": "species"}}]},
+        {"text": "Try this."},
+    ]  # fmt: skip
+    url = model_comment(chat)
+    mine = comment(chat, url).text
+    assert "Try this." in mine
+    assert re.search(r'/assistant/proposals/\d+/confirm"', mine)
+    chat.login("co")
+    theirs = comment(chat, url).text
+    assert "Try this." in theirs and "/confirm" not in theirs
+    assert shown("note.proposal") in theirs
