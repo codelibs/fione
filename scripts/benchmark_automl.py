@@ -16,7 +16,7 @@ the task and the metric that scores the fit, and may drop columns such as an ID:
                 "metric": "auc", "drop": ["id"]}}
 
 The metric is one of ``accuracy``, ``balanced_accuracy``, ``auc``, ``average_precision`` and ``f1``
-(the last three for two classes; ``f1`` is of the second class), ``rmse`` and ``rmsle``;
+(the last three for two classes; ``f1`` is of the second class), ``rmse``, ``mae`` and ``rmsle``;
 it goes to the ``metric`` and ``score`` columns beside the log loss / RMSE of ``loss``.
 Keep the spec, the data and the results out of the repository.
 
@@ -83,7 +83,16 @@ COLUMNS = [
     "score",
     "members",
 ]
-METRICS = {"accuracy", "balanced_accuracy", "auc", "average_precision", "f1", "rmse", "rmsle"}
+METRICS = {
+    "accuracy",
+    "balanced_accuracy",
+    "auc",
+    "average_precision",
+    "f1",
+    "rmse",
+    "mae",
+    "rmsle",
+}
 
 
 def load_spec(path: str | None) -> dict[str, dict]:
@@ -135,6 +144,8 @@ def score(
     and ``labels`` the model's predicted classes (default: the most probable)."""
     if metric == "rmse":
         return float(np.sqrt(np.mean((y - pred) ** 2)))
+    if metric == "mae":
+        return float(np.mean(np.abs(y - pred)))
     if metric == "rmsle":
         return float(np.sqrt(np.mean((np.log1p(np.clip(pred, 0, None)) - np.log1p(y)) ** 2)))
     classes = list(pred.columns)

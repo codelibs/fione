@@ -18,6 +18,7 @@ from fake_llm import FakeLlm
 from fione import db
 from fione.api.app import DB_FILE
 from fione.assistant import prompt, store, turns
+from fione.assistant import provider as provider_mod
 from fione.assistant.client import ChatClient
 from fione.assistant.prompt import (
     PROJECT_LINE,
@@ -689,9 +690,9 @@ def test_budget_counts_bytes_for_japanese(env, fake_llm):
         store.add_message(env.conn, env.conversation.id, "user", "質問" * 100)
         store.add_message(env.conn, env.conversation.id, "assistant", "回答" * 100)
     fake = fake_llm([{"text": "ok"}])
-    settings = settings_for(env, fake, llm_context_tokens=5000, llm_max_tokens=256)
+    settings = settings_for(env, fake, llm_context_tokens=6000, llm_max_tokens=256)
     turn(env, settings, "最新の質問")
-    budget = budget_bytes(5000, 256, list_tools())
+    budget = budget_bytes(6000, 256, list_tools())
     everything = [
         {"role": "system", "content": "x" * len(fake.requests[0]["messages"][0]["content"])},
         *(
@@ -744,7 +745,13 @@ def test_the_smallest_context_fits_a_question():
     assert size(request) > budget_bytes(MIN_PROMPT_TOKENS - 80 + 1024, 1024, list_tools())
 
 
+# What Ollama is assumed to serve before its context is known: the real default (4096) cannot
+# hold the tools and the instructions, so the tests of the fallback use this one.
+FALLBACK = 5120
+
+
 def test_ollama_context_is_learned(env, fake_llm, monkeypatch):
+    monkeypatch.setattr(provider_mod, "OLLAMA_DEFAULT_CONTEXT", FALLBACK)
     contexts = []
 
     def spy(context_tokens, max_tokens, tools):
@@ -759,7 +766,7 @@ def test_ollama_context_is_learned(env, fake_llm, monkeypatch):
     settings = settings_for(env, fake, llm_provider="ollama", llm_max_tokens=256)
     rows = turn(env, settings)
     # round 1 at the fallback (the short question needs no model load), round 2 learned
-    assert contexts[-2:] == [4096, 8192]
+    assert contexts[-2:] == [FALLBACK, 8192]
     assert "POST /api/generate" not in fake.paths
     assert rows[-1].state == "done"
 
@@ -782,15 +789,16 @@ def test_an_unknown_context_loads_the_model_first(env, fake_llm):
     assert monitor.snapshot().server_context == 16384
 
 
-def test_an_unknown_context_that_stays_unknown_is_logged(env, fake_llm, caplog):
+def test_an_unknown_context_that_stays_unknown_is_logged(env, fake_llm, caplog, monkeypatch):
+    monkeypatch.setattr(provider_mod, "OLLAMA_DEFAULT_CONTEXT", FALLBACK)
     fake = fake_llm([{"text": "ok"}], context_length=16384)
     fake.generate_status = 500
     fake.raw_replies["/api/ps"] = b'{"models": []}'  # nothing ever loads
     settings = settings_for(env, fake, llm_provider="ollama", llm_max_tokens=256)
-    turn(env, settings, "x" * 150)
-    turn(env, settings, "y" * 150)  # the first turn is history that no longer fits
-    assert "sized for 4096 tokens" in caplog.text
-    assert size(fake.requests[-1]["messages"]) <= budget_bytes(4096, 256, list_tools())
+    turn(env, settings, "x" * 800)
+    turn(env, settings, "y" * 800)  # the first turn is history that no longer fits
+    assert f"sized for {FALLBACK} tokens" in caplog.text
+    assert size(fake.requests[-1]["messages"]) <= budget_bytes(FALLBACK, 256, list_tools())
 
 
 def test_the_context_follows_the_server_down(env, fake_llm, monkeypatch):
@@ -808,20 +816,20 @@ def test_the_context_follows_the_server_down(env, fake_llm, monkeypatch):
     turn(env, settings, monitor=monitor)
     assert monitor.snapshot().server_context == 8192
 
-    fake.context_length = 4096  # restarted with a smaller context, the model loaded again
+    fake.context_length = FALLBACK  # restarted with a smaller context, the model loaded again
     contexts.clear()
     turn(env, settings, monitor=monitor)
-    assert contexts[-1] == 4096
-    assert size(fake.requests[-1]["messages"]) <= budget_bytes(4096, 256, list_tools())
+    assert contexts[-1] == FALLBACK
+    assert size(fake.requests[-1]["messages"]) <= budget_bytes(FALLBACK, 256, list_tools())
 
     fake.unload()  # restarted again: nothing loaded, so nothing known
-    fake.context_length = 4096
+    fake.context_length = FALLBACK
     monitor._update(server_context=8192)  # what a monitor learned before the restart
     contexts.clear()
     turn(env, settings, monitor=monitor)
     assert "POST /api/generate" in fake.paths
-    assert contexts[-1] == 4096 and monitor.snapshot().server_context == 4096
-    assert size(fake.requests[-1]["messages"]) <= budget_bytes(4096, 256, list_tools())
+    assert contexts[-1] == FALLBACK and monitor.snapshot().server_context == FALLBACK
+    assert size(fake.requests[-1]["messages"]) <= budget_bytes(FALLBACK, 256, list_tools())
 
 
 def test_a_slow_model_load_ends_at_the_turn_deadline(env, fake_llm):

@@ -1179,6 +1179,7 @@
   "assistant.tool.propose_training_config": "a training proposal",
   "assistant.tool.list_projects": "your projects",
   "assistant.tool.list_datasets": "the project's datasets",
+  "assistant.tool.find_table_links": "the project's dataset links",
   "assistant.tool.list_models": "the project's models",
   "assistant.tool.refused": "a tool it may not use (refused)"
 }

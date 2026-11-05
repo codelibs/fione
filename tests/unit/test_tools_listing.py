@@ -15,7 +15,7 @@ from fione.projects import ingest
 from fione.projects import service as projects
 from fione.projects.service import DatasetType
 from fione.storage import LocalStorage
-from fione.tools import ToolContext, ToolError, call_tool, list_tools, registry
+from fione.tools import ToolContext, ToolError, builtin, call_tool, list_tools, registry
 from fione.tools.registry import DATA_NOTICE, NOT_ALLOWED
 
 TOOL_NAMES = {
@@ -30,6 +30,7 @@ TOOL_NAMES = {
     "list_projects",
     "list_datasets",
     "list_models",
+    "find_table_links",
 }
 EVIL_NAME = "a\n<script>x</script>\tb"
 
@@ -88,9 +89,9 @@ def call(env, name, args, user=None, **ctx):
     return call_tool(name, args, context)
 
 
-def test_registry_has_the_eleven_flat_tools():
+def test_registry_has_the_twelve_flat_tools():
     tools = {t["function"]["name"]: t["function"] for t in list_tools()}
-    assert set(tools) == TOOL_NAMES and len(list_tools()) == 11
+    assert set(tools) == TOOL_NAMES and len(list_tools()) == 12
     for name, fn in tools.items():
         assert registry._TOOLS[name].read_only is True
         schema = fn["parameters"]
@@ -104,6 +105,101 @@ def test_registry_has_the_eleven_flat_tools():
         project_id = tools[name]["parameters"]["properties"]["project_id"]
         assert project_id["type"] == "string" and project_id["maxLength"] == 64
         assert tools[name]["parameters"]["required"] == ["project_id"]
+
+
+def test_find_table_links_reports_keys_shared_by_datasets(env):
+    keys = pd.DataFrame({"Id": range(1, 41), "label": ["a", "b"] * 20})
+    events = pd.DataFrame({"id": [i % 40 + 1 for i in range(120)], "amount": range(120)})
+    stranger = pd.DataFrame({"id": range(1000, 1040), "z": range(40)})
+    for name, frame in (("keys", keys), ("events", events), ("stranger", stranger)):
+        ingest.ingest_batches(env.storage, env.conn, env.a.id, name, DatasetType.TRAIN, [frame])
+    by_name = {d.name: d.id for d in projects.list_datasets(env.conn, env.a.id)}
+    found = call(env, "find_table_links", {"project_id": env.a.id}, user=env.users.viewer)
+    assert [(link["dataset_a"], link["dataset_b"]) for link in found["links"]] == [
+        (by_name["keys"], by_name["events"])
+    ]
+    link = found["links"][0]
+    assert (link["column_a"], link["column_b"]) == ("Id", "id")  # names match without case
+    assert link["shared_values"] == 1.0 and link["relation"] == "one_to_many"
+    assert link["one_row_per_key"] == by_name["keys"]
+    assert found["sampled"] is False and len(found["datasets"]) == 4
+    outsider = ToolContext(env.conn, env.storage, env.users.outsider)
+    with pytest.raises(ToolError, match=NOT_ALLOWED):
+        call_tool("find_table_links", {"project_id": env.a.id}, outsider)
+
+
+def test_find_table_links_samples_a_large_dataset_and_reports_repeating_keys(env, monkeypatch):
+    monkeypatch.setattr(builtin, "_LINK_FULL_ROWS", 100)
+    monkeypatch.setattr(builtin, "_LINK_SAMPLE_ROWS", 60)
+    parents = pd.DataFrame({"k": range(1000, 1060), "p": range(60)})
+    children = pd.DataFrame({"k": [1000 + i % 60 for i in range(300)], "c": range(300)})
+    days = pd.DataFrame({"day": [i % 30 for i in range(100)], "d": range(100)})
+    more = pd.DataFrame({"day": [i % 30 for i in range(90)], "m": range(90)})
+    for name, frame in (
+        ("parents", parents),
+        ("children", children),
+        ("days", days),
+        ("more", more),
+    ):
+        ingest.ingest_batches(env.storage, env.conn, env.b.id, name, DatasetType.TRAIN, [frame])
+    by_name = {d.name: d.id for d in projects.list_datasets(env.conn, env.b.id)}
+    found = call(env, "find_table_links", {"project_id": env.b.id})
+    relations = {
+        (link["column_a"], link["relation"], link["one_row_per_key"]) for link in found["links"]
+    }
+    assert relations == {
+        ("k", "one_to_many", by_name["parents"]),
+        ("day", "many_to_many", None),
+    }
+    assert found["sampled"] is True
+
+
+def test_find_table_links_reads_a_key_with_gaps_and_ranks_real_keys_first(env):
+    customers = pd.DataFrame({"cid": range(1, 61), "region": ["a", "b", "c"] * 20})
+    orders = pd.DataFrame(
+        {"cid": pd.array([1 + i % 60 if i % 10 else None for i in range(200)], dtype="Int64")}
+    )
+    for name, frame in (("customers", customers), ("orders", orders)):
+        ingest.ingest_batches(env.storage, env.conn, env.b.id, name, DatasetType.TRAIN, [frame])
+    found = call(env, "find_table_links", {"project_id": env.b.id})
+    assert [(link["column_a"], link["relation"]) for link in found["links"]] == [
+        ("cid", "one_to_many")
+    ]
+
+
+def test_find_table_links_ranks_one_row_per_key_before_repeating_keys(env):
+    wide = {f"f{i}": [j % 40 for j in range(120)] for i in range(8)}
+    train = pd.DataFrame({"cid": [1 + j % 50 for j in range(120)], **wide})
+    test = pd.DataFrame({"cid": [1 + j % 50 for j in range(120)], **wide})
+    people = pd.DataFrame({"cid": range(1, 51), "age": range(50)})
+    for name, frame in (("train", train), ("test", test), ("people", people)):
+        ingest.ingest_batches(env.storage, env.conn, env.b.id, name, DatasetType.TRAIN, [frame])
+    found = call(env, "find_table_links", {"project_id": env.b.id})
+    relations = [link["relation"] for link in found["links"]]
+    assert relations[:2] == ["one_to_many", "one_to_many"]
+    assert relations.count("many_to_many") == 5  # the least certain links are capped
+
+
+def test_find_table_links_says_what_it_did_not_examine(env, monkeypatch):
+    frame = pd.DataFrame({"k": range(30), "v": range(30)})
+    for i in range(3):
+        ingest.ingest_batches(env.storage, env.conn, env.b.id, f"d{i}", DatasetType.TRAIN, [frame])
+    monkeypatch.setattr(builtin, "_LINK_DATASETS", 2)
+    found = call(env, "find_table_links", {"project_id": env.b.id})
+    assert found["n_datasets_not_examined"] == 2 and len(found["datasets"]) == 2  # b has 4
+    monkeypatch.setattr(builtin, "_LINK_DATASETS", 8)
+    monkeypatch.setattr(builtin, "_LINK_SECS", -1.0)
+    found = call(env, "find_table_links", {"project_id": env.b.id})
+    assert found["truncated"] is True and found["links"] == []
+
+
+def test_find_table_links_ignores_constant_float_and_barely_shared_columns(env):
+    one = pd.DataFrame({"k": range(40), "f": [0.5 * i for i in range(40)], "c": ["x"] * 40})
+    two = pd.DataFrame({"k": range(30, 70), "f": [0.5 * i for i in range(40)], "c": ["x"] * 40})
+    for name, frame in (("one", one), ("two", two)):
+        ingest.ingest_batches(env.storage, env.conn, env.b.id, name, DatasetType.TRAIN, [frame])
+    found = call(env, "find_table_links", {"project_id": env.b.id})
+    assert found["links"] == []  # k shares 25% of its values, f is a float, c is constant
 
 
 def test_listing_follows_permissions(env):

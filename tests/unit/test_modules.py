@@ -59,7 +59,7 @@ def test_the_built_in_ids_and_kinds():
     modules = registry.builtin_modules()
     ids = [m.id for m in modules]
     frame_ops = (
-        "cbind concat cor cslice fillna floor pivot rbind replace rslice sort split tokenize"
+        "cbind concat cor cslice fillna floor join pivot rbind replace rslice sort split tokenize"
     )
     assert ids == sorted(frame_ops.split()) + [
         "kmeans_predict",
@@ -330,6 +330,79 @@ def test_split_parts_cover_the_frame_exactly_once():
     assert [len(p) for p in parts] == [30, 10, 10]
     assert sorted(pd.concat(parts)) == list(range(50))
     assert all(list(p) == sorted(p) for p in parts)  # source order kept inside a part
+
+
+def test_join_adds_the_columns_of_the_row_with_the_same_key():
+    df = pd.DataFrame({"id": [3, 1, 2, 9], "x": [1.0, 2.0, 3.0, 4.0]})
+    other = pd.DataFrame({"id": [1, 2, 3], "x": ["a", "b", "c"], "n": [10, 20, 30]})
+    out, _ = run_op("join", df, {"other_dataset_id": 1, "key": "id"}, other=other)
+    assert list(out.columns) == ["id", "x", "x_2", "n"]
+    assert list(out["x_2"].fillna("-")) == ["c", "a", "b", "-"]  # every row stays, in its order
+    assert list(out["n"].fillna(-1)) == [30, 10, 20, -1]
+
+
+def test_join_by_keys_with_other_names_and_missing_keys():
+    df = pd.DataFrame({"user": ["a", "b", None], "id": [1, 2, 3]})
+    other = pd.DataFrame({"name": ["a", "b", None], "v": [1, 2, 3]})
+    out, _ = run_op("join", df, {"other_dataset_id": 1, "key": "user", "other_key": "name"}, other)
+    assert list(out.columns) == ["user", "id", "v"]
+    assert list(out["v"].fillna(-1)) == [1, 2, -1]  # a missing key matches nothing
+
+
+def test_join_summarizes_a_table_with_many_rows_per_key():
+    df = pd.DataFrame({"id": [1, 2, 3]})
+    other = pd.DataFrame(
+        {"id": [1, 1, 2], "amount": [10.0, 30.0, 5.0], "kind": ["a", "b", "a"], "n": [1, 2, 3]}
+    )
+    out, _ = run_op("join", df, {"other_dataset_id": 1, "key": "id", "summarize": True}, other)
+    assert list(out.columns) == [
+        "id",
+        "rows",
+        *[f"{c}_{how}" for c in ("amount", "n") for how in ("mean", "min", "max", "sum")],
+        "kind_nunique",
+    ]
+    assert list(out["rows"].fillna(0)) == [2, 1, 0]
+    assert list(out["amount_mean"].fillna(-1)) == [20.0, 5.0, -1]
+    assert list(out["amount_sum"].fillna(-1)) == [40.0, 5.0, -1]
+    assert list(out["kind_nunique"].fillna(-1)) == [2, 1, -1]
+
+
+def test_join_matches_a_number_with_the_same_text():
+    df = pd.DataFrame({"id": [1, 2, 3]})
+    other = pd.DataFrame({"id": ["2", "3", "x"], "v": [20, 30, 99]})
+    out, _ = run_op("join", df, {"other_dataset_id": 1, "key": "id"}, other)
+    assert list(out["id"]) == [1, 2, 3]  # the key keeps its type
+    assert list(out["v"].fillna(-1)) == [-1, 20, 30]
+
+
+def test_join_matches_a_whole_float_with_the_same_text():
+    df = pd.DataFrame({"id": [1.0, 2.0, None]})
+    other = pd.DataFrame({"id": ["1", "2"], "v": [10, 20]})
+    out, _ = run_op("join", df, {"other_dataset_id": 1, "key": "id"}, other)
+    assert list(out["v"].fillna(-1)) == [10, 20, -1]
+
+
+def test_join_summarize_works_when_the_key_is_named_like_a_summary_column():
+    df = pd.DataFrame({"rows": [1, 2], "x_mean": [5, 6]})
+    other = pd.DataFrame({"rows": [1, 1, 2], "x_mean": [3, 4, 5], "k": ["a", "b", "a"]})
+    out, _ = run_op("join", df, {"other_dataset_id": 1, "key": "rows", "summarize": True}, other)
+    assert list(out["rows_2"]) == [2, 1]  # the number of rows, named apart from the key
+    assert list(out["x_mean_mean"]) == [3.5, 5.0]
+    out, _ = run_op(
+        "join", df, {"other_dataset_id": 1, "key": "x_mean", "other_key": "k", "summarize": True},
+        pd.DataFrame({"k": [5, 5, 6], "x_mean": [1, 3, 5]}),
+    )  # fmt: skip
+    assert list(out["x_mean_mean"].fillna(-1)) == [2.0, 5.0]
+
+
+def test_join_refuses_repeated_keys_unknown_columns_and_a_missing_dataset():
+    df = pd.DataFrame({"id": [1, 2]})
+    with pytest.raises(ModuleError, match="summarize it"):
+        run_op("join", df, {"other_dataset_id": 1, "key": "id"}, pd.DataFrame({"id": [1, 1]}))
+    with pytest.raises(ModuleError, match="unknown column 'zz'"):
+        run_op("join", df, {"other_dataset_id": 1, "key": "id", "other_key": "zz"}, df)
+    with pytest.raises(ModuleError, match="second dataset"):
+        run_op("join", df, {"other_dataset_id": 1, "key": "id"})
 
 
 def test_a_japanese_column_passes_through_the_ops():
