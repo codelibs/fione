@@ -203,17 +203,14 @@ def test_without_prose_the_search_gets_exactly_the_base_families(monkeypatch):
     assert seen == [[f for f in FAMILY_ORDER if f != "TextLinear"]]  # nothing late, no TextLinear
 
 
-def test_without_prose_the_trials_and_leaderboard_do_not_change():
+def test_without_prose_a_fit_has_the_base_families_and_no_late_one():
     rng = np.random.default_rng(0)
     df = pd.DataFrame(rng.normal(size=(300, 4)), columns=list("abcd"))
     df["y"] = (df["a"] + df["b"] > 0).astype(int)
-    seen = []
-    for families in (None, list(FAMILY_ORDER)):
-        model = _fit(df, families, target="y", max_models=len(FAMILY_ORDER), seed=3)
-        # The trial counts depend on the time each family gets; the families do not.
-        seen.append((sorted(set(model.trials["family"])), sorted(model.leaderboard["family"])))
-    assert seen[0] == seen[1]
-    assert not set(seen[0][1]) & set(LATE_ORDER)
+    model = _fit(df, None, target="y", max_models=len(FAMILY_ORDER), seed=3)
+    base = set(FAMILY_ORDER) - {"TextLinear"}  # TextLinear needs prose too
+    assert set(model.trials["family"]) == base
+    assert set(model.leaderboard["family"]) == base | {"Ensemble"}
 
 
 # --- which late families apply -------------------------------------------------------------
@@ -238,6 +235,78 @@ def test_the_plain_variant_needs_derived_features_to_differ_from_textlinear():
     runner = AutoML(TrainConfig(target="topic"))
     late = runner._late_families(Prep().fit(X), X, _codes(df), "classification")
     assert late == ["TextLinearChar", "TextLinearWide"]
+
+
+def _long_texts(n, tail_words, seed=0):
+    """Texts whose first 1,000 rows are short (six words) and the others ``tail_words`` long."""
+    words = ["alpha", "beta", "gamma", "delta"]
+    texts = [" ".join(words + words[:2])] * 1000 + [" ".join(words * (tail_words // 4))] * (
+        n - 1000
+    )
+    df = pd.DataFrame({"post": texts, "x": np.random.default_rng(seed).normal(size=n)})
+    return df, (np.arange(n) % 3).astype(np.int64)
+
+
+def test_the_character_variant_sizes_the_text_on_a_random_sample_of_the_rows():
+    df, y = _long_texts(5000, 400)  # about 2,400 characters in 4 of every 5 rows: ~10M
+    prep = Prep().fit(df, [TextShape("post")])
+    late = AutoML(TrainConfig(target="t"))._late_families(prep, df, y, "classification")
+    assert "TextLinearChar" not in late and "TextLinearWide" in late
+    small, y = _long_texts(5000, 8)  # the same rows with short texts
+    prep = Prep().fit(small, [TextShape("post")])
+    late = AutoML(TrainConfig(target="t"))._late_families(prep, small, y, "classification")
+    assert "TextLinearChar" in late
+
+
+def test_the_character_variant_is_not_tried_on_text_without_spaces():
+    # Letter runs split by digits are prose; with no spaces the n-grams of a text are far too many.
+    rng = np.random.default_rng(0)
+    parts = [f"{w}{i}" for w in ["alpha", "beta", "gamma", "delta"] for i in range(8)]
+    df = pd.DataFrame({"post": ["".join(rng.permutation(parts)) for _ in range(200)]})
+    df["x"] = rng.normal(size=200)
+    prep = Prep().fit(df)
+    assert prep.prose == ("post",)
+    y = np.arange(200) % 2
+    late = AutoML(TrainConfig(target="t"))._late_families(prep, df, y, "classification")
+    assert "TextLinearChar" not in late and "TextLinearWide" in late
+
+
+def test_late_families_need_the_reference_result_unless_the_list_is_explicit(monkeypatch):
+    calls = []
+
+    def fake(name, X, y, folds, task, prep, deadline, *args, **kwargs):
+        calls.append(name)
+        if name == "TextLinear":
+            raise automl_module.NoModelError("no time")
+        row = {
+            "family": name,
+            "trial": 0,
+            "state": "complete",
+            "score": 0.5,
+            "elapsed": 0.1,
+            "params": {},
+        }
+        return search.FamilyResult(
+            np.zeros((1, 2)),
+            [object()],
+            {},
+            1,
+            0.5,
+            0.0,
+            FAMILIES[name],
+            "no_improvement",
+            log=[row],
+        )
+
+    monkeypatch.setattr(automl_module, "run_family", fake)
+    names = ["TextLinear", *LATE_ORDER]
+    for families, expected in ((None, ["TextLinear"]), (names, names)):
+        calls.clear()
+        runner = AutoML(TrainConfig(target="y"), families=families)
+        runner._search(
+            names, None, None, None, "classification", None, search.Deadline(100), None, None
+        )
+        assert calls == expected  # no estimate of the time a variant needs: only if asked for
 
 
 def test_late_families_are_left_out_when_the_text_or_its_model_would_be_too_big(monkeypatch):
@@ -301,11 +370,14 @@ def test_a_late_family_with_weight_zero_is_not_a_member(name):
     }
     weights = caruana({n: r.oof for n, r in results.items()}, y, "classification")
     assert set(weights) == {"TextLinear", name} and sum(weights.values()) == pytest.approx(1.0)
-    weights = {"TextLinear": 1.0, name: 0.0}
     clock = search.Clock(search.Deadline(30), lambda: False)
-    members, _ = AutoML(TrainConfig(target="topic"))._members(
-        results, weights, X, y, prep, clock, None, "no_improvement"
-    )
+    runner = AutoML(TrainConfig(target="topic"))
+    # Whatever the ensemble decided, the members are exactly the candidates with weight above 0.
+    members, _ = runner._members(results, weights, X, y, prep, clock, None, "no_improvement")
+    assert sorted(m.key for m in members) == sorted(n for n, w in weights.items() if w > 0)
+    # A late variant with weight 0 is dropped without any special code.
+    zero = {"TextLinear": 1.0, name: 0.0}
+    members, _ = runner._members(results, zero, X, y, prep, clock, None, "no_improvement")
     assert [member.key for member in members] == ["TextLinear"]
 
 

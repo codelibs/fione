@@ -696,7 +696,10 @@ class DeepLearning(FamilySpec):
 TEXT_WORDS = 30_000  # words and word pairs kept per text column
 TEXT_WORDS_WIDE = 100_000  # the same in TextLinearWide (more made the log loss worse)
 TEXT_CHARS = 100_000  # character n-grams kept per text column in TextLinearChar
-TEXT_CHAR_BUDGET = 20_000_000  # characters of text above which TextLinearChar is not tried
+TEXT_CHAR_BUDGET = 5_000_000  # characters of text above which TextLinearChar is not tried
+# Mean characters per space-separated token above which a column counts as written without
+# spaces: a sentence is then one "word" and the character n-grams are far too many.
+TEXT_CHAR_TOKEN = 30
 TEXT_SUFFIX = "_t"  # ends the name of a text column of the text view
 
 
@@ -848,7 +851,8 @@ class TextLinearWide(TextLinear):
 class TextLinearChar(TextLinear):
     """TextLinear with the character n-grams (2 to 5, within words) of each text beside its
     words. Fitting takes several times as long and the matrix has many more entries, so it is
-    left out when the text takes more than ``TEXT_CHAR_BUDGET`` characters."""
+    left out when the text takes more than ``TEXT_CHAR_BUDGET`` characters (estimated on a
+    sample of the rows) or a column has no spaces (``TEXT_CHAR_TOKEN``)."""
 
     name = "TextLinearChar"
     chars = TEXT_CHARS
@@ -858,8 +862,15 @@ class TextLinearChar(TextLinear):
     def applies(cls, prep, X: pd.DataFrame) -> bool:
         if not super().applies(prep, X):
             return False
-        sample = X[list(prep.prose)].head(1000).astype(str)
-        return float(sample.apply(lambda s: s.str.len().mean()).sum()) * len(X) <= TEXT_CHAR_BUDGET
+        sample = X[list(prep.prose)].sample(min(1000, len(X)), random_state=0)
+        chars = 0.0
+        for column in sample:
+            text = sample[column].fillna("").astype(str)
+            tokens = max(1.0, text.str.split().str.len().mean())
+            if text.str.len().mean() / tokens > TEXT_CHAR_TOKEN:
+                return False
+            chars += text.str.len().mean() * len(X)
+        return chars <= TEXT_CHAR_BUDGET
 
 
 class TextLinearPlain(TextLinear):

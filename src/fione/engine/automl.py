@@ -158,6 +158,7 @@ class AutoML:
             raise ConfigError(f"unknown families: {unknown}; choose from {known}")
         self.families = [f for f in FAMILY_ORDER if families is None or f in families]
         self.late = [f for f in LATE_ORDER if families is None or f in families]
+        self.explicit = families is not None  # the caller named the families
 
     def _event(self, type: str, **data) -> None:
         self.emit(Event(type, data=jsonable(data)))
@@ -414,7 +415,7 @@ class AutoML:
             weights = LATE_WEIGHTS if late else FAMILY_WEIGHTS
             left = search.remaining() if late else base.remaining()
             share = left * weights[name] / sum(weights[f] for f in rest)
-            if late and not _late_fits(FAMILIES[name], share, results):
+            if late and not _late_fits(FAMILIES[name], share, results, self.explicit):
                 continue
             try:
                 result = run_family(
@@ -574,12 +575,16 @@ class AutoML:
                     sizes[name] += real
 
 
-def _late_fits(spec: type[FamilySpec], share: float, results: dict[str, FamilyResult]) -> bool:
+def _late_fits(
+    spec: type[FamilySpec], share: float, results: dict[str, FamilyResult], explicit: bool
+) -> bool:
     """Whether the first trial of a late family is expected to fit in ``share``: ``spec.cost``
-    times the first trial of its reference family, when that one has run (a first trial is
-    never interrupted)."""
+    times the first trial of its reference family (a first trial is never interrupted). Without
+    that family's result there is no estimate: only an explicit list of families runs it."""
     reference = results.get(spec.reference)
-    return reference is None or share >= spec.cost * reference.log[0]["elapsed"]
+    if reference is None:
+        return explicit
+    return share >= spec.cost * reference.log[0]["elapsed"]
 
 
 def _mb(size: float) -> str:

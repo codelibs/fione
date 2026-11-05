@@ -151,7 +151,7 @@ same cross-validation scores.
 
 Three variants of it are *late candidates*: TextLinearWide (up to 100,000 words and word pairs
 per column), TextLinearChar (the words and also the character n-grams of 2 to 5 letters; it is
-left out when the text is very large) and TextLinearPlain (without the derived features; it is
+left out when the text is very large or has no spaces) and TextLinearPlain (without the derived features; it is
 tried only when derived features were added). They run after all the other families, in the
 search time that is left: for text data, 15% of the search time is kept for them, and what the
 other families leave unused is added. Each takes a share of that time, and one that cannot finish
