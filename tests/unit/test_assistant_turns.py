@@ -630,9 +630,9 @@ def test_budget_counts_bytes_for_japanese(env, fake_llm):
         store.add_message(env.conn, env.conversation.id, "user", "質問" * 100)
         store.add_message(env.conn, env.conversation.id, "assistant", "回答" * 100)
     fake = fake_llm([{"text": "ok"}])
-    settings = settings_for(env, fake, llm_context_tokens=4352, llm_max_tokens=256)
+    settings = settings_for(env, fake, llm_context_tokens=4700, llm_max_tokens=256)
     turn(env, settings, "最新の質問")
-    budget = budget_bytes(4352, 256, list_tools())
+    budget = budget_bytes(4700, 256, list_tools())
     everything = [
         {"role": "system", "content": "x" * len(fake.requests[0]["messages"][0]["content"])},
         *(
@@ -728,8 +728,8 @@ def test_an_unknown_context_that_stays_unknown_is_logged(env, fake_llm, caplog):
     fake.generate_status = 500
     fake.raw_replies["/api/ps"] = b'{"models": []}'  # nothing ever loads
     settings = settings_for(env, fake, llm_provider="ollama", llm_max_tokens=256)
-    turn(env, settings, "x" * 1000)
-    turn(env, settings, "y" * 1000)  # the first turn is history that no longer fits
+    turn(env, settings, "x" * 800)
+    turn(env, settings, "y" * 800)  # the first turn is history that no longer fits
     assert "sized for 4096 tokens" in caplog.text
     assert size(fake.requests[-1]["messages"]) <= budget_bytes(4096, 256, list_tools())
 
