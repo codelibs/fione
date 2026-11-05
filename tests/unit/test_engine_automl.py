@@ -972,6 +972,41 @@ def test_text_linear_fits_the_words_once_per_training_set():
     assert spec.importance(model).argmax() == 0 and spec.size_bytes(model) > 0
 
 
+def test_text_linear_fits_with_few_blas_threads(monkeypatch):
+    from contextlib import contextmanager
+
+    from fione.engine import families
+    from fione.engine.prep import Prep
+
+    limits = []
+    fits = []
+    real = families.threadpool_limits
+
+    @contextmanager
+    def record(**kwargs):
+        limits.append(kwargs)
+        with real(**kwargs):
+            yield
+
+    fit = families.LogisticRegression.fit
+
+    def spy(self, *args, **kwargs):
+        fits.append(len(limits))  # the limit is already in force when the solver starts
+        return fit(self, *args, **kwargs)
+
+    monkeypatch.setattr(families, "threadpool_limits", record)
+    monkeypatch.setattr(families.LogisticRegression, "fit", spy)
+    df = _posts()
+    X = df.drop(columns=["topic"])
+    y = pd.factorize(df["topic"])[0]
+    view = Prep().fit(X).text(X)
+    families.TextLinear("classification", 3).fit(
+        {"C": 1.0}, view.iloc[:200], y[:200], view.iloc[200:], y[200:], search.Deadline(60)
+    )
+    assert fits == [1]
+    assert limits == [{"limits": families.SMALL_DATA_THREADS, "user_api": "blas"}]
+
+
 def test_text_linear_predicts_texts_it_has_never_seen():
     df = _posts(300, seed=3)
     train, new = df.iloc[:200], df.iloc[200:]

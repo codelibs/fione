@@ -58,6 +58,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+from threadpoolctl import threadpool_limits
 
 from fione.engine.config import DeadlineExceeded
 from fione.engine.prep import Task
@@ -807,7 +808,10 @@ class TextLinear(FamilySpec):
             model = LogisticRegression(C=params["C"], max_iter=self.max_iter)
         else:
             model = Ridge(alpha=1.0 / params["C"])
-        model.fit(M, y_tr, sample_weight=sample_weight)
+        # The solver's many small sparse products slow down with every BLAS thread (6 s instead of
+        # 0.05 s on 6,000 posts with 16), whatever the number of rows.
+        with threadpool_limits(limits=SMALL_DATA_THREADS, user_api="blas"):
+            model.fit(M, y_tr, sample_weight=sample_weight)
         deadline.expired()  # consulted once, so that the unit time is measured (see ``fit``)
         return TextModel(dense, texts, vectorizers, model, np.asarray(M.mean(axis=0)).ravel())
 

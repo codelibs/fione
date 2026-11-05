@@ -284,6 +284,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "starlette" },
+    { name = "threadpoolctl" },
     { name = "uvicorn" },
     { name = "xgboost" },
 ]
@@ -314,6 +315,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.9.1" },
     { name = "scipy", specifier = ">=1.18.1" },
     { name = "starlette", specifier = ">=1.9.0,<1.10" },
+    { name = "threadpoolctl", specifier = ">=3.7.0" },
     { name = "uvicorn", specifier = ">=0.54.0" },
     { name = "xgboost", specifier = ">=3.4.1" },
 ]
