@@ -990,6 +990,19 @@ def test_deleting_a_subject_removes_its_comments(chat):
     assert notes_left(chat) == ({("model", str(other))}, 1)
 
 
+def test_deleting_a_dataset_removes_its_comments(chat):
+    train, other = chat.ids[chat.p]["train"], chat.ids[chat.q]["train"]
+    for language in ("en", "ja"):
+        make_note(chat, "dataset", train, language)
+    make_note(chat, "dataset", other, project=chat.q)
+    make_note(chat, "model", train)  # the same id of another kind stays
+    r = chat.client.post(
+        f"/projects/{chat.p}/datasets/{train}/delete", data={"csrf_token": chat.csrf}
+    )
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("dataset", str(other)), ("model", str(train))}, 2)
+
+
 def test_only_a_failed_training_has_a_comment(chat):
     with closing(connect(chat.client)) as conn:
         user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]

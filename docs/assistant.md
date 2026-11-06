@@ -108,7 +108,8 @@ language, and nothing is sent again. It is written by the same model, with the s
 tools and limits as a question in the chat (it counts as one of the opener's answers at once),
 and does not appear among anyone's conversations. Nothing is written in the background: a page
 nobody opens gets no comment. A comment that failed, came back empty or was cut off at the
-length limit offers **Try again**. Deleting the model or the job deletes its comments too.
+length limit offers **Try again**. Deleting the model, the job or the dataset deletes its comments
+too.
 
 ## What is sent
 
