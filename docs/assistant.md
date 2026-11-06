@@ -35,7 +35,10 @@ Nothing is installed with Fione and no model is bundled. Ways to set it up:
   model's reasoning output off; change that with `FIONE_LLM_EXTRA_BODY`.
 - **Claude.** Set `FIONE_LLM_PROVIDER=claude` and `FIONE_LLM_API_KEY` (Fione refuses to start
   without the key). The base URL and the model default to the Anthropic API and a current Claude
-  model; set `FIONE_LLM_MODEL` to use another. `FIONE_LLM_EXTRA_BODY` does not apply.
+  model; set `FIONE_LLM_MODEL` to use another. `FIONE_LLM_EXTRA_BODY` does not apply. Requests
+  use prompt caching: the tool definitions and the system prompt, the same on every step of an
+  answer and across the answers of a project, are cached for a few minutes, as is the
+  conversation so far, which makes the later steps cheaper and faster.
 
 Without Compose, the same settings are environment variables of the Fione process.
 
@@ -218,6 +221,8 @@ sentence, and `code` with `params` is what the Training proposal card translates
 | "can be used once an administrator finishes the assistant setup" | An administrator confirms the remote host on the **Assistant setup** page (linked from the banner). |
 | "did not accept the API key" (unauthorized, 401) | Check `FIONE_LLM_API_KEY`. The System page shows the state. |
 | "is not available to this API key" (model_not_found, 404) | The model name in `FIONE_LLM_MODEL` is not available to the key: check the name, and that the key's organization can use that model. A 404 without the Anthropic API's answer (a gateway without that address) shows as "answered with an error" instead. |
+| "receiving too many requests" (rate_limited, 429) | The Anthropic API (or a proxy in front of the model) limits how much one key can send per minute. Wait a minute and ask again; if it happens often, ask for a higher rate limit for the key. |
+| "is overloaded" (overloaded, 529) | The Anthropic API is busy for a while. Ask again soon. |
 | "The model declined to answer" (refused) | The model refused this question. Ask it in other words. |
 | "The reply was cut off before it began" (truncated) | The model used its whole `FIONE_LLM_MAX_TOKENS` before it wrote anything, thinking included. Raise `FIONE_LLM_MAX_TOKENS`. |
 | A comment says "The assistant is busy" | As many answers as allowed are running (see Limits). The comment asks again by itself every few seconds and appears once an answer ends; **Try again** does the same at once. |

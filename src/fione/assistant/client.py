@@ -31,6 +31,8 @@ ErrorCode = Literal[
     "timeout",
     "http",
     "unauthorized",
+    "rate_limited",
+    "overloaded",
     "protocol",
     "truncated",
     "refused",
@@ -407,7 +409,7 @@ class HttpClient:
         except (ValueError, RecursionError):
             pass
         status = response.status_code
-        code = "unauthorized" if status == 401 else "http"
+        code = {401: "unauthorized", 429: "rate_limited", 529: "overloaded"}.get(status, "http")
         return self._error(code, f"HTTP {status}: {text}", status)
 
     def _error(self, code: ErrorCode, message: str, status: int | None = None) -> LlmError:

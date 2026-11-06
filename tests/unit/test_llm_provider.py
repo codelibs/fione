@@ -173,6 +173,20 @@ def test_claude_404_from_a_gateway_is_probe_failed(fake_llm, monitors, db_path):
     assert wait_for(monitor, "error").error_code == "probe_failed"
 
 
+@pytest.mark.parametrize("kind", ["rate_limit_error", "overloaded_error"])
+def test_claude_rate_limit_or_overload_on_the_probe_is_probe_failed(
+    fake_llm, monitors, db_path, kind
+):
+    # as any other error status of the probe: the System page says the server answered
+    # with an error, and the assistant waits for the next check
+    fake = fake_llm(api_key="sk-test-0123456789")
+    fake.claude_model_error = kind
+    consent(db_path, fake.origin)
+    monitor = monitors(fake.origin, "claude", llm_api_key="sk-test-0123456789")
+    monitor.start()
+    assert wait_for(monitor, "error").error_code == "probe_failed"
+
+
 def test_ollama_404_is_not_model_not_found(fake_llm, monitors):
     fake = fake_llm()
     monitor = monitors(f"{fake.origin}/wrong/v1")

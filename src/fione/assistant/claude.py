@@ -9,6 +9,11 @@ in the current turn (after the last user message), as the API asks within a turn
 Earlier turns go without thinking, which the API allows, so that dropping old rounds does not
 change what a sent thinking block was made after. The stored messages never hold them.
 
+The tool definitions and the system prompt are the same on every round of a turn and across the
+turns of a project: the system is sent as one text block with a cache breakpoint, which caches
+the tools with it (they render first), and the request's top-level ``cache_control`` (automatic
+caching) puts a second breakpoint on the conversation's last block as it grows.
+
 Every request sets ``thinking.block_binding.prefix_mismatch_behavior`` to ``drop_block`` (beta
 ``thinking-binding-controls-2026-08-01``): when the request before a sent thinking block has
 changed since the block was made (old rounds dropped, a tool result cut to fit), the API drops
@@ -38,6 +43,9 @@ ANTHROPIC_BETA = "thinking-binding-controls-2026-08-01"
 THINKING = {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
 MAX_KEPT_REPLIES = 256  # replies whose thinking blocks are kept for the next request
 STOP_REASONS = {"tool_use": "tool_calls", "end_turn": "stop", "max_tokens": "length"}
+CACHE = {"type": "ephemeral"}
+# The ``error.type`` of an error event in the stream -> its code; any other is ``protocol``.
+STREAM_ERRORS = {"rate_limit_error": "rate_limited", "overloaded_error": "overloaded"}
 
 log = logging.getLogger(__name__)
 
@@ -85,8 +93,11 @@ class _Reply:
             raise LlmError("protocol", "the server sent an unexpected event")
         kind = event.get("type")
         if kind == "error":
+            error = event.get("error")
             raise LlmError(
-                "protocol",
+                STREAM_ERRORS.get(
+                    error.get("type") if isinstance(error, dict) else None, "protocol"
+                ),
                 f"the server reported an error: {_error_text(event)}",
                 secret=self._secret,
             )
@@ -184,7 +195,8 @@ class ClaudeClient(HttpClient):
         cancelled: Callable[[], bool] = lambda: False,
     ) -> Completion:
         """One completion, streamed; as ``OllamaClient.complete``. A 401 is the error code
-        ``unauthorized``."""
+        ``unauthorized``, a 429 or a ``rate_limit_error`` event ``rate_limited``, a 529 or an
+        ``overloaded_error`` event ``overloaded``."""
         system, converted = self._convert(messages)
         body = {
             "model": self.model,
@@ -192,9 +204,10 @@ class ClaudeClient(HttpClient):
             "stream": True,
             "thinking": THINKING,
             "messages": converted,
+            "cache_control": CACHE,
         }
         if system:
-            body["system"] = system
+            body["system"] = [{"type": "text", "text": system, "cache_control": CACHE}]
         if tools:
             body["tools"] = claude_tools(tools)
         headers = {"anthropic-version": ANTHROPIC_VERSION, "anthropic-beta": ANTHROPIC_BETA}

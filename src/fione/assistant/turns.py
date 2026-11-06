@@ -75,6 +75,8 @@ ERROR_CODES = (
     "protocol",
     "timeout",
     "unauthorized",
+    "rate_limited",
+    "overloaded",
     "truncated",
     "refused",
     "too_many_steps",
