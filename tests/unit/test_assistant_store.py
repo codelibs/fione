@@ -252,7 +252,7 @@ def test_proposals_are_stored_and_found_through_their_conversation(
     assert (proposal.state, proposal.job_id, proposal.config) == ("pending", None, {"target": "y"})
     assert proposal.details == {"warnings": []}
     assert store.proposals_for(conn, conversation.id) == {proposal.message_id: proposal}
-    assert store.get_proposal(conn, owner, project.id, proposal.id) == proposal
+    assert store.get_proposal(conn, owner, project.id, proposal.id) == (proposal, conversation)
     with pytest.raises(ProposalNotFound):
         store.get_proposal(conn, member, project.id, proposal.id)
     with pytest.raises(ProposalNotFound):
@@ -262,7 +262,7 @@ def test_proposals_are_stored_and_found_through_their_conversation(
     shared = store.add_proposal(
         conn, store.add_message(conn, theirs.id, "assistant").id, theirs.id, None, {}, {}
     )
-    assert store.get_proposal(conn, member, project.id, shared.id) == shared
+    assert store.get_proposal(conn, member, project.id, shared.id) == (shared, theirs)
     projects.unshare_project(conn, owner, project.id, "member")
     with pytest.raises(ProposalNotFound):  # hidden with the conversation
         store.get_proposal(conn, member, project.id, shared.id)
@@ -576,3 +576,169 @@ def test_deleting_a_user_removes_their_conversations(conn, owner, member, projec
     auth.delete_user(conn, member.id)
     assert [count(conn, t) for t in TABLES] == [1, 0, 0]
     assert conn.execute("SELECT id FROM conversations").fetchone()["id"] == kept.id
+
+
+# --- notes --------------------------------------------------------------------
+
+
+def test_migration_adds_the_notes(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "old.db")
+    first = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE assistant_notes" in sql)
+    with monkeypatch.context() as m:
+        m.setattr(db, "MIGRATIONS", db.MIGRATIONS[:first])
+        db.migrate(conn)
+    owner = auth.create_user(conn, "owner", "pw-owner-1", Role.EDITOR)
+    project = projects.create_project(conn, owner, "old")
+    conn.execute(
+        "INSERT INTO conversations (project_id, user_id, title) VALUES (?, ?, 'old')",
+        (project.id, owner.id),
+    )
+    query = "SELECT name FROM sqlite_master WHERE name = 'assistant_notes'"
+    assert conn.execute(query).fetchall() == []
+    assert db.migrate(conn) == len(db.MIGRATIONS)
+    assert len(conn.execute(query).fetchall()) == 1
+    assert conn.execute("SELECT kind FROM conversations").fetchone()["kind"] == "chat"
+    assert [c.title for c in store.list_conversations(conn, owner, project.id)] == ["old"]
+    conn.close()
+
+
+def test_a_note_is_a_hidden_conversation_with_its_request(conn, owner, project):
+    note, placeholder = store.create_note(conn, owner, project.id, "model", "7", "en", "Explain")
+    assert (note.project_id, note.kind, note.subject_id, note.language) == (
+        project.id, "model", "7", "en",
+    )  # fmt: skip
+    rows = store.messages(conn, note.conversation_id)
+    assert [(m.role, m.content, m.state) for m in rows] == [
+        ("user", "Explain", "done"),
+        ("assistant", "", "queued"),
+    ]
+    assert placeholder == rows[-1]
+    assert store.get_note(conn, project.id, "model", "7", "en") == note
+    assert store.get_note(conn, project.id, "model", "7", "ja") is None
+    assert store.note_answer(conn, note.conversation_id) == placeholder
+    assert store.list_conversations(conn, owner, project.id) == []
+    kind = conn.execute("SELECT kind FROM conversations WHERE id = ?", (note.conversation_id,))
+    assert kind.fetchone()["kind"] == "note"
+
+
+def test_one_note_per_project_kind_subject_and_language(conn, owner, member, project):
+    note, _ = store.create_note(conn, owner, project.id, "model", "7", "en", "Explain")
+    again, placeholder = store.create_note(conn, member, project.id, "model", "7", "en", "x")
+    assert (again, placeholder) == (note, None)
+    assert count(conn, "conversations") == 1
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO assistant_notes (project_id, kind, subject_id, language,"
+            " conversation_id) VALUES (?, 'model', '7', 'en', ?)",
+            (project.id, note.conversation_id),
+        )
+    others = [
+        store.create_note(conn, owner, project.id, *key, "x")[0]
+        for key in (("model", "7", "ja"), ("model", "8", "en"), ("failed_job", "7", "en"))
+    ]
+    assert len({n.id for n in [note, *others]}) == 4
+    with pytest.raises(ValueError):
+        store.create_note(conn, owner, project.id, "dataset", "7", "en", "x")
+
+
+def test_a_note_needs_read_access(conn, owner, project):
+    stranger = auth.create_user(conn, "stranger", "pw-stranger-1", Role.EDITOR)
+    with pytest.raises(ConversationNotFound):
+        store.create_note(conn, stranger, project.id, "model", "7", "en", "x")
+    assert count(conn, "conversations") == 0
+
+
+def test_notes_do_not_count_toward_the_conversation_limit(conn, owner, project, monkeypatch):
+    monkeypatch.setattr(store, "MAX_CONVERSATIONS", 1)
+    store.create_note(conn, owner, project.id, "model", "1", "en", "x")
+    store.create_note(conn, owner, project.id, "model", "2", "en", "x")
+    store.create_conversation(conn, owner, project.id)
+    with pytest.raises(LimitReached):
+        store.create_conversation(conn, owner, project.id)
+
+
+def test_deleting_a_note_or_its_owner_removes_it(conn, owner, member, project):
+    note, _ = store.create_note(conn, member, project.id, "model", "7", "en", "x")
+    store.delete_note(conn, note)
+    assert store.get_note(conn, project.id, "model", "7", "en") is None
+    assert count(conn, "conversations") == 0
+    note, _ = store.create_note(conn, member, project.id, "model", "7", "en", "x")
+    auth.delete_user(conn, member.id)
+    assert store.get_note(conn, project.id, "model", "7", "en") is None
+    assert count(conn, "assistant_notes") == 0
+
+
+def test_a_note_is_no_chat_conversation(conn, owner, project):
+    note, placeholder = store.create_note(conn, owner, project.id, "model", "7", "en", "x")
+    with pytest.raises(ConversationNotFound):
+        store.get_conversation(conn, owner, project.id, note.conversation_id)
+    with pytest.raises(ConversationNotFound):
+        store.delete_conversation(conn, owner, project.id, note.conversation_id)
+    found = store.get_conversation(conn, owner, project.id, note.conversation_id, kind=None)
+    assert found.kind == "note"
+    assert store.note_of(conn, note.conversation_id) == note
+    chat = store.create_conversation(conn, owner, project.id)
+    assert store.note_of(conn, chat.id) is None
+    reply = store.add_message(conn, chat.id, "assistant", "x")
+    proposal = store.add_proposal(conn, reply.id, chat.id, None, {}, {})
+    assert store.get_proposal(conn, owner, project.id, proposal.id) == (proposal, chat)
+    store.finish_message(conn, placeholder.id, "done", content="first")
+    proposal = store.add_proposal(conn, placeholder.id, note.conversation_id, None, {}, {})
+    assert store.get_proposal(conn, owner, project.id, proposal.id) == (proposal, found)
+
+
+def test_a_proposal_of_a_note_is_found_by_whoever_can_write(conn, owner, member, project):
+    viewer = auth.create_user(conn, "viewer", "pw-viewer-1", Role.EDITOR)
+    stranger = auth.create_user(conn, "stranger", "pw-stranger-1", Role.EDITOR)
+    projects.share_project(conn, owner, project.id, "viewer", ProjectAccess.VIEWER)
+    note, placeholder = store.create_note(conn, viewer, project.id, "model", "7", "en", "x")
+    store.finish_message(conn, placeholder.id, "done", content="first")
+    proposal = store.add_proposal(conn, placeholder.id, note.conversation_id, None, {}, {})
+    for user in (owner, member):  # not the note's writer, but they can write to the project
+        found, conversation = store.get_proposal(conn, user, project.id, proposal.id)
+        assert found == proposal
+        assert (conversation.id, conversation.kind) == (note.conversation_id, "note")
+    for user in (viewer, stranger):
+        with pytest.raises(ProposalNotFound):
+            store.get_proposal(conn, user, project.id, proposal.id)
+    other = projects.create_project(conn, owner, "other")
+    with pytest.raises(ProposalNotFound):  # only through the note's own project
+        store.get_proposal(conn, owner, other.id, proposal.id)
+    projects.unshare_project(conn, owner, project.id, "member")
+    with pytest.raises(ProposalNotFound):
+        store.get_proposal(conn, member, project.id, proposal.id)
+
+
+def test_a_proposal_of_a_note_that_is_not_done_is_not_found(conn, owner, project):
+    note, placeholder = store.create_note(conn, owner, project.id, "model", "7", "en", "x")
+    proposal = store.add_proposal(conn, placeholder.id, note.conversation_id, None, {}, {})
+    with pytest.raises(ProposalNotFound):  # still being written
+        store.get_proposal(conn, owner, project.id, proposal.id)
+    store.finish_message(conn, placeholder.id, "failed", error_code="failed")
+    with pytest.raises(ProposalNotFound):
+        store.get_proposal(conn, owner, project.id, proposal.id)
+
+
+def test_the_text_of_a_note_is_its_first_answer(conn, owner, project):
+    note, placeholder = store.create_note(conn, owner, project.id, "model", "7", "en", "x")
+    store.finish_message(conn, placeholder.id, "done", content="first")
+    store.add_message(conn, note.conversation_id, "user", "a follow-up")
+    store.add_message(conn, note.conversation_id, "assistant", "second")
+    assert store.note_answer(conn, note.conversation_id).content == "first"
+
+
+def test_deleting_the_notes_of_a_subject_keeps_the_others(conn, owner, project):
+    for language in ("en", "ja"):
+        note, placeholder = store.create_note(conn, owner, project.id, "model", "7", language, "x")
+        store.finish_message(conn, placeholder.id, "done", content="first")
+        store.add_proposal(conn, placeholder.id, note.conversation_id, None, {}, {})
+    kept = [
+        store.create_note(conn, owner, project.id, *key, "en", "x")[0]
+        for key in (("model", "8"), ("failed_job", "7"))
+    ]
+    store.delete_notes_of(conn, "model", 7)
+    assert store.get_note(conn, project.id, "model", "7", "en") is None
+    assert store.get_note(conn, project.id, "model", "7", "ja") is None
+    assert [store.get_note(conn, project.id, n.kind, n.subject_id, "en") for n in kept] == kept
+    assert (count(conn, "conversations"), count(conn, "chat_proposals")) == (2, 0)
+    assert count(conn, "chat_messages") == 4  # the two kept notes' request and placeholder

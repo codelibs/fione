@@ -1,0 +1,31 @@
+{% from "_macros.html" import icon, mascot %}
+{# The assistant's comment on a model or a failed job, which its page loads. While it is being
+   written it asks again after two seconds; every other state is final. The text is escaped
+   plain text, as in the chat. A training proposal of the comment shows to every member and
+   is decided by anyone who can edit the project. #}
+<section class="card card-padded stack-tight assistant-note" id="assistant-note" data-note="{{ note.state }}" aria-labelledby="assistant-note-title"{% if note.state == "writing" %} hx-get="{{ note.url }}" hx-trigger="load delay:2s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  <h2 class="section-header__title" id="assistant-note-title">{{ mascot("happy", "mascot mascot-xs") }}{{ t('note.title') }}</h2>
+  {% if note.remote_host %}
+  <div class="alert alert-warning" role="note" data-remote-warning>{{ icon("alert") }}<span>{{ t('assistant.remote_warning', host=note.remote_host) }}</span></div>
+  {% endif %}
+  {% if note.state == "writing" %}
+  <p class="chat-status text-muted text-sm"><span class="dot dot-pulse" aria-hidden="true"></span>{{ t('note.writing') }}</p>
+  {% elif note.state == "done" %}
+  {% if note.text %}<div class="chat-text">{{ note.text }}</div>{% endif %}
+  {% if note.card %}
+  {% with card = note.card %}{% include "_assistant_proposal.html" %}{% endwith %}
+  {% endif %}
+  <p><a class="btn btn-ghost btn-sm" href="{{ note.ask }}">{{ t('note.follow_up') }}</a></p>
+  {% elif note.state == "unavailable" %}
+  <p class="text-muted text-sm">{{ t(note.message) }}</p>
+  {% elif note.state == "busy" %}
+  <p class="text-muted text-sm">{{ t('note.busy') }}</p>
+  <p><button type="button" class="btn btn-secondary btn-sm" hx-get="{{ note.url }}" hx-target="#assistant-note" hx-swap="outerHTML">{{ t('note.retry') }}</button></p>
+  {% else %}
+  <p class="chat-status chat-status-danger text-sm" role="note">{{ icon("alert", "icon icon-sm") }}{{ t(note.message) }}</p>
+  <form method="post" action="{{ note.url }}/retry" hx-post="{{ note.url }}/retry" hx-target="#assistant-note" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button type="submit" class="btn btn-secondary btn-sm">{{ t('note.retry') }}</button>
+  </form>
+  {% endif %}
+</section>

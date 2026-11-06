@@ -1253,3 +1253,142 @@ def test_interrupted_at_startup(tmp_path, make_client):
     finally:
         conn.close()
     assert (row.state, row.error_code) == ("failed", "interrupted")
+
+
+# --- notes --------------------------------------------------------------------
+
+
+def test_note_requests_name_the_subject_and_the_language():
+    model = prompt.note_request("model", "12", "ja")
+    assert "model 12" in model and "Japanese" in model and "baseline" in model
+    assert "propose_training_config" in model and "150 words" in model
+    job = prompt.note_request("failed_job", "34", "en")
+    assert "job 34" in job and "get_training_events" in job and "English" in job
+    with pytest.raises(ValueError):
+        prompt.note_request("dataset", "1", "en")
+
+
+def settled(env, manager_, user=None, kind="model", subject="1", language="en", timeout=10.0):
+    """``explain`` until the note is no longer being written; its view."""
+    end = time.monotonic() + timeout
+    while True:
+        view = manager_.explain(env.conn, user or env.owner, env.project.id, kind, subject,
+                                language)  # fmt: skip
+        if view.state != "writing" or time.monotonic() > end:
+            return view
+        time.sleep(0.05)
+
+
+def test_explain_writes_a_note_once_and_shares_it(env, manager):
+    one, fake = manager([{"text": "A good model."}, {"text": "良いモデルです。"}])
+    first = one.explain(env.conn, env.owner, env.project.id, "model", "1", "en")
+    assert first.state == "writing"
+    done = settled(env, one)
+    assert (done.state, done.text, done.error_code) == ("done", "A good model.", None)
+    assert done.conversation_id == first.conversation_id
+    assert settled(env, one, user=env.member) == done  # another reader, no second request
+    assert len(fake.requests) == 1
+    question = [m for m in fake.requests[0]["messages"] if m["role"] == "user"]
+    assert question[0]["content"] == prompt.note_request("model", "1", "en")
+    japanese = settled(env, one, user=env.member, language="ja")
+    assert japanese.text == "良いモデルです。"
+    assert len(fake.requests) == 2
+    assert store.list_conversations(env.conn, env.owner, env.project.id) == [env.conversation]
+
+
+def test_a_failed_note_is_retried(env, manager):
+    one, fake = manager([{"status": 500, "body": "boom"}, {"text": "Fixed."}])
+    failed = settled(env, one, kind="failed_job", subject="5")
+    assert (failed.state, failed.error_code) == ("failed", "http")
+    again = one.retry(env.conn, env.owner, env.project.id, "failed_job", "5", "en")
+    assert again.state == "writing" and again.conversation_id != failed.conversation_id
+    assert settled(env, one, kind="failed_job", subject="5").text == "Fixed."
+    assert count(env.conn, "assistant_notes") == 1
+    assert count(env.conn, "conversations") == 2  # the chat and the new note
+    # a note that did not fail is kept as it is
+    kept = one.retry(env.conn, env.owner, env.project.id, "failed_job", "5", "en")
+    assert kept.text == "Fixed." and len(fake.requests) == 2
+
+
+CUT = 'data: {"choices":[{"index":0,"delta":{"content":"Part"},"finish_reason":"length"}]}\n\n'
+CUT_ANSWER = {"status": 200, "content_type": "text/event-stream", "body": CUT + "data: [DONE]\n\n"}
+
+
+@pytest.mark.parametrize(
+    "item, code",
+    [({"text": ""}, "failed"), ({"text": "\n \n"}, "failed"), (CUT_ANSWER, "truncated")],
+)
+def test_an_empty_or_cut_note_fails_and_can_be_retried(env, manager, item, code):
+    one, fake = manager([item, {"text": "Whole."}])
+    failed = settled(env, one)
+    assert (failed.state, failed.error_code) == ("failed", code)
+    again = one.retry(env.conn, env.owner, env.project.id, "model", "1", "en")
+    assert again.state == "writing"
+    assert (settled(env, one).state, settled(env, one).text) == ("done", "Whole.")
+    # the chat keeps such an answer as it is
+    fake.script = [item]
+    rows = turn(env, settings_for(env, fake))
+    assert rows[-1].state == "done"
+
+
+def test_explain_needs_a_ready_assistant_but_shows_a_written_note(env, manager):
+    pulling, fake = manager(state="pulling")
+    with pytest.raises(LlmUnavailable):
+        pulling.explain(env.conn, env.owner, env.project.id, "model", "1", "en")
+    assert count(env.conn, "assistant_notes") == 0 and fake.requests == []
+    ready, _ = manager([{"text": "Written."}])
+    assert settled(env, ready).text == "Written."
+    assert settled(env, pulling).text == "Written."
+    with pytest.raises(store.ConversationNotFound):  # a reader of the project only
+        ready.explain(env.conn, env.owner, env.other.id + "x", "model", "1", "en")
+
+
+def test_explain_counts_toward_the_turns_of_a_user(env, manager):
+    one, _ = manager([{"text": "slow", "delay": 2}] * 4, llm_max_concurrent_turns=1)
+    chats = [env.conversation] + [
+        store.create_conversation(env.conn, env.owner, env.project.id, f"c{i}") for i in range(2)
+    ]
+    for chat in chats:
+        one.submit(env.conn, env.owner, env.project.id, chat.id, "Hi", language="en")
+    with pytest.raises(turns.TooManyTurns):
+        one.explain(env.conn, env.owner, env.project.id, "model", "99", "en")
+    assert store.get_note(env.conn, env.project.id, "model", "99", "en") is None
+
+
+def test_one_note_at_a_time_per_user(env, manager):
+    one, _ = manager([{"text": "slow", "delay": 1}] * 4)
+    assert one.explain(env.conn, env.owner, env.project.id, "model", "1", "en").state == "writing"
+    with pytest.raises(turns.TooManyTurns):
+        one.explain(env.conn, env.owner, env.project.id, "model", "2", "en")
+    assert store.get_note(env.conn, env.project.id, "model", "2", "en") is None
+    # the chat and other users keep their turns
+    one.submit(env.conn, env.owner, env.project.id, env.conversation.id, "Hi", language="en")
+    view = one.explain(env.conn, env.member, env.project.id, "model", "2", "en")
+    assert view.state == "writing"
+    assert settled(env, one).text == "slow"
+
+    def next_note():  # once the user's note has ended, another may start
+        try:
+            return one.explain(env.conn, env.owner, env.project.id, "model", "3", "en")
+        except turns.TooManyTurns:
+            return None
+
+    wait_until(next_note)
+
+
+def test_a_note_made_meanwhile_is_shown_instead_of_a_refusal(env, manager, monkeypatch):
+    one, _ = manager([{"text": "Written."}])
+    assert settled(env, one).text == "Written."
+    real = store.get_note
+    calls = []
+
+    def first_misses(*args):  # the note appears between the look-up and the start
+        calls.append(args)
+        return None if len(calls) == 1 else real(*args)
+
+    monkeypatch.setattr(store, "get_note", first_misses)
+    busy, _ = manager(state="pulling")
+    assert busy.explain(env.conn, env.member, env.project.id, "model", "1", "en").text == "Written."
+    calls.clear()
+    monkeypatch.setattr(turns, "MAX_TURNS_PER_USER", 0)
+    assert one.explain(env.conn, env.member, env.project.id, "model", "1", "en").text == "Written."

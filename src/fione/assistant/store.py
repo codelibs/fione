@@ -5,6 +5,10 @@ A conversation is private to its creator (admins included) and is visible only w
 creator can still read the project. Only one turn runs per conversation: ``start_turn`` inserts
 the user's message and a ``queued`` assistant placeholder in one transaction, and refuses while
 an earlier placeholder is ``queued`` or ``running``.
+
+A note is the assistant's one answer about one subject (a model, a failed job) in one language,
+shared by the project's readers. It is held by a hidden conversation (kind ``note``) of the
+member who first asked for it, which is never listed and does not count toward the limits.
 """
 
 import json
@@ -18,6 +22,7 @@ from fione.schema import clean_text
 
 MAX_MESSAGE_CHARS = 4000
 MAX_USER_MESSAGES = 100  # per conversation
+NOTE_KINDS = ("model", "failed_job")  # what a note can be about
 MAX_CONVERSATIONS = 100  # per user and project
 MAX_TITLE_CHARS = 80
 TERMINAL_STATES = ("done", "failed", "cancelled")
@@ -48,6 +53,17 @@ class Conversation:
     title: str
     created_at: str
     updated_at: str
+    kind: str = "chat"  # or "note": a hidden conversation holding a note
+
+
+@dataclass(frozen=True)
+class Note:
+    id: int
+    project_id: str
+    kind: str  # what the comment is about: "model" or "failed_job" (set by the routes)
+    subject_id: str
+    language: str
+    conversation_id: int
 
 
 @dataclass(frozen=True)
@@ -84,6 +100,18 @@ def _conversation(row: sqlite3.Row) -> Conversation:
         title=row["title"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        kind=row["kind"],
+    )
+
+
+def _note(row: sqlite3.Row) -> Note:
+    return Note(
+        id=row["id"],
+        project_id=row["project_id"],
+        kind=row["kind"],
+        subject_id=row["subject_id"],
+        language=row["language"],
+        conversation_id=row["conversation_id"],
     )
 
 
@@ -132,7 +160,8 @@ def create_conversation(
         if not can_access_project(conn, user, project_id, "read"):
             raise ConversationNotFound(project_id)
         count = conn.execute(
-            "SELECT COUNT(*) FROM conversations WHERE project_id = ? AND user_id = ?",
+            "SELECT COUNT(*) FROM conversations WHERE project_id = ? AND user_id = ?"
+            " AND kind = 'chat'",
             (project_id, user.id),
         ).fetchone()[0]
         if count >= MAX_CONVERSATIONS:
@@ -155,7 +184,7 @@ def list_conversations(conn: sqlite3.Connection, user: User, project_id: str) ->
     if not can_access_project(conn, user, project_id, "read"):
         return []
     rows = conn.execute(
-        "SELECT * FROM conversations WHERE project_id = ? AND user_id = ?"
+        "SELECT * FROM conversations WHERE project_id = ? AND user_id = ? AND kind = 'chat'"
         " ORDER BY updated_at DESC, id DESC",
         (project_id, user.id),
     ).fetchall()
@@ -163,12 +192,18 @@ def list_conversations(conn: sqlite3.Connection, user: User, project_id: str) ->
 
 
 def get_conversation(
-    conn: sqlite3.Connection, user: User, project_id: str, conversation_id: int
+    conn: sqlite3.Connection,
+    user: User,
+    project_id: str,
+    conversation_id: int,
+    kind: str | None = "chat",
 ) -> Conversation:
-    """The user's conversation in ``project_id``, if the user can read the project now."""
+    """The user's conversation of ``kind`` (``None``: any) in ``project_id``, if the user can
+    read the project now."""
     row = conn.execute(
-        "SELECT * FROM conversations WHERE id = ? AND project_id = ? AND user_id = ?",
-        (conversation_id, project_id, user.id),
+        "SELECT * FROM conversations WHERE id = ? AND project_id = ? AND user_id = ?"
+        " AND kind = COALESCE(?, kind)",
+        (conversation_id, project_id, user.id, kind),
     ).fetchone()
     if row is None or not can_access_project(conn, user, project_id, "read"):
         raise ConversationNotFound(conversation_id)
@@ -337,10 +372,14 @@ def start_turn(
         ).fetchone()[0]
         if used >= MAX_USER_MESSAGES:
             raise LimitReached(f"at most {MAX_USER_MESSAGES} messages per conversation")
-        user = _insert_message(conn, conversation_id, "user", text, None, None, None, "done")
-        placeholder = _insert_message(
-            conn, conversation_id, "assistant", "", None, None, None, "queued"
-        )
+        return _insert_turn(conn, conversation_id, text)
+
+
+def _insert_turn(conn: sqlite3.Connection, conversation_id: int, text: str):
+    user = _insert_message(conn, conversation_id, "user", text, None, None, None, "done")
+    placeholder = _insert_message(
+        conn, conversation_id, "assistant", "", None, None, None, "queued"
+    )
     return user, placeholder
 
 
@@ -350,6 +389,95 @@ def fail_interrupted(conn: sqlite3.Connection) -> int:
         "UPDATE chat_messages SET state = 'failed', error_code = 'interrupted'"
         " WHERE state IN ('queued', 'running')"
     ).rowcount
+
+
+# --- notes ------------------------------------------------------------------
+
+
+def get_note(
+    conn: sqlite3.Connection, project_id: str, kind: str, subject_id: str, language: str
+) -> Note | None:
+    row = conn.execute(
+        "SELECT * FROM assistant_notes WHERE project_id = ? AND kind = ? AND subject_id = ?"
+        " AND language = ?",
+        (project_id, kind, subject_id, language),
+    ).fetchone()
+    return None if row is None else _note(row)
+
+
+def create_note(
+    conn: sqlite3.Connection,
+    user: User,
+    project_id: str,
+    kind: str,
+    subject_id: str,
+    language: str,
+    text: str,
+) -> tuple[Note, Message | None]:
+    """The note, with its hidden conversation of ``user`` holding ``text`` as the user's
+    message and a ``queued`` assistant placeholder, all in one transaction; or the note someone
+    made first, with no placeholder. ``ConversationNotFound`` unless the user can read the
+    project; ``ValueError`` for an unknown kind."""
+    if kind not in NOTE_KINDS:
+        raise ValueError(f"unknown note kind {kind!r}")
+    with db.immediate(conn):
+        if not can_access_project(conn, user, project_id, "read"):
+            raise ConversationNotFound(project_id)
+        existing = get_note(conn, project_id, kind, subject_id, language)
+        if existing is not None:
+            return existing, None
+        try:
+            conversation_id = conn.execute(
+                "INSERT INTO conversations (project_id, user_id, kind) VALUES (?, ?, 'note')",
+                (project_id, user.id),
+            ).lastrowid
+            note_id = conn.execute(
+                "INSERT INTO assistant_notes (project_id, kind, subject_id, language,"
+                " conversation_id) VALUES (?, ?, ?, ?, ?)",
+                (project_id, kind, subject_id, language, conversation_id),
+            ).lastrowid
+        except sqlite3.IntegrityError:
+            raise ConversationNotFound(project_id) from None  # no such project
+        _, placeholder = _insert_turn(conn, conversation_id, text)
+    row = conn.execute("SELECT * FROM assistant_notes WHERE id = ?", (note_id,)).fetchone()
+    return _note(row), placeholder
+
+
+def note_of(conn: sqlite3.Connection, conversation_id: int) -> Note | None:
+    """The note a conversation holds, if it is a note's."""
+    row = conn.execute(
+        "SELECT * FROM assistant_notes WHERE conversation_id = ?", (conversation_id,)
+    ).fetchone()
+    return None if row is None else _note(row)
+
+
+def note_answer(conn: sqlite3.Connection, conversation_id: int) -> Message | None:
+    """The last assistant message of the first turn of a note's conversation, whoever owns it:
+    the callers check that the reader can read the project. Nothing written after that turn
+    can change the shared text."""
+    row = conn.execute(
+        "SELECT * FROM chat_messages WHERE conversation_id = ? AND role = 'assistant'"
+        " AND id < COALESCE((SELECT id FROM chat_messages WHERE conversation_id = ?"
+        " AND role = 'user' ORDER BY id LIMIT 1 OFFSET 1), 9223372036854775807)"
+        " ORDER BY id DESC LIMIT 1",
+        (conversation_id, conversation_id),
+    ).fetchone()
+    return None if row is None else _message(row)
+
+
+def delete_note(conn: sqlite3.Connection, note: Note) -> None:
+    """Remove the note with its conversation (a later ``create_note`` writes a new one)."""
+    conn.execute("DELETE FROM conversations WHERE id = ?", (note.conversation_id,))
+
+
+def delete_notes_of(conn: sqlite3.Connection, kind: str, subject_id: int) -> None:
+    """Remove the notes about a subject that is being deleted, in every language, each with
+    its conversation (which holds what the assistant read about it)."""
+    conn.execute(
+        "DELETE FROM conversations WHERE id IN (SELECT conversation_id FROM assistant_notes"
+        " WHERE kind = ? AND subject_id = ?)",
+        (kind, str(subject_id)),
+    )
 
 
 # --- proposals --------------------------------------------------------------
@@ -402,16 +530,34 @@ def proposals_for(conn: sqlite3.Connection, conversation_id: int) -> dict[int, P
 
 def get_proposal(
     conn: sqlite3.Connection, user: User, project_id: str, proposal_id: int
-) -> Proposal:
-    """The proposal, only through a conversation the user can see (``get_conversation``)."""
+) -> tuple[Proposal, Conversation]:
+    """The proposal and its conversation in ``project_id``: a chat's only for the chat's own
+    user while they can read the project (as ``get_conversation``), a note's for anyone who
+    can write to the project, since every member shares the note, and only once the note is
+    done (a failed note is not shown, and its retry removes it with the proposal)."""
     row = conn.execute("SELECT * FROM chat_proposals WHERE id = ?", (proposal_id,)).fetchone()
     if row is None:
         raise ProposalNotFound(proposal_id)
-    try:
-        get_conversation(conn, user, project_id, row["conversation_id"])
-    except ConversationNotFound:
-        raise ProposalNotFound(proposal_id) from None
-    return _proposal(row)
+    conversation = conn.execute(
+        "SELECT * FROM conversations WHERE id = ? AND project_id = ?",
+        (row["conversation_id"], project_id),
+    ).fetchone()
+    if conversation is None:
+        raise ProposalNotFound(proposal_id)
+    if conversation["kind"] == "note":
+        answer = note_answer(conn, conversation["id"])
+        allowed = (
+            answer is not None
+            and answer.state == "done"
+            and can_access_project(conn, user, project_id, "write")
+        )
+    else:
+        allowed = conversation["user_id"] == user.id and can_access_project(
+            conn, user, project_id, "read"
+        )
+    if not allowed:
+        raise ProposalNotFound(proposal_id)
+    return _proposal(row), _conversation(conversation)
 
 
 def claim_proposal(conn: sqlite3.Connection, proposal_id: int, user_id: int) -> bool:

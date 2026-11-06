@@ -458,7 +458,7 @@ def test_a_failed_training_shows_the_redacted_message_and_the_way_back(make_clie
     assert "target has missing values in 3 rows" in page
     assert "Traceback" not in page and "/srv/secret" not in page
     assert "Back to data analysis" in page and "analyze?target=species" in page
-    assert "hx-trigger" not in page
+    assert 'hx-trigger="every 2s"' not in page  # the status is no longer polled
 
 
 def test_a_running_job_shows_what_the_engine_does(make_client):
