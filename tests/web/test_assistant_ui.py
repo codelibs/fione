@@ -1055,6 +1055,15 @@ def test_a_failed_comment_removal_keeps_the_subject_for_a_retry(chat, monkeypatc
     assert status == 200 and notes_left(chat) == (set(), 0)
 
 
+def test_a_failed_comment_removal_keeps_the_dataset_for_a_retry(chat, monkeypatch):
+    train = chat.ids[chat.p]["train"]
+    make_note(chat, "dataset", train)
+    status = delete_failing_then_retry(
+        chat, monkeypatch, f"/projects/{chat.p}/datasets/{train}/delete"
+    )
+    assert status == 200 and notes_left(chat) == (set(), 0)
+
+
 def test_only_a_failed_training_has_a_comment(chat):
     with closing(connect(chat.client)) as conn:
         user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
