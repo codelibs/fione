@@ -533,7 +533,8 @@ def get_proposal(
 ) -> tuple[Proposal, Conversation]:
     """The proposal and its conversation in ``project_id``: a chat's only for the chat's own
     user while they can read the project (as ``get_conversation``), a note's for anyone who
-    can write to the project, since every member shares the note."""
+    can write to the project, since every member shares the note, and only once the note is
+    done (a failed note is not shown, and its retry removes it with the proposal)."""
     row = conn.execute("SELECT * FROM chat_proposals WHERE id = ?", (proposal_id,)).fetchone()
     if row is None:
         raise ProposalNotFound(proposal_id)
@@ -544,7 +545,12 @@ def get_proposal(
     if conversation is None:
         raise ProposalNotFound(proposal_id)
     if conversation["kind"] == "note":
-        allowed = can_access_project(conn, user, project_id, "write")
+        answer = note_answer(conn, conversation["id"])
+        allowed = (
+            answer is not None
+            and answer.state == "done"
+            and can_access_project(conn, user, project_id, "write")
+        )
     else:
         allowed = conversation["user_id"] == user.id and can_access_project(
             conn, user, project_id, "read"
