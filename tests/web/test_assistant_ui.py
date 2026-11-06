@@ -1245,3 +1245,15 @@ def test_prediction_comment_needs_its_integer_model_and_own_output(chat):
     refused("result_json", job.result)  # its own output, deleted
     refused("result_json", {"dataset_id": chat.ids[chat.q]["train"]})  # another project's
     assert chat.fake.requests == []
+
+
+def test_prediction_comment_needs_its_model_still_there(chat):
+    _, facts = predict_facts(chat)
+    url = prediction_comment(chat)
+    r = chat.client.post(
+        f"/projects/{chat.p}/models/{facts['model']}/delete", data={"csrf_token": chat.csrf}
+    )
+    assert r.status_code == 200
+    assert chat.client.get(url).status_code == 404
+    assert chat.client.post(url + "/retry", data={"csrf_token": chat.csrf}).status_code == 404
+    assert chat.fake.requests == [] and notes_left(chat) == (set(), 0)

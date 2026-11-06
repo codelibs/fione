@@ -524,7 +524,8 @@ def _note_subject(conn, ctx: Ctx, kind: str, sid) -> tuple[int, dict[str, int] |
             or type(output) is not int
         ):
             raise UiError(404, "error.not_found")
-        dataset_in(conn, ctx, str(output))  # still there, in the project
+        model_in(conn, ctx, str(model_id))  # both still there, in the project
+        dataset_in(conn, ctx, str(output))
         return job.id, {"model": model_id, "output": output}
     if job.kind != "automl" or job.status != JobStatus.FAILED:
         raise UiError(404, "error.not_found")
