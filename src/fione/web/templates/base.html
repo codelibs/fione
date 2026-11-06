@@ -77,9 +77,10 @@
     </div>
   </header>
   <main id="main" class="app-main" tabindex="-1">
-    {% if user %}
+    {% if user and not hide_llm_banner|default(false) %}
     {# The assistant's state when it cannot answer, for everyone signed in, with where to go
-       next: the setup or System page for administrators, else the project's assistant. #}
+       next: the setup or System page for administrators, else the project's assistant. The
+       assistant and setup pages say it in their own body (``hide_llm_banner``). #}
     {% set llm_now = llm_snapshot() %}
     {% if llm_now.state != "ready" %}
     <div class="container">

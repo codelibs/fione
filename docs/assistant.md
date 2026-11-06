@@ -76,8 +76,9 @@ The model download is about 8 GB. The System page shows its progress.
 When the assistant cannot answer (the server is not reachable, the model is missing or being
 downloaded, the API key is refused, or the consent is missing), every signed-in person sees a
 banner on each page that says why, with a link to the System page (to the setup page for the
-consent) for administrators and, inside a project, to its assistant for everyone else. The chat page explains it too, and
-its question box is disabled. Everything else in Fione keeps working.
+consent) for administrators and, inside a project, to its assistant for everyone else. The
+assistant page and the setup page have no banner: they say the same in their own body, and the
+assistant page's question box is disabled. Everything else in Fione keeps working.
 
 ## Ways to ask
 

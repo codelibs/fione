@@ -301,6 +301,7 @@ def _consent_view(request: Request, auth: Auth, *, status: int = 200, **context)
         auth,
         status=status,
         nav="system",
+        hide_llm_banner=True,  # the page is about the state the banner names
         provider=request.app.state.settings.llm_provider,
         llm=llm_status(request),
         **context,
