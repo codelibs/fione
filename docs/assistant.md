@@ -116,7 +116,7 @@ tools and limits as a question in the chat (it counts as one of the opener's ans
 and does not appear among anyone's conversations. Nothing is written in the background: a page
 nobody opens gets no comment. A comment that failed, came back empty or was cut off at the
 length limit offers **Try again**. Deleting the model, the job or the dataset deletes its comments
-too.
+too, and deleting the output of a batch prediction deletes the prediction's comments.
 
 ## What is sent
 

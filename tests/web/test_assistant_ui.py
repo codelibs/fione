@@ -1257,3 +1257,20 @@ def test_prediction_comment_needs_its_model_still_there(chat):
     assert chat.client.get(url).status_code == 404
     assert chat.client.post(url + "/retry", data={"csrf_token": chat.csrf}).status_code == 404
     assert chat.fake.requests == [] and notes_left(chat) == (set(), 0)
+
+
+def test_deleting_a_prediction_or_its_output_removes_its_comments(chat):
+    job, facts = predict_facts(chat)
+    other, _ = predict_facts(chat, chat.q)
+    for language in ("en", "ja"):
+        make_note(chat, "prediction", job.id, language)
+    make_note(chat, "prediction", other.id, project=chat.q)
+    r = chat.client.post(
+        f"/projects/{chat.p}/datasets/{facts['output']}/delete", data={"csrf_token": chat.csrf}
+    )
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("prediction", str(other.id))}, 1)
+    make_note(chat, "prediction", job.id)  # written again, then its job deleted
+    r = chat.client.post(f"/projects/{chat.p}/jobs/{job.id}/delete", data={"csrf_token": chat.csrf})
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("prediction", str(other.id))}, 1)

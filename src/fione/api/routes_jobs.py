@@ -236,6 +236,7 @@ def delete_finished_job(request: Request, conn, job: Job) -> None:
     finished."""
     store.delete_job(conn, job.id)
     assistant_store.delete_notes_of(conn, "failed_job", job.id)
+    assistant_store.delete_notes_of(conn, "prediction", job.id)
     remove_job_files(request, job)
 
 
