@@ -202,6 +202,10 @@ class _Turn:
         ).fetchone()[0]
         if first is None:
             raise ValueError("the turn has no user message")
+        kind = self.conn.execute(
+            "SELECT kind FROM conversations WHERE id = ?", (self.conversation_id,)
+        ).fetchone()
+        note = kind is not None and kind["kind"] == "note"
         rounds = 0
         while True:
             self._check_stop()
@@ -221,6 +225,11 @@ class _Turn:
                 )
             content = completion.content[:MAX_CONTENT_CHARS]
             if not completion.tool_calls:
+                # A note is kept and shared, so an empty or cut-off one fails (and can be retried)
+                if note and completion.finish_reason == "length":
+                    raise _Failed("truncated")
+                if note and not content.strip():
+                    raise _Failed("failed")
                 store.finish_message(self.conn, self.row, "done", content=content)
                 return
             self.partial = content  # what a cancel or the deadline keeps from here on

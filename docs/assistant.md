@@ -98,7 +98,8 @@ that page, and then kept: every member who can read the project sees the same co
 language, and nothing is sent again. It is written by the same model, with the same consent,
 tools and limits as a question in the chat (it counts as one of the opener's answers at once),
 and does not appear among anyone's conversations. Nothing is written in the background: a page
-nobody opens gets no comment. A comment that failed offers **Try again**.
+nobody opens gets no comment. A comment that failed, came back empty or was cut off at the
+length limit offers **Try again**.
 
 ## What is sent
 
@@ -202,7 +203,7 @@ sentence, and `code` with `params` is what the Training proposal card translates
 | "did not accept the API key" (unauthorized, 401) | Check `FIONE_LLM_API_KEY`. The System page shows the state. |
 | "is not available to this API key" (model_not_found, 404) | The model name in `FIONE_LLM_MODEL` is not available to the key: check the name, and that the key's organization can use that model. A 404 without the Anthropic API's answer (a gateway without that address) shows as "answered with an error" instead. |
 | "The model declined to answer" (refused) | The model refused this question. Ask it in other words. |
-| "The reply was cut off before it began" (truncated) | The model used its whole `FIONE_LLM_MAX_TOKENS` before it wrote anything, thinking included. Raise `FIONE_LLM_MAX_TOKENS`. |
+| "The reply was cut off at its length limit" (truncated) | The model used its whole `FIONE_LLM_MAX_TOKENS` (thinking included) before it wrote anything, or, for a comment, before it finished. Raise `FIONE_LLM_MAX_TOKENS`. |
 | A comment says "The assistant is busy" | As many answers as allowed are running (see Limits). Wait a moment and press **Try again**. |
 | A comment shows only the assistant's state ("cannot reach", "not downloaded yet"...) | The assistant is not ready, so no comment is written; fix it as in the rows above and reload the page. A comment written earlier is still shown. |
 | An answer stops with "took too long" | Ask something smaller, or raise `FIONE_LLM_TURN_TIMEOUT_SECS`; on a CPU-only Ollama, answers are slow. |

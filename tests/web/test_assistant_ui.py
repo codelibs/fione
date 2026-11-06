@@ -755,6 +755,16 @@ def test_failed_comment_can_be_tried_again(chat):
     assert bad.status_code == 403
 
 
+def test_an_empty_comment_offers_to_try_again(chat):
+    chat.fake.script = [{"text": ""}, {"text": "Second try."}]
+    url = model_comment(chat)
+    empty = comment(chat, url)
+    assert 'data-note="failed"' in empty.text and shown("assistant.error.failed") in empty.text
+    assert f'action="{url}/retry"' in empty.text
+    chat.client.post(url + "/retry", data={"csrf_token": chat.csrf})
+    assert "Second try." in comment(chat, url).text
+
+
 def test_failed_job_shows_its_comment_once(chat):
     job = chat.ids[chat.p]["job"]
     url = f"/projects/{chat.p}/jobs/{job}/comment"
