@@ -122,6 +122,11 @@ def test_find_table_links_reports_keys_shared_by_datasets(env):
     assert (link["column_a"], link["column_b"]) == ("Id", "id")  # names match without case
     assert link["shared_values"] == 1.0 and link["relation"] == "one_to_many"
     assert link["one_row_per_key"] == by_name["keys"]
+    assert link["join"] == (
+        f"dataset {by_name['keys']} has one row per key: add it to dataset {by_name['events']} "
+        f"with Join; to add dataset {by_name['events']} to dataset {by_name['keys']}, "
+        "use Join with summarize"
+    )
     assert found["sampled"] is False and len(found["datasets"]) == 4
     outsider = ToolContext(env.conn, env.storage, env.users.outsider)
     with pytest.raises(ToolError, match=NOT_ALLOWED):
@@ -151,6 +156,8 @@ def test_find_table_links_samples_a_large_dataset_and_reports_repeating_keys(env
         ("k", "one_to_many", by_name["parents"]),
         ("day", "many_to_many", None),
     }
+    repeating = next(link for link in found["links"] if link["relation"] == "many_to_many")
+    assert repeating["join"] == "both datasets repeat the key: summarize one of them before joining"
     assert found["sampled"] is True
 
 

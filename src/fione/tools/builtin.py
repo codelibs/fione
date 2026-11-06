@@ -870,6 +870,21 @@ def _read_keys(ctx: ToolContext, dataset: Dataset, columns: list[str]) -> tuple[
     return ingest.read_dataset_spread(ctx.storage, dataset, _LINK_SAMPLE_ROWS, columns), True
 
 
+def _join_advice(link: dict) -> str:
+    """What the Join module does with a link, in words a small model can pass on. Which side is
+    the base is for the caller to say (the one with the column to predict)."""
+    one = link["one_row_per_key"]
+    if one is None:
+        return "both datasets repeat the key: summarize one of them before joining"
+    many = link["dataset_b"] if one == link["dataset_a"] else link["dataset_a"]
+    if link["relation"] == "one_to_one":
+        return f"either dataset can be added to the other with Join (datasets {one} and {many})"
+    return (
+        f"dataset {one} has one row per key: add it to dataset {many} with Join; "
+        f"to add dataset {many} to dataset {one}, use Join with summarize"
+    )
+
+
 def _find_table_links(ctx: ToolContext, args: dict) -> dict:
     project_id = args["project_id"]
     _authorize(ctx, project_id)
@@ -914,21 +929,21 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
             continue
         if not (unique_a or unique_b) and min(len(values_a), len(values_b)) < _MIN_REPEATED_KEYS:
             continue  # few values on both sides: a category such as a label, not a key
-        links.append(
-            {
-                "dataset_a": a.id,
-                "column_a": clean_text(column_a),
-                "dataset_b": b.id,
-                "column_b": clean_text(column_b),
-                "shared_values": _r(shared),
-                "relation": "one_to_one"
-                if unique_a and unique_b
-                else "one_to_many"
-                if unique_a or unique_b
-                else "many_to_many",
-                "one_row_per_key": a.id if unique_a else b.id if unique_b else None,
-            }
-        )
+        link = {
+            "dataset_a": a.id,
+            "column_a": clean_text(column_a),
+            "dataset_b": b.id,
+            "column_b": clean_text(column_b),
+            "shared_values": _r(shared),
+            "relation": "one_to_one"
+            if unique_a and unique_b
+            else "one_to_many"
+            if unique_a or unique_b
+            else "many_to_many",
+            "one_row_per_key": a.id if unique_a else b.id if unique_b else None,
+        }
+        link["join"] = _join_advice(link)
+        links.append(link)
     links.sort(key=lambda link: (link["relation"] == "many_to_many", -link["shared_values"]))
     repeating = 0
     shown = []

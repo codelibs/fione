@@ -616,7 +616,7 @@ def test_validate_output_rejects(value, message):
 
 
 def test_validate_output_caps_the_size(monkeypatch):
-    assert registry.MAX_OUTPUT_CELLS == 50_000_000
+    assert registry.MAX_OUTPUT_CELLS == 150_000_000
     monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 4)
     with pytest.raises(ModuleError, match="4 cells"):
         validate_output(pd.DataFrame({"a": [1, 2, 3], "b": [1, 2, 3]}))
@@ -1122,7 +1122,7 @@ def test_tokenize_is_linear_on_hostile_text(params):
 def test_pivot_is_refused_before_it_is_built():
     import tracemalloc
 
-    n = 8_000  # 8,000 x 8,001 cells would be over the 50 million cap
+    n = 13_000  # 13,000 x 13,001 cells would be over the 150 million cap
     df = pd.DataFrame(
         {
             "i": np.r_[np.arange(n), np.arange(n)],
@@ -1142,7 +1142,7 @@ def test_pivot_is_refused_before_it_is_built():
 
 
 def test_cor_of_too_many_columns_is_refused():
-    wide = pd.DataFrame(np.zeros((3, 10_000)), columns=[f"c{i}" for i in range(10_000)])
+    wide = pd.DataFrame(np.zeros((3, 13_000)), columns=[f"c{i}" for i in range(13_000)])
     started = time.monotonic()
     with pytest.raises(ModuleError, match="cells"):
         run_op("cor", wide)
