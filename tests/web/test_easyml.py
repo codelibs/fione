@@ -628,6 +628,15 @@ def test_the_pro_form_run_time_follows_the_size_of_the_data(owner, monkeypatch):
     assert "set to 10 minutes" in page
 
 
+def test_the_pro_form_never_points_at_the_wizard_run_time_choices(owner, monkeypatch):
+    client = owner[0]
+    url = pro_form(owner, tip_frame(pd.Series(["a", "b"] * 200)))
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 1)  # more than 30 minutes
+    page = client.get(url).text
+    assert 'name="max_runtime_minutes" value="30"' in page
+    assert "Choose Other" not in page and "even 30 minutes" not in page
+
+
 def test_the_pro_form_target_change_recomputes_the_advice(owner):
     client = owner[0]
     url = pro_form(owner, tip_frame(pd.Series(["a"] * 380 + ["b"] * 20)))

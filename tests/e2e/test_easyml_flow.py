@@ -17,11 +17,7 @@ pytestmark = pytest.mark.e2e
 
 def test_the_wizard_trains_rates_predicts_and_offers_serving(stack, admin, trained, data, new_page):
     page = new_page()
-    sign_in(page, admin.username, admin.password)
-    page.goto("/admin/system")  # the fake is ready, so the pages get their comments
-    expect(page.locator("section[aria-labelledby=llm-title] .badge-success")).to_be_visible(
-        timeout=60_000
-    )
+    sign_in(page, admin.username, admin.password)  # ``trained`` waited for a ready assistant
     page.goto(trained.job)  # the progress page of the finished run
     assert page.locator("[data-job-status=done]").count() == 1
 

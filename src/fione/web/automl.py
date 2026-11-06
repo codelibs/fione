@@ -473,9 +473,14 @@ def _train_view(
     status: int = 200,
 ) -> Response:
     found, columns, defaults = _analysis(request, conn, ctx, dataset, target)
+    # Of the analysis page's notes, the one saying the run time is set to the recommendation
+    # holds only while the field does; the one naming the wizard's run-time choices never.
+    left_out = {"analysis.tip.runtime_long"}
     if values is None:  # first shown: the run time the size of the data needs
         values = _form_values(_defaults())
         values["max_runtime_minutes"] = str(recommended_runtime(dataset))
+    else:
+        left_out.add("analysis.tip.runtime")
     if inputs is None:
         inputs = defaults.inputs
     # the advice of the analysis page, for the task and inputs on the form
@@ -496,7 +501,7 @@ def _train_view(
         detected=defaults.task,
         values=values,
         inputs=inputs,
-        warnings=_warnings(dataset, found, task, inputs),
+        warnings=[w for w in _warnings(dataset, found, task, inputs) if w[1] not in left_out],
         tips=_tips(found, task),
         tasks=TASKS,
         decisions=DECISIONS,

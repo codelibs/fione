@@ -485,7 +485,6 @@ def dismiss(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
 # --- the assistant's comments -----------------------------------------------
 
 
-# A note's kind -> the path segment of its subject and its ``?ask=`` prefill.
 @dataclass(frozen=True)
 class NoteSubject:
     """Where a kind of note lives: its subject's path segment, the fragment's name, the page a
@@ -497,6 +496,7 @@ class NoteSubject:
     ask: str | None = None  # None: the plain assistant page
 
 
+# A note's kind -> where it lives.
 NOTE_SUBJECTS = {
     "model": NoteSubject("models", "comment", ask="model"),
     "failed_job": NoteSubject("jobs", "comment", ask="job"),

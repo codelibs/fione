@@ -23,6 +23,7 @@ from fione.jobs.store import JobStatus
 from fione.projects import service as projects
 from fione.projects.ingest import ingest_csv
 from fione.projects.service import DatasetType
+from fione.tools import builtin
 from fione.web import automl
 from web_helpers import make_world
 
@@ -792,10 +793,12 @@ def test_the_project_navigation_is_on_every_project_screen(world):
         assert 'class="steps' not in page or "analyze" in template
 
 
-def test_a_refused_form_keeps_the_posted_run_time(world):
+def test_a_refused_form_keeps_the_posted_run_time(world, monkeypatch):
     csrf = world.login("ed")
-    r = world.client.post(
-        world.path("/projects/{p}/datasets/{train}/train"), data=form_for(csrf, nfolds="1")
-    )
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.03)  # iris: 600 cells, 9 minutes
+    url = world.path("/projects/{p}/datasets/{train}/train")
+    assert "set to 10 minutes" in world.client.get(url).text
+    r = world.client.post(url, data=form_for(csrf, nfolds="1"))
     assert r.status_code == 422
     assert 'name="max_runtime_minutes" value="7"' in r.text
+    assert "set to 10 minutes" not in r.text  # the field no longer holds the recommendation

@@ -1,6 +1,7 @@
 """The assistant chat page against a fake LLM: sending and polling, escaping, who may see
 which conversation, the refusals of a send, the provider's state and the entry links."""
 
+import json
 import re
 import time
 from contextlib import closing
@@ -1089,3 +1090,25 @@ def test_prediction_comment_failure_and_proposal_return_to_the_result(chat):
     r = decide(chat, prid, "dismiss")
     assert r.status_code == 303
     assert r.headers["location"] == url.replace("/prediction-comment", "/result")
+
+
+def test_prediction_comment_needs_its_integer_model_and_own_output(chat):
+    job, facts = predict_facts(chat)
+    url = prediction_comment(chat)
+
+    def refused(column, value):
+        """Set the job's ``column`` to ``value``: the comment routes refuse it."""
+        with closing(connect(chat.client)) as conn:
+            conn.execute(f"UPDATE jobs SET {column} = ? WHERE id = ?", (json.dumps(value), job.id))
+        assert chat.client.get(url).status_code == 404, value
+        r = chat.client.post(url + "/retry", data={"csrf_token": chat.csrf})
+        assert r.status_code == 404, value
+
+    refused("payload_json", {**job.payload, "model_id": str(facts["model"])})
+    with closing(connect(chat.client)) as conn:
+        payload = json.dumps(job.payload)
+        conn.execute("UPDATE jobs SET payload_json = ? WHERE id = ?", (payload, job.id))
+        conn.execute("DELETE FROM datasets WHERE id = ?", (facts["output"],))
+    refused("result_json", job.result)  # its own output, deleted
+    refused("result_json", {"dataset_id": chat.ids[chat.q]["train"]})  # another project's
+    assert chat.fake.requests == []
