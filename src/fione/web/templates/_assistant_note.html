@@ -5,6 +5,9 @@
    is decided by anyone who can edit the project. #}
 <section class="card card-padded stack-tight assistant-note" id="assistant-note" data-note="{{ note.state }}" aria-labelledby="assistant-note-title"{% if note.state == "writing" %} hx-get="{{ note.url }}" hx-trigger="load delay:2s" hx-target="this" hx-swap="outerHTML"{% endif %}>
   <h2 class="section-header__title" id="assistant-note-title">{{ mascot("happy", "mascot mascot-xs") }}{{ t('note.title') }}</h2>
+  {% if note.remote_host %}
+  <div class="alert alert-warning" role="note" data-remote-warning>{{ icon("alert") }}<span>{{ t('assistant.remote_warning', host=note.remote_host) }}</span></div>
+  {% endif %}
   {% if note.state == "writing" %}
   <p class="chat-status text-muted text-sm"><span class="dot dot-pulse" aria-hidden="true"></span>{{ t('note.writing') }}</p>
   {% elif note.state == "done" %}

@@ -632,6 +632,10 @@ def test_consent_page_names_provider_host_and_model(remote, lang):
     ):
         assert str(escape(i18n.t(key, lang))) in page, key
     assert str(escape(i18n.t("consent.not_sent", lang, host="llm.invalid"))) in page
+    # opening a page with an assistant's comment sends data too, without a question
+    intro = i18n.t("consent.sent_intro", lang)
+    assert str(escape(intro)) in page
+    assert {"en": "opens a page", "ja": "ページを開いた"}[lang] in intro
     assert "<code>llm.invalid</code>" in page and "<code>claude-opus-5-5</code>" in page
     form = re.search(rf'<form[^>]*action="{SETUP}".*?</form>', page, re.S).group(0)
     assert form.count("<button") == 1 and 'name="csrf_token"' in form
@@ -726,6 +730,17 @@ def test_comment_when_the_assistant_is_not_ready(chat):
     assert shown("assistant.state.unreachable") in r.text
     assert "/comment/retry" not in r.text
     assert chat.fake.requests == []
+
+
+def test_comment_warns_of_a_remote_host(chat):
+    chat.fake.script = [{"text": "Remote note."}, {"text": "Local note."}]
+    use_monitor(chat.client, local=False, host=XSS)
+    r = comment(chat, model_comment(chat))
+    assert "Remote note." in r.text and "data-remote-warning" in r.text
+    assert str(escape(XSS)) in r.text and XSS not in r.text
+    use_monitor(chat.client)  # a local host: no warning
+    r = comment(chat, model_comment(chat))
+    assert "Remote note." in r.text and "data-remote-warning" not in r.text
 
 
 def test_comment_when_the_assistant_is_busy(chat, monkeypatch):

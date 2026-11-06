@@ -495,16 +495,17 @@ def _note_fragment(request: Request, conn, ctx: Ctx, kind: str, sid, *, retry=Fa
     subject = _note_subject(conn, ctx, kind, sid)
     pid = ctx.project.id
     path, ask = ("models", "model") if kind == "model" else ("jobs", "job")
+    status = llm_status(request)
     note = {
         "url": f"/projects/{pid}/{path}/{subject}/comment",
         "ask": f"/projects/{pid}/assistant?ask={ask}:{subject}",
+        "remote_host": None if status.local else status.host,  # as the chat page warns
     }
     manager = request.app.state.turns
     write = manager.retry if retry else manager.explain
     try:
         view: NoteView = write(conn, ctx.auth.user, pid, kind, str(subject), language(request))
     except LlmUnavailable:
-        status = llm_status(request)
         if status.error_code == "unauthorized":
             message = "assistant.error.unauthorized"
         elif status.state != "ready":

@@ -57,9 +57,10 @@ must confirm once that Fione may send the language model data. Claude always nee
 through a gateway on `localhost` or a Compose service, because the data reaches Anthropic. Until
 then the assistant does not answer, and an administrator who opens the Users, System or a
 project's Assistant page is taken to **Assistant setup**. The page names the provider, the host
-and the model, lists what each question sends (the questions and the conversation so far, names
-of projects, datasets and models, column names, statistics, example values, results of models,
-messages of jobs), and says that the data files themselves are never sent and that an API key
+and the model, lists what is sent with each question, and also when someone first opens a page
+with an assistant's comment, even without a question (the questions and the conversation so
+far, names of projects, datasets and models, column names, statistics, example values, results
+of models, messages of jobs), and says that the data files themselves are never sent and that an API key
 goes only to that host. **Allow sending to `<host>`** records the consent for that host and
 provider; a different host or provider asks again, and a server that changed after the page was
 shown shows the page again. Other people see a banner that the assistant can be used once an
@@ -108,11 +109,13 @@ the assistant needs to answer: the names of the project, its datasets and models
 kinds, statistics (missing rates, ranges, correlations), and the results of models, with example
 values from your datasets: the most frequent values of a column, the labels of a classification,
 the points of a curve, and the messages of a job, including the failure message of a failed job
-(cut to 200 characters). All of it goes to the configured model server. Claude, and an Ollama on
+(cut to 200 characters). An assistant's comment sends the same kind of data, without anyone
+asking, the first time a member opens its page. All of it goes to the configured model server. Claude, and an Ollama on
 another machine, need an administrator's one-time consent first. MCP clients never receive
 example values (see MCP).
 
-With Claude, or an Ollama on another machine, every chat user sees a warning with its host name.
+With Claude, or an Ollama on another machine, the chat page and every assistant's comment show a
+warning with its host name.
 `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` of the Fione server apply to this traffic.
 
 Conversations are private: only their creator sees them, administrators included, and a person

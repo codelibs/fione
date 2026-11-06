@@ -970,7 +970,7 @@
   "consent.provider.ollama": "Ollama",
   "consent.provider.claude": "Claude (Anthropic API)",
   "consent.sent_title": "What is sent to {host}",
-  "consent.sent_intro": "With each question, the assistant sends what it reads from the project:",
+  "consent.sent_intro": "The assistant sends what it reads from the project with each question, and also when someone first opens a page with an assistant's comment, even without a question:",
   "consent.sent.questions": "Your questions and the conversation so far",
   "consent.sent.names": "Names of projects, datasets and models",
   "consent.sent.columns": "Column names of datasets",

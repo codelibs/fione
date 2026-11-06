@@ -970,7 +970,7 @@
   "consent.provider.ollama": "Ollama",
   "consent.provider.claude": "Claude (Anthropic API)",
   "consent.sent_title": "{host} に送られるもの",
-  "consent.sent_intro": "質問のたびに、アシスタントはプロジェクトから読んだものを送ります。",
+  "consent.sent_intro": "アシスタントは、質問のたびに、また、誰かが初めてアシスタントのコメントのあるページを開いたときにも（質問をしなくても）、プロジェクトから読んだものを送ります。",
   "consent.sent.questions": "質問と、それまでの会話",
   "consent.sent.names": "プロジェクト、データセット、モデルの名前",
   "consent.sent.columns": "データセットの列名",
