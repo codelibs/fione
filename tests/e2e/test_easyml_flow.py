@@ -17,7 +17,7 @@ pytestmark = pytest.mark.e2e
 
 def test_the_wizard_trains_rates_predicts_and_offers_serving(stack, admin, trained, data, new_page):
     page = new_page()
-    sign_in(page, admin.username, admin.password)
+    sign_in(page, admin.username, admin.password)  # ``trained`` waited for a ready assistant
     page.goto(trained.job)  # the progress page of the finished run
     assert page.locator("[data-job-status=done]").count() == 1
 
@@ -48,6 +48,10 @@ def test_the_wizard_trains_rates_predicts_and_offers_serving(stack, admin, train
     rows = page.locator("#why .why-row")
     expect(rows).to_have_count(3, timeout=30_000)
     expect(rows.locator(".why-total")).to_have_count(3)
+    # and the assistant's comment on the predictions (the summary's comment is done: the
+    # one comment a person writes at a time is free)
+    note = page.locator("#assistant-note[data-note=done]")
+    expect(note).to_contain_text("(fake)", timeout=30_000)
     with page.expect_download() as caught:
         page.locator("a[download][href*='/download']").first.click()
     download = caught.value

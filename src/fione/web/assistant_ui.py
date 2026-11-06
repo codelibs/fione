@@ -9,10 +9,11 @@ plain text; a tool row only names what was read. While a turn is active, HTMX po
 thread; its last answer (and any failure to show it) is 286, which ends the polling. The page
 never fails because the LLM cannot be used: it says why.
 
-The assistant's comments (notes) on a model, a failed job and a training dataset are
-fragments their pages load: any reader of the project sees the one note of the subject in their
-language, which the first of them to open the page starts. Whatever the assistant's state, the
-fragment is a 200 that says it; while the assistant is busy it asks again by itself.
+The assistant's comments (notes) on a model, a failed job, a training dataset and a finished
+batch prediction are fragments their pages load: any reader of the project sees the one note
+of the subject in their language, which the first of them to open the page starts. Whatever
+the assistant's state, the fragment is a 200 that says it; while the assistant is busy it asks
+again by itself.
 """
 
 import logging
@@ -394,9 +395,8 @@ def _back(conn, pid: str, conversation: Conversation) -> RedirectResponse:
     note = store.note_of(conn, conversation.id)
     if note is None:
         return RedirectResponse(_page_url(pid), 303)
-    path, _ = NOTE_SUBJECTS[note.kind]
-    suffix = "/analyze" if note.kind == "dataset" else ""  # the page an upload leads to
-    return RedirectResponse(f"/projects/{pid}/{path}/{note.subject_id}{suffix}", 303)
+    where = NOTE_SUBJECTS[note.kind]
+    return RedirectResponse(f"/projects/{pid}/{where.path}/{note.subject_id}{where.back}", 303)
 
 
 def _refused(request: Request, conn, ctx: Ctx, conversation, status, key, detail=""):
@@ -483,44 +483,73 @@ def dismiss(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
 
 # --- the assistant's comments -----------------------------------------------
 
-# A note's kind -> the path segment of its subject and its ``?ask=`` prefill.
+
+@dataclass(frozen=True)
+class NoteSubject:
+    """Where a kind of note lives: its subject's path segment, the fragment's name, the page a
+    decided proposal returns to (after the subject's own path) and its ``?ask=`` prefill."""
+
+    path: str
+    fragment: str
+    back: str = ""
+    ask: str | None = None  # None: the plain assistant page
+
+
+# A note's kind -> where it lives.
 NOTE_SUBJECTS = {
-    "model": ("models", "model"),
-    "failed_job": ("jobs", "job"),
-    "dataset": ("datasets", "dataset"),
+    "model": NoteSubject("models", "comment", ask="model"),
+    "failed_job": NoteSubject("jobs", "comment", ask="job"),
+    "dataset": NoteSubject("datasets", "comment", "/analyze", ask="dataset"),
+    "prediction": NoteSubject("jobs", "prediction-comment", "/result"),
 }
 
 
-def _note_subject(conn, ctx: Ctx, kind: str, sid) -> int:
-    """The id of the note's subject in the project: a model, a training job that failed, or a
-    training dataset."""
+def _note_subject(conn, ctx: Ctx, kind: str, sid) -> tuple[int, dict[str, int] | None]:
+    """The id of the note's subject in the project and the integer facts its request names: a
+    model, a training job that failed, a training dataset, or a finished batch prediction
+    with its model and output dataset."""
     if kind == "model":
-        return model_in(conn, ctx, sid).id
+        return model_in(conn, ctx, sid).id, None
     if kind == "dataset":
         dataset = dataset_in(conn, ctx, sid)
         if dataset.type != DatasetType.TRAIN:
             raise UiError(404, "error.not_found")
-        return dataset.id
+        return dataset.id, None
     job = job_in(conn, ctx, sid)
+    if kind == "prediction":
+        model_id = job.payload.get("model_id")
+        output = (job.result or {}).get("dataset_id")
+        if (
+            job.kind != "batch_predict"
+            or job.status != JobStatus.DONE
+            or type(model_id) is not int
+            or type(output) is not int
+        ):
+            raise UiError(404, "error.not_found")
+        model_in(conn, ctx, str(model_id))  # both still there, in the project
+        dataset_in(conn, ctx, str(output))
+        return job.id, {"model": model_id, "output": output}
     if job.kind != "automl" or job.status != JobStatus.FAILED:
         raise UiError(404, "error.not_found")
-    return job.id
+    return job.id, None
 
 
 def _note_fragment(request: Request, conn, ctx: Ctx, kind: str, sid, *, retry=False) -> Response:
-    subject = _note_subject(conn, ctx, kind, sid)
+    subject, facts = _note_subject(conn, ctx, kind, sid)
     pid = ctx.project.id
-    path, ask = NOTE_SUBJECTS[kind]
+    where = NOTE_SUBJECTS[kind]
     status = llm_status(request)
     note = {
-        "url": f"/projects/{pid}/{path}/{subject}/comment",
-        "ask": f"/projects/{pid}/assistant?ask={ask}:{subject}",
+        "url": f"/projects/{pid}/{where.path}/{subject}/{where.fragment}",
+        "ask": f"/projects/{pid}/assistant" + (f"?ask={where.ask}:{subject}" if where.ask else ""),
         "remote_host": None if status.local else status.host,  # as the chat page warns
     }
     manager = request.app.state.turns
     write = manager.retry if retry else manager.explain
     try:
-        view: NoteView = write(conn, ctx.auth.user, pid, kind, str(subject), language(request))
+        view: NoteView = write(
+            conn, ctx.auth.user, pid, kind, str(subject), language(request), facts=facts
+        )
     except LlmUnavailable:
         if status.error_code == "unauthorized":
             message = "assistant.error.unauthorized"
@@ -565,6 +594,11 @@ def dataset_comment(request: Request, conn: Conn, pid: str, did: str) -> Respons
     return _note_fragment(request, conn, page(request, conn, pid), "dataset", did)
 
 
+@router.get("/projects/{pid}/jobs/{jid}/prediction-comment")
+def prediction_comment(request: Request, conn: Conn, pid: str, jid: str) -> Response:
+    return _note_fragment(request, conn, page(request, conn, pid), "prediction", jid)
+
+
 @router.post("/projects/{pid}/models/{mid}/comment/retry")
 def retry_model_comment(
     request: Request, conn: Conn, pid: str, mid: str, form: SmallForm
@@ -590,3 +624,12 @@ def retry_dataset_comment(
     same_site(request)
     ctx = action(request, conn, pid, field(form, "csrf_token"), need="read")
     return _note_fragment(request, conn, ctx, "dataset", did, retry=True)
+
+
+@router.post("/projects/{pid}/jobs/{jid}/prediction-comment/retry")
+def retry_prediction_comment(
+    request: Request, conn: Conn, pid: str, jid: str, form: SmallForm
+) -> Response:
+    same_site(request)
+    ctx = action(request, conn, pid, field(form, "csrf_token"), need="read")
+    return _note_fragment(request, conn, ctx, "prediction", jid, retry=True)

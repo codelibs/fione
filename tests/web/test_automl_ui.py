@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from api_helpers import connect, iris_csv
+from fione import i18n
 from fione.auth import service as auth
 from fione.data.profile import profile_dataset
 from fione.engine.config import TrainConfig
@@ -22,6 +23,7 @@ from fione.jobs.store import JobStatus
 from fione.projects import service as projects
 from fione.projects.ingest import ingest_csv
 from fione.projects.service import DatasetType
+from fione.tools import builtin
 from fione.web import automl
 from web_helpers import make_world
 
@@ -406,7 +408,9 @@ def test_the_form_shows_the_engine_defaults(world):
         for f in dataclasses.fields(TrainConfig)
         if f.default is not dataclasses.MISSING
     }
-    assert f'name="max_runtime_minutes" value="{defaults["max_runtime_secs"] // 60}"' in page
+    # the run time starts at the recommendation for the size of the data (iris: 3 minutes)
+    assert 'name="max_runtime_minutes" value="3"' in page
+    assert i18n.t("train.h.max_runtime_minutes", "en") in page
     for name in ("nfolds", "seed", "stopping_rounds"):
         assert f'name="{name}" value="{defaults[name]}"' in page
     assert f'name="stopping_tolerance" value="{defaults["stopping_tolerance"]:g}"' in page
@@ -787,3 +791,14 @@ def test_the_project_navigation_is_on_every_project_screen(world):
         if current:
             assert f'aria-current="page">{current}</a>' in page, template
         assert 'class="steps' not in page or "analyze" in template
+
+
+def test_a_refused_form_keeps_the_posted_run_time(world, monkeypatch):
+    csrf = world.login("ed")
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.03)  # iris: 600 cells, 9 minutes
+    url = world.path("/projects/{p}/datasets/{train}/train")
+    assert "set to 10 minutes" in world.client.get(url).text
+    r = world.client.post(url, data=form_for(csrf, nfolds="1"))
+    assert r.status_code == 422
+    assert 'name="max_runtime_minutes" value="7"' in r.text
+    assert "set to 10 minutes" not in r.text  # the field no longer holds the recommendation

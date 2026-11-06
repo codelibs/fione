@@ -541,7 +541,7 @@
   "train.f.keep_cv_fold_assignment": "Keep the fold assignment",
   "train.h.task": "Automatic decides from the column to predict (now: {detected}). Binary or multiclass follows from the number of classes.",
   "train.h.inputs": "Checked columns are learned from. Columns that would not help are unchecked, with the reason.",
-  "train.h.max_runtime_minutes": "Training stops at this time and keeps the best model so far. Whole minutes, 1 or more.",
+  "train.h.max_runtime_minutes": "Training stops at this time and keeps the best model so far. Whole minutes, 1 or more. It starts at the time recommended for the size of the data.",
   "train.h.max_runtime_secs_per_model": "Caps each model's training. Empty: no cap.",
   "train.h.max_models": "Stops after this many models have been tried. Empty: no limit.",
   "train.h.nfolds": "Each model is checked on this many parts of the data it did not learn from. 2 or more.",

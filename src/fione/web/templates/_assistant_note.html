@@ -1,9 +1,9 @@
 {% from "_macros.html" import icon, mascot %}
-{# The assistant's comment on a model, a failed job or a training dataset, which its page
-   loads. While it is being written it asks again after two seconds, and while the assistant
-   is busy after three (the button is the fallback); every other state is final. The text is
-   escaped plain text, as in the chat. A training proposal of the comment shows to every member
-   and is decided by anyone who can edit the project. #}
+{# The assistant's comment on a model, a failed job, a training dataset or a finished batch
+   prediction, which its page loads. While it is being written it asks again after two
+   seconds, and while the assistant is busy after three (the button is the fallback); every
+   other state is final. The text is escaped plain text, as in the chat. A training proposal
+   of the comment shows to every member and is decided by anyone who can edit the project. #}
 <section class="card card-padded stack-tight assistant-note" id="assistant-note" data-note="{{ note.state }}" aria-labelledby="assistant-note-title"{% if note.state == "writing" %} hx-get="{{ note.url }}" hx-trigger="load delay:2s" hx-target="this" hx-swap="outerHTML"{% elif note.state == "busy" %} hx-get="{{ note.url }}" hx-trigger="load delay:3s" hx-target="this" hx-swap="outerHTML"{% endif %}>
   <h2 class="section-header__title" id="assistant-note-title">{{ mascot("happy", "mascot mascot-xs") }}{{ t('note.title') }}</h2>
   {% if note.remote_host %}

@@ -68,9 +68,12 @@
   </section>
 
   <div id="train-body" class="stack-lg">
-    {% if dataset.type.value != "train" %}
-    <div class="alert alert-danger" role="note">{{ icon("alert") }}<span>{{ t('analysis.warn.not_train') }}</span></div>
-    {% endif %}
+    {% for level, key, vars in warnings %}
+    <div class="alert alert-{{ level }}" role="note">{{ icon("info" if level == "info" else "alert") }}<span>{{ t(key, **vars) }}</span></div>
+    {% endfor %}
+    {% for key, vars in tips %}
+    <div class="alert alert-info" role="note">{{ icon("info") }}<span>{{ t(key, **vars) }}</span></div>
+    {% endfor %}
     <form class="stack-lg" id="train-form" method="post" action="{{ base }}/train" data-run-form data-detected-task="{{ detected }}">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <input type="hidden" name="target" value="{{ target }}">

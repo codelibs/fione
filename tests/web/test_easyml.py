@@ -597,6 +597,58 @@ def test_the_run_time_follows_the_size_of_the_data(owner, monkeypatch):
     assert 'value="30" checked' in page and "even 30 minutes" in page
 
 
+def pro_form(owner, frame: pd.DataFrame) -> str:
+    """The Pro training form of ``frame`` once uploaded: its URL."""
+    client, pid, csrf = owner
+    content = frame.to_csv(index=False).encode()
+    return location(upload(client, f"/projects/{pid}/upload", csrf, content)).replace(
+        "/analyze", "/train"
+    )
+
+
+def test_the_pro_form_shows_the_warnings_and_tips_of_the_analysis(owner):
+    client = owner[0]
+    rare = client.get(pro_form(owner, tip_frame(pd.Series(["a"] * 380 + ["b"] * 20)))).text
+    assert "only 5% of the rows" in rare and "Adjust for class sizes" in rare
+    leaky = client.get(pro_form(owner, leak_frame(0.3))).text
+    assert "suspiciously well" in leaky
+    ids = pd.DataFrame({"x": range(300), "row": [f"r{i}" for i in range(300)]})
+    by_id = client.get(pro_form(owner, ids) + "?target=row").text
+    assert i18n.t("analysis.warn.target_id", "en") in by_id
+    assert by_id.count(i18n.t("analysis.warn.target_id", "en")) == 1
+
+
+def test_the_pro_form_run_time_follows_the_size_of_the_data(owner, monkeypatch):
+    client = owner[0]
+    url = pro_form(owner, tip_frame(pd.Series(["a", "b"] * 200)))
+    assert 'name="max_runtime_minutes" value="3"' in client.get(url).text
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.03)  # 400 cells: 6 minutes
+    page = client.get(url).text
+    assert 'name="max_runtime_minutes" value="10"' in page
+    assert "set to 10 minutes" in page
+
+
+def test_the_pro_form_never_points_at_the_wizard_run_time_choices(owner, monkeypatch):
+    client = owner[0]
+    url = pro_form(owner, tip_frame(pd.Series(["a", "b"] * 200)))
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 1)  # more than 30 minutes
+    page = client.get(url).text
+    assert 'name="max_runtime_minutes" value="30"' in page
+    assert "Choose Other" not in page and "even 30 minutes" not in page
+
+
+def test_the_pro_form_target_change_recomputes_the_advice(owner):
+    client = owner[0]
+    url = pro_form(owner, tip_frame(pd.Series(["a"] * 380 + ["b"] * 20)))
+    hx = {"HX-Request": "true"}
+    assert "only 5% of the rows" in client.get(url + "?target=label", headers=hx).text
+    other = client.get(url + "?target=x", headers=hx).text
+    assert "only 5% of the rows" not in other
+    assert 'name="max_runtime_minutes" value="3"' in other
+    body = other[other.index('id="train-body"') :]
+    assert 'name="max_runtime_minutes"' in body
+
+
 def test_iris_keeps_all_four_inputs_selected(owner):
     """Twice the rows, so the score runs: both petal columns then score as high as a leak."""
     client, pid, csrf = owner
@@ -1436,7 +1488,7 @@ def test_the_reasons_wait_or_say_why_instead_of_loading(make_client, monkeypatch
     # iris: 3 classes x 4 columns = 12 cells a row; 5 rows x 10 = 600
     monkeypatch.setattr(easyml.explain, "CELLS", 599)
     page = world.client.get(url).text
-    assert 'hx-trigger="load"' not in page and f'hx-get="{why}"' in page
+    assert f'hx-get="{why}" hx-trigger="load"' not in page and f'hx-get="{why}"' in page
     assert "Show why" in page
     monkeypatch.setattr(easyml.explain, "CELLS", 11)
     page = world.client.get(url).text

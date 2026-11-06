@@ -86,21 +86,28 @@ use, how to improve it) that fill in the box the same way.
 
 ## Automatic comments
 
-A model's summary and model pages, the page of a failed training, and the data analysis and
-dataset pages of a training dataset show an **Assistant's comment**: a short explanation in plain
-words. For a model it says whether the result is good, mediocre or poor against the baseline,
-what mostly drives the prediction, any problem in the data and one to three next steps; for a
-failed training, why it failed and what to change. For a training dataset, which the person who
-uploads it sees first on the data analysis page, it says what the data seems to be about and
-what could go wrong for a training (missing values, columns that identify rows, a column that
-gives the answer away, few rows, a rare class); when one column is the obvious thing to predict
-it proposes a training, otherwise it names the likely columns and asks which one to predict.
-Test and prediction datasets get no comment. When a change clearly helps, the comment can carry
-a training proposal. Every member sees it, and anyone who can edit the project can confirm or
-dismiss it, whoever's visit wrote the comment; once decided, everyone sees it as started or
-dismissed. Viewers see the card without buttons. A confirmed proposal starts the training as one
-from the chat does; deciding it returns to the comment's page (for a dataset, its data analysis
-page).
+A model's summary and model pages, the page of a failed training, the data analysis and
+dataset pages of a training dataset, and the result page of a finished batch prediction show an
+**Assistant's comment**: a short explanation in plain words.
+
+- For a model it says whether the result is good, mediocre or poor against the baseline, what
+  mostly drives the prediction, any problem in the data and one to three next steps.
+- For a failed training, it says why it failed and what to change.
+- For a training dataset, which the person who uploads it sees first on the data analysis page,
+  it says what the data seems to be about and what could go wrong for a training (missing
+  values, columns that identify rows, a column that gives the answer away, few rows, a rare
+  class); when one column is the obvious thing to predict it proposes a training, otherwise it
+  names the likely columns and asks which one to predict. Test and prediction datasets get no
+  comment of their own.
+- For a batch prediction, it says what the predictions look like (how many rows fall in each
+  class and how sure the model mostly is, or the usual range of a number), how far to trust
+  them given the quality of the model, and what to check before acting on them.
+
+When a change clearly helps, the comment can carry a training proposal. Every member sees it,
+and anyone who can edit the project can confirm or dismiss it, whoever's visit wrote the comment;
+once decided, everyone sees it as started or dismissed. Viewers see the card without buttons. A
+confirmed proposal starts the training as one from the chat does; deciding it returns to the
+comment's page (for a dataset, its data analysis page; for a batch prediction, its result page).
 
 A comment is written the first time a member of the project opens the page, in the language of
 that page, and then kept: every member who can read the project sees the same comment in that
@@ -109,7 +116,7 @@ tools and limits as a question in the chat (it counts as one of the opener's ans
 and does not appear among anyone's conversations. Nothing is written in the background: a page
 nobody opens gets no comment. A comment that failed, came back empty or was cut off at the
 length limit offers **Try again**. Deleting the model, the job or the dataset deletes its comments
-too.
+too, and deleting the output of a batch prediction deletes the prediction's comments.
 
 ## What is sent
 

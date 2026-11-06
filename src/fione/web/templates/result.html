@@ -18,6 +18,7 @@
     {% endif %}
     {% if model_id %}<a class="btn btn-ghost" href="/projects/{{ pid }}/models/{{ model_id }}/summary">{{ t('predict.back_summary') }}</a>{% endif %}
   </div>
+  <section class="card card-padded stack-tight assistant-note" id="assistant-note" hx-get="/projects/{{ pid }}/jobs/{{ job.id }}/prediction-comment" hx-trigger="load" hx-target="this" hx-swap="outerHTML"><p class="text-muted text-sm">{{ t('note.loading') }}</p></section>
   <section class="stack-tight" aria-labelledby="result-preview-title">
     <h2 class="section-header__title" id="result-preview-title">{{ t('result.preview', n=preview.rows|length) }}</h2>
     {{ preview_table(t, preview, t('result.preview', n=preview.rows|length)) }}
