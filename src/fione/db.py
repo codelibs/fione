@@ -210,6 +210,10 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX assistant_notes_conversation ON assistant_notes(conversation_id);
     """,
+    """
+    ALTER TABLE chat_proposals ADD COLUMN kind TEXT NOT NULL DEFAULT 'train'
+        CHECK (kind IN ('train', 'join'));
+    """,
 ]
 
 

@@ -1,12 +1,29 @@
-{# A training proposal of the assistant: the stored configuration and what the check found.
+{# A proposal of the assistant (a training, or a Join of two datasets): the stored configuration
+   and what the check found.
    Every text is escaped; the warnings and reasons are translated from the tool's codes, and
    only the rationale is the assistant's own words. Only a person
    who can write confirms or dismisses, and only while it is pending. #}
 {% set p = card.proposal %}
 {% set c = p.config %}
 {% set base = "/projects/" ~ ctx.project.id ~ "/assistant/proposals/" ~ p.id %}
-<section class="card card-padded stack-tight chat-proposal" data-state="{{ p.state }}" aria-label="{{ t('assistant.proposal.title') }}">
-  <h3>{{ t('assistant.proposal.title') }}</h3>
+{% set join = p.kind == "join" %}
+<section class="card card-padded stack-tight chat-proposal" data-state="{{ p.state }}" aria-label="{{ t('assistant.proposal.join_title' if join else 'assistant.proposal.title') }}">
+  <h3>{{ t('assistant.proposal.join_title' if join else 'assistant.proposal.title') }}</h3>
+  {% if join %}
+  <dl class="chat-proposal__facts text-sm">
+    <dt>{{ t('assistant.proposal.join_base') }}</dt>
+    <dd>{% if card.dataset_name %}{{ card.dataset_name }}{% else %}{{ t('assistant.proposal.dataset_gone') }}{% endif %}</dd>
+    <dt>{{ t('assistant.proposal.join_other') }}</dt>
+    <dd>{% if card.other_name %}{{ card.other_name }}{% else %}{{ t('assistant.proposal.dataset_gone') }}{% endif %}</dd>
+    <dt>{{ t('assistant.proposal.join_key') }}</dt>
+    <dd>{{ c.key }}{% if c.other_key %} = {{ c.other_key }}{% endif %}</dd>
+    <dt>{{ t('assistant.proposal.join_summarize') }}</dt>
+    <dd>{{ t('assistant.proposal.join_summarize_yes' if c.summarize else 'assistant.proposal.join_summarize_no') }}</dd>
+    <dt>{{ t('assistant.proposal.join_columns') }}</dt>
+    <dd>{% if c.columns %}{{ c.columns | join(", ") }}{% else %}{{ t('assistant.proposal.join_columns_all') }}{% endif %}</dd>
+  </dl>
+  <p class="text-muted text-sm">{{ t('assistant.proposal.join_result') }}</p>
+  {% else %}
   <dl class="chat-proposal__facts text-sm">
     <dt>{{ t('assistant.proposal.dataset') }}</dt>
     <dd>{% if card.dataset_name %}{{ card.dataset_name }}{% else %}{{ t('assistant.proposal.dataset_gone') }}{% endif %}</dd>
@@ -29,7 +46,8 @@
     <dd>{{ c.ignored_columns | join(", ") }}</dd>
     {% endif %}
   </dl>
-  {% if p.details.ignored_suggestions %}
+  {% endif %}
+  {% if not join and p.details.ignored_suggestions %}
   <div class="text-sm">
     <p class="text-muted">{{ t('assistant.proposal.ignored_suggestions') }}</p>
     <ul>
@@ -54,7 +72,7 @@
   {% endif %}
   {% if p.state == "confirmed" %}
   {% if p.job_id %}
-  <p><a href="/projects/{{ ctx.project.id }}/jobs/{{ p.job_id }}">{{ t('assistant.proposal.confirmed') }}</a></p>
+  <p><a href="/projects/{{ ctx.project.id }}/jobs/{{ p.job_id }}">{{ t('assistant.proposal.join_confirmed' if join else 'assistant.proposal.confirmed') }}</a></p>
   {% endif %}
   {% elif p.state == "dismissed" %}
   <p class="text-muted text-sm">{{ t('assistant.proposal.dismissed') }}</p>
@@ -62,7 +80,7 @@
   <div class="row-actions">
     <form method="post" action="{{ base }}/confirm">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <button type="submit" class="btn btn-primary btn-sm">{{ t('assistant.proposal.confirm') }}</button>
+      <button type="submit" class="btn btn-primary btn-sm">{{ t('assistant.proposal.join_confirm' if join else 'assistant.proposal.confirm') }}</button>
     </form>
     <form method="post" action="{{ base }}/dismiss">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
@@ -70,6 +88,6 @@
     </form>
   </div>
   {% else %}
-  <p class="text-muted text-sm">{{ t('assistant.proposal.viewer_note') }}</p>
+  <p class="text-muted text-sm">{{ t('assistant.proposal.join_viewer_note' if join else 'assistant.proposal.viewer_note') }}</p>
   {% endif %}
 </section>

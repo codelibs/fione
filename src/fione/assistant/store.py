@@ -90,6 +90,7 @@ class Proposal:
     details: dict
     state: str
     job_id: int | None
+    kind: str  # "train": a training configuration; "join": the parameters of a Join module run
 
 
 def _conversation(row: sqlite3.Row) -> Conversation:
@@ -141,6 +142,7 @@ def _proposal(row: sqlite3.Row) -> Proposal:
         details=json.loads(row["details_json"]),
         state=row["state"],
         job_id=row["job_id"],
+        kind=row["kind"],
     )
 
 
@@ -490,6 +492,7 @@ def add_proposal(
     dataset_id: int | None,
     config: dict,
     details: dict,
+    kind: str = "train",
 ) -> Proposal:
     """Attach a proposal to an assistant message of the conversation (``ValueError`` for any
     other message, or one that has a proposal already)."""
@@ -503,8 +506,8 @@ def add_proposal(
     try:
         cur = conn.execute(
             "INSERT INTO chat_proposals (message_id, conversation_id, dataset_id, config_json,"
-            " details_json) VALUES (?, ?, ?, ?, ?)",
-            (message_id, conversation_id, dataset_id, _dumps(config), _dumps(details)),
+            " details_json, kind) VALUES (?, ?, ?, ?, ?, ?)",
+            (message_id, conversation_id, dataset_id, _dumps(config), _dumps(details), kind),
         )
     except sqlite3.IntegrityError as e:
         if "UNIQUE" in str(e):

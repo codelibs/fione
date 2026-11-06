@@ -104,9 +104,10 @@ def make_world(client) -> World:
     return World(client, p.id, q.id, ids)
 
 
-def make_proposal(client, fake, username, project_id, dataset_id, target="species"):
-    """The one pending training proposal of a new conversation of ``username``, made by a turn
-    against ``fake`` whose model proposes ``target`` for ``dataset_id``."""
+def make_proposal(client, fake, username, project_id, dataset_id, target="species", call=None):
+    """The one pending proposal of a new conversation of ``username``, made by a turn against
+    ``fake`` whose model proposes training on ``target`` of ``dataset_id``, or makes ``call``
+    (``{"name": ..., "arguments": {...}}``)."""
     with closing(connect(client)) as conn:
         user = auth_service.get_user(
             conn, dict(conn.execute("SELECT username, id FROM users").fetchall())[username]
@@ -114,8 +115,8 @@ def make_proposal(client, fake, username, project_id, dataset_id, target="specie
         conversation = assistant_store.create_conversation(conn, user, project_id)
         _, placeholder = assistant_store.start_turn(conn, conversation.id, "Train on it")
         fake.script = [
-            {"tool_calls": [{"name": "propose_training_config",
-                             "arguments": {"dataset_id": dataset_id, "target": target}}]},
+            {"tool_calls": [call or {"name": "propose_training_config",
+                                     "arguments": {"dataset_id": dataset_id, "target": target}}]},
             {"text": "Please check it."},
         ]  # fmt: skip
         state = client.app.state

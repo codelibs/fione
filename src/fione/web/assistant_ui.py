@@ -3,11 +3,11 @@ and the question form.
 
 Conversations are their creator's alone, so every conversation id goes through
 ``store.get_conversation`` (404 for anyone else's, admins included) before anything is done
-with it. A training proposal goes through ``store.get_proposal``: a chat's is its creator's
-alone, a done note's is decided by anyone who can write to the project. Messages are escaped
-plain text; a tool row only names what was read. While a turn is active, HTMX polls the
-thread; its last answer (and any failure to show it) is 286, which ends the polling. The page
-never fails because the LLM cannot be used: it says why.
+with it. A proposal (a training or a join) goes through ``store.get_proposal``: a chat's is
+its creator's alone, a done note's is decided by anyone who can write to the project.
+Messages are escaped plain text; a tool row only names what was read. While a turn is
+active, HTMX polls the thread; its last answer (and any failure to show it) is 286, which
+ends the polling. The page never fails because the LLM cannot be used: it says why.
 
 The assistant's comments (notes) on a model, a failed job, a training dataset and a finished
 batch prediction are fragments their pages load: any reader of the project sees the one note
@@ -37,6 +37,7 @@ from fione.assistant.turns import ERROR_CODES, LlmUnavailable, NoteView, TooMany
 from fione.engine.config import TargetError, TrainConfig
 from fione.jobs.store import JobStatus
 from fione.models import service as models
+from fione.modules import service as modules
 from fione.modules.registry import redact
 from fione.projects import service as projects
 from fione.projects.service import DatasetNotFound, DatasetType, ProjectNotFound
@@ -72,15 +73,16 @@ class Line:
     text: str  # escaped by the template; for a tool row, its label's key
     state: str
     error_key: str | None = None
-    proposal: "Card | None" = None  # the training proposal this message carries
+    proposal: "Card | None" = None  # the proposal this message carries
 
 
 @dataclass(frozen=True)
 class Card:
-    """A training proposal as its card shows it."""
+    """A proposal as its card shows it."""
 
     proposal: store.Proposal
     dataset_name: str | None  # None once the dataset is gone
+    other_name: str | None = None  # of a join: the dataset to add; None once it is gone
 
     def warnings(self, lang: str) -> list[str]:
         """The warnings in ``lang``: a warning without a translation for its code, or without
@@ -117,17 +119,20 @@ def _cards(conn, conversation_id: int, project_id: str) -> dict[int, Card]:
     """The conversation's proposals by message id, each with its dataset's name (only for a
     dataset of the conversation's own project)."""
     cards = {}
+
+    def name_of(dataset_id) -> str | None:
+        """The dataset's name, only for a dataset of the conversation's own project."""
+        if dataset_id is None:
+            return None
+        try:
+            dataset = projects.get_dataset(conn, dataset_id)
+        except DatasetNotFound:
+            return None
+        return dataset.name if dataset.project_id == project_id else None
+
     for message_id, proposal in store.proposals_for(conn, conversation_id).items():
-        name = None
-        if proposal.dataset_id is not None:
-            try:
-                dataset = projects.get_dataset(conn, proposal.dataset_id)
-            except DatasetNotFound:
-                pass
-            else:
-                if dataset.project_id == project_id:
-                    name = dataset.name
-        cards[message_id] = Card(proposal, name)
+        other = proposal.config.get("other_dataset_id") if proposal.kind == "join" else None
+        cards[message_id] = Card(proposal, name_of(proposal.dataset_id), name_of(other))
     return cards
 
 
@@ -408,8 +413,9 @@ def _refused(request: Request, conn, ctx: Ctx, conversation, status, key, detail
 
 @router.post("/projects/{pid}/assistant/proposals/{prid}/confirm")
 def confirm(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) -> Response:
-    """Start the training a proposal stores, once: the stored configuration is submitted, never
-    a posted one. A decided proposal only goes back to its conversation (or note's subject)."""
+    """Start the training (or the Join) a proposal stores, once: the stored configuration is
+    submitted, never a posted one. A decided proposal only goes back to its conversation (or
+    note's subject)."""
     ctx, proposal, conversation = _proposal(request, conn, pid, prid, field(form, "csrf_token"))
     back = _back(conn, pid, conversation)
     if proposal.state != "pending":
@@ -424,23 +430,27 @@ def confirm(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
         dataset = projects.get_dataset(conn, proposal.dataset_id)
     except DatasetNotFound:
         return gone()
-    if dataset.project_id != pid or dataset.type != DatasetType.TRAIN:
+    if dataset.project_id != pid:
         return gone()
-    try:
-        config = TrainConfig.from_dict(proposal.config)
-    except ValueError as e:  # ConfigError
-        return _refused(
-            request, conn, ctx, conversation, 422, "assistant.proposal.failed", _reason(e)
-        )
-    # The claim is short and alone in its transaction: it makes the one job of the proposal.
-    # The data is read for the checks of submit_training outside any lock (it may be on S3).
-    with db.immediate(conn):
-        claimed = store.claim_proposal(conn, proposal.id, ctx.auth.user.id)
-    if not claimed:
-        return back  # another confirmation came first
-    try:
+    if proposal.kind == "join":
+
+        def submit():
+            return modules.submit_module(
+                conn, ctx.auth.user, pid, "join", proposal.dataset_id, proposal.config
+            )
+
+    else:
+        if dataset.type != DatasetType.TRAIN:
+            return gone()
         try:
-            job = models.submit_training(
+            config = TrainConfig.from_dict(proposal.config)
+        except ValueError as e:  # ConfigError
+            return _refused(
+                request, conn, ctx, conversation, 422, "assistant.proposal.failed", _reason(e)
+            )
+
+        def submit():
+            return models.submit_training(
                 conn,
                 request.app.state.storage,
                 ctx.auth.user,
@@ -449,6 +459,16 @@ def confirm(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
                 config,
                 name=f"Assistant proposal {proposal.id}",
             )
+
+    # The claim is short and alone in its transaction: it makes the one job of the proposal.
+    # The data is read for the checks of a training outside any lock (it may be on S3).
+    with db.immediate(conn):
+        claimed = store.claim_proposal(conn, proposal.id, ctx.auth.user.id)
+    if not claimed:
+        return back  # another confirmation came first
+    try:
+        try:
+            job = submit()
         except BaseException:
             with db.immediate(conn):  # no job: the proposal waits for the next try
                 store.release_proposal(conn, proposal.id)

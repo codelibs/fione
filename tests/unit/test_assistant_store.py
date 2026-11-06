@@ -268,6 +268,18 @@ def test_proposals_are_stored_and_found_through_their_conversation(
         store.get_proposal(conn, member, project.id, shared.id)
 
 
+def test_a_proposal_keeps_its_kind(conn, conversation):
+    assert make_proposal(conn, conversation).kind == "train"
+    message = store.add_message(conn, conversation.id, "assistant")
+    join = store.add_proposal(
+        conn, message.id, conversation.id, None, {"key": "id"}, {}, kind="join"
+    )
+    assert join.kind == "join"
+    assert store.proposals_for(conn, conversation.id)[message.id].kind == "join"
+    with pytest.raises(sqlite3.IntegrityError):  # only the two kinds exist
+        conn.execute("UPDATE chat_proposals SET kind = 'other' WHERE id = ?", (join.id,))
+
+
 def test_claim_proposal_is_single_shot(conn, owner, conversation):
     proposal = make_proposal(conn, conversation)
     assert store.claim_proposal(conn, proposal.id, owner.id) is True

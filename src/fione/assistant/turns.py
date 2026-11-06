@@ -4,7 +4,8 @@ A turn answers the user's latest message. Each round re-checks that the conversa
 may still read the project, asks the model, and runs the tool calls it made through
 ``call_tool``, scoped to the conversation's project. Only the structured ``tool_calls`` of a
 completion run anything, and only the read-only tools of the registry. A successful
-``propose_training_config`` result becomes a pending proposal that a person confirms in Fione.
+``propose_training_config`` or ``propose_join`` result becomes a pending proposal that a
+person confirms in Fione.
 
 A message ends only through ``store.finish_message``, so whichever ending lands first (the
 answer, a cancel, the deadline, a restart) wins. A row's error is a code; the provider's own
@@ -56,16 +57,17 @@ MAX_NOTES_PER_USER = 1  # of those, the notes being written
 MAX_WAITING_TURNS = 8  # waiting for a free slot of the pool, all users together
 MAX_CALLS_KEPT = 16  # stored and answered; a reply with more loses the rest
 MAX_CONTENT_CHARS = 20_000  # of an assistant message
+MIN_RESULT_BYTES = 2_000  # a tool result may always take this much
 MAX_ARGUMENT_CHARS = 8_000  # of one call's arguments
 WRITE_INTERVAL_SECS = 0.3  # between writes of the text as it streams
 _POLL_SECS = 0.05
 _CALL_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _TOOL_NAME_CHARS = 64
-PROPOSE = "propose_training_config"
+PROPOSE = {"propose_training_config": "train", "propose_join": "join"}  # tool -> proposal kind
 _DETAILS = ("warnings", "ignored_suggestions", "rationale")  # of a proposal, kept with it
 TOO_MANY_CALLS = {"error": "too many tool calls in one step"}
 BAD_ARGUMENTS = {"error": "arguments must be a JSON object"}
-ONE_PROPOSAL = {"error": "one training proposal per step"}
+ONE_PROPOSAL = {"error": "one proposal per step"}
 
 # What a failed or ended turn's ``error_code`` can be; the UI has a text for each.
 ERROR_CODES = (
@@ -258,6 +260,15 @@ class _Turn:
             raise _Failed("forbidden")
         return row["project_id"], user
 
+    def _result_bytes(self) -> int:
+        """The most one tool result may take: a third of what the messages of a request may, so
+        that a few results fit the context (a wide dataset's description is cut by columns
+        instead of being dropped whole as too large)."""
+        room = budget_bytes(
+            self.monitor.effective_context(), self.settings.llm_max_tokens, list_tools()
+        )
+        return max(MIN_RESULT_BYTES, room // 3)
+
     def _complete(self, project_id: str, first: int, *, refresh: bool) -> Completion:
         rows = store.messages(self.conn, self.conversation_id)
         project = projects.require_project(self.conn, project_id)
@@ -415,6 +426,7 @@ class _Turn:
                     user,
                     project_id=project_id,
                     via="chat",
+                    max_result_bytes=self._result_bytes(),
                 )
                 try:
                     result = call_tool(call.name, args, ctx)
@@ -428,8 +440,12 @@ class _Turn:
                 raise _Stop()
             proposed = False
             for call, (args, result) in zip(calls, runs, strict=True):
-                if call["name"] == PROPOSE and result.get("proposal") is True:
-                    result = ONE_PROPOSAL if proposed else self._propose(args, result)
+                if call["name"] in PROPOSE and result.get("proposal") is True:
+                    result = (
+                        ONE_PROPOSAL
+                        if proposed
+                        else self._propose(args, result, PROPOSE[call["name"]])
+                    )
                     proposed = proposed or "error" not in result
                 store.add_message(
                     self.conn,
@@ -446,9 +462,9 @@ class _Turn:
             )
         return following.id
 
-    def _propose(self, args: dict, result: dict) -> dict:
-        """Store the proposal of a ``propose_training_config`` result; the result, or an error
-        in its place."""
+    def _propose(self, args: dict, result: dict, kind: str) -> dict:
+        """Store the proposal of a ``propose_training_config`` or ``propose_join`` result; the
+        result, or an error in its place."""
         try:
             store.add_proposal(
                 self.conn,
@@ -457,6 +473,7 @@ class _Turn:
                 dataset_id=args["dataset_id"],
                 config=result["config"],
                 details={k: result.get(k) for k in _DETAILS},
+                kind=kind,
             )
         except ValueError as e:  # say, the dataset was deleted meanwhile
             return {"error": str(e)}

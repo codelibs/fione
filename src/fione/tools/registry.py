@@ -56,6 +56,7 @@ class ToolContext:
     allow_samples: bool = True  # raw cell values reach the model; MCP passes False
     project_id: str | None = None  # when set, no tool reaches an object of any other project
     via: Literal["chat", "mcp", "test"] = "test"  # the channel, for the log
+    max_result_bytes: int = MAX_RESULT_BYTES  # a chat lowers it to what its context can hold
 
 
 _TOOLS: dict[str, Tool] = {}
@@ -113,9 +114,9 @@ def _size(result: dict) -> int:
     return len(json.dumps(result, allow_nan=False))
 
 
-def fits(result: dict) -> bool:
-    """Whether ``result``, once ``call_tool`` has added its notice, is within the size cap."""
-    return _size({"_data_notice": DATA_NOTICE, **result}) <= MAX_RESULT_BYTES
+def fits(result: dict, limit: int = MAX_RESULT_BYTES) -> bool:
+    """Whether ``result``, once ``call_tool`` has added its notice, is within ``limit`` bytes."""
+    return _size({"_data_notice": DATA_NOTICE, **result}) <= min(limit, MAX_RESULT_BYTES)
 
 
 def _longest_list(value, path: tuple = (), best: tuple | None = None) -> tuple | None:
@@ -138,14 +139,15 @@ def _longest_list(value, path: tuple = (), best: tuple | None = None) -> tuple |
     return best
 
 
-def _cap(result: dict) -> dict:
-    """Cut the longest list from its end, again and again, until the result fits, and name the
-    lists that were cut. ``config`` is never cut; if that is not enough, the call fails."""
-    if _size(result) <= MAX_RESULT_BYTES:
+def _cap(result: dict, limit: int) -> dict:
+    """Cut the longest list from its end, again and again, until the result is within ``limit``
+    bytes, and name the lists that were cut. ``config`` is never cut; if that is not enough, the
+    call fails."""
+    if _size(result) <= limit:
         return result
     result["truncated"] = True
     cut = set(result.get("truncated_lists", []))
-    while _size(result) > MAX_RESULT_BYTES:
+    while _size(result) > limit:
         found = _longest_list(result)
         if found is None:
             raise ToolError("proposal too large" if "config" in result else "result too large")
@@ -191,7 +193,10 @@ def call_tool(name: str, args: dict, ctx: ToolContext) -> dict:
             outcome = "failed"
             log.exception("tool %s failed", clean_text(name, 40))
             raise ToolError("tool failed") from None
-        return _cap({"_data_notice": DATA_NOTICE, **_strict(result)})
+        return _cap(
+            {"_data_notice": DATA_NOTICE, **_strict(result)},
+            min(ctx.max_result_bytes, MAX_RESULT_BYTES),
+        )
     finally:
         log.info(
             "tool=%s user=%s via=%s args=%s outcome=%s duration_ms=%d",
