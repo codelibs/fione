@@ -129,10 +129,16 @@ def join(df, params, ctx):
     """Add the columns of the other dataset to the rows with the same ``key`` (a left join: every
     row stays, with missing values where the other dataset has no such key). The rows of the
     other dataset must each have a different key, unless ``summarize`` replaces them by one row
-    per key (the number of rows, and the mean, minimum, maximum and sum of each number)."""
+    per key (the number of rows, and the mean, minimum, maximum and sum of each number). With
+    ``columns``, only those columns of the other dataset are added or summarized."""
     other = _other(ctx)
     key = require_column(df, params["key"])
     other_key = require_column(other, params["other_key"] or key)
+    if params["columns"]:  # only these columns are added (and summarized)
+        unknown = [c for c in params["columns"] if c not in other.columns]
+        if unknown:
+            raise ModuleError(f"unknown columns of the other dataset: {unknown}")
+        other = other[[other_key, *[c for c in params["columns"] if c != other_key]]]
     if params["summarize"]:
         other = _summary(other, other_key)
     elif other[other_key].dropna().duplicated().any():
@@ -357,6 +363,7 @@ _op(
         "key": _NAME,
         "other_key": {**_NAME, "default": ""},
         "summarize": {"type": "boolean", "default": False},
+        "columns": _NAMES,
     },
     ("other_dataset_id", "key"),
     join,
