@@ -658,6 +658,10 @@ def test_consent_page_names_provider_host_and_model(remote, lang):
     ):
         assert str(escape(i18n.t(key, lang))) in page, key
     assert str(escape(i18n.t("consent.not_sent", lang, host="llm.invalid"))) in page
+    # opening a page with an assistant's comment sends data too, without a question
+    intro = i18n.t("consent.sent_intro", lang)
+    assert str(escape(intro)) in page
+    assert {"en": "opens a page", "ja": "ページを開いた"}[lang] in intro
     assert "<code>llm.invalid</code>" in page and "<code>claude-opus-5-5</code>" in page
     form = re.search(rf'<form[^>]*action="{SETUP}".*?</form>', page, re.S).group(0)
     assert form.count("<button") == 1 and 'name="csrf_token"' in form
@@ -755,6 +759,17 @@ def test_comment_when_the_assistant_is_not_ready(chat):
     assert chat.fake.requests == []
 
 
+def test_comment_warns_of_a_remote_host(chat):
+    chat.fake.script = [{"text": "Remote note."}, {"text": "Local note."}]
+    use_monitor(chat.client, local=False, host=XSS)
+    r = comment(chat, model_comment(chat))
+    assert "Remote note." in r.text and "data-remote-warning" in r.text
+    assert str(escape(XSS)) in r.text and XSS not in r.text
+    use_monitor(chat.client)  # a local host: no warning
+    r = comment(chat, model_comment(chat))
+    assert "Remote note." in r.text and "data-remote-warning" not in r.text
+
+
 def test_comment_when_the_assistant_is_busy(chat, monkeypatch):
     def busy(*args, **kwargs):
         raise TooManyTurns()
@@ -784,6 +799,16 @@ def test_failed_comment_can_be_tried_again(chat):
     assert bad.status_code == 403
 
 
+def test_an_empty_comment_offers_to_try_again(chat):
+    chat.fake.script = [{"text": ""}, {"text": "Second try."}]
+    url = model_comment(chat)
+    empty = comment(chat, url)
+    assert 'data-note="failed"' in empty.text and shown("assistant.error.failed") in empty.text
+    assert f'action="{url}/retry"' in empty.text
+    chat.client.post(url + "/retry", data={"csrf_token": chat.csrf})
+    assert "Second try." in comment(chat, url).text
+
+
 def test_failed_job_shows_its_comment_once(chat):
     job = chat.ids[chat.p]["job"]
     url = f"/projects/{chat.p}/jobs/{job}/comment"
@@ -800,21 +825,76 @@ def test_failed_job_shows_its_comment_once(chat):
     assert f"job {job} failed" in asked[0]["content"]
 
 
-def test_a_proposal_in_a_comment_is_decided_by_its_writer(chat):
-    train = chat.ids[chat.p]["train"]
-    chat.fake.script = [
-        {"tool_calls": [{"name": "propose_training_config",
-                         "arguments": {"dataset_id": train, "target": "species"}}]},
-        {"text": "Try this."},
-    ]  # fmt: skip
+def proposal_state(world, prid) -> tuple:
+    with closing(connect(world.client)) as conn:
+        row = conn.execute(
+            "SELECT state, job_id, decided_by FROM chat_proposals WHERE id = ?", (prid,)
+        ).fetchone()
+    return tuple(row)
+
+
+def user_id(world, username) -> int:
+    with closing(connect(world.client)) as conn:
+        query = "SELECT id FROM users WHERE username = ?"
+        return conn.execute(query, (username,)).fetchone()[0]
+
+
+def test_a_proposal_in_a_comment_is_decided_by_any_editor(chat):
     url = model_comment(chat)
-    mine = comment(chat, url).text
+    mine, prid = proposing_comment(chat, url)
     assert "Try this." in mine
-    assert re.search(r'/assistant/proposals/\d+/confirm"', mine)
-    chat.login("co")
+    chat.login("vi")  # a viewer sees the proposal, without its buttons
+    viewer = comment(chat, url).text
+    assert "Try this." in viewer and "/confirm" not in viewer
+    assert shown("assistant.proposal.viewer_note") in viewer
+    chat.csrf = chat.login("co")  # another editor decides it
     theirs = comment(chat, url).text
-    assert "Try this." in theirs and "/confirm" not in theirs
-    assert shown("note.proposal") in theirs
+    assert f"/assistant/proposals/{prid}/confirm" in theirs
+    r = decide(chat, prid, "confirm")
+    assert r.status_code == 303
+    state, job_id, decided_by = proposal_state(chat, prid)
+    assert (state, decided_by) == ("confirmed", user_id(chat, "co"))
+    assert r.headers["location"] == f"/projects/{chat.p}/jobs/{job_id}"
+    with closing(connect(chat.client)) as conn:
+        assert jobs.get_job(conn, job_id).owner_id == user_id(chat, "co")  # run as co
+    for who in ("ed", "vi"):  # every member sees it decided
+        chat.login(who)
+        html = comment(chat, url).text
+        assert shown("assistant.proposal.confirmed") in html, who
+        assert "/confirm" not in html and "/dismiss" not in html, who
+    assert len(chat.fake.requests) == 2
+
+
+def test_a_viewer_or_stranger_cannot_decide_a_comment_proposal(chat):
+    url = model_comment(chat)
+    _, prid = proposing_comment(chat, url)
+    for who, status in (("vi", 403), ("st", 404)):
+        chat.csrf = chat.login(who)
+        for route in ("confirm", "dismiss"):
+            assert decide(chat, prid, route).status_code == status, (who, route)
+    assert proposal_state(chat, prid) == ("pending", None, None)
+    chat.csrf = chat.login("co")  # a dismissal shows to the others too
+    assert decide(chat, prid, "dismiss").status_code == 303
+    assert proposal_state(chat, prid) == ("dismissed", None, user_id(chat, "co"))
+    chat.login("ed")
+    html = comment(chat, url).text
+    assert shown("assistant.proposal.dismissed") in html and "/confirm" not in html
+
+
+def test_a_proposal_of_a_comment_a_viewer_opened_first_is_confirmable(chat):
+    chat.login("vi")
+    url = model_comment(chat)
+    _, prid = proposing_comment(chat, url)  # the viewer's visit wrote it
+    with closing(connect(chat.client)) as conn:
+        owner = conn.execute(
+            "SELECT c.user_id FROM chat_proposals p JOIN conversations c"
+            " ON c.id = p.conversation_id WHERE p.id = ?",
+            (prid,),
+        ).fetchone()[0]
+    assert owner == user_id(chat, "vi")
+    chat.csrf = chat.login("ed")
+    assert decide(chat, prid, "confirm").status_code == 303
+    assert proposal_state(chat, prid)[0] == "confirmed"
 
 
 def note_conversation(world) -> int:
@@ -854,7 +934,9 @@ def proposing_comment(world, url):
         {"text": "Try this."},
     ]  # fmt: skip
     html = comment(world, url).text
-    return html, int(re.search(r"/assistant/proposals/(\d+)/confirm", html)[1])
+    with closing(connect(world.client)) as conn:
+        (prid,) = conn.execute("SELECT MAX(id) FROM chat_proposals").fetchone()
+    return html, prid
 
 
 def decide(world, prid, route):
@@ -896,6 +978,56 @@ def test_a_comment_survives_a_failing_proposal_lookup(chat, monkeypatch):
     monkeypatch.setattr(assistant_ui.projects, "get_dataset", broken)
     r = comment(chat, url)
     assert "Try this." in r.text and "/confirm" not in r.text
+
+
+def make_note(world, kind, subject, language="en", project=None) -> store.Note:
+    """A note of ``ed`` about the subject, as its first visit stores it."""
+    with closing(connect(world.client)) as conn:
+        user = auth_service.get_user(conn, user_id(world, "ed"))
+        note, _ = store.create_note(
+            conn, user, project or world.p, kind, str(subject), language, "Explain"
+        )
+    return note
+
+
+def notes_left(world) -> tuple[set, int]:
+    """The (kind, subject) of every note, and how many note conversations there are."""
+    with closing(connect(world.client)) as conn:
+        notes = {tuple(r) for r in conn.execute("SELECT kind, subject_id FROM assistant_notes")}
+        query = "SELECT COUNT(*) FROM conversations WHERE kind = 'note'"
+        return notes, conn.execute(query).fetchone()[0]
+
+
+def test_deleting_a_subject_removes_its_comments(chat):
+    model, job = chat.ids[chat.p]["model"], chat.ids[chat.p]["job"]
+    other = chat.ids[chat.q]["model"]
+    finish_job(chat, job, "failed")
+    for language in ("en", "ja"):
+        make_note(chat, "model", model, language)
+    make_note(chat, "failed_job", job)
+    make_note(chat, "model", other, project=chat.q)
+    assert str(model) == str(job)  # the same id of another kind stays
+    r = chat.client.post(
+        f"/projects/{chat.p}/models/{model}/delete", data={"csrf_token": chat.csrf}
+    )
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("failed_job", str(job)), ("model", str(other))}, 2)
+    r = chat.client.post(f"/projects/{chat.p}/jobs/{job}/delete", data={"csrf_token": chat.csrf})
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("model", str(other))}, 1)
+
+
+def test_deleting_a_dataset_removes_its_comments(chat):
+    train, other = chat.ids[chat.p]["train"], chat.ids[chat.q]["train"]
+    for language in ("en", "ja"):
+        make_note(chat, "dataset", train, language)
+    make_note(chat, "dataset", other, project=chat.q)
+    make_note(chat, "model", train)  # the same id of another kind stays
+    r = chat.client.post(
+        f"/projects/{chat.p}/datasets/{train}/delete", data={"csrf_token": chat.csrf}
+    )
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("dataset", str(other)), ("model", str(train))}, 2)
 
 
 def test_only_a_failed_training_has_a_comment(chat):
@@ -985,10 +1117,10 @@ def test_a_dataset_comment_proposal_trains_or_returns_to_the_analysis(chat):
     url = dataset_comment(chat)
     mine, prid = proposing_comment(chat, url)
     assert "Try this." in mine
-    chat.login("co")
+    chat.login("vi")
     theirs = comment(chat, url).text
-    assert "/confirm" not in theirs and shown("note.proposal") in theirs
-    chat.csrf = chat.login("ed")
+    assert "/confirm" not in theirs and shown("assistant.proposal.viewer_note") in theirs
+    chat.csrf = chat.login("co")  # an editor who did not write the comment
     r = decide(chat, prid, "confirm")
     assert r.status_code == 303 and re.fullmatch(
         rf"/projects/{chat.p}/jobs/\d+", r.headers["location"]
@@ -997,6 +1129,7 @@ def test_a_dataset_comment_proposal_trains_or_returns_to_the_analysis(chat):
         job = jobs.get_job(conn, int(r.headers["location"].rsplit("/", 1)[1]))
     assert job.kind == "automl" and job.payload["dataset_id"] == chat.ids[chat.p]["train"]
     # another subject's proposal, dismissed: back to its analysis
+    chat.csrf = chat.login("ed")
     q_url = dataset_comment(chat, chat.q)
     chat.fake.script = [
         {"tool_calls": [{"name": "propose_training_config",
@@ -1138,3 +1271,32 @@ def test_prediction_comment_needs_its_integer_model_and_own_output(chat):
     refused("result_json", job.result)  # its own output, deleted
     refused("result_json", {"dataset_id": chat.ids[chat.q]["train"]})  # another project's
     assert chat.fake.requests == []
+
+
+def test_prediction_comment_needs_its_model_still_there(chat):
+    _, facts = predict_facts(chat)
+    url = prediction_comment(chat)
+    r = chat.client.post(
+        f"/projects/{chat.p}/models/{facts['model']}/delete", data={"csrf_token": chat.csrf}
+    )
+    assert r.status_code == 200
+    assert chat.client.get(url).status_code == 404
+    assert chat.client.post(url + "/retry", data={"csrf_token": chat.csrf}).status_code == 404
+    assert chat.fake.requests == [] and notes_left(chat) == (set(), 0)
+
+
+def test_deleting_a_prediction_or_its_output_removes_its_comments(chat):
+    job, facts = predict_facts(chat)
+    other, _ = predict_facts(chat, chat.q)
+    for language in ("en", "ja"):
+        make_note(chat, "prediction", job.id, language)
+    make_note(chat, "prediction", other.id, project=chat.q)
+    r = chat.client.post(
+        f"/projects/{chat.p}/datasets/{facts['output']}/delete", data={"csrf_token": chat.csrf}
+    )
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("prediction", str(other.id))}, 1)
+    make_note(chat, "prediction", job.id)  # written again, then its job deleted
+    r = chat.client.post(f"/projects/{chat.p}/jobs/{job.id}/delete", data={"csrf_token": chat.csrf})
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("prediction", str(other.id))}, 1)

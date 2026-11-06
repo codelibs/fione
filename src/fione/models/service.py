@@ -6,6 +6,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 
+from fione.assistant import store as assistant_store
 from fione.auth.roles import User, can_access_project
 from fione.engine import metrics
 from fione.engine.artifact import load_model
@@ -251,12 +252,14 @@ def load_trained(storage: Storage, record: ModelRecord, secret: bytes) -> Traine
 
 
 def delete_model(conn: sqlite3.Connection, storage: Storage, model_id: int) -> None:
-    """Delete the objects, then the row, so a storage failure never leaves a row pointing at
-    deleted data (the retry finds the row and removes what is left). A concurrent
-    ``list_models`` can therefore briefly show a row whose objects are going away."""
+    """Delete the objects, then the row and the assistant's comments on the model, so a
+    storage failure never leaves a row pointing at deleted data (the retry finds the row and
+    removes what is left). A concurrent ``list_models`` can therefore briefly show a row whose
+    objects are going away."""
     record = get_model(conn, model_id)
     storage.delete_prefix(record.storage_prefix)
     conn.execute("DELETE FROM models WHERE id = ?", (model_id,))
+    assistant_store.delete_notes_of(conn, "model", model_id)
 
 
 def submit_training(

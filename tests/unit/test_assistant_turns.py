@@ -1307,7 +1307,7 @@ def settled(env, manager_, user=None, kind="model", subject="1", language="en", 
 def test_explain_writes_a_note_once_and_shares_it(env, manager):
     one, fake = manager([{"text": "A good model."}, {"text": "良いモデルです。"}])
     first = one.explain(env.conn, env.owner, env.project.id, "model", "1", "en")
-    assert first.state == "writing" and first.owner_id == env.owner.id
+    assert first.state == "writing"
     done = settled(env, one)
     assert (done.state, done.text, done.error_code) == ("done", "A good model.", None)
     assert done.conversation_id == first.conversation_id
@@ -1316,7 +1316,7 @@ def test_explain_writes_a_note_once_and_shares_it(env, manager):
     question = [m for m in fake.requests[0]["messages"] if m["role"] == "user"]
     assert question[0]["content"] == prompt.note_request("model", "1", "en")
     japanese = settled(env, one, user=env.member, language="ja")
-    assert japanese.text == "良いモデルです。" and japanese.owner_id == env.member.id
+    assert japanese.text == "良いモデルです。"
     assert len(fake.requests) == 2
     assert store.list_conversations(env.conn, env.owner, env.project.id) == [env.conversation]
 
@@ -1333,6 +1333,27 @@ def test_a_failed_note_is_retried(env, manager):
     # a note that did not fail is kept as it is
     kept = one.retry(env.conn, env.owner, env.project.id, "failed_job", "5", "en")
     assert kept.text == "Fixed." and len(fake.requests) == 2
+
+
+CUT = 'data: {"choices":[{"index":0,"delta":{"content":"Part"},"finish_reason":"length"}]}\n\n'
+CUT_ANSWER = {"status": 200, "content_type": "text/event-stream", "body": CUT + "data: [DONE]\n\n"}
+
+
+@pytest.mark.parametrize(
+    "item, code",
+    [({"text": ""}, "failed"), ({"text": "\n \n"}, "failed"), (CUT_ANSWER, "truncated")],
+)
+def test_an_empty_or_cut_note_fails_and_can_be_retried(env, manager, item, code):
+    one, fake = manager([item, {"text": "Whole."}])
+    failed = settled(env, one)
+    assert (failed.state, failed.error_code) == ("failed", code)
+    again = one.retry(env.conn, env.owner, env.project.id, "model", "1", "en")
+    assert again.state == "writing"
+    assert (settled(env, one).state, settled(env, one).text) == ("done", "Whole.")
+    # the chat keeps such an answer as it is
+    fake.script = [item]
+    rows = turn(env, settings_for(env, fake))
+    assert rows[-1].state == "done"
 
 
 def test_explain_needs_a_ready_assistant_but_shows_a_written_note(env, manager):
