@@ -1335,3 +1335,28 @@ def test_deleting_a_prediction_or_its_output_removes_its_comments(chat):
     r = chat.client.post(f"/projects/{chat.p}/jobs/{job.id}/delete", data={"csrf_token": chat.csrf})
     assert r.status_code == 200
     assert notes_left(chat) == ({("prediction", str(other.id))}, 1)
+
+
+def test_a_failed_prediction_comment_removal_keeps_its_job_and_output(chat, monkeypatch):
+    job, facts = predict_facts(chat)
+    make_note(chat, "prediction", job.id)
+    real = store.delete_notes_of
+
+    def broken(conn, kind, subject_id):
+        if kind == "prediction":
+            raise RuntimeError("database is locked")
+        real(conn, kind, subject_id)
+
+    for path in (
+        f"/projects/{chat.p}/datasets/{facts['output']}/delete",
+        f"/projects/{chat.p}/jobs/{job.id}/delete",
+    ):
+        with monkeypatch.context() as m:
+            m.setattr(store, "delete_notes_of", broken)
+            with pytest.raises(RuntimeError):
+                chat.client.post(path, data={"csrf_token": chat.csrf})
+        assert notes_left(chat) == ({("prediction", str(job.id))}, 1), path
+        r = chat.client.post(path, data={"csrf_token": chat.csrf})  # the retry
+        assert r.status_code == 200, path
+        assert notes_left(chat) == (set(), 0), path
+        make_note(chat, "prediction", job.id)  # for the job's turn

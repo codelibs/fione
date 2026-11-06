@@ -235,8 +235,8 @@ def delete_finished_job(request: Request, conn, job: Job) -> None:
     caller has checked write access); ``KeyError`` if it is gone, ``ValueError`` if it has not
     finished. The comments go first, so a failure leaves the job for a retry."""
     assistant_store.delete_notes_of(conn, "failed_job", job.id)
-    store.delete_job(conn, job.id)
     assistant_store.delete_notes_of(conn, "prediction", job.id)
+    store.delete_job(conn, job.id)
     remove_job_files(request, job)
 
 
