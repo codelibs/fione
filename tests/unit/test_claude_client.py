@@ -54,7 +54,9 @@ def test_claude_streams_text(fake_llm):
     assert completion == Completion("Hello world", [], "stop", 42)
     assert len(pieces) == 4 and "".join(pieces) == "Hello world"
     body = fake.requests[-1]
-    assert body["system"] == "Be brief."
+    assert body["system"] == [
+        {"type": "text", "text": "Be brief.", "cache_control": {"type": "ephemeral"}}
+    ]
     assert body["messages"] == [{"role": "user", "content": "hello"}]
     assert (body["model"], body["max_tokens"], body["stream"]) == ("claude-opus-5-5", 1024, True)
     assert "tools" not in body
@@ -177,13 +179,61 @@ def test_claude_401_names_unauthorized_without_the_key(fake_llm):
 
 
 def test_claude_error_event_becomes_llm_error(fake_llm):
-    fake = fake_llm([{"text": "par", "error": f"Overloaded {KEY}"}])
+    fake = fake_llm([{"text": "par", "error": f"Broken {KEY}", "error_type": "api_error"}])
     pieces = []
     with pytest.raises(LlmError) as raised:
         _complete(_client(fake), on_text=pieces.append)
     assert raised.value.code == "protocol"
-    assert "Overloaded" in str(raised.value) and KEY not in str(raised.value)
+    assert "Broken" in str(raised.value) and KEY not in str(raised.value)
     assert pieces == ["par"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "code"), [("rate_limit_error", "rate_limited"), ("overloaded_error", "overloaded")]
+)
+def test_claude_rate_limit_and_overload_have_their_codes(fake_llm, kind, code):
+    fake = fake_llm(
+        [{"api_error": kind}, {"text": "par", "error": f"busy {KEY}", "error_type": kind}]
+    )
+    client = _client(fake)
+    with pytest.raises(LlmError) as raised:  # over HTTP
+        _complete(client)
+    status = {"rate_limit_error": 429, "overloaded_error": 529}[kind]
+    assert (raised.value.code, raised.value.status) == (code, status)
+    with pytest.raises(LlmError) as raised:  # as an error event in the stream
+        _complete(client)
+    assert raised.value.code == code and KEY not in str(raised.value)
+
+
+def test_claude_other_error_statuses_keep_their_codes(fake_llm):
+    fake = fake_llm([{"api_error": "api_error"}, {"status": 400, "body": f"bad {KEY}"}])
+    client = _client(fake)
+    for status in (500, 400):
+        with pytest.raises(LlmError) as raised:
+            _complete(client)
+        assert (raised.value.code, raised.value.status) == ("http", status)
+        assert KEY not in str(raised.value)
+
+
+def test_claude_caches_the_tools_and_system_and_the_conversation(fake_llm):
+    fake = fake_llm([{"text": "Let me look.", "tool_calls": [{"name": "describe_dataset"}]}])
+    client = _client(fake)
+    completion = _complete(client, tools=[TOOL])
+    # the system's last block holds tools and system (they render first); the automatic
+    # breakpoint at the request's top level follows the conversation as it grows
+    assert fake.cache_points[-1] == ["request", "system.0"]
+    assert fake.requests[-1]["cache_control"] == {"type": "ephemeral"}
+    call = completion.tool_calls[0]
+    history = [
+        *HELLO,
+        {"role": "assistant", "content": completion.content,
+         "tool_calls": [{"id": call.id, "type": "function",
+                         "function": {"name": call.name, "arguments": call.arguments}}]},
+        {"role": "tool", "tool_call_id": call.id, "content": "{}"},
+    ]  # fmt: skip
+    _complete(client, history, tools=[TOOL])
+    assert fake.cache_points[-1] == ["request", "system.0"]
+    assert "cache_control" not in json.dumps(fake.requests[-1]["tools"])
 
 
 def test_claude_error_event_hides_a_key_that_straddles_the_cut(fake_llm):
@@ -201,6 +251,16 @@ def test_claude_stream_that_stops_short_is_a_protocol_error(fake_llm):
         {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "x"}},
     ]
     body = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events)
+    fake = fake_llm([{"status": 200, "body": body, "content_type": "text/event-stream"}])
+    with pytest.raises(LlmError) as raised:
+        _complete(_client(fake))
+    assert raised.value.code == "protocol"
+
+
+@pytest.mark.parametrize("error", [{"type": ["x"], "message": "odd"}, "text", None])
+def test_claude_malformed_error_event_is_still_an_llm_error(fake_llm, error):
+    event = {"type": "error", "error": error}
+    body = f"event: error\ndata: {json.dumps(event)}\n\n"
     fake = fake_llm([{"status": 200, "body": body, "content_type": "text/event-stream"}])
     with pytest.raises(LlmError) as raised:
         _complete(_client(fake))

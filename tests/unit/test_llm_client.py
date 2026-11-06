@@ -225,6 +225,14 @@ def test_http_error_hides_the_key(fake_llm):
     assert len(str(raised.value)) <= 200
 
 
+def test_a_429_from_an_ollama_proxy_is_rate_limited(fake_llm):
+    fake = fake_llm([{"status": 429, "body": f"slow down {KEY}"}])
+    with pytest.raises(LlmError) as raised:
+        _complete(OllamaClient(fake.url, "m", api_key=KEY))
+    assert (raised.value.code, raised.value.status) == ("rate_limited", 429)
+    assert KEY not in str(raised.value)
+
+
 def test_unreachable_timeout_and_cancel(fake_llm):
     gone = fake_llm()
     gone.stop()

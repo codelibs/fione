@@ -18,7 +18,11 @@ Script items (the keys combine, except ``status``)::
     {"status": int, "body": str, "content_type": str, "headers": dict, "chunks": int}
                                              a raw reply, its body sent in ``chunks`` pieces
     {"stop_reason": str}                     Anthropic only: instead of tool_use or end_turn
-    {"error": str}                           Anthropic only: an ``error`` event after the text
+    {"error": str, "error_type": str}        Anthropic only: an ``error`` event after the text
+                                             (``error_type`` defaults to ``overloaded_error``)
+    {"api_error": str}                       Anthropic only: the HTTP error of that type
+                                             (``rate_limit_error`` is a 429, ``overloaded_error``
+                                             a 529, ``api_error`` a 500)
 
 ``POST /v1/messages`` reads Anthropic requests: the policies see them as OpenAI-shaped messages
 (``tool_use`` blocks as tool calls, ``tool_result`` blocks as tool messages), while
@@ -93,6 +97,7 @@ def gullible_call(messages: list[dict]) -> tuple[str, dict] | None:
     return None
 
 
+API_ERROR_STATUS = {"rate_limit_error": 429, "overloaded_error": 529, "api_error": 500}
 _PROPOSE = re.compile(r"propose target=(\S+)")
 _PROJECT = re.compile(r"project (\S+) named")
 
@@ -193,6 +198,7 @@ class FakeLlm:
         self.pull_garbage = pull_garbage  # bytes with no newline sent as a pull's first line
         self.api_key = api_key  # the only x-api-key POST /v1/messages accepts, when set
         self.claude_models: list[str] | None = None  # what GET /v1/models/{id} knows; None: all
+        self.claude_model_error: str | None = None  # an API error type GET /v1/models/{id} answers
         self.generate_status = 200  # of POST /api/generate, which loads the model
         self.generate_delay = 0.0  # seconds before it answers: the time a model takes to load
         self.generate_padding = 0  # bytes of filler in its answer
@@ -200,6 +206,7 @@ class FakeLlm:
         self.paths: list[str] = []  # "METHOD /path" of every request
         self.requests: list[dict] = []  # every chat body
         self.request_headers: list[dict] = []  # the matching headers, names in lower case
+        self.cache_points: list[list[str]] = []  # where each Anthropic request set cache_control
         self._served: str | None = None  # the model of the last chat request
         self._lock = threading.Lock()
         self._call_ids = itertools.count(1)
@@ -485,9 +492,15 @@ class _Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _api_error(self, kind: str) -> None:
+        error = {"type": kind, "message": f"fake {kind}"}
+        self._json({"type": "error", "error": error}, API_ERROR_STATUS[kind])
+
     def _model(self, model: str, headers: dict) -> None:
         if not self._authorized(headers):
             return
+        if self.llm.claude_model_error is not None:
+            return self._api_error(self.llm.claude_model_error)
         known = self.llm.claude_models
         if known is not None and model not in known:
             error = {"type": "not_found_error", "message": f"model: {model}"}
@@ -511,10 +524,13 @@ class _Handler(BaseHTTPRequestHandler):
             )
             error = {"type": "invalid_request_error", "message": message}
             return self._json({"type": "error", "error": error}, 400)
+        self.llm.cache_points.append(cache_points(body))
         item = self.llm.record_chat(body, headers, openai_messages(body))
         time.sleep(item.get("delay", 0))
         if "status" in item:
             return self._raw(item)
+        if "api_error" in item:
+            return self._api_error(item["api_error"])
         text = item.get("text", "")
         calls = [
             (self.llm.next_call_id("toolu"), call["name"], call.get("arguments", {}))
@@ -552,9 +568,8 @@ class _Handler(BaseHTTPRequestHandler):
             events += [{"type": "content_block_delta", "index": index, "delta": d} for d in deltas]
             events.append({"type": "content_block_stop", "index": index})
         if "error" in item:
-            events.append(
-                {"type": "error", "error": {"type": "overloaded_error", "message": item["error"]}}
-            )
+            kind = item.get("error_type", "overloaded_error")
+            events.append({"type": "error", "error": {"type": kind, "message": item["error"]}})
         else:
             events += [
                 {"type": "ping"},
@@ -597,11 +612,31 @@ def _drop_mismatched(body: dict) -> list[str]:
     return [f"messages.{at}.content.{n}" for at, n in found]
 
 
+def cache_points(body: dict) -> list[str]:
+    """Where an Anthropic request sets ``cache_control``: ``request`` (top level, automatic
+    caching), ``system.N``, ``tools.N`` or ``messages.N.content.M``."""
+    found = ["request"] if "cache_control" in body else []
+    for name in ("system", "tools"):
+        items = body.get(name)
+        if isinstance(items, list):
+            found += [f"{name}.{n}" for n, b in enumerate(items) if "cache_control" in b]
+    for at, message in enumerate(body.get("messages") or []):
+        content = message.get("content")
+        if isinstance(content, list):
+            found += [
+                f"messages.{at}.content.{n}" for n, b in enumerate(content) if "cache_control" in b
+            ]
+    return found
+
+
 def openai_messages(body: dict) -> list[dict]:
     """The messages of an Anthropic request in the OpenAI shape, for the policies."""
     out = []
-    if body.get("system"):
-        out.append({"role": "system", "content": body["system"]})
+    system = body.get("system")
+    if isinstance(system, list):  # text blocks
+        system = "".join(b.get("text", "") for b in system if isinstance(b, dict))
+    if system:
+        out.append({"role": "system", "content": system})
     for message in body.get("messages") or []:
         content = message.get("content")
         if isinstance(content, str):
