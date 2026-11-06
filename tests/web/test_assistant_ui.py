@@ -951,6 +951,43 @@ def test_a_comment_survives_a_failing_proposal_lookup(chat, monkeypatch):
     assert "Try this." in r.text and "/confirm" not in r.text
 
 
+def make_note(world, kind, subject, language="en", project=None) -> store.Note:
+    """A note of ``ed`` about the subject, as its first visit stores it."""
+    with closing(connect(world.client)) as conn:
+        user = auth_service.get_user(conn, user_id(world, "ed"))
+        note, _ = store.create_note(
+            conn, user, project or world.p, kind, str(subject), language, "Explain"
+        )
+    return note
+
+
+def notes_left(world) -> tuple[set, int]:
+    """The (kind, subject) of every note, and how many note conversations there are."""
+    with closing(connect(world.client)) as conn:
+        notes = {tuple(r) for r in conn.execute("SELECT kind, subject_id FROM assistant_notes")}
+        query = "SELECT COUNT(*) FROM conversations WHERE kind = 'note'"
+        return notes, conn.execute(query).fetchone()[0]
+
+
+def test_deleting_a_subject_removes_its_comments(chat):
+    model, job = chat.ids[chat.p]["model"], chat.ids[chat.p]["job"]
+    other = chat.ids[chat.q]["model"]
+    finish_job(chat, job, "failed")
+    for language in ("en", "ja"):
+        make_note(chat, "model", model, language)
+    make_note(chat, "failed_job", job)
+    make_note(chat, "model", other, project=chat.q)
+    assert str(model) == str(job)  # the same id of another kind stays
+    r = chat.client.post(
+        f"/projects/{chat.p}/models/{model}/delete", data={"csrf_token": chat.csrf}
+    )
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("failed_job", str(job)), ("model", str(other))}, 2)
+    r = chat.client.post(f"/projects/{chat.p}/jobs/{job}/delete", data={"csrf_token": chat.csrf})
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("model", str(other))}, 1)
+
+
 def test_only_a_failed_training_has_a_comment(chat):
     with closing(connect(chat.client)) as conn:
         user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]

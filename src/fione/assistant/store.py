@@ -470,6 +470,16 @@ def delete_note(conn: sqlite3.Connection, note: Note) -> None:
     conn.execute("DELETE FROM conversations WHERE id = ?", (note.conversation_id,))
 
 
+def delete_notes_of(conn: sqlite3.Connection, kind: str, subject_id: int) -> None:
+    """Remove the notes about a subject that is being deleted, in every language, each with
+    its conversation (which holds what the assistant read about it)."""
+    conn.execute(
+        "DELETE FROM conversations WHERE id IN (SELECT conversation_id FROM assistant_notes"
+        " WHERE kind = ? AND subject_id = ?)",
+        (kind, str(subject_id)),
+    )
+
+
 # --- proposals --------------------------------------------------------------
 
 

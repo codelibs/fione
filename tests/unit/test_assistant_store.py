@@ -715,3 +715,20 @@ def test_the_text_of_a_note_is_its_first_answer(conn, owner, project):
     store.add_message(conn, note.conversation_id, "user", "a follow-up")
     store.add_message(conn, note.conversation_id, "assistant", "second")
     assert store.note_answer(conn, note.conversation_id).content == "first"
+
+
+def test_deleting_the_notes_of_a_subject_keeps_the_others(conn, owner, project):
+    for language in ("en", "ja"):
+        note, placeholder = store.create_note(conn, owner, project.id, "model", "7", language, "x")
+        store.finish_message(conn, placeholder.id, "done", content="first")
+        store.add_proposal(conn, placeholder.id, note.conversation_id, None, {}, {})
+    kept = [
+        store.create_note(conn, owner, project.id, *key, "en", "x")[0]
+        for key in (("model", "8"), ("failed_job", "7"))
+    ]
+    store.delete_notes_of(conn, "model", 7)
+    assert store.get_note(conn, project.id, "model", "7", "en") is None
+    assert store.get_note(conn, project.id, "model", "7", "ja") is None
+    assert [store.get_note(conn, project.id, n.kind, n.subject_id, "en") for n in kept] == kept
+    assert (count(conn, "conversations"), count(conn, "chat_proposals")) == (2, 0)
+    assert count(conn, "chat_messages") == 4  # the two kept notes' request and placeholder
