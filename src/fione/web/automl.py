@@ -46,6 +46,9 @@ from fione.web.easyml import (
     _names,
     _pct,
     _profile,
+    _tips,
+    _warnings,
+    recommended_runtime,
 )
 from fione.web.uploads import UploadProblem, receive_csv, size_text, upload_context
 from fione.web.views import UiError, language, render
@@ -470,6 +473,13 @@ def _train_view(
     status: int = 200,
 ) -> Response:
     found, columns, defaults = _analysis(request, conn, ctx, dataset, target)
+    if values is None:  # first shown: the run time the size of the data needs
+        values = _form_values(_defaults())
+        values["max_runtime_minutes"] = str(recommended_runtime(dataset))
+    if inputs is None:
+        inputs = defaults.inputs
+    # the advice of the analysis page, for the task and inputs on the form
+    task = values["task"] if values["task"] in ("classification", "regression") else defaults.task
     here = f"/projects/{ctx.project.id}/datasets/{dataset.id}/train?"
     here += urlencode({"target": defaults.target})
     return _view(
@@ -484,8 +494,10 @@ def _train_view(
         columns=columns,
         target=defaults.target,
         detected=defaults.task,
-        values=values if values is not None else _form_values(_defaults()),
-        inputs=inputs if inputs is not None else defaults.inputs,
+        values=values,
+        inputs=inputs,
+        warnings=_warnings(dataset, found, task, inputs),
+        tips=_tips(found, task),
         tasks=TASKS,
         decisions=DECISIONS,
         transforms=TRANSFORMS,

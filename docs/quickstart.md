@@ -121,7 +121,9 @@ every network interface of this machine; to keep it on this machine only, use
 ## Beyond the wizard
 
 Choose **View: Detailed** in the account menu (your name, top right) for the AutoML screens: every
-column's statistics and charts, the full training settings, the job list, the models with
+column's statistics and charts, the full training settings (which start with the run time
+recommended for the size of the data and show the same warnings and tips as **Data analysis**),
+the job list, the models with
 their leaderboard, variable importance and score history, model export and import, and
 project sharing. Administrators also manage users, Python modules and the system status from
 that menu.

@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from api_helpers import connect, iris_csv
+from fione import i18n
 from fione.auth import service as auth
 from fione.data.profile import profile_dataset
 from fione.engine.config import TrainConfig
@@ -406,7 +407,9 @@ def test_the_form_shows_the_engine_defaults(world):
         for f in dataclasses.fields(TrainConfig)
         if f.default is not dataclasses.MISSING
     }
-    assert f'name="max_runtime_minutes" value="{defaults["max_runtime_secs"] // 60}"' in page
+    # the run time starts at the recommendation for the size of the data (iris: 3 minutes)
+    assert 'name="max_runtime_minutes" value="3"' in page
+    assert i18n.t("train.h.max_runtime_minutes", "en") in page
     for name in ("nfolds", "seed", "stopping_rounds"):
         assert f'name="{name}" value="{defaults[name]}"' in page
     assert f'name="stopping_tolerance" value="{defaults["stopping_tolerance"]:g}"' in page
@@ -787,3 +790,12 @@ def test_the_project_navigation_is_on_every_project_screen(world):
         if current:
             assert f'aria-current="page">{current}</a>' in page, template
         assert 'class="steps' not in page or "analyze" in template
+
+
+def test_a_refused_form_keeps_the_posted_run_time(world):
+    csrf = world.login("ed")
+    r = world.client.post(
+        world.path("/projects/{p}/datasets/{train}/train"), data=form_for(csrf, nfolds="1")
+    )
+    assert r.status_code == 422
+    assert 'name="max_runtime_minutes" value="7"' in r.text
