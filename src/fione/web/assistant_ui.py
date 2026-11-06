@@ -3,9 +3,11 @@ and the question form.
 
 Conversations are their creator's alone, so every conversation id goes through
 ``store.get_conversation`` (404 for anyone else's, admins included) before anything is done
-with it. Messages are escaped plain text; a tool row only names what was read. While a turn
-is active, HTMX polls the thread; its last answer (and any failure to show it) is 286, which
-ends the polling. The page never fails because the LLM cannot be used: it says why.
+with it. A training proposal goes through ``store.get_proposal``: a chat's is its creator's
+alone, a done note's is decided by anyone who can write to the project. Messages are escaped
+plain text; a tool row only names what was read. While a turn is active, HTMX polls the
+thread; its last answer (and any failure to show it) is 286, which ends the polling. The page
+never fails because the LLM cannot be used: it says why.
 
 The assistant's comments (notes) on a model and on a failed job are fragments their pages
 load: any reader of the project sees the one note of the subject in their language, which
