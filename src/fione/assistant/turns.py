@@ -104,7 +104,6 @@ class NoteView:
     text: str
     error_code: str | None
     conversation_id: int
-    owner_id: int  # who may decide its training proposal
 
 
 class _Made(Exception):
@@ -630,9 +629,6 @@ class TurnManager:
 
     @staticmethod
     def _view(conn: sqlite3.Connection, note: store.Note) -> NoteView:
-        owner = conn.execute(
-            "SELECT user_id FROM conversations WHERE id = ?", (note.conversation_id,)
-        ).fetchone()
         answer = store.note_answer(conn, note.conversation_id)
         state, text, code = "failed", "", "failed"
         if answer is not None:
@@ -645,7 +641,7 @@ class TurnManager:
                 code = "cancelled"
             else:
                 code = answer.error_code if answer.error_code in ERROR_CODES else "failed"
-        return NoteView(state, text, code, note.conversation_id, owner["user_id"] if owner else 0)
+        return NoteView(state, text, code, note.conversation_id)
 
     def _run(self, conversation_id, assistant_id, cancel: threading.Event, language, deadline):
         try:

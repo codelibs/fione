@@ -252,7 +252,7 @@ def test_proposals_are_stored_and_found_through_their_conversation(
     assert (proposal.state, proposal.job_id, proposal.config) == ("pending", None, {"target": "y"})
     assert proposal.details == {"warnings": []}
     assert store.proposals_for(conn, conversation.id) == {proposal.message_id: proposal}
-    assert store.get_proposal(conn, owner, project.id, proposal.id) == proposal
+    assert store.get_proposal(conn, owner, project.id, proposal.id) == (proposal, conversation)
     with pytest.raises(ProposalNotFound):
         store.get_proposal(conn, member, project.id, proposal.id)
     with pytest.raises(ProposalNotFound):
@@ -262,7 +262,7 @@ def test_proposals_are_stored_and_found_through_their_conversation(
     shared = store.add_proposal(
         conn, store.add_message(conn, theirs.id, "assistant").id, theirs.id, None, {}, {}
     )
-    assert store.get_proposal(conn, member, project.id, shared.id) == shared
+    assert store.get_proposal(conn, member, project.id, shared.id) == (shared, theirs)
     projects.unshare_project(conn, owner, project.id, "member")
     with pytest.raises(ProposalNotFound):  # hidden with the conversation
         store.get_proposal(conn, member, project.id, shared.id)
@@ -681,10 +681,32 @@ def test_a_note_is_no_chat_conversation(conn, owner, project):
     assert store.note_of(conn, chat.id) is None
     reply = store.add_message(conn, chat.id, "assistant", "x")
     proposal = store.add_proposal(conn, reply.id, chat.id, None, {}, {})
-    assert store.get_proposal(conn, owner, project.id, proposal.id) == proposal
+    assert store.get_proposal(conn, owner, project.id, proposal.id) == (proposal, chat)
     store.finish_message(conn, placeholder.id, "done", content="first")
     proposal = store.add_proposal(conn, placeholder.id, note.conversation_id, None, {}, {})
-    assert store.get_proposal(conn, owner, project.id, proposal.id) == proposal
+    assert store.get_proposal(conn, owner, project.id, proposal.id) == (proposal, found)
+
+
+def test_a_proposal_of_a_note_is_found_by_whoever_can_write(conn, owner, member, project):
+    viewer = auth.create_user(conn, "viewer", "pw-viewer-1", Role.EDITOR)
+    stranger = auth.create_user(conn, "stranger", "pw-stranger-1", Role.EDITOR)
+    projects.share_project(conn, owner, project.id, "viewer", ProjectAccess.VIEWER)
+    note, placeholder = store.create_note(conn, viewer, project.id, "model", "7", "en", "x")
+    store.finish_message(conn, placeholder.id, "done", content="first")
+    proposal = store.add_proposal(conn, placeholder.id, note.conversation_id, None, {}, {})
+    for user in (owner, member):  # not the note's writer, but they can write to the project
+        found, conversation = store.get_proposal(conn, user, project.id, proposal.id)
+        assert found == proposal
+        assert (conversation.id, conversation.kind) == (note.conversation_id, "note")
+    for user in (viewer, stranger):
+        with pytest.raises(ProposalNotFound):
+            store.get_proposal(conn, user, project.id, proposal.id)
+    other = projects.create_project(conn, owner, "other")
+    with pytest.raises(ProposalNotFound):  # only through the note's own project
+        store.get_proposal(conn, owner, other.id, proposal.id)
+    projects.unshare_project(conn, owner, project.id, "member")
+    with pytest.raises(ProposalNotFound):
+        store.get_proposal(conn, member, project.id, proposal.id)
 
 
 def test_the_text_of_a_note_is_its_first_answer(conn, owner, project):

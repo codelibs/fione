@@ -1140,8 +1140,6 @@
   "note.follow_up": "Ask the assistant a follow-up",
   "note.busy": "The assistant is busy. Try again in a moment.",
   "note.retry": "Try again",
-  "note.proposal": "The assistant proposed a training setup.",
-  "note.proposal_elsewhere": "To train with it, ask the assistant a follow-up: it can propose the setup to you there.",
   "assistant.proposal.title": "Training proposal",
   "assistant.proposal.dataset": "Dataset",
   "assistant.proposal.target": "Column to predict",

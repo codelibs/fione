@@ -1282,7 +1282,7 @@ def settled(env, manager_, user=None, kind="model", subject="1", language="en", 
 def test_explain_writes_a_note_once_and_shares_it(env, manager):
     one, fake = manager([{"text": "A good model."}, {"text": "良いモデルです。"}])
     first = one.explain(env.conn, env.owner, env.project.id, "model", "1", "en")
-    assert first.state == "writing" and first.owner_id == env.owner.id
+    assert first.state == "writing"
     done = settled(env, one)
     assert (done.state, done.text, done.error_code) == ("done", "A good model.", None)
     assert done.conversation_id == first.conversation_id
@@ -1291,7 +1291,7 @@ def test_explain_writes_a_note_once_and_shares_it(env, manager):
     question = [m for m in fake.requests[0]["messages"] if m["role"] == "user"]
     assert question[0]["content"] == prompt.note_request("model", "1", "en")
     japanese = settled(env, one, user=env.member, language="ja")
-    assert japanese.text == "良いモデルです。" and japanese.owner_id == env.member.id
+    assert japanese.text == "良いモデルです。"
     assert len(fake.requests) == 2
     assert store.list_conversations(env.conn, env.owner, env.project.id) == [env.conversation]
 

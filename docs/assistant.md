@@ -89,9 +89,9 @@ A model's summary and model pages, and the page of a failed training, show an **
 a short explanation in plain words. For a model it says whether the result is good, mediocre or
 poor against the baseline, what mostly drives the prediction, any problem in the data and one to
 three next steps; for a failed training, why it failed and what to change. When a change clearly
-helps, the comment can carry a training proposal, which only the person whose visit wrote the
-comment can confirm or dismiss; the others see its reason and can ask for their own with
-**Ask the assistant a follow-up**.
+helps, the comment can carry a training proposal. Every member sees it, and anyone who can edit
+the project can confirm or dismiss it, whoever's visit wrote the comment; once decided, everyone
+sees it as started or dismissed. Viewers see the card without buttons.
 
 A comment is written the first time a member of the project opens the page, in the language of
 that page, and then kept: every member who can read the project sees the same comment in that

@@ -1140,8 +1140,6 @@
   "note.follow_up": "アシスタントに続けて質問する",
   "note.busy": "アシスタントは混み合っています。少し待ってからもう一度試してください。",
   "note.retry": "もう一度試す",
-  "note.proposal": "アシスタントが学習の設定を提案しました。",
-  "note.proposal_elsewhere": "この設定で学習するには、アシスタントに続けて質問してください。そこであなたに設定を提案できます。",
   "assistant.proposal.title": "学習の提案",
   "assistant.proposal.dataset": "データセット",
   "assistant.proposal.target": "予測する列",

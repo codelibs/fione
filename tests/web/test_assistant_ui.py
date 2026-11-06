@@ -771,21 +771,76 @@ def test_failed_job_shows_its_comment_once(chat):
     assert f"job {job} failed" in asked[0]["content"]
 
 
-def test_a_proposal_in_a_comment_is_decided_by_its_writer(chat):
-    train = chat.ids[chat.p]["train"]
-    chat.fake.script = [
-        {"tool_calls": [{"name": "propose_training_config",
-                         "arguments": {"dataset_id": train, "target": "species"}}]},
-        {"text": "Try this."},
-    ]  # fmt: skip
+def proposal_state(world, prid) -> tuple:
+    with closing(connect(world.client)) as conn:
+        row = conn.execute(
+            "SELECT state, job_id, decided_by FROM chat_proposals WHERE id = ?", (prid,)
+        ).fetchone()
+    return tuple(row)
+
+
+def user_id(world, username) -> int:
+    with closing(connect(world.client)) as conn:
+        query = "SELECT id FROM users WHERE username = ?"
+        return conn.execute(query, (username,)).fetchone()[0]
+
+
+def test_a_proposal_in_a_comment_is_decided_by_any_editor(chat):
     url = model_comment(chat)
-    mine = comment(chat, url).text
+    mine, prid = proposing_comment(chat, url)
     assert "Try this." in mine
-    assert re.search(r'/assistant/proposals/\d+/confirm"', mine)
-    chat.login("co")
+    chat.login("vi")  # a viewer sees the proposal, without its buttons
+    viewer = comment(chat, url).text
+    assert "Try this." in viewer and "/confirm" not in viewer
+    assert shown("assistant.proposal.viewer_note") in viewer
+    chat.csrf = chat.login("co")  # another editor decides it
     theirs = comment(chat, url).text
-    assert "Try this." in theirs and "/confirm" not in theirs
-    assert shown("note.proposal") in theirs
+    assert f"/assistant/proposals/{prid}/confirm" in theirs
+    r = decide(chat, prid, "confirm")
+    assert r.status_code == 303
+    state, job_id, decided_by = proposal_state(chat, prid)
+    assert (state, decided_by) == ("confirmed", user_id(chat, "co"))
+    assert r.headers["location"] == f"/projects/{chat.p}/jobs/{job_id}"
+    with closing(connect(chat.client)) as conn:
+        assert jobs.get_job(conn, job_id).owner_id == user_id(chat, "co")  # run as co
+    for who in ("ed", "vi"):  # every member sees it decided
+        chat.login(who)
+        html = comment(chat, url).text
+        assert shown("assistant.proposal.confirmed") in html, who
+        assert "/confirm" not in html and "/dismiss" not in html, who
+    assert len(chat.fake.requests) == 2
+
+
+def test_a_viewer_or_stranger_cannot_decide_a_comment_proposal(chat):
+    url = model_comment(chat)
+    _, prid = proposing_comment(chat, url)
+    for who, status in (("vi", 403), ("st", 404)):
+        chat.csrf = chat.login(who)
+        for route in ("confirm", "dismiss"):
+            assert decide(chat, prid, route).status_code == status, (who, route)
+    assert proposal_state(chat, prid) == ("pending", None, None)
+    chat.csrf = chat.login("co")  # a dismissal shows to the others too
+    assert decide(chat, prid, "dismiss").status_code == 303
+    assert proposal_state(chat, prid) == ("dismissed", None, user_id(chat, "co"))
+    chat.login("ed")
+    html = comment(chat, url).text
+    assert shown("assistant.proposal.dismissed") in html and "/confirm" not in html
+
+
+def test_a_proposal_of_a_comment_a_viewer_opened_first_is_confirmable(chat):
+    chat.login("vi")
+    url = model_comment(chat)
+    _, prid = proposing_comment(chat, url)  # the viewer's visit wrote it
+    with closing(connect(chat.client)) as conn:
+        owner = conn.execute(
+            "SELECT c.user_id FROM chat_proposals p JOIN conversations c"
+            " ON c.id = p.conversation_id WHERE p.id = ?",
+            (prid,),
+        ).fetchone()[0]
+    assert owner == user_id(chat, "vi")
+    chat.csrf = chat.login("ed")
+    assert decide(chat, prid, "confirm").status_code == 303
+    assert proposal_state(chat, prid)[0] == "confirmed"
 
 
 def note_conversation(world) -> int:
@@ -825,7 +880,9 @@ def proposing_comment(world, url):
         {"text": "Try this."},
     ]  # fmt: skip
     html = comment(world, url).text
-    return html, int(re.search(r"/assistant/proposals/(\d+)/confirm", html)[1])
+    with closing(connect(world.client)) as conn:
+        (prid,) = conn.execute("SELECT MAX(id) FROM chat_proposals").fetchone()
+    return html, prid
 
 
 def decide(world, prid, route):

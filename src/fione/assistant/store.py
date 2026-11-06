@@ -520,17 +520,28 @@ def proposals_for(conn: sqlite3.Connection, conversation_id: int) -> dict[int, P
 
 def get_proposal(
     conn: sqlite3.Connection, user: User, project_id: str, proposal_id: int
-) -> Proposal:
-    """The proposal, only through a conversation the user can see (``get_conversation``),
-    a note's included."""
+) -> tuple[Proposal, Conversation]:
+    """The proposal and its conversation in ``project_id``: a chat's only for the chat's own
+    user while they can read the project (as ``get_conversation``), a note's for anyone who
+    can write to the project, since every member shares the note."""
     row = conn.execute("SELECT * FROM chat_proposals WHERE id = ?", (proposal_id,)).fetchone()
     if row is None:
         raise ProposalNotFound(proposal_id)
-    try:
-        get_conversation(conn, user, project_id, row["conversation_id"], kind=None)
-    except ConversationNotFound:
-        raise ProposalNotFound(proposal_id) from None
-    return _proposal(row)
+    conversation = conn.execute(
+        "SELECT * FROM conversations WHERE id = ? AND project_id = ?",
+        (row["conversation_id"], project_id),
+    ).fetchone()
+    if conversation is None:
+        raise ProposalNotFound(proposal_id)
+    if conversation["kind"] == "note":
+        allowed = can_access_project(conn, user, project_id, "write")
+    else:
+        allowed = conversation["user_id"] == user.id and can_access_project(
+            conn, user, project_id, "read"
+        )
+    if not allowed:
+        raise ProposalNotFound(proposal_id)
+    return _proposal(row), _conversation(conversation)
 
 
 def claim_proposal(conn: sqlite3.Connection, proposal_id: int, user_id: int) -> bool:
