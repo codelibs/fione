@@ -176,6 +176,10 @@ period to predict leaks the answer. Key columns are read whole up to 5 million r
 dataset is sampled, and a link between two such datasets can be missed. Only the first 8
 datasets of a project are examined, and the search stops after 30 seconds (the result says so).
 
+A module's result may have at most 150 million cells (rows times columns). Joining several
+summaries onto a wide dataset can pass it; drop the columns you do not need with **Slice
+columns** before you join.
+
 ## Limits
 
 | Limit | Value |

@@ -17,9 +17,9 @@ from fione.projects.ingest import unique_names
 
 MODULE_ID = re.compile(r"[a-z][a-z0-9_]{0,39}")
 KINDS = ("frame", "train", "predict")
-# The most cells (rows times columns) a module may return: a memory ceiling (about 400 MB of
+# The most cells (rows times columns) a module may return: a memory ceiling (about 1.2 GB of
 # float64), checked before a result is built where its size can be estimated.
-MAX_OUTPUT_CELLS = 50_000_000
+MAX_OUTPUT_CELLS = 150_000_000
 # A predict module only accepts a state made by its train module.
 TRAIN_FOR = {"kmeans_predict": "kmeans_train", "lowrank_predict": "lowrank_train"}
 _PATH = re.compile(r"/(?:[^\s/:'\"]+/)+[^\s:'\"]*")
