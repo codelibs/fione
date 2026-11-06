@@ -574,10 +574,13 @@ class TurnManager:
         kind: str,
         subject_id: str,
         language: str,
+        *,
+        facts: dict[str, int] | None = None,
     ) -> NoteView:
         """The note about the subject in ``language``, which a first call starts writing.
 
-        A written note is shown whatever the provider's state; a new one needs it ready
+        ``facts`` are the integers the kind's request names (``prompt.NOTE_FACTS``). A written
+        note is shown whatever the provider's state; a new one needs it ready
         (``LlmUnavailable``) and a free turn of the user, who writes one note at a time
         (``TooManyTurns``).
         ``ConversationNotFound`` unless the user can read the project; the caller checks that
@@ -586,7 +589,7 @@ class TurnManager:
             raise store.ConversationNotFound(project_id)
         note = store.get_note(conn, project_id, kind, subject_id, language)
         if note is None:
-            text = note_request(kind, subject_id, language)
+            text = note_request(kind, subject_id, language, facts=facts)
             made: list[store.Note] = []
 
             def begin():
@@ -619,6 +622,8 @@ class TurnManager:
         kind: str,
         subject_id: str,
         language: str,
+        *,
+        facts: dict[str, int] | None = None,
     ) -> NoteView:
         """``explain``, after removing the note if it failed."""
         if not can_access_project(conn, user, project_id, "read"):
@@ -626,7 +631,7 @@ class TurnManager:
         note = store.get_note(conn, project_id, kind, subject_id, language)
         if note is not None and self._view(conn, note).state == "failed":
             store.delete_note(conn, note)
-        return self.explain(conn, user, project_id, kind, subject_id, language)
+        return self.explain(conn, user, project_id, kind, subject_id, language, facts=facts)
 
     @staticmethod
     def _view(conn: sqlite3.Connection, note: store.Note) -> NoteView:

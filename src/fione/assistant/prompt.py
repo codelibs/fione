@@ -83,7 +83,20 @@ NOTE_REQUESTS = {
         " candidates and ask which one the person wants to predict, and do not propose. At most"
         " 120 words, no headings, no tables. Answer in {language}."
     ),
+    "prediction": (
+        "Batch prediction job {id} with model {model} finished. Its output is dataset {output}:"
+        " the column predict holds the prediction and, for a classification, the columns"
+        " p_<class> hold the probabilities. Use describe_dataset and get_column_stats on the"
+        " output dataset to read it, and get_leaderboard for the quality of the model. Say in"
+        " plain words what the predictions look like (for a classification: how many rows fall"
+        " in each predicted class and how sure the model mostly is; for a regression: the usual"
+        " range), how far to trust them given the quality of the model, and one or two things"
+        " to check before acting on them. At most 120 words, no headings, no tables. Answer in"
+        " {language}."
+    ),
 }
+# The integer facts a note's request names besides its subject, by kind.
+NOTE_FACTS = {"prediction": ("model", "output")}
 
 
 class ContextTooSmall(Exception):
@@ -100,12 +113,21 @@ def system_prompt(language: str, project_id: str, project_name: str) -> str:
     )
 
 
-def note_request(kind: str, subject_id: str, language: str) -> str:
-    """The user message of a note about ``subject_id`` (``ValueError`` for an unknown kind)."""
+def note_request(
+    kind: str, subject_id: str, language: str, *, facts: dict[str, int] | None = None
+) -> str:
+    """The user message of a note about ``subject_id``, naming the integer ``facts`` its kind
+    needs (only integers: no text from the database or a person reaches it). ``ValueError``
+    for an unknown kind or facts that are not exactly the kind's integers."""
     if kind not in NOTE_REQUESTS:
         raise ValueError(f"unknown note kind {kind!r}")
+    facts = facts or {}
+    if set(facts) != set(NOTE_FACTS.get(kind, ())) or any(
+        type(value) is not int for value in facts.values()
+    ):
+        raise ValueError(f"a {kind} note needs the integers {NOTE_FACTS.get(kind, ())}")
     return NOTE_REQUESTS[kind].format(
-        id=subject_id, language=LANGUAGE_NAMES.get(language, "English")
+        id=subject_id, language=LANGUAGE_NAMES.get(language, "English"), **facts
     )
 
 

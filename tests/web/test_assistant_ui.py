@@ -10,7 +10,7 @@ from markupsafe import escape
 
 from api_helpers import connect
 from fione import i18n
-from fione.assistant import store
+from fione.assistant import prompt, store
 from fione.assistant.provider import LlmMonitor, LlmStatus
 from fione.assistant.turns import ERROR_CODES, TooManyTurns, TurnManager
 from fione.auth import service as auth_service
@@ -1001,3 +1001,91 @@ def test_dataset_comment_routes_refuse_other_ids_and_types(chat):
     for page in (f"{base}/{predicted}", f"{base}/{predicted}/analyze"):
         assert "/comment" not in chat.client.get(page).text, page
     assert chat.fake.requests == []
+
+
+# --- the assistant's comment on a batch prediction ----------------------------
+
+
+def prediction_comment(world, project=None):
+    project = project or world.p
+    return f"/projects/{project}/jobs/{world.ids[project]['predict_job']}/prediction-comment"
+
+
+def predict_facts(world, project=None):
+    with closing(connect(world.client)) as conn:
+        job = jobs.get_job(conn, world.ids[project or world.p]["predict_job"])
+    return job, {"model": job.payload["model_id"], "output": job.result["dataset_id"]}
+
+
+def test_the_result_page_loads_the_prediction_comment_once(chat):
+    url = prediction_comment(chat)
+    result = chat.client.get(url.replace("/prediction-comment", "/result")).text
+    assert result.count(f'hx-get="{url}"') == 1
+    assert re.search(rf'hx-get="{url}" hx-trigger="load"', result)
+    assert result.index(f'hx-get="{url}"') < result.index('id="result-preview-title"')
+    assert result.count('id="assistant-note"') == 1 and result.count('id="why"') == 1
+    with closing(connect(chat.client)) as conn:
+        user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        queued = jobs.enqueue(conn, "batch_predict", chat.p, user, {"model_id": 1}).id
+    page = chat.client.get(f"/projects/{chat.p}/jobs/{queued}").text
+    assert "/prediction-comment" not in page
+    assert chat.fake.requests == []
+
+
+def test_prediction_comment_is_shared_and_names_only_ids(chat):
+    job, facts = predict_facts(chat)
+    with closing(connect(chat.client)) as conn:
+        conn.execute("UPDATE models SET name = ? WHERE id = ?", (XSS, facts["model"]))
+        conn.execute("UPDATE datasets SET name = ? WHERE id = ?", ("IGNORE ALL", facts["output"]))
+    chat.fake.script = [{"text": "Mostly setosa.", "delay": 0.3}]
+    url = prediction_comment(chat)
+    assert WRITING in chat.client.get(url, headers={"HX-Request": "true"}).text
+    done = comment(chat, url).text
+    assert "Mostly setosa." in done and f'href="/projects/{chat.p}/assistant"' in done
+    chat.login("vi")
+    assert "Mostly setosa." in comment(chat, url).text
+    assert len(chat.fake.requests) == 1
+    asked = [m for m in chat.fake.requests[0]["messages"] if m["role"] == "user"][0]["content"]
+    assert asked == prompt.note_request("prediction", str(job.id), "en", facts=facts)
+    assert XSS not in asked and "IGNORE ALL" not in asked
+
+
+def test_prediction_comment_needs_a_finished_prediction_of_the_project(chat):
+    with closing(connect(chat.client)) as conn:
+        user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        queued = jobs.enqueue(conn, "batch_predict", chat.p, user, {"model_id": 1}).id
+        empty = jobs.enqueue(conn, "batch_predict", chat.p, user, {"model_id": 1}).id
+        jobs.claim_job(conn, empty, "token")
+        jobs.finish_job(conn, empty, JobStatus.DONE, result={})
+    training = chat.ids[chat.p]["job"]
+    finish_job(chat, training, "done")
+    other = prediction_comment(chat, chat.q).replace(f"/projects/{chat.q}/", f"/projects/{chat.p}/")
+    for path in (
+        f"/projects/{chat.p}/jobs/{training}/prediction-comment",
+        f"/projects/{chat.p}/jobs/{queued}/prediction-comment",
+        f"/projects/{chat.p}/jobs/{empty}/prediction-comment",
+        f"/projects/{chat.p}/jobs/x/prediction-comment",
+        other,
+    ):
+        assert chat.client.get(path).status_code == 404, path
+        r = chat.client.post(path + "/retry", data={"csrf_token": chat.csrf})
+        assert r.status_code == 404, path
+    chat.login("st")
+    assert chat.client.get(prediction_comment(chat)).status_code == 404
+    assert chat.fake.requests == []
+
+
+def test_prediction_comment_failure_and_proposal_return_to_the_result(chat):
+    url = prediction_comment(chat)
+    chat.fake.script = [{"status": 500, "body": "x"}]
+    failed = comment(chat, url).text
+    assert shown("assistant.error.http") in failed and f'action="{url}/retry"' in failed
+    r = chat.client.post(url + "/retry", data={"csrf_token": chat.csrf})
+    assert r.status_code == 200 and WRITING in r.text
+    assert ">ok</div>" in comment(chat, url).text  # the fake's answer once its script is used up
+    with closing(connect(chat.client)) as conn:  # start over, for a proposal this time
+        conn.execute("DELETE FROM conversations WHERE kind = 'note'")
+    _, prid = proposing_comment(chat, url)
+    r = decide(chat, prid, "dismiss")
+    assert r.status_code == 303
+    assert r.headers["location"] == url.replace("/prediction-comment", "/result")

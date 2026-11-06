@@ -1270,6 +1270,27 @@ def test_note_requests_name_the_subject_and_the_language():
     assert "120 words" in dataset
     with pytest.raises(ValueError):
         prompt.note_request("column", "1", "en")
+    facts = {"model": 8, "output": 9}
+    prediction = prompt.note_request("prediction", "7", "en", facts=facts)
+    assert "Batch prediction job 7 with model 8 finished" in prediction
+    assert "Its output is dataset 9" in prediction and "English" in prediction
+    for wrong in ({"model": 8}, {"model": "8", "output": 9}, {"model": True, "output": 9}):
+        with pytest.raises(ValueError):
+            prompt.note_request("prediction", "7", "en", facts=wrong)
+
+
+def test_explain_carries_the_facts_of_a_note(env, manager):
+    one, fake = manager([{"text": "Predictions."}])
+    facts = {"model": 3, "output": 4}
+    view = one.explain(env.conn, env.owner, env.project.id, "prediction", "2", "en", facts=facts)
+    assert view.state == "writing"
+    asked = [m for m in fake_requests(env, one, fake)[0]["messages"] if m["role"] == "user"]
+    assert asked[0]["content"] == prompt.note_request("prediction", "2", "en", facts=facts)
+
+
+def fake_requests(env, manager_, fake, timeout=10.0):
+    wait_until(lambda: fake.requests, timeout)
+    return fake.requests
 
 
 def settled(env, manager_, user=None, kind="model", subject="1", language="en", timeout=10.0):

@@ -1479,7 +1479,7 @@ def test_the_reasons_wait_or_say_why_instead_of_loading(make_client, monkeypatch
     # iris: 3 classes x 4 columns = 12 cells a row; 5 rows x 10 = 600
     monkeypatch.setattr(easyml.explain, "CELLS", 599)
     page = world.client.get(url).text
-    assert 'hx-trigger="load"' not in page and f'hx-get="{why}"' in page
+    assert f'hx-get="{why}" hx-trigger="load"' not in page and f'hx-get="{why}"' in page
     assert "Show why" in page
     monkeypatch.setattr(easyml.explain, "CELLS", 11)
     page = world.client.get(url).text
