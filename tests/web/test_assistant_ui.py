@@ -554,15 +554,40 @@ def test_consent_post_for_another_host_shows_the_page_again(remote, host):
     assert 'name="host" value="llm.invalid"' in r.text
 
 
-def test_viewer_sees_the_banner_not_the_page(remote):
+def test_viewer_sees_the_state_not_the_setup_page(remote):
     remote.login("vi")
     assert remote.client.get(SETUP, follow_redirects=False).status_code == 403
     r = page_of(remote)
     assert r.status_code == 200
     text = shown("assistant.state.consent_required")
-    assert text in banner(r.text) and text in r.text.replace(banner(r.text), "")
+    assert banner(r.text) is None and text in r.text  # the page says it once, in its body
     assert SETUP not in r.text
     assert text in banner(remote.client.get("/").text)
+
+
+def test_the_setup_page_shows_its_consent_without_the_banner(remote):
+    csrf = remote.login("admin")
+    page = remote.client.get(SETUP).text
+    assert banner(page) is None
+    assert shown("consent.confirm", host="llm.invalid") in page
+    again = remote.client.post(SETUP, data={"csrf_token": csrf, "host": "other.example.com"})
+    assert again.status_code == 409 and banner(again.text) is None
+    assert shown("consent.confirm", host="llm.invalid") in again.text
+    assert f'href="{SETUP}"' in banner(remote.client.get("/").text)  # elsewhere it stays
+
+
+@pytest.mark.parametrize("state", NOT_READY)
+def test_the_assistant_page_says_the_state_without_the_banner(chat, state):
+    use_monitor(chat.client, state=state)
+    text = shown(f"assistant.state.{state}")
+    cid = new_conversation(chat)
+    for query in ("", f"?c={cid}"):
+        page = page_of(chat, query).text
+        assert banner(page) is None and text in page, query
+    assert text in banner(chat.client.get(f"/projects/{chat.p}").text)
+    if state != "consent_required":  # an administrator is then sent to the setup page
+        chat.login("admin")
+        assert text in banner(chat.client.get("/admin/system").text)
 
 
 def test_local_host_has_no_consent_page_redirect(chat):
@@ -648,7 +673,8 @@ def test_consent_page_and_banner_escape_hostile_text(remote):
     remote.login("ed")
     page = page_of(remote).text
     assert str(escape(XSS)) in page and XSS not in page  # the remote warning names the host
-    assert XSS not in banner(page) and str(escape(XSS)) not in banner(page)
+    project = remote.client.get(f"/projects/{remote.p}").text  # a page with the banner
+    assert XSS not in banner(project) and str(escape(XSS)) not in banner(project)
 
 
 # --- the assistant's comments -------------------------------------------------

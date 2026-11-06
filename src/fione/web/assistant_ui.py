@@ -214,6 +214,7 @@ def conversation_page(
         "detail": detail,
         "text": text,
         "examples": EXAMPLES,
+        "hide_llm_banner": True,  # the page says the assistant's state itself
         **_llm(request),
     }
     if conversation is not None:
