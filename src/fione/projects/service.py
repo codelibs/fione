@@ -282,10 +282,9 @@ def get_dataset(conn: sqlite3.Connection, dataset_id: int) -> Dataset:
 
 
 def delete_dataset(conn: sqlite3.Connection, storage: Storage, dataset_id: int) -> None:
-    """Delete the dataset with its assistant's comments, and those on the batch predictions
-    that wrote it, then its file."""
+    """Delete the dataset's assistant's comments, and those on the batch predictions that
+    wrote it, then the dataset, so a failure leaves it for a retry, then its file."""
     dataset = get_dataset(conn, dataset_id)
-    conn.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
     assistant_store.delete_notes_of(conn, "dataset", dataset_id)
     predictions = conn.execute(
         "SELECT id FROM jobs WHERE kind = 'batch_predict'"
@@ -294,4 +293,5 @@ def delete_dataset(conn: sqlite3.Connection, storage: Storage, dataset_id: int) 
     ).fetchall()
     for row in predictions:
         assistant_store.delete_notes_of(conn, "prediction", row["id"])
+    conn.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
     storage.delete(dataset.key)
