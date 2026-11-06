@@ -22,6 +22,7 @@ from fione.api.schemas import (
     event_out,
     job_out,
 )
+from fione.assistant import store as assistant_store
 from fione.auth.roles import Role, User
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
@@ -230,9 +231,11 @@ def remove_job_files(request: Request, job: Job) -> None:
 
 
 def delete_finished_job(request: Request, conn, job: Job) -> None:
-    """Delete a finished job with its events, log and export zip (the caller has checked
-    write access); ``KeyError`` if it is gone, ``ValueError`` if it has not finished."""
+    """Delete a finished job with its events, log, export zip and assistant's comments (the
+    caller has checked write access); ``KeyError`` if it is gone, ``ValueError`` if it has not
+    finished."""
     store.delete_job(conn, job.id)
+    assistant_store.delete_notes_of(conn, "failed_job", job.id)
     remove_job_files(request, job)
 
 
