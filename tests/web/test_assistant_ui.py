@@ -736,6 +736,8 @@ def test_comment_when_the_assistant_is_busy(chat, monkeypatch):
     url = model_comment(chat)
     r = comment(chat, url)
     assert shown("note.busy") in r.text
+    # it asks again by itself, no more often than every 3 seconds; the button stays
+    assert re.search(rf'hx-get="{url}" hx-trigger="load delay:3s"', r.text)
     assert f'hx-get="{url}"' in r.text and shown("note.retry") in r.text
 
 
@@ -984,3 +986,18 @@ def test_a_dataset_comment_proposal_trains_or_returns_to_the_analysis(chat):
     )
     assert r.status_code == 303
     assert r.headers["location"] == q_url.removesuffix("/comment") + "/analyze"
+
+
+def test_dataset_comment_routes_refuse_other_ids_and_types(chat):
+    with closing(connect(chat.client)) as conn:
+        predicted = conn.execute(
+            "SELECT id FROM datasets WHERE project_id = ? AND type = 'predict'", (chat.p,)
+        ).fetchone()[0]
+    base = f"/projects/{chat.p}/datasets"
+    for did in ("x", "1.5", str(chat.ids[chat.p]["test"]), str(predicted)):
+        assert chat.client.get(f"{base}/{did}/comment").status_code == 404, did
+        r = chat.client.post(f"{base}/{did}/comment/retry", data={"csrf_token": chat.csrf})
+        assert r.status_code == 404, did
+    for page in (f"{base}/{predicted}", f"{base}/{predicted}/analyze"):
+        assert "/comment" not in chat.client.get(page).text, page
+    assert chat.fake.requests == []

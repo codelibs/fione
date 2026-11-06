@@ -7,10 +7,10 @@ with it. Messages are escaped plain text; a tool row only names what was read. W
 is active, HTMX polls the thread; its last answer (and any failure to show it) is 286, which
 ends the polling. The page never fails because the LLM cannot be used: it says why.
 
-The assistant's comments (notes) on a model and on a failed job are fragments their pages
-load: any reader of the project sees the one note of the subject in their language, which
-the first of them to open the page starts. Whatever the assistant's state, the fragment is a
-200 that says it.
+The assistant's comments (notes) on a model, a failed job and a training dataset are
+fragments their pages load: any reader of the project sees the one note of the subject in their
+language, which the first of them to open the page starts. Whatever the assistant's state, the
+fragment is a 200 that says it; while the assistant is busy it asks again by itself.
 """
 
 import logging

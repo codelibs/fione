@@ -114,8 +114,10 @@ the assistant needs to answer: the names of the project, its datasets and models
 kinds, statistics (missing rates, ranges, correlations), and the results of models, with example
 values from your datasets: the most frequent values of a column, the labels of a classification,
 the points of a curve, and the messages of a job, including the failure message of a failed job
-(cut to 200 characters). All of it goes to the configured model server. Claude, and an Ollama on
-another machine, need an administrator's one-time consent first. MCP clients never receive
+(cut to 200 characters). An automatic comment is sent the same way on the first view of its page
+by any member of the project, without a question: the column names, statistics and example values
+it reads go to the same model host. All of it goes to the configured model server. Claude, and an
+Ollama on another machine, need an administrator's one-time consent first. MCP clients never receive
 example values (see MCP).
 
 With Claude, or an Ollama on another machine, every chat user sees a warning with its host name.
@@ -210,6 +212,6 @@ sentence, and `code` with `params` is what the Training proposal card translates
 | "is not available to this API key" (model_not_found, 404) | The model name in `FIONE_LLM_MODEL` is not available to the key: check the name, and that the key's organization can use that model. A 404 without the Anthropic API's answer (a gateway without that address) shows as "answered with an error" instead. |
 | "The model declined to answer" (refused) | The model refused this question. Ask it in other words. |
 | "The reply was cut off before it began" (truncated) | The model used its whole `FIONE_LLM_MAX_TOKENS` before it wrote anything, thinking included. Raise `FIONE_LLM_MAX_TOKENS`. |
-| A comment says "The assistant is busy" | As many answers as allowed are running (see Limits). Wait a moment and press **Try again**. |
+| A comment says "The assistant is busy" | As many answers as allowed are running (see Limits). The comment asks again by itself every few seconds and appears once an answer ends; **Try again** does the same at once. |
 | A comment shows only the assistant's state ("cannot reach", "not downloaded yet"...) | The assistant is not ready, so no comment is written; fix it as in the rows above and reload the page. A comment written earlier is still shown. |
 | An answer stops with "took too long" | Ask something smaller, or raise `FIONE_LLM_TURN_TIMEOUT_SECS`; on a CPU-only Ollama, answers are slow. |
