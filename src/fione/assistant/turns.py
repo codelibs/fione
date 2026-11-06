@@ -106,7 +106,6 @@ class NoteView:
     text: str
     error_code: str | None
     conversation_id: int
-    owner_id: int  # who may decide its training proposal
 
 
 class _Made(Exception):
@@ -205,6 +204,10 @@ class _Turn:
         ).fetchone()[0]
         if first is None:
             raise ValueError("the turn has no user message")
+        kind = self.conn.execute(
+            "SELECT kind FROM conversations WHERE id = ?", (self.conversation_id,)
+        ).fetchone()
+        note = kind is not None and kind["kind"] == "note"
         rounds = 0
         while True:
             self._check_stop()
@@ -224,6 +227,11 @@ class _Turn:
                 )
             content = completion.content[:MAX_CONTENT_CHARS]
             if not completion.tool_calls:
+                # A note is kept and shared, so an empty or cut-off one fails (and can be retried)
+                if note and completion.finish_reason == "length":
+                    raise _Failed("truncated")
+                if note and not content.strip():
+                    raise _Failed("failed")
                 store.finish_message(self.conn, self.row, "done", content=content)
                 return
             self.partial = content  # what a cancel or the deadline keeps from here on
@@ -637,9 +645,6 @@ class TurnManager:
 
     @staticmethod
     def _view(conn: sqlite3.Connection, note: store.Note) -> NoteView:
-        owner = conn.execute(
-            "SELECT user_id FROM conversations WHERE id = ?", (note.conversation_id,)
-        ).fetchone()
         answer = store.note_answer(conn, note.conversation_id)
         state, text, code = "failed", "", "failed"
         if answer is not None:
@@ -652,7 +657,7 @@ class TurnManager:
                 code = "cancelled"
             else:
                 code = answer.error_code if answer.error_code in ERROR_CODES else "failed"
-        return NoteView(state, text, code, note.conversation_id, owner["user_id"] if owner else 0)
+        return NoteView(state, text, code, note.conversation_id)
 
     def _run(self, conversation_id, assistant_id, cancel: threading.Event, language, deadline):
         try:

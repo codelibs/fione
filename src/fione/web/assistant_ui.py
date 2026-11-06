@@ -374,17 +374,14 @@ def delete(request: Request, conn: Conn, pid: str, cid: str, form: SmallForm) ->
 
 
 def _proposal(request: Request, conn, pid: str, prid: str, token: str):
-    """The signed-in user's own proposal and its conversation (a chat or a note's), for a
-    person who can write to the project (404 for anyone else's, other projects' and missing
-    ones)."""
+    """The proposal and its conversation, for a person who can write to the project: of a
+    chat, only its user's own; of a note, any such person's (404 for anyone else's chat,
+    other projects' and missing ones)."""
     same_site(request)
     ctx = action(request, conn, pid, token, need="write")
     try:
-        proposal = store.get_proposal(conn, ctx.auth.user, pid, parse_id(prid))
-        conversation = store.get_conversation(
-            conn, ctx.auth.user, pid, proposal.conversation_id, kind=None
-        )
-    except (ProposalNotFound, ConversationNotFound):
+        proposal, conversation = store.get_proposal(conn, ctx.auth.user, pid, parse_id(prid))
+    except ProposalNotFound:
         raise UiError(404, "error.not_found") from None
     return ctx, proposal, conversation
 
@@ -527,7 +524,8 @@ def _note_subject(conn, ctx: Ctx, kind: str, sid) -> tuple[int, dict[str, int] |
             or type(output) is not int
         ):
             raise UiError(404, "error.not_found")
-        dataset_in(conn, ctx, str(output))  # still there, in the project
+        model_in(conn, ctx, str(model_id))  # both still there, in the project
+        dataset_in(conn, ctx, str(output))
         return job.id, {"model": model_id, "output": output}
     if job.kind != "automl" or job.status != JobStatus.FAILED:
         raise UiError(404, "error.not_found")
@@ -538,9 +536,11 @@ def _note_fragment(request: Request, conn, ctx: Ctx, kind: str, sid, *, retry=Fa
     subject, facts = _note_subject(conn, ctx, kind, sid)
     pid = ctx.project.id
     where = NOTE_SUBJECTS[kind]
+    status = llm_status(request)
     note = {
         "url": f"/projects/{pid}/{where.path}/{subject}/{where.fragment}",
         "ask": f"/projects/{pid}/assistant" + (f"?ask={where.ask}:{subject}" if where.ask else ""),
+        "remote_host": None if status.local else status.host,  # as the chat page warns
     }
     manager = request.app.state.turns
     write = manager.retry if retry else manager.explain
@@ -549,7 +549,6 @@ def _note_fragment(request: Request, conn, ctx: Ctx, kind: str, sid, *, retry=Fa
             conn, ctx.auth.user, pid, kind, str(subject), language(request), facts=facts
         )
     except LlmUnavailable:
-        status = llm_status(request)
         if status.error_code == "unauthorized":
             message = "assistant.error.unauthorized"
         elif status.state != "ready":
@@ -567,7 +566,6 @@ def _note_fragment(request: Request, conn, ctx: Ctx, kind: str, sid, *, retry=Fa
         if view.state == "failed":
             note["message"] = f"assistant.error.{view.error_code}"
         if view.state == "done":
-            note["owner"] = view.owner_id == ctx.auth.user.id
             try:
                 cards = _cards(conn, view.conversation_id, pid)
             except Exception:  # the comment is still worth showing without its proposal
