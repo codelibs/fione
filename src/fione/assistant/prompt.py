@@ -74,6 +74,15 @@ NOTE_REQUESTS = {
         " cause in plain words and what the person can change. At most 100 words, no headings."
         " Answer in {language}."
     ),
+    "dataset": (
+        "Dataset {id} was just uploaded. Use describe_dataset to look at it. Say in one sentence"
+        " what the data seems to be about. Then say what could go wrong for a training, in plain"
+        " words: missing values, columns that identify rows, a column that gives the answer"
+        " away, few rows, a rare class. Then, if one column is an obvious thing to predict,"
+        " propose a training with propose_training_config; if it is not obvious, name the likely"
+        " candidates and ask which one the person wants to predict, and do not propose. At most"
+        " 120 words, no headings, no tables. Answer in {language}."
+    ),
 }
 
 

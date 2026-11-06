@@ -9,10 +9,10 @@ plain text; a tool row only names what was read. While a turn is active, HTMX po
 thread; its last answer (and any failure to show it) is 286, which ends the polling. The page
 never fails because the LLM cannot be used: it says why.
 
-The assistant's comments (notes) on a model and on a failed job are fragments their pages
-load: any reader of the project sees the one note of the subject in their language, which
-the first of them to open the page starts. Whatever the assistant's state, the fragment is a
-200 that says it.
+The assistant's comments (notes) on a model, a failed job and a training dataset are
+fragments their pages load: any reader of the project sees the one note of the subject in their
+language, which the first of them to open the page starts. Whatever the assistant's state, the
+fragment is a 200 that says it; while the assistant is busy it asks again by itself.
 """
 
 import logging
@@ -394,8 +394,9 @@ def _back(conn, pid: str, conversation: Conversation) -> RedirectResponse:
     note = store.note_of(conn, conversation.id)
     if note is None:
         return RedirectResponse(_page_url(pid), 303)
-    path = "models" if note.kind == "model" else "jobs"
-    return RedirectResponse(f"/projects/{pid}/{path}/{note.subject_id}", 303)
+    path, _ = NOTE_SUBJECTS[note.kind]
+    suffix = "/analyze" if note.kind == "dataset" else ""  # the page an upload leads to
+    return RedirectResponse(f"/projects/{pid}/{path}/{note.subject_id}{suffix}", 303)
 
 
 def _refused(request: Request, conn, ctx: Ctx, conversation, status, key, detail=""):
@@ -482,11 +483,24 @@ def dismiss(request: Request, conn: Conn, pid: str, prid: str, form: SmallForm) 
 
 # --- the assistant's comments -----------------------------------------------
 
+# A note's kind -> the path segment of its subject and its ``?ask=`` prefill.
+NOTE_SUBJECTS = {
+    "model": ("models", "model"),
+    "failed_job": ("jobs", "job"),
+    "dataset": ("datasets", "dataset"),
+}
+
 
 def _note_subject(conn, ctx: Ctx, kind: str, sid) -> int:
-    """The id of the note's subject in the project: a model, or a training job that failed."""
+    """The id of the note's subject in the project: a model, a training job that failed, or a
+    training dataset."""
     if kind == "model":
         return model_in(conn, ctx, sid).id
+    if kind == "dataset":
+        dataset = dataset_in(conn, ctx, sid)
+        if dataset.type != DatasetType.TRAIN:
+            raise UiError(404, "error.not_found")
+        return dataset.id
     job = job_in(conn, ctx, sid)
     if job.kind != "automl" or job.status != JobStatus.FAILED:
         raise UiError(404, "error.not_found")
@@ -496,7 +510,7 @@ def _note_subject(conn, ctx: Ctx, kind: str, sid) -> int:
 def _note_fragment(request: Request, conn, ctx: Ctx, kind: str, sid, *, retry=False) -> Response:
     subject = _note_subject(conn, ctx, kind, sid)
     pid = ctx.project.id
-    path, ask = ("models", "model") if kind == "model" else ("jobs", "job")
+    path, ask = NOTE_SUBJECTS[kind]
     status = llm_status(request)
     note = {
         "url": f"/projects/{pid}/{path}/{subject}/comment",
@@ -546,6 +560,11 @@ def job_comment(request: Request, conn: Conn, pid: str, jid: str) -> Response:
     return _note_fragment(request, conn, page(request, conn, pid), "failed_job", jid)
 
 
+@router.get("/projects/{pid}/datasets/{did}/comment")
+def dataset_comment(request: Request, conn: Conn, pid: str, did: str) -> Response:
+    return _note_fragment(request, conn, page(request, conn, pid), "dataset", did)
+
+
 @router.post("/projects/{pid}/models/{mid}/comment/retry")
 def retry_model_comment(
     request: Request, conn: Conn, pid: str, mid: str, form: SmallForm
@@ -562,3 +581,12 @@ def retry_job_comment(
     same_site(request)
     ctx = action(request, conn, pid, field(form, "csrf_token"), need="read")
     return _note_fragment(request, conn, ctx, "failed_job", jid, retry=True)
+
+
+@router.post("/projects/{pid}/datasets/{did}/comment/retry")
+def retry_dataset_comment(
+    request: Request, conn: Conn, pid: str, did: str, form: SmallForm
+) -> Response:
+    same_site(request)
+    ctx = action(request, conn, pid, field(form, "csrf_token"), need="read")
+    return _note_fragment(request, conn, ctx, "dataset", did, retry=True)

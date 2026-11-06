@@ -348,9 +348,18 @@ def trained(stack, browser, admin, data) -> Trained:
     page.click(".project-card__link:text-is('Iris e2e')")
     page.wait_for_url("**/projects/*")
     project = page.url.removeprefix(stack.base)
+    from playwright.sync_api import expect
+
+    page.goto("/admin/system")  # the fake is pulled and ready, so the upload gets its comment
+    expect(page.locator("section[aria-labelledby=llm-title] .badge-success")).to_be_visible(
+        timeout=60_000
+    )
     page.goto(project + "/upload")
     upload(page, data["iris"])
     page.wait_for_url("**/analyze")
+    # the assistant comments on the upload by itself (the fake model's answer)
+    note = page.locator("#assistant-note[data-note=done]")
+    expect(note).to_contain_text("(fake)", timeout=30_000)
     assert page.locator("#target-select").input_value() == "species"
     assert page.locator("#task-classification").is_checked()
     page.check("#runtime-1")

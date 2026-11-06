@@ -751,6 +751,8 @@ def test_comment_when_the_assistant_is_busy(chat, monkeypatch):
     url = model_comment(chat)
     r = comment(chat, url)
     assert shown("note.busy") in r.text
+    # it asks again by itself, no more often than every 3 seconds; the button stays
+    assert re.search(rf'hx-get="{url}" hx-trigger="load delay:3s"', r.text)
     assert f'hx-get="{url}"' in r.text and shown("note.retry") in r.text
 
 
@@ -1009,6 +1011,19 @@ def test_deleting_a_subject_removes_its_comments(chat):
     assert notes_left(chat) == ({("model", str(other))}, 1)
 
 
+def test_deleting_a_dataset_removes_its_comments(chat):
+    train, other = chat.ids[chat.p]["train"], chat.ids[chat.q]["train"]
+    for language in ("en", "ja"):
+        make_note(chat, "dataset", train, language)
+    make_note(chat, "dataset", other, project=chat.q)
+    make_note(chat, "model", train)  # the same id of another kind stays
+    r = chat.client.post(
+        f"/projects/{chat.p}/datasets/{train}/delete", data={"csrf_token": chat.csrf}
+    )
+    assert r.status_code == 200
+    assert notes_left(chat) == ({("dataset", str(other)), ("model", str(train))}, 2)
+
+
 def notes_fail(monkeypatch):
     """Make removing notes fail, as a database error would."""
 
@@ -1040,6 +1055,15 @@ def test_a_failed_comment_removal_keeps_the_subject_for_a_retry(chat, monkeypatc
     assert status == 200 and notes_left(chat) == (set(), 0)
 
 
+def test_a_failed_comment_removal_keeps_the_dataset_for_a_retry(chat, monkeypatch):
+    train = chat.ids[chat.p]["train"]
+    make_note(chat, "dataset", train)
+    status = delete_failing_then_retry(
+        chat, monkeypatch, f"/projects/{chat.p}/datasets/{train}/delete"
+    )
+    assert status == 200 and notes_left(chat) == (set(), 0)
+
+
 def test_only_a_failed_training_has_a_comment(chat):
     with closing(connect(chat.client)) as conn:
         user = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
@@ -1048,3 +1072,126 @@ def test_only_a_failed_training_has_a_comment(chat):
     url = f"/projects/{chat.p}/jobs/{job}/comment"
     assert chat.client.get(url).status_code == 404
     assert all(url not in text for text in job_pages(chat, job))  # nor a loader for it
+
+
+# --- the assistant's comment on a training dataset ----------------------------
+
+
+def dataset_comment(world, project=None, which="train"):
+    project = project or world.p
+    return f"/projects/{project}/datasets/{world.ids[project][which]}/comment"
+
+
+def test_dataset_pages_load_the_comment_once(chat):
+    url = dataset_comment(chat)
+    base = url.removesuffix("/comment")
+    analysis = chat.client.get(base + "/analyze").text
+    assert analysis.count(f'hx-get="{url}"') == 1
+    assert re.search(rf'hx-get="{url}" hx-trigger="load"', analysis)
+    # outside the part the target selector re-renders
+    assert analysis.index(f'hx-get="{url}"') < analysis.index('id="analysis-body"')
+    assert chat.client.get(base).text.count(f'hx-get="{url}"') == 1
+    chat.mode = "detailed"
+    chat.login("ed")
+    assert chat.client.get(base).text.count(f'hx-get="{url}"') == 1
+    test = dataset_comment(chat, which="test").removesuffix("/comment")
+    for page in (test, test + "/analyze"):
+        assert "/comment" not in chat.client.get(page).text, page
+    assert chat.fake.requests == []
+
+
+def test_dataset_comment_is_written_once_and_shared(chat):
+    chat.fake.script = [{"text": "Flowers. Predict species?", "delay": 0.3}]
+    url = dataset_comment(chat)
+    first = chat.client.get(url, headers={"HX-Request": "true"})
+    assert first.status_code == 200 and WRITING in first.text
+    done = comment(chat, url).text
+    assert "Flowers. Predict species?" in done and shown("note.title") in done
+    assert f"/projects/{chat.p}/assistant?ask=dataset:{chat.ids[chat.p]['train']}" in done
+    chat.login("vi")
+    assert "Flowers. Predict species?" in comment(chat, url).text
+    assert len(chat.fake.requests) == 1
+    asked = [m for m in chat.fake.requests[0]["messages"] if m["role"] == "user"]
+    assert f"Dataset {chat.ids[chat.p]['train']} was just uploaded" in asked[0]["content"]
+
+
+def test_dataset_comment_needs_a_training_dataset_of_the_project(chat):
+    assert chat.client.get(dataset_comment(chat, which="test")).status_code == 404
+    other = f"/projects/{chat.p}/datasets/{chat.ids[chat.q]['train']}/comment"
+    assert chat.client.get(other).status_code == 404
+    chat.login("st")
+    assert chat.client.get(dataset_comment(chat)).status_code == 404
+    chat.login(None)
+    r = chat.client.get(dataset_comment(chat), follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/login?next=")
+    assert chat.fake.requests == []
+
+
+def test_dataset_comment_states(chat, monkeypatch):
+    url = dataset_comment(chat)
+    chat.fake.script = [{"status": 500, "body": "x"}, {"text": "Second try."}]
+    failed = comment(chat, url).text
+    assert shown("assistant.error.http") in failed and f'action="{url}/retry"' in failed
+    r = chat.client.post(url + "/retry", data={"csrf_token": chat.csrf})
+    assert r.status_code == 200 and WRITING in r.text
+    assert "Second try." in comment(chat, url).text
+    other = dataset_comment(chat, chat.q)
+
+    def busy(*args, **kwargs):
+        raise TooManyTurns()
+
+    with monkeypatch.context() as m:
+        m.setattr(TurnManager, "explain", busy)
+        assert shown("note.busy") in comment(chat, other).text
+    use_monitor(chat.client, state="unreachable")
+    assert shown("assistant.state.unreachable") in comment(chat, other).text
+
+
+def test_a_dataset_comment_proposal_trains_or_returns_to_the_analysis(chat):
+    url = dataset_comment(chat)
+    mine, prid = proposing_comment(chat, url)
+    assert "Try this." in mine
+    chat.login("vi")
+    theirs = comment(chat, url).text
+    assert "/confirm" not in theirs and shown("assistant.proposal.viewer_note") in theirs
+    chat.csrf = chat.login("co")  # an editor who did not write the comment
+    r = decide(chat, prid, "confirm")
+    assert r.status_code == 303 and re.fullmatch(
+        rf"/projects/{chat.p}/jobs/\d+", r.headers["location"]
+    )
+    with closing(connect(chat.client)) as conn:
+        job = jobs.get_job(conn, int(r.headers["location"].rsplit("/", 1)[1]))
+    assert job.kind == "automl" and job.payload["dataset_id"] == chat.ids[chat.p]["train"]
+    # another subject's proposal, dismissed: back to its analysis
+    chat.csrf = chat.login("ed")
+    q_url = dataset_comment(chat, chat.q)
+    chat.fake.script = [
+        {"tool_calls": [{"name": "propose_training_config",
+                         "arguments": {"dataset_id": chat.ids[chat.q]["train"],
+                                       "target": "species"}}]},
+        {"text": "Try that."},
+    ]  # fmt: skip
+    html = comment(chat, q_url).text
+    q_prid = re.search(r"/assistant/proposals/(\d+)/dismiss", html)[1]
+    r = chat.client.post(
+        f"/projects/{chat.q}/assistant/proposals/{q_prid}/dismiss",
+        data={"csrf_token": chat.csrf},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == q_url.removesuffix("/comment") + "/analyze"
+
+
+def test_dataset_comment_routes_refuse_other_ids_and_types(chat):
+    with closing(connect(chat.client)) as conn:
+        predicted = conn.execute(
+            "SELECT id FROM datasets WHERE project_id = ? AND type = 'predict'", (chat.p,)
+        ).fetchone()[0]
+    base = f"/projects/{chat.p}/datasets"
+    for did in ("x", "1.5", str(chat.ids[chat.p]["test"]), str(predicted)):
+        assert chat.client.get(f"{base}/{did}/comment").status_code == 404, did
+        r = chat.client.post(f"{base}/{did}/comment/retry", data={"csrf_token": chat.csrf})
+        assert r.status_code == 404, did
+    for page in (f"{base}/{predicted}", f"{base}/{predicted}/analyze"):
+        assert "/comment" not in chat.client.get(page).text, page
+    assert chat.fake.requests == []

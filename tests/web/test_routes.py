@@ -266,7 +266,8 @@ SHARING_PATHS = {
 # and the stranger use the owner's. The thread of a conversation with no active turn is the
 # poller's last fragment (286). A proposal is its conversation's creator's too; the personas
 # without a conversation or write access of their own use the owner's pending proposal. The
-# assistant's comment on a model or a failed job is a fragment for every reader (200).
+# assistant's comment on a model, a failed job or a training dataset is a fragment for every
+# reader (200).
 CHAT = P + "/assistant"
 ASSISTANT_ROUTES = {
     ("GET", CHAT): READ,
@@ -281,6 +282,8 @@ ASSISTANT_ROUTES = {
     ("POST", P + "/models/{model}/comment/retry"): (401, 200, 200, 200, 404, 200),
     ("GET", P + "/jobs/{job}/comment"): READ,  # the job has failed
     ("POST", P + "/jobs/{job}/comment/retry"): (401, 200, 200, 200, 404, 200),
+    ("GET", P + "/datasets/{train}/comment"): READ,
+    ("POST", P + "/datasets/{train}/comment/retry"): (401, 200, 200, 200, 404, 200),
 }
 ASSISTANT_PATHS = {
     "/projects/{pid}/assistant": CHAT,
@@ -295,6 +298,8 @@ ASSISTANT_PATHS = {
     "/projects/{pid}/models/{mid}/comment/retry": P + "/models/{model}/comment/retry",
     "/projects/{pid}/jobs/{jid}/comment": P + "/jobs/{job}/comment",
     "/projects/{pid}/jobs/{jid}/comment/retry": P + "/jobs/{job}/comment/retry",
+    "/projects/{pid}/datasets/{did}/comment": P + "/datasets/{train}/comment",
+    "/projects/{pid}/datasets/{did}/comment/retry": P + "/datasets/{train}/comment/retry",
 }
 
 

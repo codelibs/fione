@@ -22,7 +22,7 @@ from fione.schema import clean_text
 
 MAX_MESSAGE_CHARS = 4000
 MAX_USER_MESSAGES = 100  # per conversation
-NOTE_KINDS = ("model", "failed_job")  # what a note can be about
+NOTE_KINDS = ("model", "failed_job", "dataset")  # what a note can be about
 MAX_CONVERSATIONS = 100  # per user and project
 MAX_TITLE_CHARS = 80
 TERMINAL_STATES = ("done", "failed", "cancelled")

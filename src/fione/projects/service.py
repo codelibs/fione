@@ -6,6 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 
+from fione.assistant import store as assistant_store
 from fione.auth.roles import ProjectAccess, Role, User, project_access
 from fione.storage import Storage
 
@@ -281,6 +282,9 @@ def get_dataset(conn: sqlite3.Connection, dataset_id: int) -> Dataset:
 
 
 def delete_dataset(conn: sqlite3.Connection, storage: Storage, dataset_id: int) -> None:
+    """Delete the dataset's assistant's comments, then the dataset, so a failure leaves it for
+    a retry, then its file."""
     dataset = get_dataset(conn, dataset_id)
+    assistant_store.delete_notes_of(conn, "dataset", dataset_id)
     conn.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
     storage.delete(dataset.key)

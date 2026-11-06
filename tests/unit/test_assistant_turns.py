@@ -1264,8 +1264,12 @@ def test_note_requests_name_the_subject_and_the_language():
     assert "propose_training_config" in model and "150 words" in model
     job = prompt.note_request("failed_job", "34", "en")
     assert "job 34" in job and "get_training_events" in job and "English" in job
+    dataset = prompt.note_request("dataset", "56", "ja")
+    assert "Dataset 56 was just uploaded" in dataset and "Japanese" in dataset
+    assert "describe_dataset" in dataset and "propose_training_config" in dataset
+    assert "120 words" in dataset
     with pytest.raises(ValueError):
-        prompt.note_request("dataset", "1", "en")
+        prompt.note_request("column", "1", "en")
 
 
 def settled(env, manager_, user=None, kind="model", subject="1", language="en", timeout=10.0):

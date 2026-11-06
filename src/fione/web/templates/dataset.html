@@ -24,6 +24,7 @@
     {% endif %}
     <a class="btn btn-ghost" href="/api/v1/projects/{{ pid }}/datasets/{{ dataset.id }}/download" download>{{ icon("download") }}{{ t('dataset.download') }}</a>
   </div>
+  {% if dataset.type.value == "train" %}<section class="card card-padded stack-tight assistant-note" id="assistant-note" hx-get="{{ base }}/comment" hx-trigger="load" hx-target="this" hx-swap="outerHTML"><p class="text-muted text-sm">{{ t('note.loading') }}</p></section>{% endif %}
 
   <div class="tabs" data-tabs>
     <div class="tabs__list" role="tablist" aria-label="{{ t('dataset.tabs') }}">

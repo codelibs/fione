@@ -86,13 +86,21 @@ use, how to improve it) that fill in the box the same way.
 
 ## Automatic comments
 
-A model's summary and model pages, and the page of a failed training, show an **Assistant's comment**:
-a short explanation in plain words. For a model it says whether the result is good, mediocre or
-poor against the baseline, what mostly drives the prediction, any problem in the data and one to
-three next steps; for a failed training, why it failed and what to change. When a change clearly
-helps, the comment can carry a training proposal. Every member sees it, and anyone who can edit
-the project can confirm or dismiss it, whoever's visit wrote the comment; once decided, everyone
-sees it as started or dismissed. Viewers see the card without buttons.
+A model's summary and model pages, the page of a failed training, and the data analysis and
+dataset pages of a training dataset show an **Assistant's comment**: a short explanation in plain
+words. For a model it says whether the result is good, mediocre or poor against the baseline,
+what mostly drives the prediction, any problem in the data and one to three next steps; for a
+failed training, why it failed and what to change. For a training dataset, which the person who
+uploads it sees first on the data analysis page, it says what the data seems to be about and
+what could go wrong for a training (missing values, columns that identify rows, a column that
+gives the answer away, few rows, a rare class); when one column is the obvious thing to predict
+it proposes a training, otherwise it names the likely columns and asks which one to predict.
+Test and prediction datasets get no comment. When a change clearly helps, the comment can carry
+a training proposal. Every member sees it, and anyone who can edit the project can confirm or
+dismiss it, whoever's visit wrote the comment; once decided, everyone sees it as started or
+dismissed. Viewers see the card without buttons. A confirmed proposal starts the training as one
+from the chat does; deciding it returns to the comment's page (for a dataset, its data analysis
+page).
 
 A comment is written the first time a member of the project opens the page, in the language of
 that page, and then kept: every member who can read the project sees the same comment in that
@@ -100,7 +108,8 @@ language, and nothing is sent again. It is written by the same model, with the s
 tools and limits as a question in the chat (it counts as one of the opener's answers at once),
 and does not appear among anyone's conversations. Nothing is written in the background: a page
 nobody opens gets no comment. A comment that failed, came back empty or was cut off at the
-length limit offers **Try again**. Deleting the model or the job deletes its comments too.
+length limit offers **Try again**. Deleting the model, the job or the dataset deletes its comments
+too.
 
 ## What is sent
 
@@ -109,9 +118,10 @@ the assistant needs to answer: the names of the project, its datasets and models
 kinds, statistics (missing rates, ranges, correlations), and the results of models, with example
 values from your datasets: the most frequent values of a column, the labels of a classification,
 the points of a curve, and the messages of a job, including the failure message of a failed job
-(cut to 200 characters). An assistant's comment sends the same kind of data, without anyone
-asking, the first time a member opens its page. All of it goes to the configured model server. Claude, and an Ollama on
-another machine, need an administrator's one-time consent first. MCP clients never receive
+(cut to 200 characters). An automatic comment is sent the same way on the first view of its page
+by any member of the project, without a question: the column names, statistics and example values
+it reads go to the same model host. All of it goes to the configured model server. Claude, and an
+Ollama on another machine, need an administrator's one-time consent first. MCP clients never receive
 example values (see MCP).
 
 With Claude, or an Ollama on another machine, the chat page and every assistant's comment show a
@@ -207,6 +217,6 @@ sentence, and `code` with `params` is what the Training proposal card translates
 | "is not available to this API key" (model_not_found, 404) | The model name in `FIONE_LLM_MODEL` is not available to the key: check the name, and that the key's organization can use that model. A 404 without the Anthropic API's answer (a gateway without that address) shows as "answered with an error" instead. |
 | "The model declined to answer" (refused) | The model refused this question. Ask it in other words. |
 | "The reply was cut off at its length limit" (truncated) | The model used its whole `FIONE_LLM_MAX_TOKENS` (thinking included) before it wrote anything, or, for a comment, before it finished. Raise `FIONE_LLM_MAX_TOKENS`. |
-| A comment says "The assistant is busy" | As many answers as allowed are running (see Limits). Wait a moment and press **Try again**. |
+| A comment says "The assistant is busy" | As many answers as allowed are running (see Limits). The comment asks again by itself every few seconds and appears once an answer ends; **Try again** does the same at once. |
 | A comment shows only the assistant's state ("cannot reach", "not downloaded yet"...) | The assistant is not ready, so no comment is written; fix it as in the rows above and reload the page. A comment written earlier is still shown. |
 | An answer stops with "took too long" | Ask something smaller, or raise `FIONE_LLM_TURN_TIMEOUT_SECS`; on a CPU-only Ollama, answers are slow. |
