@@ -257,6 +257,16 @@ def test_claude_stream_that_stops_short_is_a_protocol_error(fake_llm):
     assert raised.value.code == "protocol"
 
 
+@pytest.mark.parametrize("error", [{"type": ["x"], "message": "odd"}, "text", None])
+def test_claude_malformed_error_event_is_still_an_llm_error(fake_llm, error):
+    event = {"type": "error", "error": error}
+    body = f"event: error\ndata: {json.dumps(event)}\n\n"
+    fake = fake_llm([{"status": 200, "body": body, "content_type": "text/event-stream"}])
+    with pytest.raises(LlmError) as raised:
+        _complete(_client(fake))
+    assert raised.value.code == "protocol"
+
+
 def test_claude_request_has_required_headers(fake_llm):
     fake = fake_llm(api_key=KEY)
     assert _complete(_client(fake)).content == "ok"

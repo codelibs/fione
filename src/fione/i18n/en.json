@@ -1122,7 +1122,7 @@
   "assistant.error.timeout": "The assistant took too long and stopped. Try a shorter or simpler question.",
   "assistant.error.too_many_steps": "The assistant needed too many steps for this question. Try asking about one thing at a time.",
   "assistant.error.unauthorized": "The language model server did not accept the API key. An administrator should check FIONE_LLM_API_KEY.",
-  "assistant.error.rate_limited": "The language model service is receiving too many requests right now. Try again in a minute.",
+  "assistant.error.rate_limited": "The language model service is receiving too many requests right now. Try again in a minute. If it keeps failing, the account may have reached its monthly spending limit.",
   "assistant.error.overloaded": "The language model service is overloaded right now. Try again soon.",
   "assistant.error.truncated": "The reply was cut off before it began. An administrator can raise FIONE_LLM_MAX_TOKENS.",
   "assistant.error.refused": "The model declined to answer this question. Try asking it in other words.",

@@ -94,10 +94,9 @@ class _Reply:
         kind = event.get("type")
         if kind == "error":
             error = event.get("error")
+            kind = error.get("type") if isinstance(error, dict) else None
             raise LlmError(
-                STREAM_ERRORS.get(
-                    error.get("type") if isinstance(error, dict) else None, "protocol"
-                ),
+                STREAM_ERRORS.get(kind, "protocol") if isinstance(kind, str) else "protocol",
                 f"the server reported an error: {_error_text(event)}",
                 secret=self._secret,
             )
