@@ -233,10 +233,10 @@ def remove_job_files(request: Request, job: Job) -> None:
 def delete_finished_job(request: Request, conn, job: Job) -> None:
     """Delete a finished job with its events, log, export zip and assistant's comments (the
     caller has checked write access); ``KeyError`` if it is gone, ``ValueError`` if it has not
-    finished."""
-    store.delete_job(conn, job.id)
+    finished. The comments go first, so a failure leaves the job for a retry."""
     assistant_store.delete_notes_of(conn, "failed_job", job.id)
     assistant_store.delete_notes_of(conn, "prediction", job.id)
+    store.delete_job(conn, job.id)
     remove_job_files(request, job)
 
 

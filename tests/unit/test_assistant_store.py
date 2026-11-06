@@ -714,6 +714,16 @@ def test_a_proposal_of_a_note_is_found_by_whoever_can_write(conn, owner, member,
         store.get_proposal(conn, member, project.id, proposal.id)
 
 
+def test_a_proposal_of_a_note_that_is_not_done_is_not_found(conn, owner, project):
+    note, placeholder = store.create_note(conn, owner, project.id, "model", "7", "en", "x")
+    proposal = store.add_proposal(conn, placeholder.id, note.conversation_id, None, {}, {})
+    with pytest.raises(ProposalNotFound):  # still being written
+        store.get_proposal(conn, owner, project.id, proposal.id)
+    store.finish_message(conn, placeholder.id, "failed", error_code="failed")
+    with pytest.raises(ProposalNotFound):
+        store.get_proposal(conn, owner, project.id, proposal.id)
+
+
 def test_the_text_of_a_note_is_its_first_answer(conn, owner, project):
     note, placeholder = store.create_note(conn, owner, project.id, "model", "7", "en", "x")
     store.finish_message(conn, placeholder.id, "done", content="first")

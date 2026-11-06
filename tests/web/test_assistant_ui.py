@@ -881,6 +881,27 @@ def test_a_viewer_or_stranger_cannot_decide_a_comment_proposal(chat):
     assert shown("assistant.proposal.dismissed") in html and "/confirm" not in html
 
 
+def test_a_proposal_of_a_failed_comment_cannot_be_decided(chat):
+    train = chat.ids[chat.p]["train"]
+    chat.fake.script = [
+        {"tool_calls": [{"name": "propose_training_config",
+                         "arguments": {"dataset_id": train, "target": "species"}}]},
+        {"text": ""},
+    ]  # fmt: skip
+    url = model_comment(chat)
+    failed = comment(chat, url).text
+    assert 'data-note="failed"' in failed and "/confirm" not in failed
+    with closing(connect(chat.client)) as conn:
+        (prid,) = conn.execute("SELECT MAX(id) FROM chat_proposals").fetchone()
+        jobs_before = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    assert prid is not None
+    for route in ("confirm", "dismiss"):
+        assert decide(chat, prid, route).status_code == 404, route
+    assert proposal_state(chat, prid) == ("pending", None, None)
+    with closing(connect(chat.client)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == jobs_before
+
+
 def test_a_proposal_of_a_comment_a_viewer_opened_first_is_confirmable(chat):
     chat.login("vi")
     url = model_comment(chat)
@@ -1028,6 +1049,46 @@ def test_deleting_a_dataset_removes_its_comments(chat):
     )
     assert r.status_code == 200
     assert notes_left(chat) == ({("dataset", str(other)), ("model", str(train))}, 2)
+
+
+def notes_fail(monkeypatch):
+    """Make removing notes fail, as a database error would."""
+
+    def broken(*args):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(store, "delete_notes_of", broken)
+
+
+def delete_failing_then_retry(chat, monkeypatch, path):
+    """Delete with the note removal failing, then again once it works; the retry's status."""
+    with monkeypatch.context() as m:
+        notes_fail(m)
+        with pytest.raises(RuntimeError):
+            chat.client.post(path, data={"csrf_token": chat.csrf})
+    return chat.client.post(path, data={"csrf_token": chat.csrf}).status_code
+
+
+def test_a_failed_comment_removal_keeps_the_subject_for_a_retry(chat, monkeypatch):
+    model, job = chat.ids[chat.p]["model"], chat.ids[chat.p]["job"]
+    finish_job(chat, job, "failed")
+    make_note(chat, "model", model)
+    make_note(chat, "failed_job", job)
+    status = delete_failing_then_retry(
+        chat, monkeypatch, f"/projects/{chat.p}/models/{model}/delete"
+    )
+    assert status == 200 and notes_left(chat) == ({("failed_job", str(job))}, 1)
+    status = delete_failing_then_retry(chat, monkeypatch, f"/projects/{chat.p}/jobs/{job}/delete")
+    assert status == 200 and notes_left(chat) == (set(), 0)
+
+
+def test_a_failed_comment_removal_keeps_the_dataset_for_a_retry(chat, monkeypatch):
+    train = chat.ids[chat.p]["train"]
+    make_note(chat, "dataset", train)
+    status = delete_failing_then_retry(
+        chat, monkeypatch, f"/projects/{chat.p}/datasets/{train}/delete"
+    )
+    assert status == 200 and notes_left(chat) == (set(), 0)
 
 
 def test_only_a_failed_training_has_a_comment(chat):
@@ -1300,3 +1361,28 @@ def test_deleting_a_prediction_or_its_output_removes_its_comments(chat):
     r = chat.client.post(f"/projects/{chat.p}/jobs/{job.id}/delete", data={"csrf_token": chat.csrf})
     assert r.status_code == 200
     assert notes_left(chat) == ({("prediction", str(other.id))}, 1)
+
+
+def test_a_failed_prediction_comment_removal_keeps_its_job_and_output(chat, monkeypatch):
+    job, facts = predict_facts(chat)
+    make_note(chat, "prediction", job.id)
+    real = store.delete_notes_of
+
+    def broken(conn, kind, subject_id):
+        if kind == "prediction":
+            raise RuntimeError("database is locked")
+        real(conn, kind, subject_id)
+
+    for path in (
+        f"/projects/{chat.p}/datasets/{facts['output']}/delete",
+        f"/projects/{chat.p}/jobs/{job.id}/delete",
+    ):
+        with monkeypatch.context() as m:
+            m.setattr(store, "delete_notes_of", broken)
+            with pytest.raises(RuntimeError):
+                chat.client.post(path, data={"csrf_token": chat.csrf})
+        assert notes_left(chat) == ({("prediction", str(job.id))}, 1), path
+        r = chat.client.post(path, data={"csrf_token": chat.csrf})  # the retry
+        assert r.status_code == 200, path
+        assert notes_left(chat) == (set(), 0), path
+        make_note(chat, "prediction", job.id)  # for the job's turn
