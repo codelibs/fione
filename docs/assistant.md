@@ -165,13 +165,21 @@ same name and mostly the same values) and says how they relate: one dataset has 
 value and the other several (a customer and their purchases), or both repeat (rows of two
 tables for the same day). Columns with fewer than 20 values are not reported when both sides
 repeat, since they are categories rather than keys. A dataset with several rows per key is
-added to the one with the column to predict by the **Join** module: choose the key and turn on
-`summarize`, which gives each key one row (the number of rows, and the mean, minimum, maximum
-and sum of each number). Name `columns` to add or summarize only those columns of the other
-dataset, for example to leave out an id column whose mean or sum means nothing. When both repeat,
-summarize the one that is not the base first. The
-assistant cannot join anything itself; it explains what to join, and suggests training once
-the joined dataset exists.
+added to the one with the column to predict by the **Join** module: the key, and `summarize`,
+which gives each key one row (the number of rows, and the mean, minimum, maximum and sum of each
+number). Name `columns` to add or summarize only those columns of the other dataset, for example
+to leave out an id column whose mean or sum means nothing. When both repeat, summarize the one
+that is not the base first.
+
+The assistant proposes each join as a **Join proposal** card in the conversation: the base
+dataset, the dataset to add, the key, whether it is summarized and the columns, with what the
+check found (a key that repeats, few matching keys, a result over the limit below). A person who
+can edit the project confirms it with **Create the joined dataset**, which starts a Join job;
+the result is a new dataset, and the base dataset stays as it is. Like a training proposal, it
+is stored as proposed and never changed by the buttons. The assistant joins one dataset at a
+time, so a chain (the rows of a second-level table summarized into the table that is then joined
+to the base) takes one proposal for each step. It suggests training once the joined dataset
+exists.
 
 Join only what is known when the model predicts: a summary of purchases that include the
 period to predict leaks the answer. Key columns are read whole up to 5 million rows; a larger
@@ -191,7 +199,7 @@ columns** before you join.
 | One answer | At most 6 rounds of reading (`FIONE_LLM_MAX_TOOL_ROUNDS`), 180 seconds (`FIONE_LLM_TURN_TIMEOUT_SECS`) |
 | Answers at once | 2 on the server (`FIONE_LLM_MAX_CONCURRENT_TURNS`), 3 per person, 8 waiting |
 | Comments being written | 1 per person at a time (it counts toward their 3 answers); another page shows "busy" until it is done |
-| A tool result | Cut to 32 KB, and the cut is reported to the model |
+| A tool result | Cut to 32 KB, or to a third of the room the context leaves for messages when that is less (a wide dataset is then described by its first columns); the cut is reported to the model |
 
 An answer that is still running when Fione restarts ends as interrupted; ask again.
 
@@ -212,10 +220,13 @@ Compose). The endpoint is `/mcp` on Fione's own port, for example `http://127.0.
 
 The client acts as the token's owner and sees the projects that person can read: it can list
 projects, datasets and models and read their descriptions, results and explanations, and it can
-get a proposed training configuration back, which is not saved. It cannot start or change
+get a proposed training configuration or Join back, which is not saved. It cannot start or change
 anything, and it never receives example values. A token has the same rights as you, so keep it secret.
 Behind a reverse proxy, block `/mcp` unless you want MCP clients outside your network. At most
 two tool calls run at once.
+
+The result of `propose_join` has the keys `proposal` (`true`), `kind` (`join`), `config` (the
+parameters of the Join module), `warnings` and `rationale`, with the warnings as below.
 
 The result of `propose_training_config` has the keys `proposal` (`true`), `config`,
 `ignored_suggestions`, `warnings` and `rationale`. Each warning is an object `{code, message, params}`: `message` is an English

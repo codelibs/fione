@@ -398,3 +398,69 @@ def test_downgraded_to_viewer_member_cannot_confirm(setup):
         projects.share_project(conn, owner, world.p, "co", ProjectAccess.VIEWER)
     assert post(world, "confirm", proposal, "co").status_code == 403
     assert (job_count(world), stored(world, proposal)) == (before, ("pending", None))
+
+
+def join_proposal(setup, username="ed", **changes):
+    """A pending proposal to join the test dataset onto the training one by a key column."""
+    fake, world = setup
+    ids = world.ids[world.p]
+    arguments = {
+        "dataset_id": ids["train"],
+        "other_dataset_id": ids["test"],
+        "key": "sepal length (cm)",
+        "summarize": True,
+        **changes,
+    }
+    call = {"name": "propose_join", "arguments": arguments}
+    proposal = make_proposal(world.client, fake, username, world.p, ids["train"], call=call)
+    return world, proposal
+
+
+def test_a_join_proposal_is_confirmed_as_a_join_module_job(setup):
+    world, proposal = join_proposal(setup, columns="sepal width (cm)")
+    assert proposal.kind == "join"
+    assert proposal.config["summarize"] is True and proposal.config["columns"] == [
+        "sepal width (cm)"
+    ]
+    world.login("ed")
+    html = world.client.get(f"/projects/{world.p}/assistant?c={proposal.conversation_id}").text
+    assert "Join proposal" in html and "Create the joined dataset" in html
+    assert "Summarized to one row per key" in html and "sepal width (cm)" in html
+    before = job_count(world)
+    r = post(world, "confirm", proposal, params="{}", module_id="rbind")
+    assert r.status_code == 303 and job_count(world) == before + 1
+    state, job_id = stored(world, proposal)
+    assert state == "confirmed" and r.headers["location"] == f"/projects/{world.p}/jobs/{job_id}"
+    with closing(connect(world.client)) as conn:
+        job = jobs.get_job(conn, job_id)
+    assert job.kind == "module"
+    assert job.payload["module_id"] == "join"  # never the posted one
+    assert job.payload["dataset_id"] == proposal.dataset_id
+    assert job.payload["params"]["other_dataset_id"] == proposal.config["other_dataset_id"]
+    assert job.payload["params"]["columns"] == ["sepal width (cm)"]
+    assert post(world, "confirm", proposal).status_code == 303
+    assert job_count(world) == before + 1  # once
+
+
+def test_a_join_proposal_is_refused_to_a_viewer_and_when_a_dataset_is_gone(setup):
+    world, proposal = join_proposal(setup)
+    before = job_count(world)
+    assert post(world, "confirm", proposal, username="vi").status_code == 403
+    with closing(connect(world.client)) as conn:
+        projects.delete_dataset(
+            conn, world.client.app.state.storage, proposal.config["other_dataset_id"]
+        )
+    r = post(world, "confirm", proposal)
+    assert r.status_code == 409 and job_count(world) == before
+    assert stored(world, proposal) == ("pending", None)
+
+
+def test_a_join_card_names_a_deleted_dataset(setup):
+    world, proposal = join_proposal(setup)
+    with closing(connect(world.client)) as conn:
+        projects.delete_dataset(
+            conn, world.client.app.state.storage, proposal.config["other_dataset_id"]
+        )
+    world.login("ed")
+    html = world.client.get(f"/projects/{world.p}/assistant?c={proposal.conversation_id}").text
+    assert "no longer available" in html

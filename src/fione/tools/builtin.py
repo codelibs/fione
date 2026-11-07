@@ -53,6 +53,7 @@ from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import explanations
 from fione.models import service as models
+from fione.modules.registry import MAX_OUTPUT_CELLS
 from fione.projects import ingest
 from fione.projects import service as projects
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
@@ -193,7 +194,7 @@ def _column_entry(col: ColumnProfile, allow_samples: bool) -> dict:
 # --- describe_dataset / get_column_stats ---------------------------------
 
 
-def _fit_columns(result: dict, total: int) -> None:
+def _fit_columns(result: dict, total: int, limit: int) -> None:
     """Cut ``columns`` until the result fits the size cap, and say how many are left out."""
     columns = result["columns"]
     while True:
@@ -202,7 +203,7 @@ def _fit_columns(result: dict, total: int) -> None:
             result["n_more_columns"] = total - len(columns)
             result["truncated"] = True
             result["truncated_lists"] = ["columns"]
-        if fits(result) or not columns:
+        if fits(result, limit) or not columns:
             return
         del columns[len(columns) - max(1, len(columns) // 10) :]
 
@@ -241,7 +242,7 @@ def _describe_dataset(ctx: ToolContext, args: dict) -> dict:
         ],
         "leak_check_partial": profile.leak_partial,
     }
-    _fit_columns(result, len(names))
+    _fit_columns(result, len(names), ctx.max_result_bytes)
     return result
 
 
@@ -963,6 +964,101 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
     return result
 
 
+# --- propose_join ---------------------------------------------------------
+
+
+def _join_columns_added(dataset: Dataset, key: str, chosen: list[str], summarize: bool) -> int:
+    """How many columns Join adds: the chosen ones (all but the key if none are chosen), or with
+    ``summarize`` a count, and four for each number or one for any other column."""
+    kinds = {name: kind for name, kind in dataset.schema if name != key}
+    if chosen:
+        kinds = {name: kinds[name] for name in chosen if name in kinds}
+    if not summarize:
+        return len(kinds)
+    numbers = sum(k.startswith(("int", "uint")) or k in _FLOAT_TYPES for k in kinds.values())
+    return 1 + 4 * numbers + len(kinds) - numbers
+
+
+def _propose_join(ctx: ToolContext, args: dict) -> dict:
+    base = _dataset(ctx, args["dataset_id"])
+    other = _dataset(ctx, args["other_dataset_id"])
+    if base.project_id != other.project_id:
+        raise ToolError("the two datasets are in different projects")
+    if base.id == other.id:
+        raise ToolError("a dataset cannot be joined to itself")
+    base_names = [name for name, _ in base.schema]
+    other_names = [name for name, _ in other.schema]
+    key = _resolve_column(base_names, args["key"], "base dataset")
+    other_key = _resolve_column(other_names, args.get("other_key") or args["key"], "other dataset")
+    given = args.get("columns", "")
+    names = [given] if given in other_names else [c.strip() for c in given.split(",") if c.strip()]
+    chosen = [_resolve_column(other_names, c, "other dataset") for c in names]
+    chosen = [c for c in dict.fromkeys(chosen) if c != other_key]
+    if not all(_is_plain(name) for name in (key, other_key, *chosen)):
+        raise ToolError("a column name is not plain text and cannot be proposed")
+    summarize = bool(args.get("summarize", False))
+
+    warnings: list[dict] = []
+    try:
+        base_frame, base_sampled = _read_keys(ctx, base, [key])
+        other_frame, other_sampled = _read_keys(ctx, other, [other_key])
+        base_keys = _key_set(base_frame, key)
+        other_keys = _key_set(other_frame, other_key)
+    except (KeyError, ValueError):  # a column the file cannot give: the checks are skipped
+        base_keys = other_keys = None
+        base_sampled = other_sampled = False
+    if other_keys is not None and not other_keys[1] and not summarize:
+        warnings.append(
+            _warning(
+                "join_key_repeats",
+                f"the values of '{clean_text(other_key)}' repeat in the other dataset, so the "
+                "join is refused unless summarize is on",
+                column=clean_text(other_key),
+            )
+        )
+    # the share of matching keys is judged on whole columns only: two samples of a large pair
+    # of datasets share far fewer keys than the datasets do
+    if base_keys is not None and other_keys is not None and not (base_sampled or other_sampled):
+        matched = len(base_keys[0] & other_keys[0]) / len(base_keys[0])
+        if matched < _MIN_SHARED:
+            warnings.append(
+                _warning(
+                    "join_few_matches",
+                    f"only {matched:.0%} of the key values of the base dataset are in the "
+                    "other dataset, so most rows would get empty values",
+                    share=f"{matched * 100:.0f}",
+                )
+            )
+    cells = base.n_rows * (
+        len(base_names) + _join_columns_added(other, other_key, chosen, summarize)
+    )
+    if cells > MAX_OUTPUT_CELLS:
+        warnings.append(
+            _warning(
+                "join_too_large",
+                f"the result would have about {cells // 10**6} million cells, over the limit of "
+                f"{MAX_OUTPUT_CELLS // 10**6} million; name fewer columns",
+                cells=str(cells // 10**6),
+                limit=str(MAX_OUTPUT_CELLS // 10**6),
+            )
+        )
+    config = {
+        "other_dataset_id": other.id,
+        "key": key,
+        "other_key": "" if other_key == key else other_key,
+        "summarize": summarize,
+        "columns": chosen,
+    }
+    notes = args.get("notes")
+    return {
+        "proposal": True,
+        "kind": "join",
+        "config": config,
+        "warnings": warnings,
+        "rationale": None if notes is None else clean_text(notes, _RATIONALE_CHARS),
+    }
+
+
 # --- listings -------------------------------------------------------------
 
 
@@ -1156,6 +1252,35 @@ for _tool in (
         _schema({"project_id": _PROJECT}, ["project_id"]),
         True,
         _find_table_links,
+    ),
+    Tool(
+        "propose_join",
+        "Call this whenever the user asks to join datasets, instead of describing the join: it "
+        "makes the card the user confirms. It proposes the Join of another dataset onto a base "
+        "dataset by a key column; nothing is started. The result is a new dataset. Use "
+        "summarize when the other dataset has several rows per key. Name columns to add only "
+        "those, leaving out ids and anything not known when the model predicts.",
+        _schema(
+            {
+                "dataset_id": _ID,
+                "other_dataset_id": _ID,
+                "key": _COLUMN,
+                "other_key": {
+                    **_COLUMN,
+                    "description": "if named differently in the other dataset",
+                },
+                "summarize": {"type": "boolean"},
+                "columns": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "description": "names, comma-separated",
+                },
+                "notes": {"type": "string", "maxLength": 2000},
+            },
+            ["dataset_id", "other_dataset_id", "key"],
+        ),
+        True,
+        _propose_join,
     ),
     Tool(
         "list_projects",

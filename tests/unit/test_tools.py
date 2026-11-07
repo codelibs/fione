@@ -44,6 +44,7 @@ TOOL_NAMES = [
     "get_training_events",
     "propose_training_config",
     "find_table_links",
+    "propose_join",
     "list_projects",
     "list_datasets",
     "list_models",
@@ -759,6 +760,25 @@ def test_a_wide_numeric_dataset_is_cut_to_the_size_cap(env):
     assert len(json.dumps(result, allow_nan=False)) <= MAX_RESULT_BYTES
 
 
+def test_a_context_can_lower_the_size_cap_of_a_result(env):
+    rng = np.random.default_rng(2)
+    frame = pd.DataFrame({f"n{i:03d}": rng.normal(size=100) for i in range(200)})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "wide-num", DatasetType.TRAIN, [frame]
+    )
+    args = {"dataset_id": ds.id}
+    whole = call(env, "describe_dataset", args)
+    small = ToolContext(
+        env.conn, env.storage, env.users.owner, project_id=env.project.id, max_result_bytes=6000
+    )
+    cut = call_tool("describe_dataset", args, small)
+    assert len(json.dumps(cut, allow_nan=False)) <= 6000
+    assert cut["truncated"] is True and len(cut["columns"]) < len(whole["columns"])
+    assert cut["n_more_columns"] > whole["n_more_columns"]
+    larger = ToolContext(env.conn, env.storage, env.users.owner, max_result_bytes=10**9)
+    assert call_tool("describe_dataset", args, larger) == whole  # never above the fixed cap
+
+
 def test_describe_reads_a_bounded_sample(env, monkeypatch):
     frames = (
         pd.DataFrame(
@@ -808,7 +828,7 @@ def test_read_dataset_sample(env):
 
 def test_list_tools_format_and_order():
     tools = list_tools()
-    assert [t["function"]["name"] for t in tools] == TOOL_NAMES and len(tools) <= 12
+    assert [t["function"]["name"] for t in tools] == TOOL_NAMES and len(tools) <= 13
     assert list_tools() == tools
     for tool in tools:
         assert set(tool) == {"type", "function"} and tool["type"] == "function"

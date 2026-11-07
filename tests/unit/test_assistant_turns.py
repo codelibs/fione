@@ -41,7 +41,7 @@ from fione.projects import service as projects
 from fione.projects.service import DatasetType
 from fione.storage import LocalStorage
 from fione.tools import list_tools
-from fione.tools.registry import MAX_RESULT_BYTES, NOT_ALLOWED
+from fione.tools.registry import NOT_ALLOWED
 
 TOOL_NAMES = {t["function"]["name"] for t in list_tools()}
 TOO_LARGE = {
@@ -385,9 +385,35 @@ def test_a_second_proposal_in_one_round_is_refused(env, fake_llm):
     rows = turn(env, settings_for(env, fake))
     first, second = tool_results(rows)
     assert first["proposal"] is True
-    assert second == {"error": "one training proposal per step"}
+    assert second == {"error": "one proposal per step"}
     assert len(store.proposals_for(env.conn, env.conversation.id)) == 1
     assert rows[-1].state == "done"
+
+
+def test_a_join_proposal_is_stored_with_its_kind_and_shares_the_one_per_step(env, fake_llm):
+    extra = pd.DataFrame({"sepal length (cm)": [5.1, 4.9], "z": [1, 2]})
+    other = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "extra", DatasetType.TRAIN, [extra]
+    )
+    join = {
+        "dataset_id": env.iris.id,
+        "other_dataset_id": other.id,
+        "key": "sepal length (cm)",
+        "summarize": True,
+    }
+    train = {"dataset_id": env.iris.id, "target": "species"}
+    fake = fake_llm([
+        {"tool_calls": [{"name": "propose_join", "arguments": join},
+                        {"name": "propose_training_config", "arguments": train}]},
+        {"text": "Proposed."},
+    ])  # fmt: skip
+    rows = turn(env, settings_for(env, fake))
+    first, second = tool_results(rows)
+    assert first["proposal"] is True and first["kind"] == "join"
+    assert second == {"error": "one proposal per step"}
+    (proposal,) = store.proposals_for(env.conn, env.conversation.id).values()
+    assert proposal.kind == "join" and proposal.dataset_id == env.iris.id
+    assert proposal.config["other_dataset_id"] == other.id and proposal.config["summarize"] is True
 
 
 def test_a_refused_proposal_is_not_stored(env, fake_llm):
@@ -668,9 +694,9 @@ def test_budget_drops_old_rounds(env, fake_llm):
     for n in range(30):
         add_history_round(env.conn, env.conversation.id, n, 5000)
     fake = fake_llm([describe(env.iris.id), {"text": "ok"}])
-    settings = settings_for(env, fake, llm_context_tokens=4800, llm_max_tokens=256)
+    settings = settings_for(env, fake, llm_context_tokens=5400, llm_max_tokens=256)
     turn(env, settings, "The newest question")
-    budget = budget_bytes(4800, 256, list_tools())
+    budget = budget_bytes(5400, 256, list_tools())
     assert len(fake.requests) == 2
     for request in fake.requests:
         messages = request["messages"]
@@ -690,9 +716,9 @@ def test_budget_counts_bytes_for_japanese(env, fake_llm):
         store.add_message(env.conn, env.conversation.id, "user", "質問" * 100)
         store.add_message(env.conn, env.conversation.id, "assistant", "回答" * 100)
     fake = fake_llm([{"text": "ok"}])
-    settings = settings_for(env, fake, llm_context_tokens=6000, llm_max_tokens=256)
+    settings = settings_for(env, fake, llm_context_tokens=6600, llm_max_tokens=256)
     turn(env, settings, "最新の質問")
-    budget = budget_bytes(6000, 256, list_tools())
+    budget = budget_bytes(6600, 256, list_tools())
     everything = [
         {"role": "system", "content": "x" * len(fake.requests[0]["messages"][0]["content"])},
         *(
@@ -707,19 +733,38 @@ def test_budget_counts_bytes_for_japanese(env, fake_llm):
     assert len(messages) < len(everything)
 
 
-def test_oversized_current_result_is_replaced(env, fake_llm):
+def wide_dataset(env):
     frame = pd.DataFrame({f"column_{i:03d}_with_a_long_name": range(30) for i in range(200)})
-    wide = ingest.ingest_batches(
+    return ingest.ingest_batches(
         env.storage, env.conn, env.project.id, "wide", DatasetType.TRAIN, [frame]
     )
-    fake = fake_llm([describe(wide.id), {"text": "Ask about fewer columns."}])
-    settings = settings_for(env, fake, llm_context_tokens=4800, llm_max_tokens=256)
+
+
+def test_a_wide_dataset_is_described_by_the_columns_that_fit_the_context(env, fake_llm):
+    wide = wide_dataset(env)
+    fake = fake_llm([describe(wide.id), {"text": "Done."}])
+    settings = settings_for(env, fake, llm_context_tokens=7500, llm_max_tokens=256)
     rows = turn(env, settings)
-    stored = rows[2].content
-    assert len(stored) > MAX_RESULT_BYTES // 2 and "column_000" in stored
+    stored = json.loads(rows[2].content)
+    room = budget_bytes(7500, 256, list_tools())
+    assert stored["truncated"] is True and stored["n_more_columns"] > 0
+    assert 0 < stored["n_columns_listed"] < 200 and "column_000" in rows[2].content
+    assert len(rows[2].content.encode()) <= max(turns.MIN_RESULT_BYTES, room // 3)
     second = fake.requests[1]["messages"]
-    assert second[-1]["role"] == "tool" and json.loads(second[-1]["content"]) == TOO_LARGE
-    assert size(second) <= budget_bytes(4800, 256, list_tools())
+    assert json.loads(second[-1]["content"]) == stored  # sent as it is, not replaced
+    assert size(second) <= room and rows[-1].state == "done"
+
+
+def test_results_that_together_overflow_the_context_are_replaced_largest_first(env, fake_llm):
+    wide = wide_dataset(env)
+    fake = fake_llm([{"tool_calls": [describe(wide.id)["tool_calls"][0]] * 4}, {"text": "Ok."}])
+    settings = settings_for(env, fake, llm_context_tokens=7500, llm_max_tokens=256)
+    rows = turn(env, settings)
+    second = fake.requests[1]["messages"]
+    sent = [json.loads(m["content"]) for m in second if m["role"] == "tool"]
+    assert TOO_LARGE in sent and len(sent) == 4  # every call is still answered
+    assert size(second) <= budget_bytes(7500, 256, list_tools())
+    assert all(json.loads(r.content) != TOO_LARGE for r in rows if r.role == "tool")  # rows intact
     assert rows[-1].state == "done"
 
 
@@ -747,7 +792,7 @@ def test_the_smallest_context_fits_a_question():
 
 # What Ollama is assumed to serve before its context is known: the real default (4096) cannot
 # hold the tools and the instructions, so the tests of the fallback use this one.
-FALLBACK = 5120
+FALLBACK = 6500
 
 
 def test_ollama_context_is_learned(env, fake_llm, monkeypatch):
@@ -766,7 +811,8 @@ def test_ollama_context_is_learned(env, fake_llm, monkeypatch):
     settings = settings_for(env, fake, llm_provider="ollama", llm_max_tokens=256)
     rows = turn(env, settings)
     # round 1 at the fallback (the short question needs no model load), round 2 learned
-    assert contexts[-2:] == [FALLBACK, 8192]
+    assert FALLBACK in contexts and contexts[-1] == 8192
+    assert contexts.index(FALLBACK) < contexts.index(8192)
     assert "POST /api/generate" not in fake.paths
     assert rows[-1].state == "done"
 
@@ -795,8 +841,8 @@ def test_an_unknown_context_that_stays_unknown_is_logged(env, fake_llm, caplog, 
     fake.generate_status = 500
     fake.raw_replies["/api/ps"] = b'{"models": []}'  # nothing ever loads
     settings = settings_for(env, fake, llm_provider="ollama", llm_max_tokens=256)
-    turn(env, settings, "x" * 800)
-    turn(env, settings, "y" * 800)  # the first turn is history that no longer fits
+    turn(env, settings, "x" * 1500)
+    turn(env, settings, "y" * 1500)  # the first turn is history that no longer fits
     assert f"sized for {FALLBACK} tokens" in caplog.text
     assert size(fake.requests[-1]["messages"]) <= budget_bytes(FALLBACK, 256, list_tools())
 

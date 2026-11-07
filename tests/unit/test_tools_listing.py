@@ -31,6 +31,7 @@ TOOL_NAMES = {
     "list_datasets",
     "list_models",
     "find_table_links",
+    "propose_join",
 }
 EVIL_NAME = "a\n<script>x</script>\tb"
 
@@ -89,9 +90,9 @@ def call(env, name, args, user=None, **ctx):
     return call_tool(name, args, context)
 
 
-def test_registry_has_the_twelve_flat_tools():
+def test_registry_has_the_thirteen_flat_tools():
     tools = {t["function"]["name"]: t["function"] for t in list_tools()}
-    assert set(tools) == TOOL_NAMES and len(list_tools()) == 12
+    assert set(tools) == TOOL_NAMES and len(list_tools()) == 13
     for name, fn in tools.items():
         assert registry._TOOLS[name].read_only is True
         schema = fn["parameters"]
@@ -358,3 +359,95 @@ def test_log_names_the_channel(env, caplog):
         call(env, "list_projects", {})
     lines = [r.getMessage() for r in caplog.records if r.name == "fione.tools"]
     assert "via=mcp" in lines[0] and "via=test" in lines[1]
+
+
+def _two_tables(env, project, other_rows=None):
+    keys = pd.DataFrame({"Id": range(1, 41), "label": ["a", "b"] * 20})
+    events = pd.DataFrame(
+        {"id": [i % 40 + 1 for i in range(120)], "amount": range(120), "tag": ["t"] * 120}
+    )
+    if other_rows is not None:
+        events = events.iloc[:other_rows]
+    for name, frame in (("keys", keys), ("events", events)):
+        ingest.ingest_batches(env.storage, env.conn, project.id, name, DatasetType.TRAIN, [frame])
+    return {d.name: d for d in projects.list_datasets(env.conn, project.id)}
+
+
+def test_propose_join_returns_the_parameters_of_a_join(env):
+    by_name = _two_tables(env, env.a)
+    args = {"dataset_id": by_name["keys"].id, "other_dataset_id": by_name["events"].id}
+    found = call(env, "propose_join", {**args, "key": "Id", "other_key": "id", "notes": "why"})
+    assert found["proposal"] is True and found["kind"] == "join" and found["rationale"] == "why"
+    assert found["config"] == {
+        "other_dataset_id": by_name["events"].id,
+        "key": "Id",
+        "other_key": "id",
+        "summarize": False,
+        "columns": [],
+    }
+    # the events repeat their key: asked for as they are, the join would be refused
+    assert [w["code"] for w in found["warnings"]] == ["join_key_repeats"]
+    found = call(
+        env,
+        "propose_join",
+        {
+            **args,
+            "key": "Id",
+            "other_key": "id",
+            "summarize": True,
+            "columns": "amount, tag,amount",
+        },
+    )
+    assert found["config"]["columns"] == ["amount", "tag"] and found["warnings"] == []
+
+
+def test_propose_join_warns_about_few_matches_and_a_result_over_the_limit(env, monkeypatch):
+    by_name = _two_tables(env, env.a)
+    outside = pd.DataFrame({"Id": range(1000, 1040), "z": range(40)})
+    ingest.ingest_batches(env.storage, env.conn, env.a.id, "outside", DatasetType.TRAIN, [outside])
+    other = {d.name: d for d in projects.list_datasets(env.conn, env.a.id)}["outside"]
+    found = call(
+        env,
+        "propose_join",
+        {"dataset_id": by_name["keys"].id, "other_dataset_id": other.id, "key": "Id"},
+    )
+    assert [w["code"] for w in found["warnings"]] == ["join_few_matches"]
+    assert found["warnings"][0]["params"] == {"share": "0"}
+    monkeypatch.setattr(builtin, "MAX_OUTPUT_CELLS", 100)
+    args = {"dataset_id": by_name["keys"].id, "other_dataset_id": by_name["events"].id}
+    found = call(env, "propose_join", {**args, "key": "Id", "other_key": "id", "summarize": True})
+    (warning,) = [w for w in found["warnings"] if w["code"] == "join_too_large"]
+    assert warning["params"] == {"cells": "0", "limit": "0"}
+
+
+def test_propose_join_does_not_judge_the_matching_keys_of_a_sample(env, monkeypatch):
+    by_name = _two_tables(env, env.a)
+    outside = pd.DataFrame({"Id": range(1000, 1040), "z": range(40)})
+    ingest.ingest_batches(env.storage, env.conn, env.a.id, "outside", DatasetType.TRAIN, [outside])
+    other = {d.name: d for d in projects.list_datasets(env.conn, env.a.id)}["outside"]
+    args = {"dataset_id": by_name["keys"].id, "other_dataset_id": other.id, "key": "Id"}
+    assert [w["code"] for w in call(env, "propose_join", args)["warnings"]] == ["join_few_matches"]
+    monkeypatch.setattr(builtin, "_LINK_FULL_ROWS", 10)
+    monkeypatch.setattr(builtin, "_LINK_SAMPLE_ROWS", 25)  # two samples share few keys
+    assert call(env, "propose_join", args)["warnings"] == []
+
+
+def test_propose_join_refuses_what_a_join_cannot_do(env):
+    by_name = _two_tables(env, env.a)
+    keys, events = by_name["keys"].id, by_name["events"].id
+    with pytest.raises(ToolError, match="different projects"):
+        call(
+            env, "propose_join", {"dataset_id": keys, "other_dataset_id": env.ds_b.id, "key": "Id"}
+        )
+    with pytest.raises(ToolError, match="itself"):
+        call(env, "propose_join", {"dataset_id": keys, "other_dataset_id": keys, "key": "Id"})
+    with pytest.raises(ToolError, match="column not found in the other dataset"):
+        call(env, "propose_join", {"dataset_id": keys, "other_dataset_id": events, "key": "Id"})
+    args = {"dataset_id": keys, "other_dataset_id": events, "key": "Id", "other_key": "id"}
+    with pytest.raises(ToolError, match="column not found in the other dataset"):
+        call(env, "propose_join", {**args, "columns": "nope"})
+    with pytest.raises(ToolError, match=NOT_ALLOWED):
+        call(env, "propose_join", args, user=env.users.outsider)
+    # a conversation of project B cannot reach project A
+    with pytest.raises(ToolError, match=NOT_ALLOWED):
+        call(env, "propose_join", args, project_id=env.b.id)
