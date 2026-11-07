@@ -1202,6 +1202,7 @@
   "assistant.tool.get_training_events": "a training's progress",
   "assistant.tool.propose_training_config": "a training proposal",
   "assistant.tool.propose_join": "a join proposal",
+  "assistant.tool.propose_first_join": "a join proposal",
   "assistant.tool.list_projects": "your projects",
   "assistant.tool.list_datasets": "the project's datasets",
   "assistant.tool.find_table_links": "the project's dataset links",

@@ -63,7 +63,11 @@ WRITE_INTERVAL_SECS = 0.3  # between writes of the text as it streams
 _POLL_SECS = 0.05
 _CALL_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _TOOL_NAME_CHARS = 64
-PROPOSE = {"propose_training_config": "train", "propose_join": "join"}  # tool -> proposal kind
+PROPOSE = {
+    "propose_training_config": "train",
+    "propose_join": "join",
+    "propose_first_join": "join",
+}  # tool -> proposal kind
 _DETAILS = ("warnings", "ignored_suggestions", "rationale")  # of a proposal, kept with it
 TOO_MANY_CALLS = {"error": "too many tool calls in one step"}
 BAD_ARGUMENTS = {"error": "arguments must be a JSON object"}
@@ -110,12 +114,13 @@ class NoteView:
     conversation_id: int
 
 
-def _acknowledgement(kind: str, result: dict) -> dict:
+def _acknowledgement(kind: str, result: dict, args: dict | None = None) -> dict:
     """What the model is told of a proposal it made: that the user sees a card, and the warnings
     (the card has the settings, which the model needs no second copy of)."""
     config = result.get("config") or {}
     if kind == "join":
         summary = {k: config.get(k) for k in ("other_dataset_id", "key", "summarize", "columns")}
+        summary["dataset_id"] = result.get("dataset_id") or (args or {}).get("dataset_id")
     else:
         summary = {k: config.get(k) for k in ("target", "task", "ignored_columns")}
     warnings = [w["message"] for w in result.get("warnings") or [] if isinstance(w, dict)]
@@ -488,14 +493,14 @@ class _Turn:
                 self.conn,
                 self.row,
                 self.conversation_id,
-                dataset_id=args["dataset_id"],
+                dataset_id=result.get("dataset_id") or args["dataset_id"],
                 config=result["config"],
                 details={k: result.get(k) for k in _DETAILS},
                 kind=kind,
             )
         except ValueError as e:  # say, the dataset was deleted meanwhile
             return {"error": str(e)}
-        return _acknowledgement(kind, result)
+        return _acknowledgement(kind, result, args)
 
 
 def run_turn(

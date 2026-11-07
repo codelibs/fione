@@ -416,6 +416,26 @@ def test_a_join_proposal_is_stored_with_its_kind_and_shares_the_one_per_step(env
     assert proposal.config["other_dataset_id"] == other.id and proposal.config["summarize"] is True
 
 
+def test_a_first_join_proposal_is_stored_with_the_base_the_tool_chose(env, fake_llm):
+    keys = pd.DataFrame({"user_id": range(1, 41), "age": range(40)})
+    events = pd.DataFrame({"user_id": [i % 40 + 1 for i in range(120)], "amount": range(120)})
+    ids = {}
+    for name, frame in (("events", events), ("users", keys)):
+        ids[name] = ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, name, DatasetType.TRAIN, [frame]
+        ).id
+    args = {"project_id": env.project.id, "target": "age"}
+    call = {"name": "propose_first_join", "arguments": args}
+    fake = fake_llm([{"tool_calls": [call]}, {"text": "Proposed."}])
+    rows = turn(env, settings_for(env, fake))
+    (result,) = tool_results(rows)
+    assert result["proposal"] is True and result["kind"] == "join"
+    (proposal,) = store.proposals_for(env.conn, env.conversation.id).values()
+    assert proposal.kind == "join" and proposal.dataset_id == ids["users"]
+    assert proposal.config["other_dataset_id"] == ids["events"]
+    assert proposal.config["summarize"] is True
+
+
 def test_the_model_is_told_of_a_proposal_in_a_few_lines_and_the_card_keeps_the_settings(
     env, fake_llm
 ):
@@ -724,9 +744,9 @@ def test_budget_drops_old_rounds(env, fake_llm):
     for n in range(30):
         add_history_round(env.conn, env.conversation.id, n, 5000)
     fake = fake_llm([describe(env.iris.id), {"text": "ok"}])
-    settings = settings_for(env, fake, llm_context_tokens=5400, llm_max_tokens=256)
+    settings = settings_for(env, fake, llm_context_tokens=5600, llm_max_tokens=256)
     turn(env, settings, "The newest question")
-    budget = budget_bytes(5400, 256, list_tools())
+    budget = budget_bytes(5600, 256, list_tools())
     assert len(fake.requests) == 2
     for request in fake.requests:
         messages = request["messages"]

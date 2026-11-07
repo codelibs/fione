@@ -44,6 +44,7 @@ TOOL_NAMES = [
     "get_training_events",
     "propose_training_config",
     "find_table_links",
+    "propose_first_join",
     "propose_join",
     "list_projects",
     "list_datasets",
@@ -841,7 +842,7 @@ def test_read_dataset_sample(env):
 
 def test_list_tools_format_and_order():
     tools = list_tools()
-    assert [t["function"]["name"] for t in tools] == TOOL_NAMES and len(tools) <= 13
+    assert [t["function"]["name"] for t in tools] == TOOL_NAMES and len(tools) <= 14
     assert list_tools() == tools
     for tool in tools:
         assert set(tool) == {"type", "function"} and tool["type"] == "function"
