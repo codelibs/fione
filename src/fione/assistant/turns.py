@@ -189,6 +189,7 @@ class _Turn:
         self.language = language
         self.row = 0  # the assistant message being written
         self.partial = ""  # its text so far
+        self._asked: dict[str, dict | None] = {}  # what the model answered to a tool's question
 
     def run(self, row: int) -> None:
         self.row = row
@@ -450,6 +451,7 @@ class _Turn:
                     project_id=project_id,
                     via="chat",
                     max_result_bytes=self._result_bytes(),
+                    ask_model=self._ask_model,
                 )
                 try:
                     result = call_tool(call.name, args, ctx)
@@ -484,6 +486,34 @@ class _Turn:
                 self.conn, self.conversation_id, "assistant", "", state="running"
             )
         return following.id
+
+    def _ask_model(self, question: str, tool: dict) -> dict | None:
+        """The arguments of the call to ``tool`` that the model makes to answer ``question``,
+        or None: no call, or no answer before the turn's deadline or a cancel. A tool asks
+        this for what its data cannot say (find_table_links, for columns of another name that
+        mean the same); the same question in a turn is asked once."""
+        if question in self._asked:
+            return self._asked[question]
+        try:
+            completion = self._bounded(
+                lambda: self.client.complete(
+                    [{"role": "user", "content": question}],
+                    [tool],
+                    deadline=self.deadline,
+                    cancelled=self.cancel.is_set,
+                ),
+                give_up=True,
+            )
+        except LlmError:
+            return None  # the turn's own next call tells why
+        answer = None
+        for call in completion.tool_calls if completion else []:
+            if call.name == tool["function"]["name"]:
+                answer = _arguments(call.arguments)
+                break
+        if completion is not None:
+            self._asked[question] = answer
+        return answer
 
     def _propose(self, args: dict, result: dict, kind: str) -> dict:
         """Store the proposal of a ``propose_training_config`` or ``propose_join`` result; the

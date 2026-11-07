@@ -353,6 +353,102 @@ def test_find_table_links_ignores_constant_float_and_barely_shared_columns(env):
     assert found["links"] == []  # k shares 25% of its values, f is a float, c is constant
 
 
+def _stores_and_sales(env, project):
+    stores = pd.DataFrame({"shop": range(1, 55), "city": ["a", "b", "c"] * 18})
+    sales = pd.DataFrame(
+        {"store_nbr": [i % 54 + 1 for i in range(300)], "units": range(1000, 1300)}
+    )
+    return _ingest(env, project, sales=sales, stores=stores)
+
+
+class Asked:
+    """A model that answers a tool's question with ``links`` and keeps the questions."""
+
+    def __init__(self, links):
+        self.links, self.questions = links, []
+
+    def __call__(self, question, tool):
+        self.questions.append((question, tool["function"]["name"]))
+        return None if self.links is None else {"links": self.links}
+
+
+def _fresh(env):
+    return projects.create_project(env.conn, env.users.owner, "Shops")
+
+
+def _pair(table_a, column_a, table_b, column_b):
+    return {"table_a": table_a, "column_a": column_a, "table_b": table_b, "column_b": column_b}
+
+
+def test_find_table_links_asks_the_model_about_a_dataset_no_link_reaches(env):
+    project = _fresh(env)
+    by_name = _stores_and_sales(env, project)
+    asked = Asked([_pair("stores", "shop", "sales", "store_nbr")])  # either order
+    found = call(env, "find_table_links", {"project_id": project.id}, ask_model=asked)
+    (link,) = found["links"]
+    assert link["datasets"] == [by_name["sales"], by_name["stores"]]
+    assert link["columns"] == ["store_nbr", "shop"] and link["basis"] == "meaning"
+    assert link["relation"] == "one_to_many" and link["one_row_per_key"] == by_name["stores"]
+    ((question, tool),) = asked.questions
+    assert tool == "report_links" and "sales, stores" in question and "shop" in question
+    assert call(env, "find_table_links", {"project_id": project.id})["links"] == []  # no model
+
+
+def test_find_table_links_does_not_ask_when_the_names_linked_every_dataset(env):
+    project = _fresh(env)
+    customers = pd.DataFrame({"id": range(1, 61), "city": ["a", "b", "c"] * 20})
+    orders = pd.DataFrame({"customer_id": [i % 60 + 1 for i in range(200)], "total": range(200)})
+    _ingest(env, project, customers=customers, orders=orders)
+    asked = Asked([])
+    found = call(env, "find_table_links", {"project_id": project.id}, ask_model=asked)
+    assert [link["basis"] for link in found["links"]] == ["table_id"] and asked.questions == []
+
+
+def test_find_table_links_asks_about_a_dataset_with_only_repeating_links(env):
+    project = _fresh(env)
+    facts = pd.DataFrame({"k": [i % 40 for i in range(120)], "u": range(120)})
+    more = pd.DataFrame({"k": [i % 40 for i in range(80)], "v": range(80)})
+    _ingest(env, project, facts=facts, more=more)
+    asked = Asked([])
+    found = call(env, "find_table_links", {"project_id": project.id}, ask_model=asked)
+    assert [link["relation"] for link in found["links"]] == ["many_to_many"]
+    assert len(asked.questions) == 1
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        None,
+        [],
+        [_pair("stores", "shop", "stores", "city")],  # one dataset
+        [_pair("stores", "no such", "sales", "store_nbr")],  # a column that is not there
+        [_pair("shops", "shop", "sales", "store_nbr")],  # a dataset that is not there
+        [_pair("sales", "units", "stores", "shop")],  # values that do not overlap
+        [_pair("sales", "store_nbr", "stores", "city")],  # a column of another kind
+        ["stores.shop = sales.store_nbr", 3, {"table_a": "stores"}],  # not pairs
+    ],
+)
+def test_find_table_links_drops_what_the_model_got_wrong(env, answer):
+    project = _fresh(env)
+    _stores_and_sales(env, project)
+    found = call(env, "find_table_links", {"project_id": project.id}, ask_model=Asked(answer))
+    assert found["links"] == []
+
+
+def test_find_table_links_does_not_take_two_repeating_columns_for_one_key(env):
+    project = _fresh(env)
+    one = pd.DataFrame({"grade": [i % 30 for i in range(120)], "u": range(120)})
+    two = pd.DataFrame({"level": [i % 30 for i in range(90)], "q": range(90)})
+    _ingest(env, project, one=one, two=two)
+    found = call(
+        env,
+        "find_table_links",
+        {"project_id": project.id},
+        ask_model=Asked([_pair("one", "grade", "two", "level")]),
+    )
+    assert found["links"] == []
+
+
 def test_listing_follows_permissions(env):
     owner = call(env, "list_projects", {})
     assert owner["_data_notice"] == DATA_NOTICE

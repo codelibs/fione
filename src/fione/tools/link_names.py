@@ -13,6 +13,7 @@ SAME_NAME = "same_name"
 TABLE_ID = "table_id"
 SIMILAR_NAME = "similar_name"
 VALUES = "values"  # no name relates the columns; their values do
+MEANING = "meaning"  # the model took the columns to mean the same thing; their values agree
 
 # ``id`` is a key anywhere in a name (SK_ID_CURR); the others only as the last word, so that
 # ``order_number`` is a key and ``number_of_items`` is not
