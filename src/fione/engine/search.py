@@ -115,6 +115,8 @@ def make_time_folds(order: np.ndarray, y: np.ndarray, task: Task, nfolds: int) -
     folds = [(np.flatnonzero(part < p), np.flatnonzero(part == p)) for p in present[1:]]
     if task == "classification":
         classes = np.unique(y)
+        if len(np.unique(y[np.concatenate([valid for _, valid in folds])])) < 2:
+            raise ConfigError("the later parts hold a single class, which cannot be validated")
         for train, _ in folds:
             if len(np.unique(y[train])) < len(classes):
                 raise ConfigError(

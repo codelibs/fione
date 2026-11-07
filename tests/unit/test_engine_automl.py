@@ -1134,3 +1134,34 @@ def test_the_refit_of_time_ordered_folds_takes_its_rounds_from_the_last_fold():
             result, None, None, prep, {}, clock, None, ahead=ahead
         )
         assert (model, problem) == ("full", None) and asked[-1] == rounds
+
+
+def test_fold_std_leaves_out_a_fold_where_the_metric_is_undefined():
+    from fione.engine import metrics
+
+    y = np.array([0, 1, 0, 1, 0, 0])
+    one = np.array([0.2, 0.8, 0.3, 0.7, 0.1, 0.4])
+    p = np.column_stack([1 - one, one])
+    folds = [
+        (np.array([4, 5]), np.array([0, 1])),
+        (np.array([0, 1]), np.array([2, 3])),
+        (np.array([0, 1]), np.array([4, 5])),
+    ]
+    assert np.isfinite(metrics.fold_std("auc", y, p, folds))  # the last part has one class
+    assert np.isnan(metrics.fold_std("auc", y, p, folds[2:]))
+
+
+def test_the_members_without_a_refit_keep_only_the_last_time_ordered_fold_model():
+    df = _trend(600)
+    events = []
+    model = _fit(
+        df,
+        events,
+        target="y",
+        task="regression",
+        families=["DeepLearning"],
+        max_models=1,
+        time_column="day",
+    )
+    member = next(m for m in model.members if m.spec.name == "DeepLearning")
+    assert len(member.models) == 1  # not five models, four of them learned from older rows only

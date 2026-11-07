@@ -21,9 +21,9 @@ it goes to the ``metric`` and ``score`` columns beside the log loss / RMSE of ``
 With ``"order": "column"`` the holdout is the last 20% of the rows in the order of that column
 (rows of the same value stay together) instead of a random one, for data whose test period comes
 after the training period; every split is then the same holdout, and only the seed of the fit
-differs. The column stays a feature unless ``drop`` names it; name it in ``--config`` as
-``{"time_column": "column"}`` to also validate in order of it (add it to ``ignored_columns`` to
-leave it out of the features).
+differs (the split number is the seed unless ``--config`` sets one). The column stays a feature
+unless ``drop`` names it; name it in ``--config`` as ``{"time_column": "column"}`` to also
+validate in order of it (add it to ``ignored_columns`` to leave it out of the features).
 Keep the spec, the data and the results out of the repository.
 
 ``run`` fits every dataset on ``--splits`` random 80/20 splits (the split number is the seed) and
@@ -183,8 +183,13 @@ def last_fifth(frame: pd.DataFrame, order: str) -> tuple[pd.DataFrame, pd.DataFr
     are on the same side (the cut moves to the start of its value)."""
     if order not in frame.columns:
         raise SystemExit(f"order column {order!r} is not in the data")
-    ranked = frame.sort_values(order, kind="stable")
-    values = ranked[order].to_numpy()
+    keys = frame[order]
+    if keys.isna().any():
+        raise SystemExit(f"order column {order!r} has missing values")
+    if keys.dtype == object:  # dates as text are put in date order, not in text order
+        keys = pd.to_datetime(keys)
+    ranked = frame.iloc[np.argsort(keys.to_numpy(), kind="stable")]
+    values = keys.iloc[np.argsort(keys.to_numpy(), kind="stable")].to_numpy()
     cut = int(np.searchsorted(values, values[int(len(values) * 0.8)], side="left"))
     if cut == 0:
         raise SystemExit(f"order column {order!r} has too few different values")
@@ -210,7 +215,8 @@ def run_one(job: tuple[str, int, str, dict, str, dict, dict]) -> dict:
         strat = frame[target] if task == "classification" else None
         train, test = train_test_split(frame, test_size=0.2, random_state=split, stratify=strat)
     started = time.monotonic()
-    model = AutoML(TrainConfig(**{"target": target, "task": task, **config})).fit(train)
+    seed = {"seed": split} if entry.get("order") else {}  # a holdout in order is not random
+    model = AutoML(TrainConfig(**{"target": target, "task": task, **seed, **config})).fit(train)
     secs = time.monotonic() - started
     y = test[target].to_numpy()
     row = dict(label=label, dataset=name, split=split, task=task, secs=round(secs, 1))

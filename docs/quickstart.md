@@ -188,7 +188,9 @@ cross-validation predictions cover the other parts; a row of the first part has 
 (empty in the kept predictions, fold -1 in the fold assignment). The final models learn
 from all the rows. The column can be left out of the inputs and still order the rows.
 Derived features are not tried in this mode, since their check uses shuffled folds. A
-classification needs every class in the earlier parts of each fold.
+classification needs every class in the earlier parts of each fold, and more than one class in
+the parts that are predicted. A family that has no final refit (DeepLearning) keeps only the model
+of the last fold, which learned from the most rows.
 
 ## Derived features
 

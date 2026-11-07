@@ -905,3 +905,10 @@ def test_time_folds_of_a_classification_refuse_a_class_that_comes_late():
         search.make_time_folds(order, y, "classification", 4)
     ok = np.arange(40) % 2
     assert len(search.make_time_folds(order, ok, "classification", 4)) == 4
+
+
+def test_time_folds_refuse_later_parts_with_a_single_class():
+    order = np.arange(60)
+    y = np.array([0, 1] * 10 + [0] * 40)  # both classes early, only one in the parts to predict
+    with pytest.raises(ConfigError, match="single class"):
+        search.make_time_folds(order, y, "classification", 2)

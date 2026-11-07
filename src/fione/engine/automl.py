@@ -522,7 +522,9 @@ class AutoML:
         refitted: set[str] = set()
         for name in chosen:
             result = results[name]
-            models = result.models
+            # time-ordered fold models learned from 1/(k+1) to k/(k+1) of the rows: only
+            # the last, with the most, stands in when there is no refit
+            models = result.models[-1:] if ahead else result.models
             if stop_reason != "cancelled" and not self.should_stop() and result.spec.refit:
                 start = time.monotonic()
                 model, problem = _refit(result, X, y, prep, views, clock, weight, ahead=ahead)
@@ -539,7 +541,8 @@ class AutoML:
                         else "did not fit in the time left"
                     )
                     self._notice(
-                        f"{name}: the final refit {why}; using its {len(models)} fold models",
+                        f"{name}: the final refit {why}; using its "
+                        f"{len(models)} fold model{'s' if len(models) != 1 else ''}",
                         family=result.spec.name,
                     )
             members_of[name] = models
