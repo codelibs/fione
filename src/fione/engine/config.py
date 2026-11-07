@@ -32,6 +32,7 @@ _DECISIONS = ("argmax", "balanced")
 _TRANSFORMS = ("none", "log1p")
 # The folds' random_state (numpy's RandomState through scikit-learn) takes 0..2**32 - 1.
 MAX_SEED = 2**32 - 1
+MAX_CV_REPEATS = 10  # every repeat refits every fold of every trial
 # The metric names, compared case-insensitively. The AutoML accepts the
 # subset that fits the task (see ``fione.engine.metrics``).
 _METRICS = frozenset(
@@ -92,6 +93,10 @@ class TrainConfig:
     # Rows that share a value of this column are kept together in one fold, so the validation
     # rows never hold a group the training rows have seen. None: rows are split at random.
     cv_group_column: str | None = None
+    # How many times the folds are drawn again with other seeds, each repeat judging a trial
+    # alone and the scores averaged. None: by the number of rows (3 up to 2,000, 2 up to 5,000,
+    # else 1); 1: never.
+    cv_repeats: int | None = None
     # Validate looking forward in time: the rows ordered by this column (a number or a date, which
     # may also be ignored as a feature) are cut into parts, and each fold learns from the parts
     # before the one it predicts. None: shuffled folds.
@@ -107,6 +112,12 @@ class TrainConfig:
         _check_int("max_runtime_secs_per_model", self.max_runtime_secs_per_model, 1, optional=True)
         _check_int("max_models", self.max_models, 1, optional=True)
         _check_int("nfolds", self.nfolds, 2)
+        _check_int("cv_repeats", self.cv_repeats, 1, optional=True)
+        if self.cv_repeats is not None and self.cv_repeats > MAX_CV_REPEATS:
+            raise ConfigError(
+                f"cv_repeats must be a whole number from 1 to {MAX_CV_REPEATS} (or empty), "
+                f"got {self.cv_repeats!r}"
+            )
         if not _is_int(self.seed) or not 0 <= self.seed <= MAX_SEED:
             raise ConfigError(
                 f"seed must be a whole number from 0 to {MAX_SEED}, got {self.seed!r}"

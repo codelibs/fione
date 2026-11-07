@@ -140,6 +140,7 @@
         <legend class="fieldset__legend">{{ t('train.g.validation') }}</legend>
         <div class="form-grid">
           {{ number("nfolds", 2) }}
+          {{ number("cv_repeats", 1, optional=True) }}
           {{ number("seed", 0, seed_max) }}
         </div>
         <div class="field">
