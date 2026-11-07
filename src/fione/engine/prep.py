@@ -22,7 +22,7 @@ PROSE_WORDS = 5  # a column whose median value has this many words is prose, not
 # A shorter text is prose too when its values are mostly different and made of real words (a
 # product title of four words): a label repeats, and the frequency of a title says nothing.
 SHORT_PROSE_WORDS = 3
-SHORT_PROSE_UNIQUE = 0.5  # share of different values among the first 1,000
+SHORT_PROSE_UNIQUE = 0.5  # share of different values in the column
 SHORT_PROSE_WORD_CHARS = 3  # mean letters of a word, so that a code such as C_ID_92a is no text
 MAX_PROSE = 3  # prose columns the text view reads (the first ones)
 _LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code has no words
@@ -48,17 +48,23 @@ def _as_str(s: pd.Series) -> pd.Series:
 def is_prose(s: pd.Series) -> bool:
     """Whether a string column holds text: the median value has ``PROSE_WORDS`` words (runs of
     letters, so a timestamp or a code is not prose), or ``SHORT_PROSE_WORDS`` words in values
-    that are mostly different (``SHORT_PROSE_UNIQUE``) and have longer words than a code."""
-    values = _as_str(s).dropna().head(1000)
-    if not len(values):
+    that are mostly different (``SHORT_PROSE_UNIQUE``, of the whole column) and have longer
+    words than a code."""
+    values = _as_str(s).dropna()
+    first = values.head(1000)
+    if not len(first):
         return False
-    words = values.str.findall(_LETTERS.pattern)
+    words = first.str.findall(_LETTERS.pattern)
     counts = words.str.len()
     if counts.median() >= PROSE_WORDS:
         return True
-    if counts.median() < SHORT_PROSE_WORDS or values.nunique() < SHORT_PROSE_UNIQUE * len(values):
+    if (
+        counts.median() < SHORT_PROSE_WORDS
+        or words.explode().str.len().mean() < SHORT_PROSE_WORD_CHARS
+    ):
         return False
-    return bool(words.explode().str.len().mean() >= SHORT_PROSE_WORD_CHARS)
+    # a label with hundreds of levels looks all different in 1,000 rows: count them in all
+    return bool(values.nunique() >= SHORT_PROSE_UNIQUE * len(values))
 
 
 def _holds_date_strings(s: pd.Series) -> bool:

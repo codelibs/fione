@@ -443,6 +443,23 @@ def test_a_short_text_is_prose_only_when_its_values_are_mostly_different_words()
     assert Prep().fit(frame).prose == ("title",)
 
 
+def test_a_label_with_hundreds_of_levels_is_not_prose_though_its_first_rows_look_different():
+    n = 5000
+    levels = [f"fraud_Shop{i}-Toy" for i in range(600)]  # three words each
+    frame = pd.DataFrame({"merchant": [levels[i % 600] for i in range(n)], "num": range(n)})
+    first = frame["merchant"].head(1000)
+    assert first.nunique() > 0.5 * len(first)  # all different, to look at 1,000 rows
+    assert Prep().fit(frame).prose == ()
+
+
+def test_a_name_of_three_words_that_is_different_in_every_row_is_prose():
+    n = 300
+    surnames = ["Braund", "Cumings", "Heikkinen", "Futrelle", "Allen", "Moran", "McCarthy"]
+    names = [f"{surnames[i % 7]}{i}, Mr. Owen Harris" for i in range(n)]
+    frame = pd.DataFrame({"name": names, "num": range(n)})
+    assert Prep().fit(frame).prose == ("name",)
+
+
 def test_text_view_is_the_linear_view_plus_the_text_of_each_prose_column():
     frame = _posts()
     frame.loc[3, "post"] = None
