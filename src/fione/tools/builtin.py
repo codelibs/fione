@@ -1019,6 +1019,19 @@ def _link(
         if inter / len(key) < _MIN_SEQUENCE_COVERAGE and _is_sequence(key):
             return None  # a row number or a short list of ids that the other column only touches
         shared = inter / len(other)
+    elif basis == link_names.MEANING:
+        # the model named the columns: one side still has to be the key, and most values of the
+        # other are in it, but a short key or a small integer is no reason to refuse
+        if not (unique_a or unique_b):
+            return None
+        if unique_a and unique_b:
+            key, other = sorted((values_a, values_b), key=len, reverse=True)
+        else:
+            key, other = (values_a, values_b) if unique_a else (values_b, values_a)
+        inter = len(key & other)
+        if inter < _MIN_REPEATED_KEYS or inter / len(other) < _MIN_SHARED:
+            return None
+        shared = inter / len(other)
     else:
         # the share of the smaller set of values that the larger one has
         shared = len(values_a & values_b) / min(len(values_a), len(values_b))
@@ -1026,8 +1039,6 @@ def _link(
             return None
         if not (unique_a or unique_b) and min(len(values_a), len(values_b)) < _MIN_REPEATED_KEYS:
             return None  # few values on both sides: a category such as a label, not a key
-        if basis == link_names.MEANING and not (unique_a or unique_b):
-            return None  # a key of a table is unique there: two repeating columns are not one
     link = {"datasets": [a.id, b.id]}
     if column_a == column_b:
         link["column"] = clean_text(column_a)
@@ -1069,6 +1080,12 @@ def _asked_links(
             columns = {k: n for k, n in columns.items() if k not in elsewhere}
         names = sorted(columns.values(), key=lambda n: not link_names.is_id_like(n))
         lines.append(f"{clean_text(d.name)}: " + ", ".join(map(clean_text, names[:_ASKED_COLUMNS])))
+    if not any(
+        usable[d.id].keys() - {k for o in datasets if o.id != d.id for k in usable[o.id]}
+        for d in datasets
+        if d.id in unlinked
+    ):
+        return []  # every name of the unlinked datasets is in another: nothing to ask
     unlinked_names = [clean_text(d.name) for d in datasets if d.id in unlinked]
     question = (
         "Tables and their columns (for "
@@ -1076,8 +1093,8 @@ def _asked_links(
         + " only the columns whose name occurs in no other table):\n"
         + "\n".join(lines)
         + f"\n\nThe tables {', '.join(unlinked_names)} are not linked to the others yet. For"
-        " each of them, find the column that identifies the same thing (a customer, a loan, a"
-        " shop, a date) as a column of another table, so that the two tables can be joined on"
+        " each of them, find the column that identifies the same thing (a person, an item, a"
+        " place, a date) as a column of another table, so that the two tables can be joined on"
         " them. The columns have different names. Amounts, counts, flags and categories are not"
         " keys. Give at most one pair for each of these tables, and none if there is no such"
         " column. Report them with report_links."
@@ -1194,12 +1211,15 @@ def _project_links(
         reached = {
             i for _, link in links if link["relation"] != "many_to_many" for i in link["datasets"]
         }
-        unlinked = {d.id for d in datasets} - reached
+        # a test or predict dataset holds the columns of a train one: no link is expected
+        unlinked = {d.id for d in datasets if d.type == DatasetType.TRAIN} - reached
+        waiting = time.monotonic()
         asked = (
             _asked_links(ctx.ask_model, datasets, usable, unlinked)
             if unlinked and len(datasets) > 1
             else []
         )
+        started += time.monotonic() - waiting  # the wait for the model is not the reading's
         linked = {
             (
                 link["datasets"][0],

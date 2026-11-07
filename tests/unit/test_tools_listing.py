@@ -449,6 +449,32 @@ def test_find_table_links_does_not_take_two_repeating_columns_for_one_key(env):
     assert found["links"] == []
 
 
+def test_find_table_links_wants_most_values_of_the_other_column_in_the_asked_key(env):
+    project = _fresh(env)
+    parents = pd.DataFrame({"member": range(1, 101), "name": [f"n{i}" for i in range(100)]})
+    # 1,000 distinct values, 100 of them members: 10% of the column, above the 5% floor
+    visits = pd.DataFrame({"person": [i % 1000 + 1 for i in range(3000)], "n": range(3000)})
+    _ingest(env, project, parents=parents, visits=visits)
+    found = call(
+        env,
+        "find_table_links",
+        {"project_id": project.id},
+        ask_model=Asked([_pair("parents", "member", "visits", "person")]),
+    )
+    assert found["links"] == []
+
+
+def test_find_table_links_does_not_ask_about_a_test_dataset_or_names_all_shared(env):
+    project = _fresh(env)
+    train = pd.DataFrame({"a": range(1, 41), "b": range(41, 81)})
+    test = pd.DataFrame({"a": range(200, 240), "b": range(300, 340)})
+    ingest.ingest_batches(env.storage, env.conn, project.id, "t1", DatasetType.TRAIN, [train])
+    ingest.ingest_batches(env.storage, env.conn, project.id, "t2", DatasetType.TEST, [test])
+    asked = Asked([])
+    call(env, "find_table_links", {"project_id": project.id}, ask_model=asked)
+    assert asked.questions == []  # t2 is a test set; every name of t1 is in t2
+
+
 def test_listing_follows_permissions(env):
     owner = call(env, "list_projects", {})
     assert owner["_data_notice"] == DATA_NOTICE

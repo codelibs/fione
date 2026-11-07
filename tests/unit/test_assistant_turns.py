@@ -485,6 +485,30 @@ def test_find_table_links_goes_on_when_the_model_gives_no_answer(env, fake_llm):
     assert rows[-1].state == "done"
 
 
+def test_find_table_links_stops_waiting_for_a_slow_answer_and_the_turn_goes_on(
+    env, fake_llm, monkeypatch
+):
+    _stores_and_sales(env)
+    monkeypatch.setattr(turns, "ASK_SECS", 0.3)
+    find = {"name": "find_table_links", "arguments": {"project_id": env.project.id}}
+    pair = {
+        "table_a": "sales",
+        "column_a": "store_nbr",
+        "table_b": "stores",
+        "column_b": "shop",
+    }
+    report = {"name": "report_links", "arguments": {"links": [pair]}}
+    fake = fake_llm([
+        {"tool_calls": [find]},
+        {"tool_calls": [report], "delay": 1.5},  # the answer comes after the wait is over
+        {"text": "Done."},
+    ])  # fmt: skip
+    rows = turn(env, settings_for(env, fake))
+    (result,) = tool_results(rows)
+    assert result["links"] == [] and "truncated" not in result
+    assert rows[-1].state == "done"
+
+
 def test_the_model_is_told_of_a_proposal_in_a_few_lines_and_the_card_keeps_the_settings(
     env, fake_llm
 ):
