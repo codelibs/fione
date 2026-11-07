@@ -229,6 +229,52 @@ def test_find_table_links_keeps_a_key_with_stray_repeats_before_categories(env):
     assert found["links"][0]["column"] == "mid"  # not city or zone, which only a few values share
 
 
+def _ingest(env, project, **frames):
+    for name, frame in frames.items():
+        ingest.ingest_batches(env.storage, env.conn, project.id, name, DatasetType.TRAIN, [frame])
+    return {d.name: d.id for d in projects.list_datasets(env.conn, project.id)}
+
+
+def test_find_table_links_matches_a_key_named_for_its_table(env):
+    customers = pd.DataFrame({"id": range(1, 61), "city": ["a", "b", "c"] * 20})
+    orders = pd.DataFrame({"customer_id": [i % 60 + 1 for i in range(200)], "total": range(200)})
+    by_name = _ingest(env, env.b, customers=customers, orders=orders)
+    (link,) = call(env, "find_table_links", {"project_id": env.b.id})["links"]
+    assert link["datasets"] == [by_name["customers"], by_name["orders"]]
+    assert link["columns"] == ["id", "customer_id"] and link["basis"] == "table_id"
+    assert link["relation"] == "one_to_many" and link["one_row_per_key"] == by_name["customers"]
+
+
+def test_find_table_links_matches_similar_names_and_leaves_same_names_unmarked(env):
+    people = pd.DataFrame({"cust_id": range(1, 61), "pid": range(100, 160)})
+    visits = pd.DataFrame({"customer_id": [i % 60 + 1 for i in range(200)], "pid": range(100, 300)})
+    by_name = _ingest(env, env.b, people=people, visits=visits)
+    links = call(env, "find_table_links", {"project_id": env.b.id})["links"]
+    similar = next(link for link in links if "basis" in link)
+    assert similar["columns"] == ["cust_id", "customer_id"] and similar["basis"] == "similar_name"
+    same = next(link for link in links if "column" in link)
+    assert same["column"] == "pid" and "basis" not in same
+    assert {tuple(link["datasets"]) for link in links} == {(by_name["people"], by_name["visits"])}
+
+
+def test_find_table_links_matches_text_keys_by_their_values_when_the_names_differ(env):
+    codes = pd.DataFrame({"serial": [f"s{i:03d}" for i in range(60)], "grade": ["x", "y"] * 30})
+    readings = pd.DataFrame({"unit": [f"s{i % 60:03d}" for i in range(180)], "v": range(180)})
+    by_name = _ingest(env, env.b, codes=codes, readings=readings)
+    (link,) = call(env, "find_table_links", {"project_id": env.b.id})["links"]
+    assert link["columns"] == ["serial", "unit"] and link["basis"] == "values"
+    assert link["one_row_per_key"] == by_name["codes"] and link["shared"] == 1.0
+
+
+def test_find_table_links_does_not_match_small_integers_or_unrelated_values(env):
+    ranks = pd.DataFrame({"rank": range(40), "name": [f"n{i}" for i in range(40)]})
+    counts = pd.DataFrame({"n_items": [i % 40 for i in range(200)], "label": ["q"] * 200})
+    ids = pd.DataFrame({"user_id": range(1000, 1060), "age": range(60)})
+    other = pd.DataFrame({"item_id": range(2000, 2060), "age2": range(60)})
+    _ingest(env, env.b, ranks=ranks, counts=counts, ids=ids, other=other)
+    assert call(env, "find_table_links", {"project_id": env.b.id})["links"] == []
+
+
 def test_find_table_links_says_what_it_did_not_examine(env, monkeypatch):
     frame = pd.DataFrame({"k": range(30), "v": range(30)})
     for i in range(3):

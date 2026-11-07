@@ -57,6 +57,7 @@ from fione.modules.registry import MAX_OUTPUT_CELLS
 from fione.projects import ingest
 from fione.projects import service as projects
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
+from fione.tools import link_names
 from fione.tools.registry import Tool, ToolContext, ToolError, clean_text, fits, register
 
 _MAX_COLUMNS = 200
@@ -909,6 +910,7 @@ _LINK_SECS = 30.0  # the reading stops after this long, and the result says so
 _MIN_SHARED = 0.5
 _MIN_REPEATED_KEYS = 20  # keys that repeat on both sides need this many values to be reported
 _MAX_LINKS = 20
+_LINK_VALUE_COLUMNS = 8  # columns of a dataset compared by their values, whatever their names
 _MAX_REPEATING_LINKS = 2  # links where both sides repeat come last and are the least certain
 
 
@@ -935,24 +937,98 @@ def _read_keys(ctx: ToolContext, dataset: Dataset, columns: list[str]) -> tuple[
     return ingest.read_dataset_spread(ctx.storage, dataset, _LINK_SAMPLE_ROWS, columns), True
 
 
+def _value_columns(dataset: Dataset, usable: dict[str, str]) -> list[str]:
+    """The columns of the dataset compared by their values alone: those with an id-like name
+    first, at most ``_LINK_VALUE_COLUMNS``."""
+    names = list(usable.values())
+    names.sort(key=lambda n: not link_names.is_id_like(n))  # stable: the file's order within
+    return names[:_LINK_VALUE_COLUMNS]
+
+
+def _link(
+    a: Dataset, b: Dataset, column_a: str, column_b: str, basis: str, found, key_ok=(True, True)
+) -> dict | None:
+    """The link of the two columns given their key sets, or None when the values do not say
+    they are one key."""
+    (values_a, unique_a), (values_b, unique_b) = found
+    if basis == link_names.VALUES:
+        # one side is the key and most values of the other are in it
+        if unique_a == unique_b or not key_ok[0 if unique_a else 1]:
+            return None
+        key, other = (values_a, values_b) if unique_a else (values_b, values_a)
+        inter = len(key & other)
+        if inter < _MIN_REPEATED_KEYS or inter / len(other) < _MIN_SHARED:
+            return None
+        shared = inter / len(other)
+    else:
+        # the share of the smaller set of values that the larger one has
+        shared = len(values_a & values_b) / min(len(values_a), len(values_b))
+        if shared < _MIN_SHARED:
+            return None
+        if not (unique_a or unique_b) and min(len(values_a), len(values_b)) < _MIN_REPEATED_KEYS:
+            return None  # few values on both sides: a category such as a label, not a key
+    link = {"datasets": [a.id, b.id]}
+    if column_a == column_b:
+        link["column"] = clean_text(column_a)
+    else:
+        link["columns"] = [clean_text(column_a), clean_text(column_b)]
+    link["relation"] = (
+        "one_to_one"
+        if unique_a and unique_b
+        else "one_to_many"
+        if unique_a or unique_b
+        else "many_to_many"
+    )
+    link["one_row_per_key"] = a.id if unique_a else b.id if unique_b else None
+    link["shared"] = round(shared, 2)
+    if basis != link_names.SAME_NAME:  # the usual case is not said
+        link["basis"] = basis
+    return link
+
+
 def _find_table_links(ctx: ToolContext, args: dict) -> dict:
     project_id = args["project_id"]
     _authorize(ctx, project_id)
     every = projects.list_datasets(ctx.conn, project_id)
     datasets = every[:_LINK_DATASETS]
     # a column stored as a float cannot be a key (the file's types are in the schema)
-    names = {
+    usable = {
         d.id: {clean_text(n).lower(): n for n, kind in d.schema if kind not in _FLOAT_TYPES}
         for d in datasets
     }
     wanted: dict[int, set[str]] = {d.id: set() for d in datasets}
-    pairs = []
+    id_like = {
+        d.id: [n for n in usable[d.id].values() if link_names.is_id_like(n)] for d in datasets
+    }
+    # a whole-number column is a key by its values only when its name says id; a small
+    # integer such as a count or a rank overlaps with any other
+    key_columns = {
+        d.id: {
+            n
+            for n, kind in d.schema
+            if kind not in _FLOAT_TYPES
+            and (link_names.is_id_like(n) or not kind.startswith(("int", "uint")))
+        }
+        for d in datasets
+    }
+    pairs = []  # (dataset, dataset, column, column, basis): pairs whose names say they may match
     for i, a in enumerate(datasets):
         for b in datasets[i + 1 :]:
-            for lower in names[a.id].keys() & names[b.id].keys():
-                pairs.append((a, b, names[a.id][lower], names[b.id][lower]))
-                wanted[a.id].add(names[a.id][lower])
-                wanted[b.id].add(names[b.id][lower])
+            matched = [
+                (usable[a.id][k], usable[b.id][k])
+                for k in usable[a.id].keys() & usable[b.id].keys()
+            ]
+            matched += [
+                (x, y) for x in id_like[a.id] for y in id_like[b.id] if x.lower() != y.lower()
+            ]
+            for column_a, column_b in matched:
+                basis = link_names.related(a.name, column_a, b.name, column_b)
+                if basis is not None:
+                    pairs.append((a, b, column_a, column_b, basis))
+                    wanted[a.id].add(column_a)
+                    wanted[b.id].add(column_b)
+    for d in datasets:
+        wanted[d.id].update(_value_columns(d, usable[d.id]))
     keys: dict[tuple[int, str], tuple[set[str], bool] | None] = {}
     sampled = cut = False
     started = time.monotonic()
@@ -968,34 +1044,26 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
             keys[d.id, column] = _key_set(frame, column)
         del frame
     links = []
-    for a, b, column_a, column_b in pairs:
-        left, right = keys.get((a.id, column_a)), keys.get((b.id, column_b))
-        if left is None or right is None:
+    examined = set()  # the pairs the names said to compare: the values judged them already
+    for a, b, column_a, column_b, basis in pairs:
+        found = keys.get((a.id, column_a)), keys.get((b.id, column_b))
+        if None in found:
             continue
-        (values_a, unique_a), (values_b, unique_b) = left, right
-        # the share of the smaller set of values that the larger one has
-        shared = len(values_a & values_b) / min(len(values_a), len(values_b))
-        if shared < _MIN_SHARED:
-            continue
-        if not (unique_a or unique_b) and min(len(values_a), len(values_b)) < _MIN_REPEATED_KEYS:
-            continue  # few values on both sides: a category such as a label, not a key
-        link = {"datasets": [a.id, b.id]}
-        if column_a == column_b:
-            link["column"] = clean_text(column_a)
-        else:  # the names differ in case
-            link["columns"] = [clean_text(column_a), clean_text(column_b)]
-        link["relation"] = (
-            "one_to_one"
-            if unique_a and unique_b
-            else "one_to_many"
-            if unique_a or unique_b
-            else "many_to_many"
-        )
-        link["one_row_per_key"] = a.id if unique_a else b.id if unique_b else None
-        link["shared"] = round(shared, 2)
-        links.append((len(values_a | values_b), link))
-    # a key has many values; a category (a state, a city) has few, and a key that repeats on
-    # both sides only through a few stray rows must not lose its place to one
+        examined.add((a.id, column_a, b.id, column_b))
+        link = _link(a, b, column_a, column_b, basis, found)
+        if link is not None:
+            links.append((len(found[0][0] | found[1][0]), link))
+    for i, a in enumerate(datasets):
+        for b in datasets[i + 1 :]:
+            for column_a in _value_columns(a, usable[a.id]):
+                for column_b in _value_columns(b, usable[b.id]):
+                    found = keys.get((a.id, column_a)), keys.get((b.id, column_b))
+                    if None in found or (a.id, column_a, b.id, column_b) in examined:
+                        continue
+                    key_ok = (column_a in key_columns[a.id], column_b in key_columns[b.id])
+                    link = _link(a, b, column_a, column_b, link_names.VALUES, found, key_ok)
+                    if link is not None:
+                        links.append((len(found[0][0] | found[1][0]), link))
     links.sort(
         key=lambda item: (
             item[1]["relation"] == "many_to_many",
