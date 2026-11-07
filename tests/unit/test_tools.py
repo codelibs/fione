@@ -738,6 +738,7 @@ def test_more_than_200_columns_are_summarized(env):
         env.storage, env.conn, env.project.id, "wide", DatasetType.TRAIN, [frame]
     )
     result = call(env, "describe_dataset", {"dataset_id": ds.id, "target": "c299"})
+    # past what the room allows the columns are named by kind, without their statistics
     assert len(result["columns"]) == 200 and result["n_more_columns"] == 100
     assert result["truncated"] is True and result["columns"][-1]["name"] == "c199"
     assert len(json.dumps(result)) <= MAX_RESULT_BYTES
@@ -749,34 +750,46 @@ def test_more_than_200_columns_are_summarized(env):
     assert "many_columns" in codes(proposal)
 
 
-def test_a_wide_numeric_dataset_is_cut_to_the_size_cap(env):
+def test_a_wide_dataset_is_described_by_an_overview_within_the_size_cap(env):
     rng = np.random.default_rng(2)
     frame = pd.DataFrame({f"n{i:03d}": rng.normal(size=100) for i in range(200)})
     ds = ingest.ingest_batches(
         env.storage, env.conn, env.project.id, "wide-num", DatasetType.TRAIN, [frame]
     )
     result = call(env, "describe_dataset", {"dataset_id": ds.id})
-    assert result["truncated"] is True and 0 < len(result["columns"]) < 200
+    assert "columns" not in result and set(result["columns_by_kind"]) == {"numeric"}
+    assert len(result["columns_by_kind"]["numeric"]) == 200 and "truncated" not in result
     assert len(json.dumps(result, allow_nan=False)) <= MAX_RESULT_BYTES
+    assert "next_step" not in result  # no target was named
 
 
-def test_a_context_can_lower_the_size_cap_of_a_result(env):
+def test_an_overview_is_cut_by_names_to_a_lowered_cap(env):
     rng = np.random.default_rng(2)
     frame = pd.DataFrame({f"n{i:03d}": rng.normal(size=100) for i in range(200)})
     ds = ingest.ingest_batches(
         env.storage, env.conn, env.project.id, "wide-num", DatasetType.TRAIN, [frame]
     )
-    args = {"dataset_id": ds.id}
-    whole = call(env, "describe_dataset", args)
     small = ToolContext(
-        env.conn, env.storage, env.users.owner, project_id=env.project.id, max_result_bytes=6000
+        env.conn, env.storage, env.users.owner, project_id=env.project.id, max_result_bytes=2200
     )
-    cut = call_tool("describe_dataset", args, small)
-    assert len(json.dumps(cut, allow_nan=False)) <= 6000
-    assert cut["truncated"] is True and len(cut["columns"]) < len(whole["columns"])
-    assert cut["n_more_columns"] > whole["n_more_columns"]
+    cut = call_tool("describe_dataset", {"dataset_id": ds.id}, small)
+    listed = len(cut["columns_by_kind"]["numeric"])
+    assert len(json.dumps(cut, allow_nan=False)) <= 2200 and listed < 200
+    assert cut["n_columns_listed"] == listed and cut["n_more_columns"] == 200 - listed
+    assert cut["truncated"] is True
     larger = ToolContext(env.conn, env.storage, env.users.owner, max_result_bytes=10**9)
-    assert call_tool("describe_dataset", args, larger) == whole  # never above the fixed cap
+    assert call_tool("describe_dataset", {"dataset_id": ds.id}, larger) == call(
+        env, "describe_dataset", {"dataset_id": ds.id}
+    )  # never above the fixed cap
+
+
+def test_results_say_what_to_call_next(env):
+    described = call(env, "describe_dataset", {"dataset_id": env.dataset.id, "target": "label"})
+    assert "propose_training_config" in described["next_step"]
+    assert "next_step" not in call(env, "describe_dataset", {"dataset_id": env.dataset.id})
+    alone = call(env, "find_table_links", {"project_id": env.project.id})
+    assert alone["links"] == [] and "propose_join" not in alone["next_step"]
+    assert "describe_dataset" in alone["next_step"]
 
 
 def test_describe_reads_a_bounded_sample(env, monkeypatch):
@@ -1149,16 +1162,7 @@ def test_cut_lists_are_named(env):
     assert "truncated" not in call(env, "get_training_events", {"job_id": env.job.id})
 
 
-def test_a_cut_describe_counts_the_dropped_columns(env):
-    rng = np.random.default_rng(3)
-    frame = pd.DataFrame({f"n{i:03d}": rng.normal(size=100) for i in range(200)})
-    ds = ingest.ingest_batches(
-        env.storage, env.conn, env.project.id, "wide-num-2", DatasetType.TRAIN, [frame]
-    )
-    result = call(env, "describe_dataset", {"dataset_id": ds.id})
-    assert result["truncated"] is True and result["truncated_lists"] == ["columns"]
-    assert result["n_columns_listed"] == len(result["columns"]) < 200
-    assert result["n_columns_listed"] + result["n_more_columns"] == 200
+def test_describe_counts_its_columns(env):
     plain = call(env, "describe_dataset", {"dataset_id": env.dataset.id})
     assert plain["n_columns_listed"] == 10 and "n_more_columns" not in plain
 

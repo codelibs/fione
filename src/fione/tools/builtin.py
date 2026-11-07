@@ -60,6 +60,21 @@ from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.tools.registry import Tool, ToolContext, ToolError, clean_text, fits, register
 
 _MAX_COLUMNS = 200
+# Said in a result, where the model is looking when it chooses its next call: a small model asked
+# for a proposal otherwise answers in text far more often than it calls the tool.
+_NEXT_AFTER_DESCRIBE = (
+    "If the user asked for a training suggestion, call propose_training_config now with this"
+    " dataset_id and the target column."
+)
+_NEXT_TO_TRAIN = (
+    "If the user asked for a training suggestion, call describe_dataset on the dataset with the"
+    " column to predict first."
+)
+_NEXT_TO_JOIN = (
+    "If the user asked for a join, call propose_join now with the dataset ids and the key column"
+    " of the link. "
+)
+_OVERVIEW_GAPS = 20  # columns named in an overview as the ones with the most missing values
 _SAMPLE_ROWS = 200_000
 _TOP_CORRELATIONS = 10
 _TOP_VALUES = 10
@@ -194,20 +209,6 @@ def _column_entry(col: ColumnProfile, allow_samples: bool) -> dict:
 # --- describe_dataset / get_column_stats ---------------------------------
 
 
-def _fit_columns(result: dict, total: int, limit: int) -> None:
-    """Cut ``columns`` until the result fits the size cap, and say how many are left out."""
-    columns = result["columns"]
-    while True:
-        result["n_columns_listed"] = len(columns)
-        if total > len(columns):
-            result["n_more_columns"] = total - len(columns)
-            result["truncated"] = True
-            result["truncated_lists"] = ["columns"]
-        if fits(result, limit) or not columns:
-            return
-        del columns[len(columns) - max(1, len(columns) // 10) :]
-
-
 def _is_plain(name: str) -> bool:
     """Whether ``name`` has no control characters or odd whitespace (its length is not judged)."""
     return clean_text(name, max_len=len(name) + 1) == name
@@ -242,7 +243,56 @@ def _describe_dataset(ctx: ToolContext, args: dict) -> dict:
         ],
         "leak_check_partial": profile.leak_partial,
     }
-    _fit_columns(result, len(names), ctx.max_result_bytes)
+    listed = len(result["columns"])
+    result["n_columns_listed"] = listed
+    if len(names) > listed:  # past the first 200 columns
+        result["n_more_columns"] = len(names) - listed
+        result["truncated"] = True
+        result["truncated_lists"] = ["columns"]
+    if target is not None:
+        result["next_step"] = _NEXT_AFTER_DESCRIBE
+    if not fits(result, ctx.max_result_bytes):
+        result = _overview(ctx, result, profile, names, target)
+    return result
+
+
+def _overview(
+    ctx: ToolContext, detailed: dict, profile, names: list[str], target: str | None
+) -> dict:
+    """What a wide dataset gets in place of its columns' statistics, which do not fit the room
+    of the request: the names of the columns by kind, the missing rates, the target in full and
+    the same correlations and leak suspects. ``get_column_stats`` gives one column's figures."""
+    by_kind: dict[str, list[str]] = {}
+    for col in profile.columns:
+        by_kind.setdefault(col.kind, []).append(clean_text(col.name))
+    gaps = sorted((c for c in profile.columns if c.missing_rate > 0), key=lambda c: -c.missing_rate)
+    result = {
+        "dataset": detailed["dataset"],
+        "profile_rows": detailed["profile_rows"],
+        "overview": "columns are listed by kind without statistics; use get_column_stats for one",
+        "columns_by_kind": by_kind,
+        "n_columns_with_missing_values": len(gaps),
+        "most_missing": {clean_text(c.name): _r(c.missing_rate) for c in gaps[:_OVERVIEW_GAPS]},
+        "correlations": detailed["correlations"],
+        "leak_suspects": detailed["leak_suspects"],
+        "leak_check_partial": detailed["leak_check_partial"],
+    }
+    if target is not None:
+        entry = next((c for c in profile.columns if c.name == target), None)
+        if entry is not None:
+            result["target"] = _column_entry(entry, ctx.allow_samples)
+    if "next_step" in detailed:
+        result["next_step"] = detailed["next_step"]
+    while True:
+        listed = sum(len(v) for v in by_kind.values())
+        result["n_columns_listed"] = listed
+        if listed < len(names):
+            result["n_more_columns"] = len(names) - listed
+            result["truncated"] = True
+        if fits(result, ctx.max_result_bytes) or not listed:
+            break
+        longest = max(by_kind.values(), key=len)
+        del longest[len(longest) - max(1, len(longest) // 10) :]
     return result
 
 
@@ -845,7 +895,7 @@ _LINK_SECS = 30.0  # the reading stops after this long, and the result says so
 _MIN_SHARED = 0.5
 _MIN_REPEATED_KEYS = 20  # keys that repeat on both sides need this many values to be reported
 _MAX_LINKS = 20
-_MAX_REPEATING_LINKS = 5  # links where both sides repeat come last and are the least certain
+_MAX_REPEATING_LINKS = 2  # links where both sides repeat come last and are the least certain
 
 
 def _key_set(frame: pd.DataFrame, column: str) -> tuple[set[str], bool] | None:
@@ -869,21 +919,6 @@ def _read_keys(ctx: ToolContext, dataset: Dataset, columns: list[str]) -> tuple[
     if dataset.n_rows <= _LINK_FULL_ROWS:
         return ingest.read_dataset(ctx.storage, dataset, columns), False
     return ingest.read_dataset_spread(ctx.storage, dataset, _LINK_SAMPLE_ROWS, columns), True
-
-
-def _join_advice(link: dict) -> str:
-    """What the Join module does with a link, in words a small model can pass on. Which side is
-    the base is for the caller to say (the one with the column to predict)."""
-    one = link["one_row_per_key"]
-    if one is None:
-        return "both datasets repeat the key: summarize one of them before joining"
-    many = link["dataset_b"] if one == link["dataset_a"] else link["dataset_a"]
-    if link["relation"] == "one_to_one":
-        return f"either dataset can be added to the other with Join (datasets {one} and {many})"
-    return (
-        f"dataset {one} has one row per key: add it to dataset {many} with Join; "
-        f"to add dataset {many} to dataset {one}, use Join with summarize"
-    )
 
 
 def _find_table_links(ctx: ToolContext, args: dict) -> dict:
@@ -930,22 +965,22 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
             continue
         if not (unique_a or unique_b) and min(len(values_a), len(values_b)) < _MIN_REPEATED_KEYS:
             continue  # few values on both sides: a category such as a label, not a key
-        link = {
-            "dataset_a": a.id,
-            "column_a": clean_text(column_a),
-            "dataset_b": b.id,
-            "column_b": clean_text(column_b),
-            "shared_values": _r(shared),
-            "relation": "one_to_one"
+        link = {"datasets": [a.id, b.id]}
+        if column_a == column_b:
+            link["column"] = clean_text(column_a)
+        else:  # the names differ in case
+            link["columns"] = [clean_text(column_a), clean_text(column_b)]
+        link["relation"] = (
+            "one_to_one"
             if unique_a and unique_b
             else "one_to_many"
             if unique_a or unique_b
-            else "many_to_many",
-            "one_row_per_key": a.id if unique_a else b.id if unique_b else None,
-        }
-        link["join"] = _join_advice(link)
+            else "many_to_many"
+        )
+        link["one_row_per_key"] = a.id if unique_a else b.id if unique_b else None
+        link["shared"] = round(shared, 2)
         links.append(link)
-    links.sort(key=lambda link: (link["relation"] == "many_to_many", -link["shared_values"]))
+    links.sort(key=lambda link: (link["relation"] == "many_to_many", -link["shared"]))
     repeating = 0
     shown = []
     for link in links:
@@ -956,6 +991,7 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
         "datasets": [_dataset_block(d) for d in datasets],
         "links": shown[:_MAX_LINKS],
         "sampled": sampled,
+        "next_step": (_NEXT_TO_JOIN if shown else "") + _NEXT_TO_TRAIN,
     }
     if len(every) > len(datasets):
         result["n_datasets_not_examined"] = len(every) - len(datasets)

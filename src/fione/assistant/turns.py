@@ -110,6 +110,24 @@ class NoteView:
     conversation_id: int
 
 
+def _acknowledgement(kind: str, result: dict) -> dict:
+    """What the model is told of a proposal it made: that the user sees a card, and the warnings
+    (the card has the settings, which the model needs no second copy of)."""
+    config = result.get("config") or {}
+    if kind == "join":
+        summary = {k: config.get(k) for k in ("other_dataset_id", "key", "summarize", "columns")}
+    else:
+        summary = {k: config.get(k) for k in ("target", "task", "ignored_columns")}
+    warnings = [w["message"] for w in result.get("warnings") or [] if isinstance(w, dict)]
+    return {
+        "proposal": True,
+        "kind": kind,
+        "shown_to_the_user": "as a card they can confirm in Fione; nothing has started",
+        "proposed": summary,
+        "warnings": warnings,
+    }
+
+
 class _Made(Exception):
     """Another reader made the note first: there is no turn to start."""
 
@@ -477,7 +495,7 @@ class _Turn:
             )
         except ValueError as e:  # say, the dataset was deleted meanwhile
             return {"error": str(e)}
-        return result
+        return _acknowledgement(kind, result)
 
 
 def run_turn(

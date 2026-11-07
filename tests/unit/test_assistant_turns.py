@@ -416,6 +416,36 @@ def test_a_join_proposal_is_stored_with_its_kind_and_shares_the_one_per_step(env
     assert proposal.config["other_dataset_id"] == other.id and proposal.config["summarize"] is True
 
 
+def test_the_model_is_told_of_a_proposal_in_a_few_lines_and_the_card_keeps_the_settings(
+    env, fake_llm
+):
+    args = {"dataset_id": env.iris.id, "target": "species"}
+    fake = fake_llm([
+        {"tool_calls": [{"name": "propose_training_config", "arguments": args}]},
+        {"text": "Proposed."},
+    ])  # fmt: skip
+    rows = turn(env, settings_for(env, fake))
+    (told,) = tool_results(rows)
+    assert told["proposal"] is True and told["kind"] == "train"
+    assert told["proposed"]["target"] == "species" and "card" in told["shown_to_the_user"]
+    assert "config" not in told and "stopping_rounds" not in json.dumps(told)
+    (proposal,) = store.proposals_for(env.conn, env.conversation.id).values()
+    assert proposal.config["target"] == "species" and "stopping_rounds" in proposal.config
+
+
+def test_an_earlier_turn_is_sent_again_as_words_without_what_its_tools_returned(env, fake_llm):
+    fake = fake_llm([describe(env.iris.id), {"text": "Four measurements."}, {"text": "Again."}])
+    settings = settings_for(env, fake)
+    turn(env, settings, "What is in iris?")
+    turn(env, settings, "And now?")
+    second_turn = fake.requests[-1]["messages"]
+    assert [m["role"] for m in second_turn] == ["system", "user", "assistant", "user"]
+    assert second_turn[2]["content"] == "Four measurements."
+    assert not any("tool_calls" in m for m in second_turn)
+    first_turn_second_round = fake.requests[1]["messages"]
+    assert any(m["role"] == "tool" for m in first_turn_second_round)  # within its own turn
+
+
 def test_a_refused_proposal_is_not_stored(env, fake_llm):
     args = {"dataset_id": env.iris.id, "target": "no such column"}
     fake = fake_llm([
@@ -907,18 +937,11 @@ def test_build_messages_keeps_rounds_whole_and_only_done_rows():
     ]
     current = [m(8, "user", "now"), m(9, "assistant", "", state="running")]
     full = build_messages("sys", history, current, 10**6)
-    assert [x["content"] for x in full] == [
-        "sys",
-        "old",
-        "",
-        "x" * 300,
-        "old answer",
-        "cancelled one",
-        "now",
-    ]
-    assert full[2]["tool_calls"][0]["function"] == {"name": "list_projects", "arguments": "{}"}
-    # whole turns go, oldest first: a question with its tool rounds and its answer, so the
-    # history never starts with an assistant or tool message
+    # an earlier turn is sent as its question and its answer: what the tools returned then, and
+    # the calls that fetched it, are left out
+    assert [x["content"] for x in full] == ["sys", "old", "old answer", "cancelled one", "now"]
+    assert not any("tool_calls" in x or x["role"] == "tool" for x in full)
+    # whole turns go, oldest first, so the history never starts with an assistant message
     cut = build_messages("sys", history, current, size(full) - 1)
     assert [x["content"] for x in cut] == ["sys", "cancelled one", "now"]
     budget = size(cut) - 1

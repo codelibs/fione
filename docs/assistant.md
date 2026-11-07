@@ -199,9 +199,19 @@ columns** before you join.
 | One answer | At most 6 rounds of reading (`FIONE_LLM_MAX_TOOL_ROUNDS`), 180 seconds (`FIONE_LLM_TURN_TIMEOUT_SECS`) |
 | Answers at once | 2 on the server (`FIONE_LLM_MAX_CONCURRENT_TURNS`), 3 per person, 8 waiting |
 | Comments being written | 1 per person at a time (it counts toward their 3 answers); another page shows "busy" until it is done |
-| A tool result | Cut to 32 KB, or to a third of the room the context leaves for messages when that is less (a wide dataset is then described by its first columns); the cut is reported to the model |
+| A tool result | Cut to 32 KB, or to a third of the room the context leaves for messages when that is less; the cut is reported to the model. A dataset whose columns do not fit is described by the names of its columns by kind, with the missing rates and the column to predict in full (`get_column_stats` gives one column's figures) |
 
 An answer that is still running when Fione restarts ends as interrupted; ask again.
+
+### What a request holds
+
+A request to the model holds the instructions, the tool definitions, the questions and answers
+of earlier turns, and the question being answered with what the tools returned for it. Earlier
+turns are sent as words only: what the tools returned then is not sent again (the assistant
+calls a tool again when it needs the figures). The results of `describe_dataset` and
+`find_table_links` end with the next call to make, because a small model asked for a proposal
+otherwise tends to answer in text, which cannot be confirmed. A proposal the model makes is
+acknowledged to it in a few lines; the card has the settings.
 
 ## MCP
 
