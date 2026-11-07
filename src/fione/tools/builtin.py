@@ -72,8 +72,8 @@ _NEXT_TO_TRAIN = (
     " column to predict first."
 )
 _NEXT_TO_JOIN = (
-    "If the user asked for a join, call propose_join now with the dataset ids and the key column"
-    " of the link. "
+    "To answer how the datasets should be combined, call propose_first_join now: the user then"
+    " sees the join as a card they can confirm. Do not describe the join in text first. "
 )
 _OVERVIEW_GAPS = 20  # columns named in an overview as the ones with the most missing values
 _SAMPLE_ROWS = 200_000
@@ -994,9 +994,11 @@ def _link(
     return link
 
 
-def _find_table_links(ctx: ToolContext, args: dict) -> dict:
-    project_id = args["project_id"]
-    _authorize(ctx, project_id)
+def _project_links(
+    ctx: ToolContext, project_id: str
+) -> tuple[list[dict], list[Dataset], list[Dataset], bool, bool]:
+    """The links to show for a project, ranked, with the datasets examined and all of them, and
+    whether any was sampled and whether the time ran out."""
     every = projects.list_datasets(ctx.conn, project_id)
     datasets = every[:_LINK_DATASETS]
     # a column stored as a float cannot be a key (the file's types are in the schema)
@@ -1087,8 +1089,15 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
         repeating += link["relation"] == "many_to_many"
         if repeating <= _MAX_REPEATING_LINKS:
             shown.append(link)
+    return shown[:_MAX_LINKS], datasets, every, sampled, cut
+
+
+def _find_table_links(ctx: ToolContext, args: dict) -> dict:
+    project_id = args["project_id"]
+    _authorize(ctx, project_id)
+    shown, datasets, every, sampled, cut = _project_links(ctx, project_id)
     result = {
-        "links": shown[:_MAX_LINKS],
+        "links": shown,
         "sampled": sampled,
         "next_step": (_NEXT_TO_JOIN if shown else "") + _NEXT_TO_TRAIN,
     }
@@ -1198,6 +1207,55 @@ def _propose_join(ctx: ToolContext, args: dict) -> dict:
         "warnings": warnings,
         "rationale": None if notes is None else clean_text(notes, _RATIONALE_CHARS),
     }
+
+
+# --- propose_first_join -----------------------------------------------------
+
+
+def _first_join(links: list[dict]) -> tuple[dict, bool] | None:
+    """The link to join first and whether its other side is summarized, or None.
+
+    A link needs one row per key on a side, which is then the base (a customer, with the
+    purchases summarized into it). The base is not itself the repeating side of another link,
+    so the table at the root of the others is joined first; the ranking of the links decides
+    among the rest."""
+    usable = [link for link in links if link["relation"] != "many_to_many"]
+    repeating = {_sides(link)[1] for link in usable if link["relation"] == "one_to_many"}
+    for link in usable:
+        if _sides(link)[0] not in repeating:
+            return link, link["relation"] == "one_to_many"
+    return (usable[0], usable[0]["relation"] == "one_to_many") if usable else None
+
+
+def _sides(link: dict) -> tuple[int, int]:
+    """The base of the link (the dataset with one row per key) and the other dataset."""
+    a, b = link["datasets"]
+    return (b, a) if link["one_row_per_key"] == b else (a, b)
+
+
+def _propose_first_join(ctx: ToolContext, args: dict) -> dict:
+    project_id = args["project_id"]
+    _authorize(ctx, project_id)
+    links, *_ = _project_links(ctx, project_id)
+    chosen = _first_join(links)
+    if chosen is None:
+        raise ToolError(
+            "no two datasets of the project have a column with one row per value in common; "
+            "call find_table_links to see how they relate"
+        )
+    link, summarize = chosen
+    column_a, column_b = link.get("columns") or [link["column"]] * 2
+    a, b = _sides(link)
+    if a != link["datasets"][0]:
+        column_a, column_b = column_b, column_a
+    join = {
+        "dataset_id": a,
+        "other_dataset_id": b,
+        "key": column_a,
+        "other_key": column_b,
+        "summarize": summarize,
+    }
+    return {**_propose_join(ctx, join), "dataset_id": a}
 
 
 # --- listings -------------------------------------------------------------
@@ -1386,13 +1444,22 @@ for _tool in (
     ),
     Tool(
         "find_table_links",
-        "Find datasets of a project that can be joined: columns with the same name and mostly "
+        "Find datasets of a project that can be joined: columns with related names and mostly "
         "the same values; 'one_row_per_key' names a dataset with one row per value (none: both "
         "repeat, so one must be summarized first). Large datasets are sampled; nothing is "
         "joined.",
         _schema({"project_id": _PROJECT}, ["project_id"]),
         True,
         _find_table_links,
+    ),
+    Tool(
+        "propose_first_join",
+        "Call this when the user asks how to combine or join the datasets: Fione picks the first "
+        "join and the user confirms its card. To join two datasets the user named, call "
+        "propose_join.",
+        _schema({"project_id": _PROJECT}, ["project_id"]),
+        True,
+        _propose_first_join,
     ),
     Tool(
         "propose_join",

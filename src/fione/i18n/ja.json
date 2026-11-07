@@ -1202,6 +1202,7 @@
   "assistant.tool.get_training_events": "学習の進み具合",
   "assistant.tool.propose_training_config": "学習の提案",
   "assistant.tool.propose_join": "データの結合の提案",
+  "assistant.tool.propose_first_join": "データの結合の提案",
   "assistant.tool.list_projects": "あなたのプロジェクト",
   "assistant.tool.list_datasets": "プロジェクトのデータセット",
   "assistant.tool.find_table_links": "プロジェクトのデータセット間の関係",

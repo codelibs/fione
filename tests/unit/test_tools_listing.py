@@ -32,6 +32,7 @@ TOOL_NAMES = {
     "list_models",
     "find_table_links",
     "propose_join",
+    "propose_first_join",
 }
 EVIL_NAME = "a\n<script>x</script>\tb"
 
@@ -92,7 +93,7 @@ def call(env, name, args, user=None, **ctx):
 
 def test_registry_has_the_thirteen_flat_tools():
     tools = {t["function"]["name"]: t["function"] for t in list_tools()}
-    assert set(tools) == TOOL_NAMES and len(list_tools()) == 13
+    assert set(tools) == TOOL_NAMES and len(list_tools()) == 14
     for name, fn in tools.items():
         assert registry._TOOLS[name].read_only is True
         schema = fn["parameters"]
@@ -117,7 +118,7 @@ def test_find_table_links_reports_keys_shared_by_datasets(env):
     by_name = {d.name: d.id for d in projects.list_datasets(env.conn, env.a.id)}
     found = call(env, "find_table_links", {"project_id": env.a.id}, user=env.users.viewer)
     assert [link["datasets"] for link in found["links"]] == [[by_name["keys"], by_name["events"]]]
-    assert "propose_join" in found["next_step"] and "describe_dataset" in found["next_step"]
+    assert "propose_first_join" in found["next_step"] and "describe_dataset" in found["next_step"]
     link = found["links"][0]
     assert link["columns"] == ["Id", "id"]  # names match without case
     assert link["shared"] == 1.0 and link["relation"] == "one_to_many"
@@ -505,6 +506,47 @@ def test_propose_join_returns_the_parameters_of_a_join(env):
         },
     )
     assert found["config"]["columns"] == ["amount", "tag"] and found["warnings"] == []
+
+
+def test_propose_first_join_joins_the_table_at_the_root_of_the_others_first(env):
+    customers = pd.DataFrame({"id": range(1, 61), "city": ["a", "b", "c"] * 20})
+    orders = pd.DataFrame({"id": range(100, 220), "customer_id": [i % 60 + 1 for i in range(120)]})
+    items = pd.DataFrame({"order_id": [100 + i % 120 for i in range(300)], "qty": range(300)})
+    by_name = _ingest(env, env.b, items=items, orders=orders, customers=customers)
+    found = call(env, "propose_first_join", {"project_id": env.b.id})
+    # the orders could be joined with the items first, but the customers are the base
+    assert found["proposal"] is True and found["kind"] == "join"
+    assert found["dataset_id"] == by_name["customers"]
+    assert found["config"] == {
+        "other_dataset_id": by_name["orders"],
+        "key": "id",
+        "other_key": "customer_id",
+        "summarize": True,
+        "columns": [],
+    }
+    assert found["warnings"] == []
+    with pytest.raises(ToolError, match=NOT_ALLOWED):
+        call(env, "propose_first_join", {"project_id": env.b.id}, user=env.users.outsider)
+
+
+def test_propose_first_join_does_not_summarize_a_one_to_one_link(env):
+    left = pd.DataFrame({"k": range(1, 61), "a": range(60)})
+    right = pd.DataFrame({"k": range(1, 61), "b": range(60)})
+    by_name = _ingest(env, env.b, left=left, right=right)
+    found = call(env, "propose_first_join", {"project_id": env.b.id})
+    assert found["dataset_id"] == by_name["left"]
+    assert found["config"]["other_dataset_id"] == by_name["right"]
+    assert found["config"]["summarize"] is False and found["config"]["other_key"] == ""
+
+
+def test_propose_first_join_says_when_no_dataset_has_one_row_per_key(env):
+    repeating = pd.DataFrame({"k": [i % 40 for i in range(120)], "a": range(120)})
+    other = pd.DataFrame({"k": [i % 40 for i in range(160)], "b": range(160)})
+    _ingest(env, env.b, repeating=repeating, other=other)
+    with pytest.raises(ToolError, match="find_table_links"):
+        call(env, "propose_first_join", {"project_id": env.b.id})
+    with pytest.raises(ToolError, match="find_table_links"):
+        call(env, "propose_first_join", {"project_id": env.a.id})  # a single dataset
 
 
 def test_propose_join_warns_about_few_matches_and_a_result_over_the_limit(env, monkeypatch):

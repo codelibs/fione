@@ -63,7 +63,11 @@ WRITE_INTERVAL_SECS = 0.3  # between writes of the text as it streams
 _POLL_SECS = 0.05
 _CALL_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _TOOL_NAME_CHARS = 64
-PROPOSE = {"propose_training_config": "train", "propose_join": "join"}  # tool -> proposal kind
+PROPOSE = {
+    "propose_training_config": "train",
+    "propose_join": "join",
+    "propose_first_join": "join",
+}  # tool -> proposal kind
 _DETAILS = ("warnings", "ignored_suggestions", "rationale")  # of a proposal, kept with it
 TOO_MANY_CALLS = {"error": "too many tool calls in one step"}
 BAD_ARGUMENTS = {"error": "arguments must be a JSON object"}
@@ -488,7 +492,7 @@ class _Turn:
                 self.conn,
                 self.row,
                 self.conversation_id,
-                dataset_id=args["dataset_id"],
+                dataset_id=result.get("dataset_id") or args["dataset_id"],
                 config=result["config"],
                 details={k: result.get(k) for k in _DETAILS},
                 kind=kind,
