@@ -170,8 +170,8 @@ abbreviation (`cust` and `customer`) counts; a name with another word does not (
 `item_category_id`). A link whose names are not the same also needs the shared values to be at
 least 5% of the longer column, so a few small ids inside a long id column are not a link. A pair
 whose names are unrelated is compared by its values alone only when one side has one row per
-value (at least 100 of them, and not a run of consecutive whole numbers such as a row number),
-most values of the other side are among them, and both columns are named like an id or are not
+value (at least 100 of them; a run of consecutive whole numbers, such as a row number, counts
+only when the other column has at least 30% of it), most values of the other side are among them, and both columns are named like an id or are not
 whole numbers (a small integer such as a count overlaps with any other). Up to 8 columns of each
 dataset are compared this way, those named like an id first. A link whose names are not the same
 says `basis` (`table_id`, `similar_name` or `values`); links by name come before links by values.
@@ -195,6 +195,12 @@ best link joins to, among the links that have one row per key on a side. The oth
 summarized when it has several rows per key, and looked up as it is when it has one (a table of
 sales gets its stores' columns). A pair of datasets the person names is proposed with
 `propose_join`.
+
+A join key is one column, or several that identify a row together (a shop and an item; the
+assistant names them comma-separated in `key`, and the Join module takes them as `keys`): the rows match when every part is the same, and a row with a part missing matches
+nothing. The repeat check and the summary then work on the combination of the columns, so a
+table with one row for each shop and item is looked up even though each column repeats.
+`find_table_links` finds links of single columns only.
 
 The assistant proposes each join as a **Join proposal** card in the conversation: the base
 dataset, the dataset to add, the key, whether it is summarized and the columns, with what the

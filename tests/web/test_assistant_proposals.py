@@ -455,6 +455,21 @@ def test_a_join_proposal_is_refused_to_a_viewer_and_when_a_dataset_is_gone(setup
     assert stored(world, proposal) == ("pending", None)
 
 
+def test_a_join_by_several_key_columns_is_shown_and_confirmed(setup):
+    both = "sepal length (cm), sepal width (cm)"
+    world, proposal = join_proposal(setup, key=both, columns="petal width (cm)")
+    assert proposal.config["keys"] == ["sepal length (cm)", "sepal width (cm)"]
+    world.login("ed")
+    html = world.client.get(f"/projects/{world.p}/assistant?c={proposal.conversation_id}").text
+    assert "sepal length (cm), sepal width (cm)" in html
+    r = post(world, "confirm", proposal)
+    assert r.status_code == 303
+    _, job_id = stored(world, proposal)
+    with closing(connect(world.client)) as conn:
+        params = jobs.get_job(conn, job_id).payload["params"]
+    assert params["keys"] == ["sepal length (cm)", "sepal width (cm)"] and params["key"] == ""
+
+
 def test_a_join_card_names_a_deleted_dataset(setup):
     world, proposal = join_proposal(setup)
     with closing(connect(world.client)) as conn:

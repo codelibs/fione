@@ -39,9 +39,7 @@ def people(n=600, seed=0):
     surname = rng.choice([f"Name{i}" for i in range(80)], n)
     X = pd.DataFrame(
         {
-            "name": [
-                f"{s}, {t}. Person{i}" for i, (s, t) in enumerate(zip(surname, title, strict=True))
-            ],
+            "name": [f"{s}, {t}." for s, t in zip(surname, title, strict=True)],
             "noise": rng.normal(size=n),
             "group": rng.choice(["a", "b", "c"], n),
         }
@@ -131,7 +129,7 @@ def test_text_topics_without_words_give_no_features():
 
 def test_text_topics_are_offered_for_prose_only():
     X, _ = sentences()
-    X["name"] = [f"Person, Mr. Number {i}" for i in range(len(X))]  # 4 words: a name, not prose
+    X["name"] = [f"Mr. Number{i}" for i in range(len(X))]  # 2 words: a name, not prose
     labels = [g.label for g in features.candidates(Prep().fit(X), X, [])]
     assert "text topics of text" in labels and "text topics of name" not in labels
 

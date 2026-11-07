@@ -310,6 +310,15 @@ def test_find_table_links_does_not_match_ids_with_a_row_number_by_their_values(e
     assert call(env, "find_table_links", {"project_id": env.b.id})["links"] == []
 
 
+def test_find_table_links_matches_an_auto_increment_key_the_other_column_mostly_covers(env):
+    customers = pd.DataFrame({"id": range(1, 1001), "age": [i % 60 + 18 for i in range(1000)]})
+    orders = pd.DataFrame({"client_id": [i % 1000 + 1 for i in range(3000)], "n": range(3000)})
+    by_name = _ingest(env, env.b, customers=customers, orders=orders)
+    (link,) = call(env, "find_table_links", {"project_id": env.b.id})["links"]
+    assert link["datasets"] == [by_name["customers"], by_name["orders"]]
+    assert link["columns"] == ["id", "client_id"] and link["basis"] == "values"
+
+
 def test_find_table_links_puts_a_link_by_name_before_one_by_values(env):
     codes = [f"s{i:03d}" for i in range(120)]
     customers = pd.DataFrame({"cid": range(1, 121), "serial": codes})
@@ -533,6 +542,42 @@ def test_propose_join_returns_the_parameters_of_a_join(env):
         },
     )
     assert found["config"]["columns"] == ["amount", "tag"] and found["warnings"] == []
+
+
+def test_propose_join_by_several_key_columns(env):
+    sales = pd.DataFrame(
+        {"Shop": [i % 4 for i in range(80)], "Item": [i % 5 for i in range(80)], "n": range(80)}
+    )
+    history = pd.DataFrame(
+        {
+            "shop": [s for s in range(4) for _ in range(5)],
+            "item": list(range(5)) * 4,
+            "m": range(20),
+        }
+    )
+    by_name = _ingest(env, env.b, sales=sales, history=history)
+    args = {"dataset_id": by_name["sales"], "other_dataset_id": by_name["history"]}
+    found = call(env, "propose_join", {**args, "key": "Shop, Item", "other_key": "shop,item"})
+    assert found["config"] == {
+        "other_dataset_id": by_name["history"],
+        "key": "",
+        "keys": ["Shop", "Item"],
+        "other_key": "",
+        "other_keys": ["shop", "item"],
+        "summarize": False,
+        "columns": [],
+    }
+    # each pair is once in the history: nothing to warn about, though each column alone repeats
+    assert found["warnings"] == []
+    single = call(env, "propose_join", {**args, "key": "Shop", "other_key": "shop"})
+    assert [w["code"] for w in single["warnings"]] == ["join_key_repeats"]
+    assert "keys" not in single["config"]
+    with pytest.raises(ToolError, match="names a column twice"):
+        call(env, "propose_join", {**args, "key": "Shop,Shop"})
+    with pytest.raises(ToolError, match="same number"):
+        call(env, "propose_join", {**args, "key": "Shop,Item", "other_key": "shop"})
+    with pytest.raises(ToolError, match="name the key"):
+        call(env, "propose_join", args)
 
 
 def _shop(env):

@@ -129,3 +129,15 @@ def test_event_defaults_timestamp_and_data():
     assert event.type == "trial"
     assert before <= event.ts <= time.time()
     assert Event("started").data == {}
+
+
+def test_the_time_column_defaults_to_none_and_must_name_a_column():
+    config = TrainConfig(target="y")
+    assert config.time_column is None
+    del config.__dict__["time_column"]  # a config saved before the setting
+    assert config.time_column is None
+    assert TrainConfig.from_dict({"target": "y", "time_column": "day"}).time_column == "day"
+    with pytest.raises(ConfigError, match="time_column must name a column"):
+        TrainConfig(target="y", time_column="").validate()
+    with pytest.raises(ConfigError, match="cannot be the target"):
+        TrainConfig(target="y", time_column="y").validate()
