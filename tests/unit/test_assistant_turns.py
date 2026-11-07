@@ -436,6 +436,92 @@ def test_a_first_join_proposal_is_stored_with_the_base_the_tool_chose(env, fake_
     assert proposal.config["summarize"] is True
 
 
+def _stores_and_sales(env):
+    stores = pd.DataFrame({"shop": range(1, 55), "city": ["a", "b", "c"] * 18})
+    sales = pd.DataFrame({"store_nbr": [i % 54 + 1 for i in range(300)], "units": range(300)})
+    for name, frame in (("sales", sales), ("stores", stores)):
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, name, DatasetType.TRAIN, [frame]
+        )
+
+
+@pytest.mark.parametrize("provider", ["ollama", "claude"])
+def test_find_table_links_asks_the_model_once_for_the_links_the_names_do_not_show(
+    env, fake_llm, provider
+):
+    _stores_and_sales(env)
+    find = {"name": "find_table_links", "arguments": {"project_id": env.project.id}}
+    pair = {
+        "table_a": "sales",
+        "column_a": "store_nbr",
+        "table_b": "stores",
+        "column_b": "shop",
+    }
+    report = {"name": "report_links", "arguments": {"links": [pair]}}
+    fake = fake_llm([
+        {"tool_calls": [find]},
+        {"tool_calls": [report]},  # the answer to the tool's question
+        {"tool_calls": [find]},  # the same question is not asked again in the turn
+        {"text": "Done."},
+    ])  # fmt: skip
+    if provider == "claude":
+        settings = make_settings(
+            env.tmp / "data",
+            llm_provider="claude",
+            llm_base_url=fake.origin,
+            llm_api_key="sk-test-0123456789",
+        )
+    else:
+        settings = settings_for(env, fake)
+    rows = turn(env, settings)
+    first, second = tool_results(rows)
+    (link,) = [x for x in first["links"] if x.get("basis") == "meaning"]
+    assert link["columns"] == ["store_nbr", "shop"] and second["links"] == first["links"]
+    question = fake.requests[1]
+    assert [m["role"] for m in question["messages"]] == ["user"]
+    names = [t.get("name") or t["function"]["name"] for t in question["tools"]]
+    assert names == ["report_links"]
+    assert len(fake.requests) == 4
+
+
+def test_find_table_links_goes_on_when_the_model_gives_no_answer(env, fake_llm):
+    _stores_and_sales(env)
+    find = {"name": "find_table_links", "arguments": {"project_id": env.project.id}}
+    fake = fake_llm([
+        {"tool_calls": [find]},
+        {"text": "No call."},  # the question gets text, not a call
+        {"text": "Done."},
+    ])  # fmt: skip
+    rows = turn(env, settings_for(env, fake))
+    (result,) = tool_results(rows)
+    assert not any(x.get("basis") == "meaning" for x in result["links"])
+    assert rows[-1].state == "done"
+
+
+def test_find_table_links_stops_waiting_for_a_slow_answer_and_the_turn_goes_on(
+    env, fake_llm, monkeypatch
+):
+    _stores_and_sales(env)
+    monkeypatch.setattr(turns, "ASK_SECS", 0.3)
+    find = {"name": "find_table_links", "arguments": {"project_id": env.project.id}}
+    pair = {
+        "table_a": "sales",
+        "column_a": "store_nbr",
+        "table_b": "stores",
+        "column_b": "shop",
+    }
+    report = {"name": "report_links", "arguments": {"links": [pair]}}
+    fake = fake_llm([
+        {"tool_calls": [find]},
+        {"tool_calls": [report], "delay": 1.5},  # the answer comes after the wait is over
+        {"text": "Done."},
+    ])  # fmt: skip
+    rows = turn(env, settings_for(env, fake))
+    (result,) = tool_results(rows)
+    assert result["links"] == [] and "truncated" not in result
+    assert rows[-1].state == "done"
+
+
 def test_the_model_is_told_of_a_proposal_in_a_few_lines_and_the_card_keeps_the_settings(
     env, fake_llm
 ):
