@@ -291,6 +291,8 @@ def submit_training(
     unknown = [c for c in config.ignored_columns if c not in columns]
     if unknown:
         raise ConfigError(f"unknown columns in ignored_columns: {unknown}")
+    if config.time_column is not None and config.time_column not in columns:
+        raise ConfigError(f"time column '{config.time_column}' is not in the data")
     task = check_target(storage, dataset, config.target, config.task, config.nfolds)
     for field in ("stopping_metric", "sort_metric"):  # as AutoML.fit resolves them
         metrics.resolve(getattr(config, field), task, field)
