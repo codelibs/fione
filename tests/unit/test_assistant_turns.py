@@ -424,7 +424,8 @@ def test_a_first_join_proposal_is_stored_with_the_base_the_tool_chose(env, fake_
         ids[name] = ingest.ingest_batches(
             env.storage, env.conn, env.project.id, name, DatasetType.TRAIN, [frame]
         ).id
-    call = {"name": "propose_first_join", "arguments": {"project_id": env.project.id}}
+    args = {"project_id": env.project.id, "target": "age"}
+    call = {"name": "propose_first_join", "arguments": args}
     fake = fake_llm([{"tool_calls": [call]}, {"text": "Proposed."}])
     rows = turn(env, settings_for(env, fake))
     (result,) = tool_results(rows)
@@ -743,9 +744,9 @@ def test_budget_drops_old_rounds(env, fake_llm):
     for n in range(30):
         add_history_round(env.conn, env.conversation.id, n, 5000)
     fake = fake_llm([describe(env.iris.id), {"text": "ok"}])
-    settings = settings_for(env, fake, llm_context_tokens=5400, llm_max_tokens=256)
+    settings = settings_for(env, fake, llm_context_tokens=5600, llm_max_tokens=256)
     turn(env, settings, "The newest question")
-    budget = budget_bytes(5400, 256, list_tools())
+    budget = budget_bytes(5600, 256, list_tools())
     assert len(fake.requests) == 2
     for request in fake.requests:
         messages = request["messages"]

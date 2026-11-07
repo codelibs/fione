@@ -12,8 +12,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 MIN_SETUP_TOKEN_LENGTH = 16
 # The room a request needs besides the reply: the assistant's tools and longest system prompt
-# take about 5,060 tokens (at 2 bytes per token), and a short question the rest.
-MIN_PROMPT_TOKENS = 5119
+# take about 5,100 tokens (at 2 bytes per token), and a short question the rest.
+MIN_PROMPT_TOKENS = 5170
 _VISIBLE_ASCII = re.compile(r"[\x21-\x7e]+")  # it travels in an HTTP header
 # scheme://host[:port] with dot-separated labels: what Fione's own origin must look like.
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"

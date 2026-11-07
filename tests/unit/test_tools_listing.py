@@ -201,7 +201,7 @@ def test_find_table_links_cuts_column_names_before_it_cuts_datasets(env):
             {f"a_long_column_name_number_{j}": range(30) for j in range(builtin._LINK_COLUMNS)}
         )
         ingest.ingest_batches(env.storage, env.conn, env.b.id, f"d{i}", DatasetType.TRAIN, [frame])
-    found = call(env, "find_table_links", {"project_id": env.b.id}, max_result_bytes=3600)
+    found = call(env, "find_table_links", {"project_id": env.b.id}, max_result_bytes=3900)
     assert len(found["datasets"]) == builtin._LINK_DATASETS  # every id a link may name is kept
     assert "truncated" not in found and "columns" not in found["datasets"][0]
     full = call(env, "find_table_links", {"project_id": env.b.id})
@@ -508,45 +508,65 @@ def test_propose_join_returns_the_parameters_of_a_join(env):
     assert found["config"]["columns"] == ["amount", "tag"] and found["warnings"] == []
 
 
-def test_propose_first_join_joins_the_table_at_the_root_of_the_others_first(env):
-    customers = pd.DataFrame({"id": range(1, 61), "city": ["a", "b", "c"] * 20})
+def _shop(env):
+    customers = pd.DataFrame({"id": range(1, 61), "churned": [0, 1, 0] * 20})
     orders = pd.DataFrame({"id": range(100, 220), "customer_id": [i % 60 + 1 for i in range(120)]})
     items = pd.DataFrame({"order_id": [100 + i % 120 for i in range(300)], "qty": range(300)})
-    by_name = _ingest(env, env.b, items=items, orders=orders, customers=customers)
-    found = call(env, "propose_first_join", {"project_id": env.b.id})
-    # the orders could be joined with the items first, but the customers are the base
+    return _ingest(env, env.b, items=items, orders=orders, customers=customers)
+
+
+def test_propose_first_join_starts_from_the_dataset_with_the_column_to_predict(env):
+    by_name = _shop(env)
+    found = call(env, "propose_first_join", {"project_id": env.b.id, "target": "Churned"})
     assert found["proposal"] is True and found["kind"] == "join"
     assert found["dataset_id"] == by_name["customers"]
     assert found["config"] == {
         "other_dataset_id": by_name["orders"],
         "key": "id",
         "other_key": "customer_id",
-        "summarize": True,
+        "summarize": True,  # the orders repeat their customer
         "columns": [],
     }
     assert found["warnings"] == []
     with pytest.raises(ToolError, match=NOT_ALLOWED):
-        call(env, "propose_first_join", {"project_id": env.b.id}, user=env.users.outsider)
+        call(
+            env,
+            "propose_first_join",
+            {"project_id": env.b.id, "target": "x"},
+            user=env.users.outsider,
+        )
+
+
+def test_propose_first_join_looks_up_the_one_row_per_key_side_of_a_fact_table(env):
+    by_name = _shop(env)
+    found = call(env, "propose_first_join", {"project_id": env.b.id, "target": "qty"})
+    # the items hold the column to predict: the orders are looked up, not summarized into one row
+    assert found["dataset_id"] == by_name["items"]
+    assert found["config"]["other_dataset_id"] == by_name["orders"]
+    assert found["config"]["key"] == "order_id" and found["config"]["other_key"] == "id"
+    assert found["config"]["summarize"] is False and found["warnings"] == []
 
 
 def test_propose_first_join_does_not_summarize_a_one_to_one_link(env):
     left = pd.DataFrame({"k": range(1, 61), "a": range(60)})
     right = pd.DataFrame({"k": range(1, 61), "b": range(60)})
     by_name = _ingest(env, env.b, left=left, right=right)
-    found = call(env, "propose_first_join", {"project_id": env.b.id})
-    assert found["dataset_id"] == by_name["left"]
-    assert found["config"]["other_dataset_id"] == by_name["right"]
+    found = call(env, "propose_first_join", {"project_id": env.b.id, "target": "b"})
+    assert found["dataset_id"] == by_name["right"]
+    assert found["config"]["other_dataset_id"] == by_name["left"]
     assert found["config"]["summarize"] is False and found["config"]["other_key"] == ""
 
 
-def test_propose_first_join_says_when_no_dataset_has_one_row_per_key(env):
+def test_propose_first_join_says_what_it_cannot_do(env):
     repeating = pd.DataFrame({"k": [i % 40 for i in range(120)], "a": range(120)})
     other = pd.DataFrame({"k": [i % 40 for i in range(160)], "b": range(160)})
     _ingest(env, env.b, repeating=repeating, other=other)
     with pytest.raises(ToolError, match="find_table_links"):
+        call(env, "propose_first_join", {"project_id": env.b.id, "target": "a"})  # both repeat
+    with pytest.raises(ToolError, match="ask the user which column"):
         call(env, "propose_first_join", {"project_id": env.b.id})
-    with pytest.raises(ToolError, match="find_table_links"):
-        call(env, "propose_first_join", {"project_id": env.a.id})  # a single dataset
+    with pytest.raises(ToolError, match="no dataset of the project has a column named"):
+        call(env, "propose_first_join", {"project_id": env.b.id, "target": "nope"})
 
 
 def test_propose_join_warns_about_few_matches_and_a_result_over_the_limit(env, monkeypatch):

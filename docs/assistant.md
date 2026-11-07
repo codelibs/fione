@@ -183,12 +183,15 @@ number). Name `columns` to add or summarize only those columns of the other data
 to leave out an id column whose mean or sum means nothing. When both repeat, summarize the one
 that is not the base first.
 
-When a person asks how to combine the datasets, the assistant calls `propose_first_join` and Fione
-chooses the first join: among the links that have one row per key on a side, the dataset that is
-not the repeating side of another link is the base (a customer table before the purchases, and
-the purchases before their own details), and the other dataset is summarized when it has several
-rows per key. A pair of datasets the person names is proposed with `propose_join`. The
-assistant proposes each join as a **Join proposal** card in the conversation: the base
+When a person asks how to combine the datasets and says which column to predict, the assistant
+calls `propose_first_join` with it (when they have not said, it asks first), and Fione chooses the
+first join: the base is the dataset that has that column, and the other dataset is the one its
+best link joins to, among the links that have one row per key on a side. The other dataset is
+summarized when it has several rows per key, and looked up as it is when it has one (a table of
+sales gets its stores' columns). A pair of datasets the person names is proposed with
+`propose_join`.
+
+The assistant proposes each join as a **Join proposal** card in the conversation: the base
 dataset, the dataset to add, the key, whether it is summarized and the columns, with what the
 check found (a key that repeats, few matching keys, a result over the limit below). A person who
 can edit the project confirms it with **Create the joined dataset**, which starts a Join job;
@@ -254,8 +257,8 @@ two tool calls run at once.
 
 The result of `propose_join` has the keys `proposal` (`true`), `kind` (`join`), `config` (the
 parameters of the Join module), `warnings` and `rationale`, with the warnings as below.
-`propose_first_join` takes only the project and has the same keys and `dataset_id`, the base
-dataset it chose.
+`propose_first_join` takes the project and `target`, the column to predict, and has the same
+keys and `dataset_id`, the base dataset it chose.
 
 The result of `propose_training_config` has the keys `proposal` (`true`), `config`,
 `ignored_suggestions`, `warnings` and `rationale`. Each warning is an object `{code, message, params}`: `message` is an English
