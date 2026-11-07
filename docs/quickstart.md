@@ -172,6 +172,18 @@ change from the bias to the prediction in proportion to each column's effect on 
 which is an approximation. Only the scores of the search itself (the trial history) stay on the
 logarithm scale. Every value must be above -1, and the setting is ignored for classification.
 
+## Keeping related rows together
+
+Fione scores a model on rows it did not learn from, chosen at random. When several rows
+belong together (the same customer, patient or store) and the data you will predict holds other
+ones, a random split puts rows of one customer on both sides, and the score looks better than it
+is. Choose that column as "Keep related rows together by" (`cv_group_column` in the API): the
+rows with one value then always stay in the same validation fold, in the search and in the choice
+of derived features alike. The column is still an input unless you leave it out. A missing value
+counts as one group, and with fewer groups than folds the number of folds is lowered to the
+number of groups (at least two groups are needed). A class that occurs in so few groups that some fold's training rows lack it is refused, with the column named. The analysis page and the assistant suggest
+this when a column named like an ID (`user_id`, `顧客ID`) repeats its values over rows.
+
 ## Derived features
 
 Fione builds *derived features* that never read the target, and chooses among them by

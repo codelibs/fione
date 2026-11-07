@@ -385,6 +385,23 @@ def test_the_gate_adopts_a_group_that_explains_the_label():
     assert all(v.reason == "adopted" for v in verdicts if v.adopted)
 
 
+def test_the_gate_keeps_the_rows_of_a_group_in_one_fold():
+    X, y = people()
+    groups = np.arange(len(X)) // 6
+    gate = features._Gate(X, y, "classification", 5, 0, groups=groups)
+    for repeat in range(2):
+        for train, valid in gate.folds(repeat):
+            assert not set(groups[train]) & set(groups[valid])
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120), row_groups=groups)
+    assert verdicts
+
+
+def test_the_gate_lowers_its_folds_to_the_groups_it_has():
+    X, y = people()
+    gate = features._Gate(X, y, "classification", 5, 0, groups=np.arange(len(X)) % 3)
+    assert gate.nfolds == 3
+
+
 def test_the_gate_adopts_nothing_for_noise():
     X, y = noise_text()
     kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))

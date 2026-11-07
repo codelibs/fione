@@ -30,6 +30,7 @@ training and the explain job stored; none of them loads a model or computes anyt
 
 import dataclasses
 import math
+import re
 import time
 from datetime import datetime
 
@@ -676,6 +677,11 @@ MIN_RUNTIME_SECS = 120
 # keeps the tip off targets that are nearly symmetric.
 TARGET_SKEW = 1.0
 RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balanced"
+# A column named like an identifier (id, user_id, userId, 顧客ID, 番号) that holds each value in
+# several rows, at least REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
+REPEATED_ID_GROUPS = 10
+REPEATED_ID_MIN_ROWS = 2  # rows per value, on average
+_ID_NAME = re.compile(r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(?![a-z])|番号")
 
 
 def runtime_need_secs(dataset: Dataset) -> float:
@@ -707,6 +713,22 @@ def rare_class_share(y: pd.Series, task: str) -> float | None:
         return None
     share = float(y.value_counts(normalize=True).min())
     return share if share < RARE_CLASS_SHARE else None
+
+
+def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | None:
+    """The first column other than ``target`` that is named like an identifier and repeats its
+    values over rows (``REPEATED_ID_GROUPS`` or more values, ``REPEATED_ID_MIN_ROWS`` rows each on
+    average), where ``cv_group_column`` may keep the validation honest; else None."""
+    for col in profile.columns:
+        if (
+            col.name != target
+            and col.kind in ("categorical", "numeric", "text")
+            and _ID_NAME.search(col.name)
+            and col.n_unique >= REPEATED_ID_GROUPS
+            and profile.n_rows >= REPEATED_ID_MIN_ROWS * col.n_unique
+        ):
+            return col
+    return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -876,6 +898,26 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     overrides = {
         k: args[k] for k in ("max_runtime_secs", "decision", "target_transform") if k in args
     }
+    if "group_column" in args:
+        group = args["group_column"]
+        try:
+            group = _resolve_column(names[:_MAX_COLUMNS], group)
+        except ToolError:
+            raise ToolError("group_column is not a column of the dataset") from None
+        if group == target or not _is_plain(group):
+            raise ToolError("group_column must be a plain-text column other than the target")
+        overrides["cv_group_column"] = group
+    elif (repeated := repeated_id_column(profile, target)) is not None:
+        column = clean_text(repeated.name)
+        warnings.append(
+            _warning(
+                "repeated_id",
+                f"column '{column}' looks like an id that repeats over rows; if rows of one "
+                "value are related (the same customer, say), group_column keeps them together "
+                "in validation so the score is not too good",
+                column=column,
+            )
+        )
     if overrides.get("decision", "argmax") != "argmax" and task != "classification":
         raise ToolError("decision applies to a classification target only")
     if overrides.get("target_transform", "none") != "none":
@@ -1451,7 +1493,8 @@ for _tool in (
         "proposal for the user to confirm; nothing is started. Set the optional max_runtime_secs, "
         "decision ('balanced': a rare class and a score such as balanced accuracy) and "
         "target_transform ('log1p': a skewed target and a score such as RMSLE) only when the "
-        "user's goal calls for it.",
+        "user's goal calls for it. group_column: a repeating id (a customer) whose rows stay "
+        "together in validation.",
         _schema(
             {
                 "dataset_id": _ID,
@@ -1460,6 +1503,7 @@ for _tool in (
                 "max_runtime_secs": {"type": "integer", "minimum": 1},
                 "decision": {"type": "string", "enum": ["argmax", "balanced"]},
                 "target_transform": {"type": "string", "enum": ["none", "log1p"]},
+                "group_column": _COLUMN,
             },
             ["dataset_id", "target"],
         ),

@@ -159,6 +159,15 @@
           <p class="field__hint" id="target_transform-hint">{{ t('train.h.target_transform') }}</p>
           {{ error("target_transform") }}
         </div>
+        <div class="field">
+          <label class="field__label" for="f-cv_group_column">{{ t('train.f.cv_group_column') }}</label>
+          <select class="input input-md input-limited" id="f-cv_group_column" name="cv_group_column"{{ described("cv_group_column") }}>
+            <option value="">{{ t('train.group.none') }}</option>
+            {% for col in columns if not col.target %}<option value="{{ col.profile.name }}"{% if values.cv_group_column == col.profile.name %} selected{% endif %}>{{ col.profile.name }}</option>{% endfor %}
+          </select>
+          <p class="field__hint" id="cv_group_column-hint">{{ t('train.h.cv_group_column') }}</p>
+          {{ error("cv_group_column") }}
+        </div>
         {{ flag("feature_engineering") }}
       </fieldset>
 

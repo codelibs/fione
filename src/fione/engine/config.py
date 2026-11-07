@@ -89,6 +89,9 @@ class TrainConfig:
     keep_cv_models: bool = False
     keep_cv_fold_assignment: bool = False
     ignored_columns: list[str] = field(default_factory=list)
+    # Rows that share a value of this column are kept together in one fold, so the validation
+    # rows never hold a group the training rows have seen. None: rows are split at random.
+    cv_group_column: str | None = None
 
     def validate(self) -> "TrainConfig":
         """Raise ConfigError for the first invalid value; return self when everything is valid."""
@@ -143,6 +146,11 @@ class TrainConfig:
             raise ConfigError("ignored_columns must be a list of column names")
         if self.target in ignored:
             raise ConfigError(f"the target column '{self.target}' cannot also be ignored")
+        group = self.cv_group_column
+        if group is not None and (not isinstance(group, str) or not group):
+            raise ConfigError("cv_group_column must name a column or be empty")
+        if group == self.target:
+            raise ConfigError(f"the target column '{self.target}' cannot also be the group column")
         return self
 
     @classmethod
