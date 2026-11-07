@@ -123,6 +123,9 @@ def test_find_table_links_reports_keys_shared_by_datasets(env):
     assert link["shared"] == 1.0 and link["relation"] == "one_to_many"
     assert link["one_row_per_key"] == by_name["keys"]
     assert found["sampled"] is False and len(found["datasets"]) == 4
+    listed = {d["name"]: d for d in found["datasets"]}
+    assert listed["events"]["columns"] == ["id", "amount"]  # which table holds what
+    assert "n_more_columns" not in listed["events"]
     outsider = ToolContext(env.conn, env.storage, env.users.outsider)
     with pytest.raises(ToolError, match=NOT_ALLOWED):
         call_tool("find_table_links", {"project_id": env.a.id}, outsider)
@@ -180,6 +183,50 @@ def test_find_table_links_ranks_one_row_per_key_before_repeating_keys(env):
     relations = [link["relation"] for link in found["links"]]
     assert relations[:2] == ["one_to_many", "one_to_many"]
     assert relations.count("many_to_many") == 2  # the least certain links are capped
+
+
+def test_find_table_links_names_the_first_columns_of_a_wide_dataset(env):
+    wide = pd.DataFrame({f"c{i}": range(30) for i in range(builtin._LINK_COLUMNS + 5)})
+    ingest.ingest_batches(env.storage, env.conn, env.b.id, "wide", DatasetType.TRAIN, [wide])
+    found = call(env, "find_table_links", {"project_id": env.b.id})
+    block = next(d for d in found["datasets"] if d["name"] == "wide")
+    assert block["columns"] == [f"c{i}" for i in range(builtin._LINK_COLUMNS)]
+    assert block["n_more_columns"] == 5
+
+
+def test_find_table_links_cuts_column_names_before_it_cuts_datasets(env):
+    for i in range(builtin._LINK_DATASETS):
+        frame = pd.DataFrame(
+            {f"a_long_column_name_number_{j}": range(30) for j in range(builtin._LINK_COLUMNS)}
+        )
+        ingest.ingest_batches(env.storage, env.conn, env.b.id, f"d{i}", DatasetType.TRAIN, [frame])
+    found = call(env, "find_table_links", {"project_id": env.b.id}, max_result_bytes=3600)
+    assert len(found["datasets"]) == builtin._LINK_DATASETS  # every id a link may name is kept
+    assert "truncated" not in found and "columns" not in found["datasets"][0]
+    full = call(env, "find_table_links", {"project_id": env.b.id})
+    assert len(full["datasets"][1]["columns"]) == builtin._LINK_COLUMNS
+
+
+def test_find_table_links_keeps_a_key_with_stray_repeats_before_categories(env):
+    ids = [f"m{i}" for i in range(300)]
+    shops = pd.DataFrame(
+        {
+            "mid": ids + ["m0", "m1"],
+            "city": [i % 25 for i in range(302)],
+            "zone": [i % 30 for i in range(302)],
+        }
+    )
+    sales = pd.DataFrame(
+        {
+            "mid": [ids[i % 300] for i in range(600)],
+            "city": [i % 25 for i in range(600)],
+            "zone": [i % 30 for i in range(600)],
+        }
+    )
+    for name, frame in (("shops", shops), ("sales", sales)):
+        ingest.ingest_batches(env.storage, env.conn, env.b.id, name, DatasetType.TRAIN, [frame])
+    found = call(env, "find_table_links", {"project_id": env.b.id})
+    assert found["links"][0]["column"] == "mid"  # not city or zone, which only a few values share
 
 
 def test_find_table_links_says_what_it_did_not_examine(env, monkeypatch):
