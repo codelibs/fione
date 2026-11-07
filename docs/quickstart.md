@@ -144,7 +144,7 @@ which corrects the same imbalance while learning, and it is ignored for regressi
 
 ## Text columns
 
-A column of running text (the median value has five words or more) is read in two ways. Its
+A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product) is read in two ways. Its
 topics are derived features (see below). A model family called TextLinear also reads its words:
 a logistic (or ridge) regression on the TF-IDF weights of words and word pairs, with the other
 columns beside them, learned again on each training fold. It joins the search and the ensemble
@@ -179,7 +179,7 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
 
 - text columns: the common words (letter runs, so `C85` gives `c`) as 0/1 flags, plus length,
   word count, share of digits and capitals and the first number; for running text (a median
-  of five words or more) also 32 *topics*, the main directions of word use found by an SVD of
+  of five words or more, or the titles described under Text columns) also 32 *topics*, the main directions of word use found by an SVD of
   the word weights (TF-IDF);
 - categories: how common each is, and how common each pair is;
 - identifiers: a string column (two of them at most) with at least 12 distinct values and no

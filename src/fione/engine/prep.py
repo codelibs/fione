@@ -19,6 +19,11 @@ LINEAR_LEVELS = 15  # categories one-hot encoded per column in the linear view (
 LINEAR_CLIP = 5.0  # standardised numbers are clipped to +-this many standard deviations
 LINEAR_SKEW = 2.0  # non-negative numbers more skewed than this are log-transformed in that view
 PROSE_WORDS = 5  # a column whose median value has this many words is prose, not a label or name
+# A shorter text is prose too when its values are mostly different and made of real words (a
+# product title of four words): a label repeats, and the frequency of a title says nothing.
+SHORT_PROSE_WORDS = 3
+SHORT_PROSE_UNIQUE = 0.5  # share of different values among the first 1,000
+SHORT_PROSE_WORD_CHARS = 3  # mean letters of a word, so that a code such as C_ID_92a is no text
 MAX_PROSE = 3  # prose columns the text view reads (the first ones)
 _LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code has no words
 # ordinal: seconds since the Unix epoch; the hour is added for columns that carry a time of day
@@ -41,10 +46,19 @@ def _as_str(s: pd.Series) -> pd.Series:
 
 
 def is_prose(s: pd.Series) -> bool:
-    """Whether a string column holds running text: the median value has ``PROSE_WORDS`` words
-    (runs of letters, so a timestamp or a code is not prose)."""
+    """Whether a string column holds text: the median value has ``PROSE_WORDS`` words (runs of
+    letters, so a timestamp or a code is not prose), or ``SHORT_PROSE_WORDS`` words in values
+    that are mostly different (``SHORT_PROSE_UNIQUE``) and have longer words than a code."""
     values = _as_str(s).dropna().head(1000)
-    return bool(len(values) and values.str.count(_LETTERS.pattern).median() >= PROSE_WORDS)
+    if not len(values):
+        return False
+    words = values.str.findall(_LETTERS.pattern)
+    counts = words.str.len()
+    if counts.median() >= PROSE_WORDS:
+        return True
+    if counts.median() < SHORT_PROSE_WORDS or values.nunique() < SHORT_PROSE_UNIQUE * len(values):
+        return False
+    return bool(words.explode().str.len().mean() >= SHORT_PROSE_WORD_CHARS)
 
 
 def _holds_date_strings(s: pd.Series) -> bool:

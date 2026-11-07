@@ -423,6 +423,26 @@ def test_prose_columns_are_the_ones_with_running_text():
     assert prep.prose == ("post",)
 
 
+def test_a_short_text_is_prose_only_when_its_values_are_mostly_different_words():
+    n = 200
+    rng = np.random.default_rng(2)
+    words = ["red", "blue", "cotton", "leather", "bag", "shirt", "vintage", "small", "large"]
+    frame = pd.DataFrame(
+        {
+            "num": rng.normal(size=n),
+            # four words, mostly different: a product title
+            "title": [" ".join(rng.choice(words, 4)) + f" {i}" for i in range(n)],
+            # four words but few different values: a label
+            "label": rng.choice(["Eastern Time (US Canada)", "Pacific Time (US Canada)"], n),
+            # four letter runs of one or two letters, all different: a code
+            "code": [f"C_ID_{i:04d}a{i % 7}b" for i in range(n)],
+            # two words, all different: a name
+            "person": [f"Ann{i} Lee" for i in range(n)],
+        }
+    )
+    assert Prep().fit(frame).prose == ("title",)
+
+
 def test_text_view_is_the_linear_view_plus_the_text_of_each_prose_column():
     frame = _posts()
     frame.loc[3, "post"] = None
