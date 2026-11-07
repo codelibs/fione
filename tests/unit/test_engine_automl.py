@@ -1041,3 +1041,72 @@ def test_a_fit_without_high_cardinality_strings_does_not_depend_on_their_unseen_
     expected = run()
     monkeypatch.setattr(automl_module, "Prep", NoUnseenShare)
     pd.testing.assert_frame_equal(run(), expected)
+
+
+def _trend(n=800, seed=0):
+    """A target that grows with the day: shuffled folds interpolate it, later days cannot."""
+    rng = np.random.default_rng(seed)
+    day = np.arange(n) // 4
+    df = pd.DataFrame({"x": rng.normal(size=n), "day": day})
+    df["y"] = day * 1.0 + df["x"] * 0.1 + rng.normal(scale=0.1, size=n)
+    return df.sample(frac=1, random_state=seed).reset_index(drop=True)  # not in order of day
+
+
+def _ensemble_score(model):
+    board = model.leaderboard
+    return float(board.loc[board["family"] == "Ensemble", "cv_score"].iloc[0])
+
+
+def test_a_time_column_validates_on_later_rows_and_is_stricter_than_shuffled_folds():
+    df = _trend()
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    shuffled = _fit(df, feature_engineering=False, **options)
+    events = []
+    ordered = _fit(
+        df,
+        events,
+        time_column="day",
+        keep_cv_predictions=True,
+        keep_cv_fold_assignment=True,
+        **options,
+    )
+    assert _ensemble_score(ordered) > 3 * _ensemble_score(shuffled)  # later days were never seen
+    notice = next(e for e in events if e.data.get("kind") == "time_validation")
+    assert notice.data["folds"] == 5
+    # the first part of the days is only learned from: no prediction, no fold
+    first = (df["day"] <= 33).to_numpy()  # 800 rows in 6 parts: days 0 to 33
+    assert (ordered.fold_assignment[first] == -1).all()
+    assert (ordered.fold_assignment[~first] >= 0).all()
+    assert np.isnan(ordered.cv_predictions[first]).all()
+    assert np.isfinite(ordered.cv_predictions[~first]).all()
+    assert ordered.cv_predictions.shape == (len(df),)
+    assert ordered.predict(df).shape == (len(df),)  # a model is still fitted on every row
+
+
+def test_the_time_column_may_be_ignored_as_a_feature_and_may_hold_dates():
+    df = _trend(400)
+    df["when"] = (pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")).dt.strftime(
+        "%Y-%m-%d"
+    )
+    model = _fit(
+        df,
+        target="y",
+        task="regression",
+        families=["LightGBM"],
+        max_models=1,
+        time_column="when",
+        ignored_columns=["when", "day"],
+        keep_cv_fold_assignment=True,
+    )
+    assert "when" not in model.columns and (model.fold_assignment >= 0).sum() > 0
+
+
+def test_a_time_column_that_cannot_order_the_rows_is_refused():
+    df = _trend(200)
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    with pytest.raises(ConfigError, match="not in the data"):
+        _fit(df, time_column="nope", **options)
+    with pytest.raises(ConfigError, match="missing values"):
+        _fit(df.assign(day=df["day"].mask(df.index == 3)), time_column="day", **options)
+    with pytest.raises(ConfigError, match="numbers or dates"):
+        _fit(df.assign(day="soon"), time_column="day", **options)

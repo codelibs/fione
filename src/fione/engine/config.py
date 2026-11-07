@@ -89,6 +89,10 @@ class TrainConfig:
     keep_cv_models: bool = False
     keep_cv_fold_assignment: bool = False
     ignored_columns: list[str] = field(default_factory=list)
+    # Validate looking forward in time: the rows ordered by this column (a number or a date, which
+    # may also be ignored as a feature) are cut into parts, and each fold learns from the parts
+    # before the one it predicts. None: shuffled folds.
+    time_column: str | None = None
 
     def validate(self) -> "TrainConfig":
         """Raise ConfigError for the first invalid value; return self when everything is valid."""
@@ -143,6 +147,12 @@ class TrainConfig:
             raise ConfigError("ignored_columns must be a list of column names")
         if self.target in ignored:
             raise ConfigError(f"the target column '{self.target}' cannot also be ignored")
+        if self.time_column is not None and (
+            not isinstance(self.time_column, str) or not self.time_column
+        ):
+            raise ConfigError("time_column must name a column or be empty")
+        if self.time_column == self.target:
+            raise ConfigError("the time column cannot be the target")
         return self
 
     @classmethod

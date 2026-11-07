@@ -172,6 +172,24 @@ change from the bias to the prediction in proportion to each column's effect on 
 which is an approximation. Only the scores of the search itself (the trial history) stay on the
 logarithm scale. Every value must be above -1, and the setting is ignored for classification.
 
+## Data that follows time
+
+When the rows to predict come after the rows to learn from (sales of next month, a later
+period of a market), shuffled cross-validation parts overstate the score: a model learns from
+days after the ones it predicts. Choose a column that orders the rows in time ("Order of the
+rows in time", `time_column` in the API; a number, a date, or text a date can be read from, with
+no missing value). Fione then cuts the rows, in the order of that column, into `nfolds` + 1 parts of
+about the same size. Fold *j* checks the models on part *j* and learns from the parts before
+it, so no model learns from a later row than it predicts. Rows with the same value of the
+column are in the same part, and a column with few different values gives fewer folds.
+
+The first part is only learned from. The scores, the ensemble weights, the diagnostics and the
+cross-validation predictions cover the other parts; a row of the first part has no prediction
+(empty in the kept predictions, fold -1 in the fold assignment). The final models learn
+from all the rows. The column can be left out of the inputs and still order the rows.
+Derived features are not tried in this mode, since their check uses shuffled folds. A
+classification needs every class in the earlier parts of each fold.
+
 ## Derived features
 
 Fione builds *derived features* that never read the target, and chooses among them by

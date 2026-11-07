@@ -79,6 +79,7 @@ SINGLE_FIELDS = (
     "max_runtime_secs_per_model",
     "max_models",
     "nfolds",
+    "time_column",
     "seed",
     "balance_classes",
     "decision",
@@ -433,6 +434,7 @@ def _form_values(defaults: dict) -> dict:
         "max_runtime_minutes": str(int(minutes)) if minutes.is_integer() else "",
         "max_runtime_secs_per_model": "",
         "max_models": "",
+        "time_column": "",
     }
     for name in (
         "nfolds",
@@ -562,6 +564,10 @@ def _parse_train(form: FormData, names: list[str], inferred_task: str):
     if values["target_transform"] not in TRANSFORMS:
         errors["target_transform"] = "train.error.target_transform"
     config["target_transform"] = values["target_transform"]
+    time_column = values["time_column"]
+    if time_column and (time_column not in names or time_column == target):
+        errors["time_column"] = "train.error.time_column"
+    config["time_column"] = time_column or None
     minutes = values["max_runtime_minutes"].strip()
     if len(minutes) > MAX_RUNTIME_DIGITS or _whole(minutes, 1) is None:
         errors["max_runtime_minutes"] = "analysis.error.runtime"
