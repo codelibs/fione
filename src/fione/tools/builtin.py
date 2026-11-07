@@ -181,6 +181,20 @@ def _dataset_block(dataset: Dataset) -> dict:
     }
 
 
+_LINK_COLUMNS = 20  # column names listed for each dataset of find_table_links
+
+
+def _linked_dataset(dataset: Dataset, listed: int) -> dict:
+    """The dataset block with its first ``listed`` column names, so the model can tell which
+    table holds the column to predict and what each one is about."""
+    block = _dataset_block(dataset)
+    if listed:
+        block["columns"] = [clean_text(name) for name, _ in dataset.schema[:listed]]
+        if dataset.n_cols > listed:
+            block["n_more_columns"] = dataset.n_cols - listed
+    return block
+
+
 def _column_entry(col: ColumnProfile, allow_samples: bool) -> dict:
     entry = {
         "name": clean_text(col.name),
@@ -979,8 +993,17 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
         )
         link["one_row_per_key"] = a.id if unique_a else b.id if unique_b else None
         link["shared"] = round(shared, 2)
-        links.append(link)
-    links.sort(key=lambda link: (link["relation"] == "many_to_many", -link["shared"]))
+        links.append((len(values_a | values_b), link))
+    # a key has many values; a category (a state, a city) has few, and a key that repeats on
+    # both sides only through a few stray rows must not lose its place to one
+    links.sort(
+        key=lambda item: (
+            item[1]["relation"] == "many_to_many",
+            -item[0] if item[1]["relation"] == "many_to_many" else 0,
+            -item[1]["shared"],
+        )
+    )
+    links = [link for _, link in links]
     repeating = 0
     shown = []
     for link in links:
@@ -988,7 +1011,6 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
         if repeating <= _MAX_REPEATING_LINKS:
             shown.append(link)
     result = {
-        "datasets": [_dataset_block(d) for d in datasets],
         "links": shown[:_MAX_LINKS],
         "sampled": sampled,
         "next_step": (_NEXT_TO_JOIN if shown else "") + _NEXT_TO_TRAIN,
@@ -997,7 +1019,13 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
         result["n_datasets_not_examined"] = len(every) - len(datasets)
     if cut:
         result["truncated"] = True  # the time ran out before every dataset was read
-    return result
+    # the column names go first when the result is too large: the links name datasets by id
+    listed = _LINK_COLUMNS
+    while True:
+        full = {"datasets": [_linked_dataset(d, listed) for d in datasets], **result}
+        if listed == 0 or fits(full, ctx.max_result_bytes):
+            return full
+        listed //= 2
 
 
 # --- propose_join ---------------------------------------------------------

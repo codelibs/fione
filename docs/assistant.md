@@ -164,7 +164,10 @@ When a project holds more than one dataset, the assistant looks for the columns 
 same name and mostly the same values) and says how they relate: one dataset has one row per
 value and the other several (a customer and their purchases), or both repeat (rows of two
 tables for the same day). Columns with fewer than 20 values are not reported when both sides
-repeat, since they are categories rather than keys. A dataset with several rows per key is
+repeat, since they are categories rather than keys; of the links where both sides repeat, the
+ones with the most values come first and at most two are shown. The result also names the first 20
+columns of each dataset (fewer when the result would not fit; the other datasets' ids are always
+kept), so that the assistant can tell which table holds the column to predict. A dataset with several rows per key is
 added to the one with the column to predict by the **Join** module: the key, and `summarize`,
 which gives each key one row (the number of rows, and the mean, minimum, maximum and sum of each
 number). Name `columns` to add or summarize only those columns of the other dataset, for example
