@@ -496,17 +496,15 @@ def test_find_table_links_takes_table_names_in_any_case_and_refuses_hidden_colum
         ask_model=Asked([_pair("Stores", "SHOP", "SALES", "Store_Nbr")]),
     )
     assert [x["basis"] for x in found["links"]] == ["meaning"]
-    # a name that another dataset also has was left out of the question: it is not taken
+    # a name that another dataset also has was left out of the question: it is not taken, though
+    # its values would agree
     other = _fresh(env)
     sales = pd.DataFrame({"id": [i % 54 + 1 for i in range(300)], "u": range(300)})
-    stores = pd.DataFrame({"id": range(1, 55), "shop": range(1, 55)})
+    stores = pd.DataFrame({"id": range(1000, 1054), "shop": range(1, 55)})
     _ingest(env, other, sales=sales, stores=stores)
-    found = call(
-        env,
-        "find_table_links",
-        {"project_id": other.id},
-        ask_model=Asked([_pair("sales", "u", "stores", "id")]),
-    )
+    hidden = Asked([_pair("sales", "id", "stores", "shop")])
+    found = call(env, "find_table_links", {"project_id": other.id}, ask_model=hidden)
+    assert len(hidden.questions) == 1
     assert all(x.get("basis") != "meaning" for x in found["links"])
 
 
@@ -519,9 +517,9 @@ def test_find_table_links_does_not_take_two_row_numbers_for_one_key(env):
         env,
         "find_table_links",
         {"project_id": project.id},
-        ask_model=Asked([_pair("one", "row_a", "two", "row_b")]),
+        ask_model=(asked := Asked([_pair("one", "row_a", "two", "row_b")])),
     )
-    assert found["links"] == []
+    assert found["links"] == [] and len(asked.questions) == 1
 
 
 def test_listing_follows_permissions(env):

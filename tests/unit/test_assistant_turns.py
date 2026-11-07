@@ -445,7 +445,10 @@ def _stores_and_sales(env):
         )
 
 
-def test_find_table_links_asks_the_model_once_for_the_links_the_names_do_not_show(env, fake_llm):
+@pytest.mark.parametrize("provider", ["ollama", "claude"])
+def test_find_table_links_asks_the_model_once_for_the_links_the_names_do_not_show(
+    env, fake_llm, provider
+):
     _stores_and_sales(env)
     find = {"name": "find_table_links", "arguments": {"project_id": env.project.id}}
     pair = {
@@ -461,13 +464,23 @@ def test_find_table_links_asks_the_model_once_for_the_links_the_names_do_not_sho
         {"tool_calls": [find]},  # the same question is not asked again in the turn
         {"text": "Done."},
     ])  # fmt: skip
-    rows = turn(env, settings_for(env, fake))
+    if provider == "claude":
+        settings = make_settings(
+            env.tmp / "data",
+            llm_provider="claude",
+            llm_base_url=fake.origin,
+            llm_api_key="sk-test-0123456789",
+        )
+    else:
+        settings = settings_for(env, fake)
+    rows = turn(env, settings)
     first, second = tool_results(rows)
     (link,) = [x for x in first["links"] if x.get("basis") == "meaning"]
     assert link["columns"] == ["store_nbr", "shop"] and second["links"] == first["links"]
     question = fake.requests[1]
     assert [m["role"] for m in question["messages"]] == ["user"]
-    assert [t["function"]["name"] for t in question["tools"]] == ["report_links"]
+    names = [t.get("name") or t["function"]["name"] for t in question["tools"]]
+    assert names == ["report_links"]
     assert len(fake.requests) == 4
 
 
