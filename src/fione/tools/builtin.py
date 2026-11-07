@@ -911,6 +911,7 @@ _LINK_SAMPLE_ROWS = 200_000
 _LINK_SECS = 30.0  # the reading stops after this long, and the result says so
 _MIN_SHARED = 0.5
 _MIN_VALUE_KEYS = 100  # a key found by its values alone needs this many values: small ids overlap
+_MIN_SEQUENCE_COVERAGE = 0.3  # of a key that is a run of whole numbers, found by values alone
 _MIN_COVERAGE = 0.05  # of the longer key column, for names that are not the same
 _MIN_REPEATED_KEYS = 20  # keys that repeat on both sides need this many values to be reported
 _MAX_LINKS = 20
@@ -959,7 +960,7 @@ def _value_columns(dataset: Dataset, usable: dict[str, str]) -> list[str]:
 
 def _is_sequence(values: set[str]) -> bool:
     """The values are whole numbers with none missing between the smallest and the largest: a
-    row number or a list of small ids, which other ids overlap by chance."""
+    row number, or a list of ids that other ids can overlap by chance."""
     try:
         numbers = [int(v) for v in values]
     except ValueError:
@@ -983,8 +984,10 @@ def _link(
             return None
         key, other = (values_a, values_b) if unique_a else (values_b, values_a)
         inter = len(key & other)
-        if inter < _MIN_VALUE_KEYS or inter / len(other) < _MIN_SHARED or _is_sequence(key):
+        if inter < _MIN_VALUE_KEYS or inter / len(other) < _MIN_SHARED:
             return None
+        if inter / len(key) < _MIN_SEQUENCE_COVERAGE and _is_sequence(key):
+            return None  # a row number or a short list of ids that the other column only touches
         shared = inter / len(other)
     else:
         # the share of the smaller set of values that the larger one has
