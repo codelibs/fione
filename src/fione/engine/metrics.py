@@ -65,8 +65,11 @@ def loss(name: str, y: np.ndarray, pred: np.ndarray) -> float:
 def fold_std(
     name: str, y: np.ndarray, pred: np.ndarray, folds: Folds, prior: np.ndarray | None = None
 ) -> float:
-    """Standard deviation of the metric over the validation folds."""
-    return float(np.std([value(name, y[valid], pred[valid], prior) for _, valid in folds]))
+    """Standard deviation of the metric over the validation folds, leaving out the folds where
+    it is undefined (an AUC of a part with one class); NaN if there is none."""
+    values = np.array([value(name, y[valid], pred[valid], prior) for _, valid in folds])
+    values = values[np.isfinite(values)]
+    return float(np.std(values)) if len(values) else float("nan")
 
 
 def summary(

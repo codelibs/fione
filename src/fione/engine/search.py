@@ -42,7 +42,7 @@ import optuna
 import pandas as pd
 from sklearn.model_selection import KFold, StratifiedKFold
 
-from fione.engine.config import Deadline, DeadlineExceeded, NoModelError
+from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError
 from fione.engine.events import Event, EventSink
 from fione.engine.families import FAMILIES, UNIT_SAFETY, FamilySpec, n_threads
 from fione.engine.prep import Prep, Task
@@ -95,6 +95,43 @@ def make_folds(y: np.ndarray, task: Task, nfolds: int, seed: int = 0) -> Folds:
     """Shuffled K folds, stratified by class for classification."""
     splitter = StratifiedKFold if task == "classification" else KFold
     return list(splitter(nfolds, shuffle=True, random_state=seed).split(np.zeros(len(y)), y))
+
+
+def make_time_folds(order: np.ndarray, y: np.ndarray, task: Task, nfolds: int) -> Folds:
+    """Folds that look forward in time. The rows, ordered by ``order`` (whole numbers, equal for
+    rows of the same moment), are cut into ``nfolds + 1`` parts of about the same size; the
+    fold ``j`` validates on part ``j`` and trains on the parts before it, so no model learns
+    from a later row than the ones it predicts. The first part is never validated. Rows that
+    share a value of ``order`` are in the same part, so fewer folds come out when it has few
+    different values."""
+    n = len(order)
+    ranked = np.argsort(order, kind="stable")
+    starts = np.searchsorted(order[ranked], order[ranked], side="left")
+    part = np.empty(n, dtype=np.int64)
+    part[ranked] = np.minimum(starts * (nfolds + 1) // n, nfolds)
+    present = np.unique(part)
+    if len(present) < 2:
+        raise ConfigError("the time column has too few different values to make validation parts")
+    folds = [(np.flatnonzero(part < p), np.flatnonzero(part == p)) for p in present[1:]]
+    if task == "classification":
+        classes = np.unique(y)
+        if len(np.unique(y[np.concatenate([valid for _, valid in folds])])) < 2:
+            raise ConfigError("the later parts hold a single class, which cannot be validated")
+        for train, _ in folds:
+            if len(np.unique(y[train])) < len(classes):
+                raise ConfigError(
+                    "a class has no row in the earlier part of a time-ordered validation; "
+                    "use fewer folds or validate without a time column"
+                )
+    return folds
+
+
+def covered(folds: Folds, n: int) -> np.ndarray:
+    """The rows (of ``n``) that some fold validates, in order: all of them for shuffled folds."""
+    rows = np.zeros(n, dtype=bool)
+    for _, valid in folds:
+        rows[valid] = True
+    return np.flatnonzero(rows)
 
 
 def score(task: Task, y: np.ndarray, pred: np.ndarray) -> float:
@@ -188,7 +225,8 @@ def _run_trial(
         trial.report(float(np.mean(losses)), i)
         if trial.should_prune():
             return _Outcome("pruned", float(np.mean(losses)))
-    return _Outcome("complete", score(spec.task, y, oof), oof, models)
+    rows = covered(folds, len(y))
+    return _Outcome("complete", score(spec.task, y[rows], oof[rows]), oof, models)
 
 
 def run_family(
