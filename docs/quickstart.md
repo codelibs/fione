@@ -173,7 +173,9 @@ a group at one time are reduced to their mean (or sum, with `how`) first, so a c
 gives, for example, the mean of an item over all its shops one month earlier. No row reads its
 own time or a later one, but the module does not know which rows are to be predicted: to give
 the rows to predict their lags, put them in the same dataset (with the target empty) before
-adding the lags.
+adding the lags. Training refuses a target with missing values, so take the rows to learn from
+with **Slice rows** (such as `month < 34`) before training, and the rows to predict with another
+slice for the prediction.
 
 ## Learning a skewed target
 
