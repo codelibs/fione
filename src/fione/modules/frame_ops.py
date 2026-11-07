@@ -96,14 +96,14 @@ _SUMMARIES = ("mean", "min", "max", "sum")
 _JOIN_KEY = "\0join_key"  # a name no column has
 
 
-def _summary(other: pd.DataFrame, key: str) -> pd.DataFrame:
-    """One row per value of ``key``: the number of rows, and per column the mean, minimum,
+def _summary(other: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    """One row per value of ``keys``: the number of rows, and per column the mean, minimum,
     maximum and sum of a number, or the number of different values of anything else."""
-    others = [c for c in other.columns if c != key]
+    others = [c for c in other.columns if c not in keys]
     numeric = [c for c in others if pd.api.types.is_numeric_dtype(other[c])]
     rest = [c for c in others if c not in numeric]
-    check_cells(other[key].nunique(), 1 + len(numeric) * len(_SUMMARIES) + len(rest))
-    groups = other.groupby(key)
+    check_cells(len(other[keys].drop_duplicates()), 1 + len(numeric) * len(_SUMMARIES) + len(rest))
+    groups = other.groupby(keys)
     parts = [groups.size().rename("rows").to_frame()]
     if numeric:
         stats = groups[numeric].agg(list(_SUMMARIES))
@@ -112,10 +112,10 @@ def _summary(other: pd.DataFrame, key: str) -> pd.DataFrame:
     if rest:
         parts.append(groups[rest].nunique().add_suffix("_nunique"))
     summary = pd.concat(parts, axis=1)
-    # a summary column never takes the key's name (a key called "rows" is possible)
-    summary.columns = unique_names([str(key)] + [str(c) for c in summary.columns])[1:]
-    summary.insert(0, key, summary.index)
-    return summary.reset_index(drop=True)
+    # a summary column never takes a key's name (a key called "rows" is possible)
+    names = unique_names([str(k) for k in keys] + [str(c) for c in summary.columns])
+    summary.columns = names[len(keys) :]
+    return summary.reset_index()
 
 
 def _as_text(s: pd.Series) -> pd.Series:
@@ -125,43 +125,65 @@ def _as_text(s: pd.Series) -> pd.Series:
     return s.astype(str).where(s.notna())
 
 
+def _key_columns(frame: pd.DataFrame, params: dict, one: str, many: str) -> list[str]:
+    """The key columns named by ``one`` (a column) or ``many`` (several that identify a row
+    together), which are not both given."""
+    if params[one] and params[many]:
+        raise ModuleError(f"give '{one}' or '{many}', not both")
+    names = params[many] or ([params[one]] if params[one] else [])
+    if len(set(names)) != len(names):
+        raise ModuleError(f"'{many}' names a column twice")
+    return [require_column(frame, name) for name in names]
+
+
 def join(df, params, ctx):
-    """Add the columns of the other dataset to the rows with the same ``key`` (a left join: every
-    row stays, with missing values where the other dataset has no such key). The rows of the
-    other dataset must each have a different key, unless ``summarize`` replaces them by one row
-    per key (the number of rows, and the mean, minimum, maximum and sum of each number). With
-    ``columns``, only those columns of the other dataset are added or summarized."""
+    """Add the columns of the other dataset to the rows with the same key (a left join: every
+    row stays, with missing values where the other dataset has no such key). The key is one
+    column (``key``) or several that identify a row together (``keys``); a row with a missing
+    part matches nothing. The rows of the other dataset must each have a different key, unless
+    ``summarize`` replaces them by one row per key (the number of rows, and the mean, minimum,
+    maximum and sum of each number). With ``columns``, only those columns of the other dataset
+    are added or summarized."""
     other = _other(ctx)
-    key = require_column(df, params["key"])
-    other_key = require_column(other, params["other_key"] or key)
+    keys = _key_columns(df, params, "key", "keys")
+    if not keys:
+        raise ModuleError("name the key column ('key') or the key columns ('keys')")
+    if params["other_key"] or params["other_keys"]:
+        other_keys = _key_columns(other, params, "other_key", "other_keys")
+    else:
+        other_keys = _key_columns(other, params, "key", "keys")
+    if len(keys) != len(other_keys):
+        raise ModuleError("the key and the other key must name the same number of columns")
     if params["columns"]:  # only these columns are added (and summarized)
         unknown = [c for c in params["columns"] if c not in other.columns]
         if unknown:
             raise ModuleError(f"unknown columns of the other dataset: {unknown}")
-        other = other[[other_key, *[c for c in params["columns"] if c != other_key]]]
+        other = other[[*other_keys, *[c for c in params["columns"] if c not in other_keys]]]
     if params["summarize"]:
-        other = _summary(other, other_key)
-    elif other[other_key].dropna().duplicated().any():
+        other = _summary(other, other_keys)
+    elif other[other_keys].dropna().duplicated().any():
         raise ModuleError(
-            f"the values of '{other_key}' repeat in the other dataset; "
-            "summarize it by that column, or the rows would multiply"
+            f"the values of {', '.join(repr(k) for k in other_keys)} repeat in the other "
+            "dataset; summarize it by that column, or the rows would multiply"
         )
-    added = [c for c in other.columns if c != other_key]
+    added = [c for c in other.columns if c not in other_keys]
     names = unique_names([str(c) for c in df.columns] + [str(c) for c in added])[len(df.columns) :]
-    right = other[[other_key, *added]].set_axis([_JOIN_KEY, *names], axis=1)
-    right = right[right[_JOIN_KEY].notna()]  # a missing key matches nothing
-    left = df.assign(**{_JOIN_KEY: df[key]})
-    if pd.api.types.is_numeric_dtype(left[_JOIN_KEY]) != pd.api.types.is_numeric_dtype(
-        right[_JOIN_KEY]
-    ):  # 7 and "7" are the same key
-        left[_JOIN_KEY] = _as_text(left[_JOIN_KEY])
-        right = right.assign(**{_JOIN_KEY: _as_text(right[_JOIN_KEY])})
+    parts = [f"{_JOIN_KEY}{i}" for i in range(len(keys))]
+    right = other[[*other_keys, *added]].set_axis([*parts, *names], axis=1)
+    right = right.dropna(subset=parts)  # a missing part matches nothing
+    left = df.assign(**{part: df[key] for part, key in zip(parts, keys, strict=True)})
+    for part in parts:
+        if pd.api.types.is_numeric_dtype(left[part]) != pd.api.types.is_numeric_dtype(
+            right[part]
+        ):  # 7 and "7" are the same key
+            left[part] = _as_text(left[part])
+            right = right.assign(**{part: _as_text(right[part])})
     check_cells(len(df), len(df.columns) + len(added))
     try:
-        merged = left.merge(right, how="left", on=_JOIN_KEY)
+        merged = left.merge(right, how="left", on=parts)
     except ValueError as e:
         raise ModuleError(f"the keys cannot be compared: {e}") from None
-    return merged.drop(columns=_JOIN_KEY)
+    return merged.drop(columns=parts)
 
 
 def cslice(df, params, ctx):
@@ -357,15 +379,17 @@ _op(
 _op("floor", "Apply floor", {"columns": _NAMES}, (), floor)
 _op(
     "join",
-    "Join datasets by a key column",
+    "Join datasets by key columns",
     {
         "other_dataset_id": _OTHER,
-        "key": _NAME,
+        "key": {**_NAME, "default": ""},
+        "keys": _NAMES,
         "other_key": {**_NAME, "default": ""},
+        "other_keys": _NAMES,
         "summarize": {"type": "boolean", "default": False},
         "columns": _NAMES,
     },
-    ("other_dataset_id", "key"),
+    ("other_dataset_id",),
     join,
 )
 _op(

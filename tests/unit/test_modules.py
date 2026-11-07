@@ -424,6 +424,51 @@ def test_join_refuses_repeated_keys_unknown_columns_and_a_missing_dataset():
         run_op("join", df, {"other_dataset_id": 1, "key": "id"})
 
 
+def test_join_by_several_key_columns_matches_the_whole_key():
+    df = pd.DataFrame({"shop": [1, 1, 2, 2, None], "item": [5, 6, 5, 6, 5]})
+    other = pd.DataFrame({"s": [1, 2, 2], "i": ["5", "5", "6"], "n": [10, 20, 30]})
+    out, _ = run_op(
+        "join",
+        df,
+        {"other_dataset_id": 1, "keys": ["shop", "item"], "other_keys": ["s", "i"]},
+        other,
+    )
+    assert list(out.columns) == ["shop", "item", "n"]
+    # item 5 of shop 1 and of shop 2 differ; a shop and item pair absent from the other
+    # dataset, and a pair with a missing part, get nothing
+    assert list(out["n"].fillna(-1)) == [10, -1, 20, 30, -1]
+
+
+def test_join_by_several_key_columns_refuses_a_repeated_pair_and_summarizes_it():
+    df = pd.DataFrame({"a": [1, 1, 2], "b": ["x", "y", "x"]})
+    other = pd.DataFrame({"a": [1, 1, 2], "b": ["x", "x", "x"], "v": [1.0, 3.0, 5.0]})
+    with pytest.raises(ModuleError, match="'a', 'b' repeat"):
+        run_op("join", df, {"other_dataset_id": 1, "keys": ["a", "b"]}, other)
+    out, _ = run_op(
+        "join", df, {"other_dataset_id": 1, "keys": ["a", "b"], "summarize": True}, other
+    )
+    assert list(out.columns)[:2] == ["a", "b"] and "rows" in out.columns
+    assert list(out["rows"].fillna(0)) == [2, 0, 1]
+    assert list(out["v_mean"].fillna(-1)) == [2.0, -1, 5.0]
+    # one name where the other has two does not repeat a pair that is different
+    ok = other.assign(b=["x", "y", "x"])
+    out, _ = run_op("join", df, {"other_dataset_id": 1, "keys": ["a", "b"]}, ok)
+    assert list(out["v"]) == [1.0, 3.0, 5.0]
+
+
+def test_join_by_several_key_columns_refuses_unclear_keys():
+    df = pd.DataFrame({"a": [1], "b": [2]})
+    for params, message in (
+        ({"key": "a", "keys": ["a", "b"]}, "not both"),
+        ({"keys": ["a", "a"]}, "names a column twice"),
+        ({"keys": ["a", "b"], "other_key": "a"}, "same number"),
+        ({}, "name the key"),
+        ({"keys": ["a", "zz"]}, "unknown column 'zz'"),
+    ):
+        with pytest.raises(ModuleError, match=message):
+            run_op("join", df, {"other_dataset_id": 1, **params}, df)
+
+
 def test_a_japanese_column_passes_through_the_ops():
     df = pd.DataFrame({"年齢": [30, 20, 25], "名前": ["さ", "た", "な"]})
     out, _ = run_op("sort", df, {"column": "年齢"})
