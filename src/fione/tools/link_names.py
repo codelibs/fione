@@ -20,6 +20,7 @@ _ID_WORD = "id"
 _LAST_ID_WORDS = frozenset({"nbr", "number", "no", "key", "code", "uid", "ref"})
 _SIMILAR_RATIO = 0.75
 _MIN_ABBREVIATION = 3
+_MAX_PREFIX_CHARS = 3  # the letters a name may have more and still be the same key
 
 
 def _words(name: str) -> list[str]:
@@ -60,12 +61,19 @@ def related(table_a: str, column_a: str, table_b: str, column_b: str) -> str | N
             return TABLE_ID  # ``id`` of a table and ``<table>_id`` elsewhere
     if not (stem_a and stem_b):
         return None
-    if set(stem_a) <= set(stem_b) or set(stem_b) <= set(stem_a):
-        return SIMILAR_NAME
+    fewer, more = sorted((set(stem_a), set(stem_b)), key=len)
+    if fewer <= more and sum(map(len, more - fewer)) <= _MAX_PREFIX_CHARS:
+        return SIMILAR_NAME  # a short word more: sk_id_bureau and bureau_id
     joined_a, joined_b = "".join(stem_a), "".join(stem_b)
     short, long = sorted((joined_a, joined_b), key=len)
-    if len(short) >= _MIN_ABBREVIATION and long.startswith(short):
+    if (
+        len(stem_a) == len(stem_b) == 1
+        and len(short) >= _MIN_ABBREVIATION
+        and long.startswith(short)
+    ):
         return SIMILAR_NAME  # an abbreviation: cust and customer
+    if len(stem_a) != len(stem_b):
+        return None  # a word more or less names another thing (customer and customer_type)
     ratio = difflib.SequenceMatcher(None, joined_a, joined_b).ratio()
     return SIMILAR_NAME if ratio >= _SIMILAR_RATIO else None
 

@@ -910,6 +910,8 @@ _LINK_FULL_ROWS = 5_000_000  # a key column of up to this many rows is read whol
 _LINK_SAMPLE_ROWS = 200_000
 _LINK_SECS = 30.0  # the reading stops after this long, and the result says so
 _MIN_SHARED = 0.5
+_MIN_VALUE_KEYS = 100  # a key found by its values alone needs this many values: small ids overlap
+_MIN_COVERAGE = 0.05  # of the longer key column, for names that are not the same
 _MIN_REPEATED_KEYS = 20  # keys that repeat on both sides need this many values to be reported
 _MAX_LINKS = 20
 _LINK_VALUE_COLUMNS = 8  # columns of a dataset compared by their values, whatever their names
@@ -955,19 +957,33 @@ def _value_columns(dataset: Dataset, usable: dict[str, str]) -> list[str]:
     return names[:_LINK_VALUE_COLUMNS]
 
 
+def _is_sequence(values: set[str]) -> bool:
+    """The values are whole numbers with none missing between the smallest and the largest: a
+    row number or a list of small ids, which other ids overlap by chance."""
+    try:
+        numbers = [int(v) for v in values]
+    except ValueError:
+        return False
+    return max(numbers) - min(numbers) + 1 == len(numbers)
+
+
 def _link(
     a: Dataset, b: Dataset, column_a: str, column_b: str, basis: str, found, key_ok=(True, True)
 ) -> dict | None:
     """The link of the two columns given their key sets, or None when the values do not say
     they are one key."""
     (values_a, unique_a), (values_b, unique_b) = found
+    if basis != link_names.SAME_NAME and (
+        len(values_a & values_b) / max(len(values_a), len(values_b)) < _MIN_COVERAGE
+    ):
+        return None  # a few small ids inside a long id column: they overlap by chance
     if basis == link_names.VALUES:
         # one side is the key and most values of the other are in it
         if unique_a == unique_b or not all(key_ok):
             return None
         key, other = (values_a, values_b) if unique_a else (values_b, values_a)
         inter = len(key & other)
-        if inter < _MIN_REPEATED_KEYS or inter / len(other) < _MIN_SHARED:
+        if inter < _MIN_VALUE_KEYS or inter / len(other) < _MIN_SHARED or _is_sequence(key):
             return None
         shared = inter / len(other)
     else:
