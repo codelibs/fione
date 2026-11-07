@@ -170,8 +170,8 @@ abbreviation (`cust` and `customer`) counts; a name with another word does not (
 `item_category_id`). A link whose names are not the same also needs the shared values to be at
 least 5% of the longer column, so a few small ids inside a long id column are not a link. A pair
 whose names are unrelated is compared by its values alone only when one side has one row per
-value (at least 100 of them, and not a run of consecutive whole numbers such as a row number),
-most values of the other side are among them, and both columns are named like an id or are not
+value (at least 100 of them; a run of consecutive whole numbers, such as a row number, counts
+only when the other column has at least 30% of it), most values of the other side are among them, and both columns are named like an id or are not
 whole numbers (a small integer such as a count overlaps with any other). Up to 8 columns of each
 dataset are compared this way, those named like an id first. A link whose names are not the same
 says `basis` (`table_id`, `similar_name` or `values`); links by name come before links by values.

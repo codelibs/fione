@@ -310,6 +310,15 @@ def test_find_table_links_does_not_match_ids_with_a_row_number_by_their_values(e
     assert call(env, "find_table_links", {"project_id": env.b.id})["links"] == []
 
 
+def test_find_table_links_matches_an_auto_increment_key_the_other_column_mostly_covers(env):
+    customers = pd.DataFrame({"id": range(1, 1001), "age": [i % 60 + 18 for i in range(1000)]})
+    orders = pd.DataFrame({"client_id": [i % 1000 + 1 for i in range(3000)], "n": range(3000)})
+    by_name = _ingest(env, env.b, customers=customers, orders=orders)
+    (link,) = call(env, "find_table_links", {"project_id": env.b.id})["links"]
+    assert link["datasets"] == [by_name["customers"], by_name["orders"]]
+    assert link["columns"] == ["id", "client_id"] and link["basis"] == "values"
+
+
 def test_find_table_links_puts_a_link_by_name_before_one_by_values(env):
     codes = [f"s{i:03d}" for i in range(120)]
     customers = pd.DataFrame({"cid": range(1, 121), "serial": codes})
