@@ -9,7 +9,7 @@ import pytest
 from sklearn.datasets import make_classification, make_regression
 
 from fione.engine import search
-from fione.engine.config import Deadline, DeadlineExceeded, NoModelError
+from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError
 from fione.engine.families import (
     FAMILIES,
     MAX_ROUNDS,
@@ -953,7 +953,8 @@ def test_a_repeated_search_scores_each_repeat_alone_and_keeps_the_first_runs_mod
     )
     assert len(result.models) == 3 and result.repeats == 3 and len(result.oofs) == 3
     assert result.oof is result.oofs[0]
-    assert result.stacked().shape == (3 * len(y), 2)
+    assert result.stacked(np.arange(len(y))).shape == (3 * len(y), 2)
+    assert result.stacked(np.arange(10)).shape == (30, 2)
     mean = np.mean([score("classification", y, oof) for oof in result.oofs])
     assert result.best_score == pytest.approx(mean)
     assert not np.allclose(result.oofs[0], result.oofs[1])  # other splits, other predictions
@@ -974,4 +975,45 @@ def test_one_repeat_is_the_plain_search():
         lambda: False,
         max_trials=1,
     )
-    assert result.repeats == 1 and result.oofs == [] and result.stacked() is result.oof
+    assert result.repeats == 1 and result.oofs == []
+    assert np.array_equal(result.stacked(np.arange(10)), result.oof[:10])
+
+
+def test_time_folds_learn_only_from_earlier_rows():
+    order = np.repeat(np.arange(60), 5)[np.random.default_rng(0).permutation(300)]
+    y = np.zeros(300)
+    folds = search.make_time_folds(order, y, "regression", 4)
+    assert len(folds) == 4
+    for train, valid in folds:
+        assert order[train].max() < order[valid].min()  # nothing is learned from a later row
+        assert len(np.intersect1d(train, valid)) == 0
+    # the folds go forward, and the first part is never predicted
+    firsts = [order[valid].min() for _, valid in folds]
+    assert firsts == sorted(firsts)
+    seen = search.covered(folds, 300)
+    assert len(seen) == 240 and order[seen].min() == 12
+
+
+def test_time_folds_keep_rows_of_one_moment_together_and_need_two_parts():
+    order = np.array([1, 1, 1, 1, 2, 2, 2, 2, 2, 2])
+    folds = search.make_time_folds(order, np.zeros(10), "regression", 5)
+    assert len(folds) == 1  # two moments: one learned from, one predicted
+    assert set(order[folds[0][0]]) == {1} and set(order[folds[0][1]]) == {2}
+    with pytest.raises(ConfigError, match="too few different values"):
+        search.make_time_folds(np.ones(10, dtype=int), np.zeros(10), "regression", 3)
+
+
+def test_time_folds_of_a_classification_refuse_a_class_that_comes_late():
+    order = np.arange(40)
+    y = np.array([0] * 30 + [1] * 10)  # the class 1 first appears after the early parts
+    with pytest.raises(ConfigError, match="a class has no row"):
+        search.make_time_folds(order, y, "classification", 4)
+    ok = np.arange(40) % 2
+    assert len(search.make_time_folds(order, ok, "classification", 4)) == 4
+
+
+def test_time_folds_refuse_later_parts_with_a_single_class():
+    order = np.arange(60)
+    y = np.array([0, 1] * 10 + [0] * 40)  # both classes early, only one in the parts to predict
+    with pytest.raises(ConfigError, match="single class"):
+        search.make_time_folds(order, y, "classification", 2)
