@@ -160,9 +160,18 @@ important results.
 
 ## Several tables
 
-When a project holds more than one dataset, the assistant looks for the columns they share (the
-same name and mostly the same values) and says how they relate: one dataset has one row per
-value and the other several (a customer and their purchases), or both repeat (rows of two
+When a project holds more than one dataset, the assistant looks for the columns they share and
+says how they relate. Names come first, as when a person reads the tables: the same name; the
+`id` of a table and a column named for it elsewhere (`customers.id` and `orders.customer_id`);
+id-like names (the word id, or a last word such as key, number or code) that differ little
+(`cust_id` and `customer_id`). The values decide next: the two columns must mostly share their
+values. A pair whose names are unrelated is compared by its values alone only when one side has one row per
+value, most values of the other side are among them, and both columns are named like an id or
+are not whole numbers (a small integer such as a count overlaps with any other). Up to 8 columns of
+each dataset are compared this way, those named like an id first. A link whose names are not
+the same says `basis` (`table_id`, `similar_name` or `values`); links by name come before links
+by values. A link also says how the datasets
+relate: one dataset has one row per value and the other several (a customer and their purchases), or both repeat (rows of two
 tables for the same day). Columns with fewer than 20 values are not reported when both sides
 repeat, since they are categories rather than keys; of the links where both sides repeat, the
 ones with the most values come first and at most two are shown. The result also names the first 20
