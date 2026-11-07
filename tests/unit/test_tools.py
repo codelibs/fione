@@ -689,6 +689,66 @@ def test_propose_hints_at_settings_that_suit_the_target(env):
     assert rare["config"]["decision"] == "argmax"  # a hint, not a choice
 
 
+@pytest.fixture
+def grouped(env):
+    """Makes a dataset of 40 ids over ``repeats`` rows each; removed again after the test, since
+    the project's other tests look at how its datasets link."""
+    made = []
+
+    def make(name="user_id", repeats=10):
+        rng = np.random.default_rng(0)
+        users = np.repeat(np.arange(40), repeats)
+        frame = pd.DataFrame(
+            {"x": rng.normal(size=len(users)), name: users, "label": rng.integers(0, 2, len(users))}
+        )
+        ds = ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "groups", DatasetType.TRAIN, [frame]
+        )
+        made.append(ds)
+        return ds
+
+    yield make
+    for ds in made:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+
+
+def test_propose_suggests_grouping_by_a_repeated_id_column(env, grouped):
+    ds = grouped()
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    assert "repeated_id" in codes(result)
+    warning = next(w for w in result["warnings"] if w["code"] == "repeated_id")
+    assert warning["params"]["column"] == "user_id"
+    assert result["config"]["cv_group_column"] is None  # a hint, not a choice
+
+
+def test_propose_does_not_suggest_grouping_for_plain_columns(env, grouped):
+    for name, repeats in (("city", 10), ("user_id", 1), ("paid", 10), ("idle", 10)):
+        ds = grouped(name, repeats)
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+        assert "repeated_id" not in codes(result), name
+
+
+@pytest.mark.parametrize("name", ["id", "user_id", "userId", "UserID", "顧客ID", "注文番号"])
+def test_id_like_names_are_recognised(name):
+    assert builtin._ID_NAME.search(name)
+
+
+@pytest.mark.parametrize("name", ["paid", "idle", "valid", "PAID", "width", "identity"])
+def test_other_names_are_not(name):
+    assert not builtin._ID_NAME.search(name)
+
+
+def test_propose_sets_the_group_column_the_user_chose(env, grouped):
+    ds = grouped()
+    base = {"dataset_id": ds.id, "target": "label"}
+    config = call(env, "propose_training_config", {**base, "group_column": "user_id"})["config"]
+    assert config["cv_group_column"] == "user_id"
+    with pytest.raises(ToolError, match="group_column"):
+        call(env, "propose_training_config", {**base, "group_column": "nope"})
+    with pytest.raises(ToolError, match="group_column"):
+        call(env, "propose_training_config", {**base, "group_column": "label"})
+
+
 def test_propose_refuses_settings_the_target_cannot_use(env):
     frame = pd.DataFrame(
         {

@@ -6,7 +6,9 @@ spec 5.1/5.7) and spends it in phases:
 1. Checks, the choice of derived features (``fione.engine.features``; at most
    ``FEATURE_SHARE`` of the time, or ``FEATURE_MIN_SECS`` of a short run, and off with
    ``feature_engineering=False``), ``Prep.fit``
-   and the folds: measured, not otherwise budgeted. Call the time left after them L.
+   and the folds (a ``cv_group_column`` keeps the rows of a group in one fold, in the search and
+   in the choice of derived features alike): measured, not otherwise budgeted. Call the time left
+   after them L.
 2. Search: 0.65 L. Families run one after another in ``FAMILY_ORDER``; each gets the search
    time still left times its ``FAMILY_WEIGHTS`` share among the families not yet run, so time a
    family leaves unused flows to the next ones. The search scores trials with log loss / RMSE.
@@ -186,6 +188,29 @@ class AutoML:
         stopping_metric = metrics.resolve(c.stopping_metric, task, "stopping_metric")
         notices: list[Event] = []
         y, classes, nfolds = validate_target(target, task, c.nfolds, notices.append)
+        row_groups = None
+        if c.cv_group_column is not None:
+            if c.cv_group_column not in df.columns:
+                raise ConfigError(f"cv_group_column '{c.cv_group_column}' is not in the data")
+            row_groups = pd.factorize(df[c.cv_group_column], use_na_sentinel=False)[0]
+            distinct = int(row_groups.max()) + 1
+            if distinct < 2:
+                raise ConfigError(
+                    f"the group column '{c.cv_group_column}' needs at least 2 groups, "
+                    f"it has {distinct}"
+                )
+            if distinct < nfolds:
+                nfolds = distinct
+                notices.append(
+                    Event(
+                        "notice",
+                        data={
+                            "message": f"nfolds reduced to {nfolds}: only {distinct} groups",
+                            "nfolds_reduced_to": nfolds,
+                            "reason": f"only {distinct} groups",
+                        },
+                    )
+                )
         self._event(
             "started",
             config=c.to_dict(),
@@ -215,14 +240,16 @@ class AutoML:
         elif c.decision == "balanced":
             prior = np.bincount(y) / len(y)
         if c.time_column is None:
-            groups, tried = self._engineer(X, y, task, nfolds, deadline)
+            groups, tried = self._engineer(X, y, task, nfolds, deadline, row_groups)
         else:  # the gate judges a feature on shuffled folds, which look at the future
             groups, tried = [], None
             if c.feature_engineering:
                 self._notice("derived features are not tried with a time column")
         prep = Prep().fit(X, groups)
         if c.time_column is None:
-            folds = make_folds(y, task, nfolds, c.seed)
+            folds = make_folds(y, task, nfolds, c.seed, row_groups)
+            if row_groups is not None and task == "classification":
+                self._check_classes_in_training(y, folds, classes)
         else:
             folds = make_time_folds(_order_codes(df, c.time_column), y, task, nfolds)
             self._notice(
@@ -355,7 +382,9 @@ class AutoML:
     def _feature_secs(left: float) -> float:
         return max(FEATURE_SHARE * left, min(FEATURE_MIN_SECS, FEATURE_MAX_SHARE * left))
 
-    def _engineer(self, X, y, task, nfolds, deadline) -> tuple[list, list[dict] | None]:
+    def _engineer(
+        self, X, y, task, nfolds, deadline, row_groups=None
+    ) -> tuple[list, list[dict] | None]:
         """The derived-feature groups to add and the verdict on every candidate (None when
         switched off). The choice gets at most ``FEATURE_SHARE`` of the time, or of a short run
         ``FEATURE_MIN_SECS`` (but under ``FEATURE_MAX_SHARE``)."""
@@ -370,6 +399,7 @@ class AutoML:
                 self.config.seed,
                 deadline.child(self._feature_secs(deadline.remaining())),
                 self.should_stop,
+                row_groups,
             )
         except Exception as e:  # the base features still train
             self.emit(error_notice("features_error", "features", e))
@@ -495,6 +525,18 @@ class AutoML:
             if result.reason == "cancelled":
                 break
         return results, logs, reasons, finished, errors
+
+    def _check_classes_in_training(self, y, folds, classes) -> None:
+        """Group folds do not balance the classes: a class that lives in a single group is
+        missing from the training rows of its fold, and several families then fail on it."""
+        for train, valid in folds:
+            missing = np.setdiff1d(np.unique(y[valid]), np.unique(y[train]))
+            if len(missing):
+                raise ConfigError(
+                    f"class {classes[int(missing[0])]!r} occurs in too few groups of "
+                    f"'{self.config.cv_group_column}' to be in the training rows of every fold; "
+                    "choose another group column or leave it empty"
+                )
 
     def _stop_reason(self, reasons: dict[str, str], finished: int) -> str:
         ends = set(reasons.values())

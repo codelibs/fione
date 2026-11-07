@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import optuna
 import pandas as pd
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import GroupKFold, KFold, StratifiedGroupKFold, StratifiedKFold
 
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError
 from fione.engine.events import Event, EventSink
@@ -91,10 +91,19 @@ def error_notice(kind: str, family: str, error: Exception) -> Event:
     return Event("notice", data=data)
 
 
-def make_folds(y: np.ndarray, task: Task, nfolds: int, seed: int = 0) -> Folds:
-    """Shuffled K folds, stratified by class for classification."""
-    splitter = StratifiedKFold if task == "classification" else KFold
-    return list(splitter(nfolds, shuffle=True, random_state=seed).split(np.zeros(len(y)), y))
+def make_folds(
+    y: np.ndarray, task: Task, nfolds: int, seed: int = 0, groups: np.ndarray | None = None
+) -> Folds:
+    """Shuffled K folds, stratified by class for classification. With ``groups`` (one label per
+    row) the rows of a group stay in one fold, and the classes are balanced as far as that
+    allows."""
+    classification = task == "classification"
+    if groups is None:
+        splitter = StratifiedKFold if classification else KFold
+        return list(splitter(nfolds, shuffle=True, random_state=seed).split(np.zeros(len(y)), y))
+    splitter = StratifiedGroupKFold if classification else GroupKFold
+    split = splitter(nfolds, shuffle=True, random_state=seed)
+    return list(split.split(np.zeros(len(y)), y, groups))
 
 
 def make_time_folds(order: np.ndarray, y: np.ndarray, task: Task, nfolds: int) -> Folds:

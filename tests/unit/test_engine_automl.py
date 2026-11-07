@@ -1043,6 +1043,97 @@ def test_a_fit_without_high_cardinality_strings_does_not_depend_on_their_unseen_
     pd.testing.assert_frame_equal(run(), expected)
 
 
+# --- group folds ----------------------------------------------------------------
+
+
+def _grouped(n_groups=30, per_group=10, seed=0):
+    df = _binary(n_groups * per_group, seed)
+    df["user"] = np.repeat([f"u{i}" for i in range(n_groups)], per_group)
+    return df
+
+
+def test_a_group_column_keeps_each_group_in_one_fold():
+    df = _grouped()
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=3,
+        cv_group_column="user",
+        feature_engineering=False,
+        keep_cv_fold_assignment=True,
+    )
+    folds_of = pd.Series(model.fold_assignment).groupby(df["user"].to_numpy()).nunique()
+    assert (folds_of == 1).all()
+
+
+def test_the_group_column_is_not_a_feature_when_ignored():
+    df = _grouped()
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        cv_group_column="user",
+        ignored_columns=["user"],
+        feature_engineering=False,
+    )
+    assert "user" not in model.columns
+
+
+def test_unknown_group_column_is_rejected():
+    with pytest.raises(ConfigError, match="cv_group_column 'nope'"):
+        _fit(_binary(100), target="y", cv_group_column="nope")
+
+
+def test_a_single_group_is_rejected():
+    df = _binary(100)
+    df["user"] = "same"
+    with pytest.raises(ConfigError, match="at least 2 groups"):
+        _fit(df, target="y", cv_group_column="user")
+
+
+def test_fewer_groups_than_folds_reduce_the_folds_with_a_notice():
+    df = _grouped(n_groups=3)
+    events = []
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=5,
+        cv_group_column="user",
+        feature_engineering=False,
+    )
+    notices = [e.data for e in events if e.type == "notice"]
+    assert any(n.get("nfolds_reduced_to") == 3 for n in notices)
+
+
+def test_missing_group_values_form_one_group():
+    df = _grouped()
+    df.loc[df.index[:20], "user"] = None
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=3,
+        cv_group_column="user",
+        feature_engineering=False,
+        keep_cv_fold_assignment=True,
+    )
+    assert len(set(model.fold_assignment[:20])) == 1
+
+
+def test_a_class_living_in_one_group_is_refused_for_group_folds():
+    df = _grouped()
+    df["y"] = (df["user"] == "u0").astype(int)
+    with pytest.raises(ConfigError, match="occurs in too few groups"):
+        _fit(df, families=["LightGBM"], target="y", max_models=1, cv_group_column="user")
+
+
 def _trend(n=800, seed=0):
     """A target that grows with the day: shuffled folds interpolate it, later days cannot."""
     rng = np.random.default_rng(seed)
@@ -1165,3 +1256,10 @@ def test_the_members_without_a_refit_keep_only_the_last_time_ordered_fold_model(
     )
     member = next(m for m in model.members if m.spec.name == "DeepLearning")
     assert len(member.models) == 1  # not five models, four of them learned from older rows only
+
+
+def test_a_group_column_and_a_time_column_cannot_be_used_together():
+    df = _grouped()
+    df["when"] = np.arange(len(df))
+    with pytest.raises(ConfigError, match="cannot be used together"):
+        _fit(df, target="y", cv_group_column="user", time_column="when")

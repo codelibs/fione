@@ -45,6 +45,10 @@
     <dt>{{ t('train.f.target_transform') }}</dt>
     <dd>{{ t('train.transform.' ~ c.target_transform) }}</dd>
     {% endif %}
+    {% if c.cv_group_column %}
+    <dt>{{ t('train.f.cv_group_column') }}</dt>
+    <dd>{{ c.cv_group_column }}</dd>
+    {% endif %}
     {% if c.ignored_columns %}
     <dt>{{ t('assistant.proposal.ignored') }}</dt>
     <dd>{{ c.ignored_columns | join(", ") }}</dd>

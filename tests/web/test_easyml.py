@@ -578,6 +578,18 @@ def test_a_rare_class_suggests_the_class_size_decision(owner):
     assert "rarest class" not in tips_page(owner, tip_frame(even))
 
 
+def test_a_repeated_id_column_suggests_keeping_its_rows_together(owner):
+    label = pd.Series(np.random.default_rng(2).integers(0, 2, 400))
+    repeated = tip_frame(label)  # the column to predict stays the last one
+    repeated.insert(1, "user_id", np.repeat(np.arange(40), 10))
+    page = tips_page(owner, repeated)
+    assert "looks like an ID that appears in several rows" in page and "user_id" in page
+    assert "Keep related rows together by" in page
+    unique = tip_frame(label)
+    unique.insert(1, "user_id", np.arange(400))
+    assert "appears in several rows" not in tips_page(owner, unique)
+
+
 def test_the_tips_are_for_the_detailed_view_where_the_settings_are(owner):
     rare = pd.Series(["a"] * 380 + ["b"] * 20)
     assert "rarest class" not in tips_page(owner, tip_frame(rare), detailed=False)

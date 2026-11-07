@@ -39,6 +39,16 @@ def test_a_config_saved_before_the_settings_reads_their_defaults():
     assert (config.decision, config.target_transform) == ("argmax", "none")
 
 
+def test_the_group_column_defaults_to_none_and_old_configs_read_it():
+    config = TrainConfig(target="y")
+    assert config.cv_group_column is None
+    del config.__dict__["cv_group_column"]
+    assert config.cv_group_column is None
+    assert (
+        TrainConfig.from_dict({"target": "y", "cv_group_column": "user"}).cv_group_column == "user"
+    )
+
+
 def test_train_config_dict_round_trip():
     config = TrainConfig(target="y", task="regression", max_runtime_secs=60, ignored_columns=["id"])
     assert TrainConfig.from_dict(config.to_dict()) == config
@@ -74,6 +84,9 @@ def test_from_dict_rejects_unknown_and_missing_keys():
         ({"decision": "balanced", "balance_classes": True}, "use one"),
         ({"ignored_columns": "id"}, "ignored_columns"),
         ({"ignored_columns": ["y"]}, "target"),
+        ({"cv_group_column": ""}, "cv_group_column"),
+        ({"cv_group_column": 3}, "cv_group_column"),
+        ({"cv_group_column": "y"}, "target"),
     ],
 )
 def test_validate_rejects_bad_values(changes, message):

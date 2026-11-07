@@ -84,6 +84,7 @@ SINGLE_FIELDS = (
     "balance_classes",
     "decision",
     "target_transform",
+    "cv_group_column",
     "feature_engineering",
     "stopping_rounds",
     "stopping_metric",
@@ -447,6 +448,7 @@ def _form_values(defaults: dict) -> dict:
         "target_transform",
     ):
         values[name] = str(defaults[name])
+    values["cv_group_column"] = defaults["cv_group_column"] or ""
     values["stopping_tolerance"] = f"{defaults['stopping_tolerance']:g}"
     for name in FLAGS:
         values[name] = defaults[name]
@@ -564,10 +566,16 @@ def _parse_train(form: FormData, names: list[str], inferred_task: str):
     if values["target_transform"] not in TRANSFORMS:
         errors["target_transform"] = "train.error.target_transform"
     config["target_transform"] = values["target_transform"]
+    group = values["cv_group_column"]
+    if group and (group == target or group not in names):
+        errors["cv_group_column"] = "train.error.cv_group_column"
+    config["cv_group_column"] = group or None
     time_column = values["time_column"]
     if time_column and (time_column not in names or time_column == target):
         errors["time_column"] = "train.error.time_column"
     config["time_column"] = time_column or None
+    if group and time_column:
+        errors["cv_group_column"] = "train.error.group_or_time"
     minutes = values["max_runtime_minutes"].strip()
     if len(minutes) > MAX_RUNTIME_DIGITS or _whole(minutes, 1) is None:
         errors["max_runtime_minutes"] = "analysis.error.runtime"

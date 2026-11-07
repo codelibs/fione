@@ -874,6 +874,33 @@ def test_one_top_trial_hands_on_no_runners_up(monkeypatch):
     assert result.runners_up == []
 
 
+def _group_ids(n, groups, seed=0):
+    return np.random.default_rng(seed).integers(0, groups, n)
+
+
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_group_folds_never_split_a_group_and_cover_every_row(task):
+    rng = np.random.default_rng(1)
+    y = rng.integers(0, 2, 300) if task == "classification" else rng.normal(size=300)
+    groups = _group_ids(300, 40)
+    folds = make_folds(y, task, 5, 0, groups)
+    assert len(folds) == 5
+    valid_rows = np.concatenate([valid for _, valid in folds])
+    assert sorted(valid_rows) == list(range(300))
+    for train, valid in folds:
+        assert not set(groups[train]) & set(groups[valid])
+
+
+def test_group_folds_are_deterministic_and_follow_the_seed():
+    y = np.random.default_rng(1).integers(0, 2, 300)
+    groups = _group_ids(300, 40)
+    first = make_folds(y, "classification", 5, 0, groups)
+    again = make_folds(y, "classification", 5, 0, groups)
+    other = make_folds(y, "classification", 5, 1, groups)
+    assert all(np.array_equal(a[1], b[1]) for a, b in zip(first, again, strict=True))
+    assert any(not np.array_equal(a[1], b[1]) for a, b in zip(first, other, strict=True))
+
+
 def test_time_folds_learn_only_from_earlier_rows():
     order = np.repeat(np.arange(60), 5)[np.random.default_rng(0).permutation(300)]
     y = np.zeros(300)

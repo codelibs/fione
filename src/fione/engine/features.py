@@ -639,18 +639,24 @@ class _OutOfTime(Exception):
 class _Gate:
     """Paired fold-wise losses of the reference model on a sample of the rows."""
 
-    def __init__(self, X, y, task: Task, nfolds: int, seed: int, out_of_time=lambda: False):
-        self.X, self.y, self.task, self.seed = X, y, task, seed
+    def __init__(
+        self, X, y, task: Task, nfolds: int, seed: int, out_of_time=lambda: False, groups=None
+    ):
+        self.X, self.y, self.task, self.seed, self.groups = X, y, task, seed, groups
         self.out_of_time = out_of_time
         self._cache: dict[tuple, np.ndarray] = {}
         self.nfolds = max(2, min(GATE_FOLDS, nfolds))
+        if groups is not None:  # a sample may hold fewer groups than the run has
+            self.nfolds = max(2, min(self.nfolds, len(np.unique(groups))))
         self.classes = int(y.max()) + 1 if task == "classification" else 0
         self.threads = 1 if len(X) < THREAD_ROWS else n_threads(len(X))
         self._folds: dict[int, list] = {}
 
     def folds(self, repeat: int):
         if repeat not in self._folds:
-            self._folds[repeat] = make_folds(self.y, self.task, self.nfolds, self.seed + repeat)
+            self._folds[repeat] = make_folds(
+                self.y, self.task, self.nfolds, self.seed + repeat, self.groups
+            )
         return self._folds[repeat]
 
     def _model(self):
@@ -745,11 +751,15 @@ def select_groups(
     seed: int,
     deadline: Deadline,
     should_stop=lambda: False,
+    row_groups: np.ndarray | None = None,
 ) -> tuple[list[Group], list[Verdict]]:
-    """The candidate groups worth keeping, and a verdict for every candidate tried."""
+    """The candidate groups worth keeping, and a verdict for every candidate tried. With
+    ``row_groups`` (a group label per row) the gate's folds keep the rows of a group together,
+    as the search's do."""
     if len(X) > GATE_ROWS:
         rows = _sample(y, task, seed)
         X, y = X.iloc[rows].reset_index(drop=True), y[rows]
+        row_groups = None if row_groups is None else row_groups[rows]
     gate = _Gate(
         X,
         y,
@@ -757,6 +767,7 @@ def select_groups(
         nfolds,
         (seed + GATE_SEED_OFFSET) % GATE_SEED_SPACE,
         lambda: deadline.expired() or should_stop(),
+        row_groups,
     )
     kept: list[Group] = []
     verdicts: list[Verdict] = []
