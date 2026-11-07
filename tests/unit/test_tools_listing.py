@@ -548,7 +548,7 @@ def test_propose_join_by_several_key_columns(env):
     )
     by_name = _ingest(env, env.b, sales=sales, history=history)
     args = {"dataset_id": by_name["sales"], "other_dataset_id": by_name["history"]}
-    found = call(env, "propose_join", {**args, "keys": "Shop, Item", "other_keys": "shop,item"})
+    found = call(env, "propose_join", {**args, "key": "Shop, Item", "other_key": "shop,item"})
     assert found["config"] == {
         "other_dataset_id": by_name["history"],
         "key": "",
@@ -563,10 +563,10 @@ def test_propose_join_by_several_key_columns(env):
     single = call(env, "propose_join", {**args, "key": "Shop", "other_key": "shop"})
     assert [w["code"] for w in single["warnings"]] == ["join_key_repeats"]
     assert "keys" not in single["config"]
-    with pytest.raises(ToolError, match="not both"):
-        call(env, "propose_join", {**args, "key": "Shop", "keys": "Shop,Item"})
+    with pytest.raises(ToolError, match="names a column twice"):
+        call(env, "propose_join", {**args, "key": "Shop,Shop"})
     with pytest.raises(ToolError, match="same number"):
-        call(env, "propose_join", {**args, "keys": "Shop,Item", "other_key": "shop"})
+        call(env, "propose_join", {**args, "key": "Shop,Item", "other_key": "shop"})
     with pytest.raises(ToolError, match="name the key"):
         call(env, "propose_join", args)
 

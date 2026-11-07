@@ -1168,20 +1168,17 @@ def _join_columns_added(
     return 1 + 4 * numbers + len(kinds) - numbers
 
 
-def _key_args(names: list[str], args: dict, one: str, many: str, where: str) -> list[str]:
-    """The columns named by ``one`` (a column) or ``many`` (several that identify a row
-    together), as the schema's names."""
-    if args.get(one) and args.get(many):
-        raise ToolError(f"give {one} or {many}, not both")
-    text = args.get(many) or ""
-    if text in names:  # one column whose name has a comma
+def _key_args(names: list[str], args: dict, name: str, where: str) -> list[str]:
+    """The key columns named by ``args[name]``: one column, or several (comma-separated) that
+    identify a row together, as the schema's names."""
+    text = args.get(name) or ""
+    if text in names:  # one column, whose name may have a comma
         given = [text]
     else:
         given = [c.strip() for c in text.split(",") if c.strip()]
-    given = given or ([args[one]] if args.get(one) else [])
     resolved = [_resolve_column(names, g, where) for g in given]
     if len(set(resolved)) != len(resolved):
-        raise ToolError(f"{many} names a column twice")
+        raise ToolError(f"{name} names a column twice")
     return resolved
 
 
@@ -1194,10 +1191,10 @@ def _propose_join(ctx: ToolContext, args: dict) -> dict:
         raise ToolError("a dataset cannot be joined to itself")
     base_names = [name for name, _ in base.schema]
     other_names = [name for name, _ in other.schema]
-    keys = _key_args(base_names, args, "key", "keys", "base dataset")
+    keys = _key_args(base_names, args, "key", "base dataset")
     if not keys:
-        raise ToolError("name the key column (key) or the key columns (keys)")
-    other_keys = _key_args(other_names, args, "other_key", "other_keys", "other dataset") or [
+        raise ToolError("name the key column (key)")
+    other_keys = _key_args(other_names, args, "other_key", "other dataset") or [
         _resolve_column(other_names, k, "other dataset") for k in keys
     ]
     if len(keys) != len(other_keys):
@@ -1544,9 +1541,9 @@ for _tool in (
     ),
     Tool(
         "propose_join",
-        "Call this whenever the user asks to join datasets, instead of describing the join: it "
+        "Call this whenever the user asks to join datasets, instead of describing it: it "
         "makes the card the user confirms. It proposes the Join of another dataset onto a base "
-        "dataset by a key column (or by keys, several columns that identify a row together); "
+        "dataset by key columns (comma-separated); "
         "nothing is started. The result is a new dataset. Use "
         "summarize when the other dataset has several rows per key. Name columns to add only "
         "those, leaving out ids and anything not known when the model predicts.",
@@ -1554,22 +1551,10 @@ for _tool in (
             {
                 "dataset_id": _ID,
                 "other_dataset_id": _ID,
-                "key": {**_COLUMN, "description": "the key column; or name keys instead"},
-                "keys": {
-                    "type": "string",
-                    "maxLength": 1000,
-                    "description": "several columns that identify a row together (such as a "
-                    "shop and an item), comma-separated, in place of key",
-                },
+                "key": _COLUMN,
                 "other_key": {
                     **_COLUMN,
                     "description": "if named differently in the other dataset",
-                },
-                "other_keys": {
-                    "type": "string",
-                    "maxLength": 1000,
-                    "description": "the columns of keys if named differently in the other "
-                    "dataset, comma-separated",
                 },
                 "summarize": {"type": "boolean"},
                 "columns": {

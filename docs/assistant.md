@@ -196,8 +196,8 @@ summarized when it has several rows per key, and looked up as it is when it has 
 sales gets its stores' columns). A pair of datasets the person names is proposed with
 `propose_join`.
 
-A join key is one column, or several that identify a row together (a shop and an item, named in
-`keys`): the rows match when every part is the same, and a row with a part missing matches
+A join key is one column, or several that identify a row together (a shop and an item; the
+assistant names them comma-separated in `key`, and the Join module takes them as `keys`): the rows match when every part is the same, and a row with a part missing matches
 nothing. The repeat check and the summary then work on the combination of the columns, so a
 table with one row for each shop and item is looked up even though each column repeats.
 `find_table_links` finds links of single columns only.

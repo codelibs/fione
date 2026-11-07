@@ -16,8 +16,8 @@
     <dt>{{ t('assistant.proposal.join_other') }}</dt>
     <dd>{% if card.other_name %}{{ card.other_name }}{% else %}{{ t('assistant.proposal.dataset_gone') }}{% endif %}</dd>
     <dt>{{ t('assistant.proposal.join_key') }}</dt>
-    {% if c.keys %}
-    <dd>{{ c.keys | join(", ") }}{% if c.other_keys %} = {{ c.other_keys | join(", ") }}{% endif %}</dd>
+    {% if c.get("keys") %}
+    <dd>{{ c.get("keys") | join(", ") }}{% if c.get("other_keys") %} = {{ c.get("other_keys") | join(", ") }}{% endif %}</dd>
     {% else %}
     <dd>{{ c.key }}{% if c.other_key %} = {{ c.other_key }}{% endif %}</dd>
     {% endif %}
