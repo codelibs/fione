@@ -258,8 +258,8 @@ def test_find_table_links_matches_similar_names_and_leaves_same_names_unmarked(e
 
 
 def test_find_table_links_matches_text_keys_by_their_values_when_the_names_differ(env):
-    codes = pd.DataFrame({"serial": [f"s{i:03d}" for i in range(60)], "grade": ["x", "y"] * 30})
-    readings = pd.DataFrame({"unit": [f"s{i % 60:03d}" for i in range(180)], "v": range(180)})
+    codes = pd.DataFrame({"serial": [f"s{i:03d}" for i in range(120)], "grade": ["x", "y"] * 60})
+    readings = pd.DataFrame({"unit": [f"s{i % 120:03d}" for i in range(360)], "v": range(360)})
     by_name = _ingest(env, env.b, codes=codes, readings=readings)
     (link,) = call(env, "find_table_links", {"project_id": env.b.id})["links"]
     assert link["columns"] == ["serial", "unit"] and link["basis"] == "values"
@@ -282,11 +282,38 @@ def test_find_table_links_does_not_match_a_count_with_ids_that_start_at_one(env)
     assert call(env, "find_table_links", {"project_id": env.b.id})["links"] == []
 
 
+def test_find_table_links_does_not_match_a_few_small_ids_with_a_long_id_column(env):
+    sales = pd.DataFrame(
+        {"shop_id": [i % 50 for i in range(6000)], "item_id": [i % 2000 for i in range(6000)]}
+    )
+    items = pd.DataFrame(
+        {"item_id": range(2000), "item_category_id": [i % 40 for i in range(2000)]}
+    )
+    shops = pd.DataFrame({"shop_id": range(50), "city": ["c"] * 50})
+    categories = pd.DataFrame({"item_category_id": range(40), "name": [f"n{i}" for i in range(40)]})
+    by_name = _ingest(env, env.b, sales=sales, items=items, shops=shops, categories=categories)
+    found = call(env, "find_table_links", {"project_id": env.b.id})["links"]
+    real = {
+        (by_name["sales"], by_name["items"], "item_id"),
+        (by_name["sales"], by_name["shops"], "shop_id"),
+        (by_name["items"], by_name["categories"], "item_category_id"),
+    }
+    # the shop ids lie inside the item ids, and the item ids inside nothing: not links
+    assert {(*link["datasets"], link["column"]) for link in found} == real
+
+
+def test_find_table_links_does_not_match_ids_with_a_row_number_by_their_values(env):
+    sales = pd.DataFrame({"item_id": [i % 500 + 7 for i in range(3000)], "n": range(3000)})
+    rows = pd.DataFrame({"ID": range(5000), "shop": ["s"] * 5000})
+    _ingest(env, env.b, sales=sales, rows=rows)
+    assert call(env, "find_table_links", {"project_id": env.b.id})["links"] == []
+
+
 def test_find_table_links_puts_a_link_by_name_before_one_by_values(env):
-    codes = [f"s{i:03d}" for i in range(80)]
-    customers = pd.DataFrame({"cid": range(1, 81), "serial": codes})
+    codes = [f"s{i:03d}" for i in range(120)]
+    customers = pd.DataFrame({"cid": range(1, 121), "serial": codes})
     orders = pd.DataFrame(
-        {"cid": [i % 80 + 41 for i in range(240)], "unit": [codes[i % 80] for i in range(240)]}
+        {"cid": [i % 120 + 61 for i in range(360)], "unit": [codes[i % 120] for i in range(360)]}
     )
     _ingest(env, env.b, customers=customers, orders=orders)
     links = call(env, "find_table_links", {"project_id": env.b.id})["links"]

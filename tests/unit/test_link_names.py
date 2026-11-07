@@ -18,6 +18,9 @@ from fione.tools import link_names
         ("a", "merchant_id", "b", "merch_id", "similar_name"),
         ("customers", "id", "orders", "product_id", None),  # the id of another table
         ("a", "id", "b", "id2", None),
+        ("items", "item_id", "item_categories", "item_category_id", None),  # another entity
+        ("a", "shop_id", "b", "shop_item_id", None),
+        ("a", "customer_id", "b", "customer_type_id", None),
         ("a", "user_id", "b", "item_id", None),
         ("a", "MONTHS_BALANCE", "b", "CNT_INSTALMENT", None),  # not id-like
         ("a", "amount", "b", "total_amount", None),  # similar but not id-like
