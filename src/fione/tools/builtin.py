@@ -1025,6 +1025,8 @@ def _link(
         if not (unique_a or unique_b):
             return None
         if unique_a and unique_b:
+            if _is_sequence(values_a) and _is_sequence(values_b):
+                return None  # two row numbers
             key, other = sorted((values_a, values_b), key=len, reverse=True)
         else:
             key, other = (values_a, values_b) if unique_a else (values_b, values_a)
@@ -1069,24 +1071,33 @@ def _asked_links(
     dataset has are left out, as the names compared them already. Of its answer, the pairs
     that name two datasets and a column of each, in the order of ``datasets``; their values
     decide afterwards."""
+    # a test or predict dataset holds the columns of a train one: it is neither asked about nor
+    # offered, so the names of a train dataset are compared with the other train datasets
+    train = [d for d in datasets if d.type == DatasetType.TRAIN]
+    if len(train) < 2:
+        return []
     by_name: dict[str, list[Dataset]] = {}
-    for d in datasets:
-        by_name.setdefault(clean_text(d.name), []).append(d)
+    for d in train:
+        by_name.setdefault(clean_text(d.name).lower(), []).append(d)
     lines = []
-    for d in datasets:
+    offered: dict[int, set[str]] = {}  # the names (lower case) of each dataset the model saw
+    for d in train:
         columns = usable[d.id]
         if d.id in unlinked:
-            elsewhere = {k for o in datasets if o.id != d.id for k in usable[o.id]}
+            elsewhere = {k for o in train if o.id != d.id for k in usable[o.id]}
             columns = {k: n for k, n in columns.items() if k not in elsewhere}
-        names = sorted(columns.values(), key=lambda n: not link_names.is_id_like(n))
-        lines.append(f"{clean_text(d.name)}: " + ", ".join(map(clean_text, names[:_ASKED_COLUMNS])))
+        names = sorted(columns.values(), key=lambda n: not link_names.is_id_like(n))[
+            :_ASKED_COLUMNS
+        ]
+        offered[d.id] = {clean_text(n).lower() for n in names}
+        lines.append(f"{clean_text(d.name)}: " + ", ".join(map(clean_text, names)))
     if not any(
-        usable[d.id].keys() - {k for o in datasets if o.id != d.id for k in usable[o.id]}
-        for d in datasets
+        usable[d.id].keys() - {k for o in train if o.id != d.id for k in usable[o.id]}
+        for d in train
         if d.id in unlinked
     ):
         return []  # every name of the unlinked datasets is in another: nothing to ask
-    unlinked_names = [clean_text(d.name) for d in datasets if d.id in unlinked]
+    unlinked_names = [clean_text(d.name) for d in train if d.id in unlinked]
     question = (
         "Tables and their columns (for "
         + ", ".join(unlinked_names)
@@ -1109,16 +1120,17 @@ def _asked_links(
         if not all(isinstance(f, str) for f in fields):
             continue
         table_a, column_a, table_b, column_b = fields
-        found_a, found_b = by_name.get(table_a, []), by_name.get(table_b, [])
+        found_a = by_name.get(table_a.strip().lower(), [])
+        found_b = by_name.get(table_b.strip().lower(), [])
         if len(found_a) != 1 or len(found_b) != 1 or found_a[0].id == found_b[0].id:
             continue
         a, b = found_a[0], found_b[0]
         if not {a.id, b.id} & unlinked:
             continue
-        name_a = usable[a.id].get(clean_text(column_a).lower())
-        name_b = usable[b.id].get(clean_text(column_b).lower())
-        if name_a is None or name_b is None:
-            continue
+        key_a, key_b = clean_text(column_a).lower(), clean_text(column_b).lower()
+        if key_a not in offered[a.id] or key_b not in offered[b.id]:
+            continue  # a column the model was not shown
+        name_a, name_b = usable[a.id][key_a], usable[b.id][key_b]
         if datasets.index(a) > datasets.index(b):
             a, b, name_a, name_b = b, a, name_b, name_a
         if (a, b, name_a, name_b) not in asked:
@@ -1214,11 +1226,7 @@ def _project_links(
         # a test or predict dataset holds the columns of a train one: no link is expected
         unlinked = {d.id for d in datasets if d.type == DatasetType.TRAIN} - reached
         waiting = time.monotonic()
-        asked = (
-            _asked_links(ctx.ask_model, datasets, usable, unlinked)
-            if unlinked and len(datasets) > 1
-            else []
-        )
+        asked = _asked_links(ctx.ask_model, datasets, usable, unlinked) if unlinked else []
         started += time.monotonic() - waiting  # the wait for the model is not the reading's
         linked = {
             (

@@ -176,11 +176,13 @@ whole numbers (a small integer such as a count overlaps with any other). Up to 8
 dataset are compared this way, those named like an id first. A link whose names are not the same
 says `basis` (`table_id`, `similar_name`, `values` or `meaning`); links by name come before
 links by values. In a chat, a dataset that no link reaches (or only links where both sides
-repeat) is also put to the model, once per turn and with the names of the columns alone: which
+repeat) is also put to the model (a train dataset, when there are two or more), once per turn
+and with the names of the columns alone: which
 column of the dataset names the same thing as a column of another dataset, whatever its name
 (`shop` and `store_nbr`). The values must confirm the answer: one side has one row per value and
 most values of the other are among them. Such a link says `meaning`. Over MCP, and when the
-model gives no answer, only the links found by names and values are reported.
+model gives no answer (or none within 30 seconds), only the links found by names and values are
+reported.
 A link also says how the datasets
 relate: one dataset has one row per value and the other several (a customer and their purchases), or both repeat (rows of two
 tables for the same day). Columns with fewer than 20 values are not reported when both sides

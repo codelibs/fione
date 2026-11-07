@@ -475,6 +475,55 @@ def test_find_table_links_does_not_ask_about_a_test_dataset_or_names_all_shared(
     assert asked.questions == []  # t2 is a test set; every name of t1 is in t2
 
 
+def test_find_table_links_asks_about_train_datasets_only(env):
+    project = _fresh(env)
+    train = pd.DataFrame({"id": range(1, 41), "f": range(40), "label": ["a", "b"] * 20})
+    test = pd.DataFrame({"id": range(100, 140), "f": range(40), "extra": range(40)})
+    ingest.ingest_batches(env.storage, env.conn, project.id, "t1", DatasetType.TRAIN, [train])
+    ingest.ingest_batches(env.storage, env.conn, project.id, "t2", DatasetType.TEST, [test])
+    asked = Asked([_pair("t1", "label", "t2", "extra")])
+    found = call(env, "find_table_links", {"project_id": project.id}, ask_model=asked)
+    assert asked.questions == [] and all("basis" not in x for x in found["links"])
+
+
+def test_find_table_links_takes_table_names_in_any_case_and_refuses_hidden_columns(env):
+    project = _fresh(env)
+    _stores_and_sales(env, project)
+    found = call(
+        env,
+        "find_table_links",
+        {"project_id": project.id},
+        ask_model=Asked([_pair("Stores", "SHOP", "SALES", "Store_Nbr")]),
+    )
+    assert [x["basis"] for x in found["links"]] == ["meaning"]
+    # a name that another dataset also has was left out of the question: it is not taken
+    other = _fresh(env)
+    sales = pd.DataFrame({"id": [i % 54 + 1 for i in range(300)], "u": range(300)})
+    stores = pd.DataFrame({"id": range(1, 55), "shop": range(1, 55)})
+    _ingest(env, other, sales=sales, stores=stores)
+    found = call(
+        env,
+        "find_table_links",
+        {"project_id": other.id},
+        ask_model=Asked([_pair("sales", "u", "stores", "id")]),
+    )
+    assert all(x.get("basis") != "meaning" for x in found["links"])
+
+
+def test_find_table_links_does_not_take_two_row_numbers_for_one_key(env):
+    project = _fresh(env)
+    one = pd.DataFrame({"row_a": range(500), "p": [f"p{i}" for i in range(500)]})
+    two = pd.DataFrame({"row_b": range(300), "q": [f"q{i}" for i in range(300)]})
+    _ingest(env, project, one=one, two=two)
+    found = call(
+        env,
+        "find_table_links",
+        {"project_id": project.id},
+        ask_model=Asked([_pair("one", "row_a", "two", "row_b")]),
+    )
+    assert found["links"] == []
+
+
 def test_listing_follows_permissions(env):
     owner = call(env, "list_projects", {})
     assert owner["_data_notice"] == DATA_NOTICE
