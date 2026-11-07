@@ -196,6 +196,12 @@ summarized when it has several rows per key, and looked up as it is when it has 
 sales gets its stores' columns). A pair of datasets the person names is proposed with
 `propose_join`.
 
+A join key is one column, or several that identify a row together (a shop and an item, named in
+`keys`): the rows match when every part is the same, and a row with a part missing matches
+nothing. The repeat check and the summary then work on the combination of the columns, so a
+table with one row for each shop and item is looked up even though each column repeats.
+`find_table_links` finds links of single columns only.
+
 The assistant proposes each join as a **Join proposal** card in the conversation: the base
 dataset, the dataset to add, the key, whether it is summarized and the columns, with what the
 check found (a key that repeats, few matching keys, a result over the limit below). A person who

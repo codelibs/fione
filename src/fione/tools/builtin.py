@@ -941,6 +941,25 @@ def _key_set(frame: pd.DataFrame, column: str) -> tuple[set[str], bool] | None:
     return set(distinct.astype(str)), len(distinct) == len(s)
 
 
+def _key_tuples(frame: pd.DataFrame, columns: list[str]) -> tuple[set[str], bool] | None:
+    """What ``_key_set`` gives for several columns that identify a row together: the distinct
+    combinations as text and whether each appears once. A row with a missing part is left out."""
+    whole = frame[columns].dropna()
+    parts = []
+    for column in columns:
+        s = whole[column]
+        if pd.api.types.is_float_dtype(s.dtype):
+            if not (s == s.round()).all():
+                return None
+            s = s.astype("int64")
+        parts.append(s.astype(str))
+    combined = parts[0].str.cat(parts[1:], sep="\x1f")
+    distinct = combined.drop_duplicates()
+    if len(distinct) < 2:
+        return None
+    return set(distinct), len(distinct) == len(combined)
+
+
 def _read_keys(ctx: ToolContext, dataset: Dataset, columns: list[str]) -> tuple[pd.DataFrame, bool]:
     """The columns of the dataset, whole when it is small enough, else a sample spread over
     the file; and whether it is a sample."""
@@ -1135,16 +1154,35 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
 # --- propose_join ---------------------------------------------------------
 
 
-def _join_columns_added(dataset: Dataset, key: str, chosen: list[str], summarize: bool) -> int:
+def _join_columns_added(
+    dataset: Dataset, keys: list[str], chosen: list[str], summarize: bool
+) -> int:
     """How many columns Join adds: the chosen ones (all but the key if none are chosen), or with
     ``summarize`` a count, and four for each number or one for any other column."""
-    kinds = {name: kind for name, kind in dataset.schema if name != key}
+    kinds = {name: kind for name, kind in dataset.schema if name not in keys}
     if chosen:
         kinds = {name: kinds[name] for name in chosen if name in kinds}
     if not summarize:
         return len(kinds)
     numbers = sum(k.startswith(("int", "uint")) or k in _FLOAT_TYPES for k in kinds.values())
     return 1 + 4 * numbers + len(kinds) - numbers
+
+
+def _key_args(names: list[str], args: dict, one: str, many: str, where: str) -> list[str]:
+    """The columns named by ``one`` (a column) or ``many`` (several that identify a row
+    together), as the schema's names."""
+    if args.get(one) and args.get(many):
+        raise ToolError(f"give {one} or {many}, not both")
+    text = args.get(many) or ""
+    if text in names:  # one column whose name has a comma
+        given = [text]
+    else:
+        given = [c.strip() for c in text.split(",") if c.strip()]
+    given = given or ([args[one]] if args.get(one) else [])
+    resolved = [_resolve_column(names, g, where) for g in given]
+    if len(set(resolved)) != len(resolved):
+        raise ToolError(f"{many} names a column twice")
+    return resolved
 
 
 def _propose_join(ctx: ToolContext, args: dict) -> dict:
@@ -1156,38 +1194,49 @@ def _propose_join(ctx: ToolContext, args: dict) -> dict:
         raise ToolError("a dataset cannot be joined to itself")
     base_names = [name for name, _ in base.schema]
     other_names = [name for name, _ in other.schema]
-    key = _resolve_column(base_names, args["key"], "base dataset")
-    other_key = _resolve_column(other_names, args.get("other_key") or args["key"], "other dataset")
+    keys = _key_args(base_names, args, "key", "keys", "base dataset")
+    if not keys:
+        raise ToolError("name the key column (key) or the key columns (keys)")
+    other_keys = _key_args(other_names, args, "other_key", "other_keys", "other dataset") or [
+        _resolve_column(other_names, k, "other dataset") for k in keys
+    ]
+    if len(keys) != len(other_keys):
+        raise ToolError("the key and the other key must name the same number of columns")
     given = args.get("columns", "")
     names = [given] if given in other_names else [c.strip() for c in given.split(",") if c.strip()]
     chosen = [_resolve_column(other_names, c, "other dataset") for c in names]
-    chosen = [c for c in dict.fromkeys(chosen) if c != other_key]
-    if not all(_is_plain(name) for name in (key, other_key, *chosen)):
+    chosen = [c for c in dict.fromkeys(chosen) if c not in other_keys]
+    if not all(_is_plain(name) for name in (*keys, *other_keys, *chosen)):
         raise ToolError("a column name is not plain text and cannot be proposed")
     summarize = bool(args.get("summarize", False))
+    shown = ", ".join(f"'{clean_text(k)}'" for k in other_keys)
 
     warnings: list[dict] = []
     try:
-        base_frame, base_sampled = _read_keys(ctx, base, [key])
-        other_frame, other_sampled = _read_keys(ctx, other, [other_key])
-        base_keys = _key_set(base_frame, key)
-        other_keys = _key_set(other_frame, other_key)
+        base_frame, base_sampled = _read_keys(ctx, base, keys)
+        other_frame, other_sampled = _read_keys(ctx, other, other_keys)
+        if len(keys) == 1:
+            base_set = _key_set(base_frame, keys[0])
+            other_set = _key_set(other_frame, other_keys[0])
+        else:
+            base_set = _key_tuples(base_frame, keys)
+            other_set = _key_tuples(other_frame, other_keys)
     except (KeyError, ValueError):  # a column the file cannot give: the checks are skipped
-        base_keys = other_keys = None
+        base_set = other_set = None
         base_sampled = other_sampled = False
-    if other_keys is not None and not other_keys[1] and not summarize:
+    if other_set is not None and not other_set[1] and not summarize:
         warnings.append(
             _warning(
                 "join_key_repeats",
-                f"the values of '{clean_text(other_key)}' repeat in the other dataset, so the "
+                f"the values of {shown} repeat in the other dataset, so the "
                 "join is refused unless summarize is on",
-                column=clean_text(other_key),
+                column=", ".join(clean_text(k) for k in other_keys),
             )
         )
     # the share of matching keys is judged on whole columns only: two samples of a large pair
     # of datasets share far fewer keys than the datasets do
-    if base_keys is not None and other_keys is not None and not (base_sampled or other_sampled):
-        matched = len(base_keys[0] & other_keys[0]) / len(base_keys[0])
+    if base_set is not None and other_set is not None and not (base_sampled or other_sampled):
+        matched = len(base_set[0] & other_set[0]) / len(base_set[0])
         if matched < _MIN_SHARED:
             warnings.append(
                 _warning(
@@ -1198,7 +1247,7 @@ def _propose_join(ctx: ToolContext, args: dict) -> dict:
                 )
             )
     cells = base.n_rows * (
-        len(base_names) + _join_columns_added(other, other_key, chosen, summarize)
+        len(base_names) + _join_columns_added(other, other_keys, chosen, summarize)
     )
     if cells > MAX_OUTPUT_CELLS:
         warnings.append(
@@ -1210,10 +1259,18 @@ def _propose_join(ctx: ToolContext, args: dict) -> dict:
                 limit=str(MAX_OUTPUT_CELLS // 10**6),
             )
         )
+    if len(keys) == 1:
+        key_config = {"key": keys[0], "other_key": "" if other_keys == keys else other_keys[0]}
+    else:  # several columns identify a row together
+        key_config = {
+            "key": "",
+            "keys": keys,
+            "other_key": "",
+            "other_keys": [] if other_keys == keys else other_keys,
+        }
     config = {
         "other_dataset_id": other.id,
-        "key": key,
-        "other_key": "" if other_key == key else other_key,
+        **key_config,
         "summarize": summarize,
         "columns": chosen,
     }
@@ -1489,17 +1546,30 @@ for _tool in (
         "propose_join",
         "Call this whenever the user asks to join datasets, instead of describing the join: it "
         "makes the card the user confirms. It proposes the Join of another dataset onto a base "
-        "dataset by a key column; nothing is started. The result is a new dataset. Use "
+        "dataset by a key column (or by keys, several columns that identify a row together); "
+        "nothing is started. The result is a new dataset. Use "
         "summarize when the other dataset has several rows per key. Name columns to add only "
         "those, leaving out ids and anything not known when the model predicts.",
         _schema(
             {
                 "dataset_id": _ID,
                 "other_dataset_id": _ID,
-                "key": _COLUMN,
+                "key": {**_COLUMN, "description": "the key column; or name keys instead"},
+                "keys": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "several columns that identify a row together (such as a "
+                    "shop and an item), comma-separated, in place of key",
+                },
                 "other_key": {
                     **_COLUMN,
                     "description": "if named differently in the other dataset",
+                },
+                "other_keys": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "the columns of keys if named differently in the other "
+                    "dataset, comma-separated",
                 },
                 "summarize": {"type": "boolean"},
                 "columns": {
@@ -1509,7 +1579,7 @@ for _tool in (
                 },
                 "notes": {"type": "string", "maxLength": 2000},
             },
-            ["dataset_id", "other_dataset_id", "key"],
+            ["dataset_id", "other_dataset_id"],
         ),
         True,
         _propose_join,
