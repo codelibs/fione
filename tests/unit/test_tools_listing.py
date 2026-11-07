@@ -116,18 +116,12 @@ def test_find_table_links_reports_keys_shared_by_datasets(env):
         ingest.ingest_batches(env.storage, env.conn, env.a.id, name, DatasetType.TRAIN, [frame])
     by_name = {d.name: d.id for d in projects.list_datasets(env.conn, env.a.id)}
     found = call(env, "find_table_links", {"project_id": env.a.id}, user=env.users.viewer)
-    assert [(link["dataset_a"], link["dataset_b"]) for link in found["links"]] == [
-        (by_name["keys"], by_name["events"])
-    ]
+    assert [link["datasets"] for link in found["links"]] == [[by_name["keys"], by_name["events"]]]
+    assert "propose_join" in found["next_step"] and "describe_dataset" in found["next_step"]
     link = found["links"][0]
-    assert (link["column_a"], link["column_b"]) == ("Id", "id")  # names match without case
-    assert link["shared_values"] == 1.0 and link["relation"] == "one_to_many"
+    assert link["columns"] == ["Id", "id"]  # names match without case
+    assert link["shared"] == 1.0 and link["relation"] == "one_to_many"
     assert link["one_row_per_key"] == by_name["keys"]
-    assert link["join"] == (
-        f"dataset {by_name['keys']} has one row per key: add it to dataset {by_name['events']} "
-        f"with Join; to add dataset {by_name['events']} to dataset {by_name['keys']}, "
-        "use Join with summarize"
-    )
     assert found["sampled"] is False and len(found["datasets"]) == 4
     outsider = ToolContext(env.conn, env.storage, env.users.outsider)
     with pytest.raises(ToolError, match=NOT_ALLOWED):
@@ -151,14 +145,14 @@ def test_find_table_links_samples_a_large_dataset_and_reports_repeating_keys(env
     by_name = {d.name: d.id for d in projects.list_datasets(env.conn, env.b.id)}
     found = call(env, "find_table_links", {"project_id": env.b.id})
     relations = {
-        (link["column_a"], link["relation"], link["one_row_per_key"]) for link in found["links"]
+        (link["column"], link["relation"], link["one_row_per_key"]) for link in found["links"]
     }
     assert relations == {
         ("k", "one_to_many", by_name["parents"]),
         ("day", "many_to_many", None),
     }
     repeating = next(link for link in found["links"] if link["relation"] == "many_to_many")
-    assert repeating["join"] == "both datasets repeat the key: summarize one of them before joining"
+    assert repeating["one_row_per_key"] is None
     assert found["sampled"] is True
 
 
@@ -170,7 +164,7 @@ def test_find_table_links_reads_a_key_with_gaps_and_ranks_real_keys_first(env):
     for name, frame in (("customers", customers), ("orders", orders)):
         ingest.ingest_batches(env.storage, env.conn, env.b.id, name, DatasetType.TRAIN, [frame])
     found = call(env, "find_table_links", {"project_id": env.b.id})
-    assert [(link["column_a"], link["relation"]) for link in found["links"]] == [
+    assert [(link["column"], link["relation"]) for link in found["links"]] == [
         ("cid", "one_to_many")
     ]
 
@@ -185,7 +179,7 @@ def test_find_table_links_ranks_one_row_per_key_before_repeating_keys(env):
     found = call(env, "find_table_links", {"project_id": env.b.id})
     relations = [link["relation"] for link in found["links"]]
     assert relations[:2] == ["one_to_many", "one_to_many"]
-    assert relations.count("many_to_many") == 5  # the least certain links are capped
+    assert relations.count("many_to_many") == 2  # the least certain links are capped
 
 
 def test_find_table_links_says_what_it_did_not_examine(env, monkeypatch):
