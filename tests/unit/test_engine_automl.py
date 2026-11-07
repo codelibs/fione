@@ -330,7 +330,13 @@ def test_balance_classes_weights_every_fit_and_lifts_minority_recall(monkeypatch
     for balance in (False, True):
         weights.clear()
         model = _fit(
-            train, families=["LightGBM"], target="y", max_models=1, balance_classes=balance, seed=1
+            train,
+            families=["LightGBM"],
+            target="y",
+            max_models=1,
+            balance_classes=balance,
+            seed=1,
+            cv_repeats=1,
         )
         pred = model.predict(test)
         recall[balance] = (pred[test["y"] == 1] == 1).mean()
@@ -618,7 +624,9 @@ def test_a_crash_after_a_good_trial_keeps_that_trial(monkeypatch):
     monkeypatch.setattr(LightGBM, "_fit", second_trial_fails)
     monkeypatch.setattr(FamilySpec, "fit_full", _boom)  # keep the fold models to inspect
     events = []
-    model = _fit(_binary(300), events, families=["LightGBM"], target="y", max_models=3)
+    model = _fit(
+        _binary(300), events, families=["LightGBM"], target="y", max_models=3, cv_repeats=1
+    )
     assert len(model.trials) == 1
     assert [len(m.models) for m in model.members] == [5]
     assert _errors(events, "family_error")[0]["message"] == "late failure"
@@ -633,6 +641,7 @@ def test_an_errored_family_never_counts_as_stagnation(monkeypatch):
         target="y",
         stopping_rounds=1,
         stopping_tolerance=0.5,  # LightGBM stagnates after two trials
+        cv_repeats=1,
     )
     assert model.stop_reason == "error"
 
@@ -1132,3 +1141,73 @@ def test_a_class_living_in_one_group_is_refused_for_group_folds():
     df["y"] = (df["user"] == "u0").astype(int)
     with pytest.raises(ConfigError, match="occurs in too few groups"):
         _fit(df, families=["LightGBM"], target="y", max_models=1, cv_group_column="user")
+
+
+# --- repeated folds -------------------------------------------------------------
+
+
+def _started(events):
+    return next(e.data for e in events if e.type == "started")
+
+
+def test_few_rows_repeat_the_folds_and_the_ensemble_sees_every_repeat(monkeypatch):
+    seen = {}
+    real = automl_module.caruana
+
+    def spy(oof, y, task, *args, **kwargs):
+        seen["rows"] = {len(p) for p in oof.values()}
+        seen["y"] = len(y)
+        return real(oof, y, task, *args, **kwargs)
+
+    monkeypatch.setattr(automl_module, "caruana", spy)
+    df = _binary(300)
+    events = []
+    model = _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=3,
+        feature_engineering=False,
+        keep_cv_predictions=True,
+        keep_cv_models=True,
+        keep_cv_fold_assignment=True,
+    )
+    assert _started(events)["cv_repeats"] == 3
+    assert seen == {"rows": {900}, "y": 900}
+    # what is reported comes from the first repeat alone
+    assert model.cv_predictions.shape == (300, 2)
+    assert sorted(set(model.fold_assignment)) == [0, 1, 2]
+    assert len(model.cv_models["LightGBM"]) == 3
+
+
+def test_cv_repeats_one_turns_the_repetition_off_and_more_forces_it():
+    df = _binary(300)
+    for repeats, expected in ((1, 1), (2, 2)):
+        events = []
+        _fit(
+            df,
+            events,
+            families=["LightGBM"],
+            target="y",
+            max_models=1,
+            feature_engineering=False,
+            cv_repeats=repeats,
+        )
+        assert _started(events)["cv_repeats"] == expected
+
+
+def test_as_few_groups_as_folds_are_not_repeated():
+    events = []
+    _fit(
+        _grouped(n_groups=5),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=5,
+        cv_group_column="user",
+        feature_engineering=False,
+    )
+    assert _started(events)["cv_repeats"] == 1

@@ -26,7 +26,7 @@ from fione.api.routes_jobs import delete_finished_job, delete_finished_jobs_of
 from fione.api.schemas import job_out
 from fione.data.profile import SCORE_REASONS, leak_code
 from fione.engine import metrics
-from fione.engine.config import ConfigError, TargetError, TrainConfig
+from fione.engine.config import MAX_CV_REPEATS, ConfigError, TargetError, TrainConfig
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
 from fione.models import service as models
@@ -79,6 +79,7 @@ SINGLE_FIELDS = (
     "max_runtime_secs_per_model",
     "max_models",
     "nfolds",
+    "cv_repeats",
     "seed",
     "balance_classes",
     "decision",
@@ -434,6 +435,7 @@ def _form_values(defaults: dict) -> dict:
         "max_runtime_minutes": str(int(minutes)) if minutes.is_integer() else "",
         "max_runtime_secs_per_model": "",
         "max_models": "",
+        "cv_repeats": "",
     }
     for name in (
         "nfolds",
@@ -450,7 +452,7 @@ def _form_values(defaults: dict) -> dict:
     values["stopping_tolerance"] = f"{defaults['stopping_tolerance']:g}"
     for name in FLAGS:
         values[name] = defaults[name]
-    for name in ("max_runtime_secs_per_model", "max_models"):
+    for name in ("max_runtime_secs_per_model", "max_models", "cv_repeats"):
         if defaults[name] is not None:
             values[name] = str(defaults[name])
     return values
@@ -576,6 +578,7 @@ def _parse_train(form: FormData, names: list[str], inferred_task: str):
     for name, low, high in (
         ("max_runtime_secs_per_model", 1, None),
         ("max_models", 1, None),
+        ("cv_repeats", 1, MAX_CV_REPEATS),
     ):
         if values[name].strip() == "":
             config[name] = None

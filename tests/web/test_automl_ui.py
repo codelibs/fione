@@ -450,6 +450,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "keep_cv_fold_assignment": True,
         "ignored_columns": ["sepal width (cm)", "petal length (cm)"],
         "cv_group_column": None,
+        "cv_repeats": None,
     }
     assert {f.name for f in dataclasses.fields(TrainConfig)} == set(expected)  # all covered
     assert config.to_dict() == expected

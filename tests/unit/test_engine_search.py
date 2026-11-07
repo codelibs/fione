@@ -19,7 +19,14 @@ from fione.engine.families import (
     n_threads,
 )
 from fione.engine.prep import Prep, validate_target
-from fione.engine.search import STARTUP_TRIALS, make_folds, run_family
+from fione.engine.search import (
+    STARTUP_TRIALS,
+    make_folds,
+    repeat_folds,
+    repeats_for,
+    run_family,
+    score,
+)
 
 TRIAL_KEYS = {"family", "trial", "score", "params", "elapsed", "best_so_far"}
 
@@ -899,3 +906,72 @@ def test_group_folds_are_deterministic_and_follow_the_seed():
     other = make_folds(y, "classification", 5, 1, groups)
     assert all(np.array_equal(a[1], b[1]) for a, b in zip(first, again, strict=True))
     assert any(not np.array_equal(a[1], b[1]) for a, b in zip(first, other, strict=True))
+
+
+@pytest.mark.parametrize(
+    ("rows", "repeats"), [(10, 3), (2_000, 3), (2_001, 2), (5_000, 2), (5_001, 1), (1_000_000, 1)]
+)
+def test_the_folds_are_repeated_for_few_rows(rows, repeats):
+    assert repeats_for(rows) == repeats
+
+
+def test_repeated_folds_are_runs_of_other_partitions():
+    y = np.random.default_rng(1).integers(0, 2, 200)
+    folds = repeat_folds(y, "classification", 4, 3, repeats=3)
+    assert len(folds) == 12
+    first = make_folds(y, "classification", 4, 3)
+    assert all(np.array_equal(a[1], b[1]) for a, b in zip(folds[:4], first, strict=True))
+    runs = [folds[i * 4 : (i + 1) * 4] for i in range(3)]
+    for run in runs:
+        assert sorted(np.concatenate([valid for _, valid in run])) == list(range(200))
+    assert not np.array_equal(runs[0][0][1], runs[1][0][1])
+
+
+def test_repeated_group_folds_keep_each_group_together_in_every_run():
+    y = np.random.default_rng(1).integers(0, 2, 300)
+    groups = _group_ids(300, 40)
+    for train, valid in repeat_folds(y, "classification", 5, 0, groups, 2):
+        assert not set(groups[train]) & set(groups[valid])
+
+
+def test_a_repeated_search_scores_each_repeat_alone_and_keeps_the_first_runs_models():
+    X, y = _classification(300, 6)
+    prep = Prep().fit(X)
+    folds = repeat_folds(y, "classification", 3, 0, repeats=3)
+    result = run_family(
+        "LightGBM",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(30),
+        lambda event: None,
+        lambda: False,
+        max_trials=2,
+        repeats=3,
+    )
+    assert len(result.models) == 3 and result.repeats == 3 and len(result.oofs) == 3
+    assert result.oof is result.oofs[0]
+    assert result.stacked().shape == (3 * len(y), 2)
+    mean = np.mean([score("classification", y, oof) for oof in result.oofs])
+    assert result.best_score == pytest.approx(mean)
+    assert not np.allclose(result.oofs[0], result.oofs[1])  # other splits, other predictions
+
+
+def test_one_repeat_is_the_plain_search():
+    X, y = _classification(300, 6)
+    prep = Prep().fit(X)
+    result = run_family(
+        "LightGBM",
+        X,
+        y,
+        make_folds(y, "classification", 3, 0),
+        "classification",
+        prep,
+        Deadline(30),
+        lambda event: None,
+        lambda: False,
+        max_trials=1,
+    )
+    assert result.repeats == 1 and result.oofs == [] and result.stacked() is result.oof

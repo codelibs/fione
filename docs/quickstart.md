@@ -172,6 +172,17 @@ change from the bias to the prediction in proportion to each column's effect on 
 which is an approximation. Only the scores of the search itself (the trial history) stay on the
 logarithm scale. Every value must be above -1, and the setting is ignored for classification.
 
+## Repeating the cross-validation
+
+With few rows, one random split into folds is noisy: a search over many trials then picks
+settings that happened to score well on that split, and the model does worse on new data than
+its score says. Up to 2,000 rows Fione therefore draws the folds three times with other seeds
+(twice up to 5,000 rows) and judges each trial by the mean of the repeats' scores; the ensemble
+is chosen on all repeats. The models, the diagnostics, the leaderboard and the cross-validation
+predictions come from the first repeat. Set "Repeats of cross-validation" (`cv_repeats` in the
+API) to choose the number yourself (1 to 10); 1 turns it off. With as few groups as folds (see below) the folds cannot differ between repeats, so they are not repeated. A run of fixed length tries fewer trials the
+more repeats it has.
+
 ## Keeping related rows together
 
 Fione scores a model on rows it did not learn from, chosen at random. When several rows

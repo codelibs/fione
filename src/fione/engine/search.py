@@ -78,6 +78,15 @@ class FamilyResult:
     log: list[dict] = field(default_factory=list)  # the ``trial`` event data, in order
     error: Exception | None = None  # what ended the search when ``reason == "error"``
     runners_up: list["FamilyResult"] = field(default_factory=list)  # next best trials, best first
+    # With repeated folds (``repeats`` > 1): the out-of-fold predictions of every repeat, ``oof``
+    # being the first. ``models`` and ``oof`` are the first repeat's alone; ``best_score`` is the
+    # mean of the repeats' scores. Empty when the folds are not repeated.
+    oofs: list[np.ndarray] = field(default_factory=list)
+    repeats: int = 1
+
+    def stacked(self) -> np.ndarray:
+        """The predictions of all repeats one below the other (``oof`` when there is one)."""
+        return np.concatenate(self.oofs) if len(self.oofs) > 1 else self.oof
 
 
 def error_notice(kind: str, family: str, error: Exception) -> Event:
@@ -104,6 +113,38 @@ def make_folds(
     splitter = StratifiedGroupKFold if classification else GroupKFold
     split = splitter(nfolds, shuffle=True, random_state=seed)
     return list(split.split(np.zeros(len(y)), y, groups))
+
+
+# The folds of repeat r use the seed plus r times this step (a prime, so repeats never share one).
+REPEAT_SEED_STEP = 104_729
+# With few rows a validation score is noisy, and a search over many trials then picks parameters
+# that were lucky on the folds. Up to each row count the folds are repeated with other seeds.
+REPEATS_BY_ROWS = ((2_000, 3), (5_000, 2))
+
+
+def repeats_for(n_rows: int) -> int:
+    """How many times the folds are repeated for ``n_rows`` rows (1: not at all)."""
+    for rows, repeats in REPEATS_BY_ROWS:
+        if n_rows <= rows:
+            return repeats
+    return 1
+
+
+def repeat_folds(
+    y: np.ndarray,
+    task: Task,
+    nfolds: int,
+    seed: int = 0,
+    groups: np.ndarray | None = None,
+    repeats: int = 1,
+) -> Folds:
+    """``make_folds`` ``repeats`` times with other seeds, one after another: the first
+    ``nfolds`` folds are those of ``make_folds`` itself."""
+    return [
+        fold
+        for r in range(repeats)
+        for fold in make_folds(y, task, nfolds, (seed + r * REPEAT_SEED_STEP) % 2**32, groups)
+    ]
 
 
 def score(task: Task, y: np.ndarray, pred: np.ndarray) -> float:
@@ -134,6 +175,7 @@ class _Outcome:
     score: float
     oof: np.ndarray | None = None
     models: list | None = None
+    oofs: list | None = None  # every repeat's oof; ``oof`` is the first
 
 
 def _run_trial(
@@ -149,8 +191,13 @@ def _run_trial(
     keep_late: bool,
     should_stop: Callable[[], bool],
     sample_weight: np.ndarray | None,
+    repeats: int = 1,
 ) -> _Outcome | None:
     """Fit all folds; None when cancelled or, unless ``keep_late``, cut off by ``deadline``.
+
+    ``folds`` holds ``repeats`` runs of folds one after another. Only the first run's models are
+    kept (the others only score the parameters), and the score is the mean over the runs of
+    their out-of-fold score, so each run is judged alone, as a single run would be.
 
     ``cap()`` is the trial's time limit, re-read before each fold because the unit time it is
     raised to is only measured by the first fit on small data. A capped trial truncates its
@@ -158,7 +205,9 @@ def _run_trial(
     smallest cap (``CAP_MARGIN x UNIT_SAFETY x`` the unit), even when earlier folds overran their
     shares by a prediction or an iteration, so only ``deadline`` can still end the trial.
     """
-    oof = np.zeros((len(y), spec.n_classes)) if spec.classification else np.zeros(len(y))
+    shape = (len(y), spec.n_classes) if spec.classification else (len(y),)
+    per_run = len(folds) // repeats
+    oofs = [np.zeros(shape) for _ in range(repeats)]
     models, losses = [], []
     start = time.monotonic()
     for i, (train, valid) in enumerate(folds):
@@ -191,13 +240,15 @@ def _run_trial(
         if should_stop() or (deadline.expired() and not keep_late):
             return None
         pred = spec.predict(model, X.iloc[valid])
-        oof[valid] = pred
-        models.append(model)
+        oofs[i // per_run][valid] = pred
+        if i < per_run:
+            models.append(model)
         losses.append(score(spec.task, y[valid], pred))
         trial.report(float(np.mean(losses)), i)
         if trial.should_prune():
             return _Outcome("pruned", float(np.mean(losses)))
-    return _Outcome("complete", score(spec.task, y, oof), oof, models)
+    total = float(np.mean([score(spec.task, y, oof) for oof in oofs]))
+    return _Outcome("complete", total, oofs[0], models, oofs)
 
 
 def run_family(
@@ -217,8 +268,10 @@ def run_family(
     stopping_tolerance: float = 0.0,
     stopping_score: Callable[[np.ndarray], float] | None = None,
     sample_weight: np.ndarray | None = None,
+    repeats: int = 1,
 ) -> FamilyResult:
-    """Search family ``name`` within ``deadline``; ``y`` is float targets or class codes 0..k-1."""
+    """Search family ``name`` within ``deadline``; ``y`` is float targets or class codes 0..k-1.
+    ``folds`` holds ``repeats`` runs of folds (see ``repeat_folds``)."""
     start = time.monotonic()
     n_classes = int(y.max()) + 1 if task == "classification" else 0
     spec = FAMILIES[name](task, n_classes, seed=seed, n_jobs=n_threads(len(X)))
@@ -288,6 +341,7 @@ def run_family(
                 first,
                 should_stop,
                 sample_weight,
+                repeats,
             )
         except Exception as e:
             study.tell(trial, state=optuna.trial.TrialState.FAIL)
@@ -318,7 +372,11 @@ def run_family(
             leaders.sort(key=lambda leader: leader[0].score)  # stable: earlier trials first
             del leaders[TOP_TRIALS:]  # drops the models of the trials left behind
             best = leaders[0][0]
-            value = outcome.score if stopping_score is None else stopping_score(outcome.oof)
+            value = (
+                outcome.score
+                if stopping_score is None
+                else float(np.mean([stopping_score(oof) for oof in outcome.oofs]))
+            )
             stop_best = min(stop_best, value)
         stop_history.append(stop_best)
         finished += 1
@@ -379,6 +437,8 @@ def run_family(
             log,
             error,
             list(runners_up),
+            outcome.oofs if repeats > 1 else [],
+            repeats,
         )
 
     return result(*leaders[0][:4], [result(*leader) for leader in leaders[1:]])

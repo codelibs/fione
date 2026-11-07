@@ -23,7 +23,12 @@ spec 5.1/5.7) and spends it in phases:
    not yet run, and only when its first trial is expected to fit in that share (``cost`` times
    the first trial of TextLinear). A late family that does not apply to the data is not run and
    changes nothing; one that does not improve the ensemble gets weight 0 from ``caruana``.
-3. Ensemble selection: ``caruana`` on the candidates' out-of-fold (OOF) predictions; cheap.
+   With few rows the folds are drawn again, with other seeds, ``repeats_for`` times (or
+   ``cv_repeats``): a trial's score is the mean of the repeats' scores, each judged alone,
+   which makes the search less likely to pick parameters that were only lucky on one split.
+   Fold models, diagnostics, the leaderboard and the fold assignment come from the first repeat.
+3. Ensemble selection: ``caruana`` on the candidates' out-of-fold (OOF) predictions, all repeats
+   one below the other; cheap.
 4. Final refit: until the reserve (about 0.2 L when the search used its whole share; more when
    it ended early). Each member with weight > 0 is refit once on all rows with its best
    parameters: boosting for 1.1 x the mean best iteration of its fold models, without early
@@ -82,7 +87,8 @@ from fione.engine.search import (
     FamilyResult,
     Folds,
     error_notice,
-    make_folds,
+    repeat_folds,
+    repeats_for,
     run_family,
 )
 
@@ -186,6 +192,7 @@ class AutoML:
         stopping_metric = metrics.resolve(c.stopping_metric, task, "stopping_metric")
         notices: list[Event] = []
         y, classes, nfolds = validate_target(target, task, c.nfolds, notices.append)
+        repeats = c.cv_repeats or repeats_for(len(X))
         row_groups = None
         if c.cv_group_column is not None:
             if c.cv_group_column not in df.columns:
@@ -197,6 +204,8 @@ class AutoML:
                     f"the group column '{c.cv_group_column}' needs at least 2 groups, "
                     f"it has {distinct}"
                 )
+            if distinct <= nfolds:
+                repeats = 1  # each group is a fold: every seed gives the same partition
             if distinct < nfolds:
                 nfolds = distinct
                 notices.append(
@@ -216,6 +225,7 @@ class AutoML:
             n_cols=X.shape[1],
             task=task,
             nfolds=nfolds,
+            cv_repeats=repeats,
         )
         for notice in notices:
             self.emit(notice)
@@ -239,7 +249,8 @@ class AutoML:
             prior = np.bincount(y) / len(y)
         groups, tried = self._engineer(X, y, task, nfolds, deadline, row_groups)
         prep = Prep().fit(X, groups)
-        folds = make_folds(y, task, nfolds, c.seed, row_groups)
+        folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
+        first_run = folds[:nfolds]  # what is reported: the other repeats only judge the search
         if row_groups is not None and task == "classification":
             self._check_classes_in_training(y, folds, classes)
         families = self._without_wide_linear_view(prep, len(X))
@@ -262,6 +273,7 @@ class AutoML:
             deadline.child(SEARCH_SHARE * left),
             None if default_stopping else (lambda oof: metrics.loss(stopping_metric, y, oof)),
             weight,
+            repeats,
         )
         stop_reason = self._stop_reason(reasons, finished)
         if not results:
@@ -278,7 +290,9 @@ class AutoML:
         self._event("stopped", reason=stop_reason)
 
         oof = {name: result.oof for name, result in results.items()}
-        weights = caruana(oof, y, task)
+        # The weights are chosen on every repeat's predictions, one below the other.
+        stacked = {name: result.stacked() for name, result in results.items()}
+        weights = caruana(stacked, np.tile(y, repeats), task)
         scores = {name: metrics.value(sort_metric, y, p, prior) for name, p in oof.items()}
         pick = max if sort_metric in metrics.HIGHER_IS_BETTER else min
         self._event(
@@ -310,10 +324,10 @@ class AutoML:
                 exception=type(e).__name__,
             )
         leaderboard = _leaderboard(
-            results, final, refit_secs, blended, y_seen, folds, sort_metric, original, prior
+            results, final, refit_secs, blended, y_seen, first_run, sort_metric, original, prior
         )
         assignment = np.empty(len(y), dtype=np.int64)
-        for i, (_, valid) in enumerate(folds):
+        for i, (_, valid) in enumerate(first_run):
             assignment[valid] = i
         model = TrainedModel(
             task=task,
@@ -415,7 +429,9 @@ class AutoML:
             and FAMILIES[name].coef_bytes(prep, outputs) <= SIZE_CAP
         ]
 
-    def _search(self, families, X, y, folds, task, prep, search: Deadline, stopping_score, weight):
+    def _search(
+        self, families, X, y, folds, task, prep, search: Deadline, stopping_score, weight, repeats=1
+    ):
         """Run the families in order, the late ones last; returns (results with models, trial
         rows, end reason per family, finished trial count, exception per failed family)."""
         c = self.config
@@ -469,6 +485,7 @@ class AutoML:
                     stopping_tolerance=c.stopping_tolerance,
                     stopping_score=stopping_score,
                     sample_weight=weight,
+                    repeats=repeats,
                 )
             except NoModelError:
                 if not late:
@@ -641,8 +658,10 @@ def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight, bag: i
     """``(model refit on all rows, None)``, or ``(None, why)`` with why ``"time"``,
     ``"cancelled"`` or the exception the refit raised. ``bag`` > 0 refits with another seed."""
     spec = result.spec
-    # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit.
-    if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / (len(result.models) - 1):
+    # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit
+    # (and over the folds of every repeat).
+    fits = result.repeats * (len(result.models) - 1)  # full-data fits the trial's time paid for
+    if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / fits:
         return None, "cancelled" if clock.should_stop() else "time"
     try:
         if spec.view not in views:
