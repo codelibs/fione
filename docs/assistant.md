@@ -167,7 +167,9 @@ tables for the same day). Columns with fewer than 20 values are not reported whe
 repeat, since they are categories rather than keys. A dataset with several rows per key is
 added to the one with the column to predict by the **Join** module: choose the key and turn on
 `summarize`, which gives each key one row (the number of rows, and the mean, minimum, maximum
-and sum of each number). When both repeat, summarize the one that is not the base first. The
+and sum of each number). Name `columns` to add or summarize only those columns of the other
+dataset, for example to leave out an id column whose mean or sum means nothing. When both repeat,
+summarize the one that is not the base first. The
 assistant cannot join anything itself; it explains what to join, and suggests training once
 the joined dataset exists.
 

@@ -367,6 +367,25 @@ def test_join_summarizes_a_table_with_many_rows_per_key():
     assert list(out["kind_nunique"].fillna(-1)) == [2, 1, -1]
 
 
+def test_join_adds_only_the_chosen_columns_and_summarizes_only_those():
+    df = pd.DataFrame({"id": [1, 2, 3]})
+    other = pd.DataFrame(
+        {"id": [1, 1, 2], "ref": [7, 8, 9], "amount": [10.0, 30.0, 5.0], "kind": ["a", "b", "a"]}
+    )
+    one_each = other.iloc[[0, 2]]
+    args = {"other_dataset_id": 1, "key": "id"}
+    out, _ = run_op("join", df, {**args, "columns": ["amount", "id"]}, one_each)
+    assert list(out.columns) == ["id", "amount"]  # the key is not added twice
+    out, _ = run_op("join", df, {**args, "summarize": True, "columns": ["amount"]}, other)
+    assert list(out.columns) == [
+        "id",
+        "rows",
+        *[f"amount_{h}" for h in ("mean", "min", "max", "sum")],
+    ]
+    with pytest.raises(ModuleError, match="unknown columns"):
+        run_op("join", df, {**args, "columns": ["zz"]}, one_each)
+
+
 def test_join_matches_a_number_with_the_same_text():
     df = pd.DataFrame({"id": [1, 2, 3]})
     other = pd.DataFrame({"id": ["2", "3", "x"], "v": [20, 30, 99]})
