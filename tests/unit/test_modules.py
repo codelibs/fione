@@ -1274,3 +1274,30 @@ def test_lag_leaves_a_missing_time_or_group_empty_and_refuses_unclear_input():
     names = pd.DataFrame({"t": [1, 2], "s": ["a", "b"]})
     with pytest.raises(ModuleError, match="is not numeric"):
         run_op("lag", names, {"time": "t", "columns": ["s"]})
+
+
+def test_lag_sum_keeps_an_all_missing_group_empty():
+    df = pd.DataFrame({"g": ["a", "a", "a"], "t": [1, 2, 3], "v": [5.0, np.nan, np.nan]})
+    out, _ = run_op("lag", df, {"time": "t", "by": ["g"], "columns": ["v"], "how": "sum"})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 5.0, -1]  # not 0.0 for an empty time 2
+
+
+def test_lag_does_not_wrap_a_narrow_integer_time_and_keeps_its_type():
+    df = pd.DataFrame({"t": np.array([250, 4], dtype="uint8"), "v": [1.0, 2.0]})
+    out, _ = run_op("lag", df, {"time": "t", "columns": ["v"], "lags": "10"})
+    assert list(out["v_lag10"].fillna(-1)) == [-1, -1]  # 250 + 10 is 260, not 4
+    assert out["t"].dtype == np.dtype("uint8") and list(out["t"]) == [250, 4]
+    nullable = pd.DataFrame({"t": pd.array([1, 2, None], dtype="Int8"), "v": [1.0, 2.0, 3.0]})
+    out, _ = run_op("lag", nullable, {"time": "t", "columns": ["v"]})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 1.0, -1]
+
+
+def test_lag_refuses_a_time_of_booleans_and_a_column_named_twice():
+    df = pd.DataFrame({"g": [1, 2], "t": [True, False], "v": [1.0, 2.0]})
+    with pytest.raises(ModuleError, match="whole numbers"):
+        run_op("lag", df, {"time": "t", "columns": ["v"]})
+    ok = df.assign(t=[1, 2])
+    with pytest.raises(ModuleError, match="twice"):
+        run_op("lag", ok, {"time": "t", "by": ["g", "g"], "columns": ["v"]})
+    with pytest.raises(ModuleError, match="twice"):
+        run_op("lag", ok, {"time": "t", "columns": ["v", "v"]})

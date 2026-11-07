@@ -187,6 +187,8 @@ def lag(df, params, ctx):
     by = pick_columns(df, params["by"]) if params["by"] else []
     if time in by:
         raise ModuleError("by cannot include the time column")
+    if len(set(by)) != len(by) or len(set(params["columns"])) != len(params["columns"]):
+        raise ModuleError("by and columns cannot name a column twice")
     if not params["columns"]:
         raise ModuleError("name the columns to lag")
     columns = [c for c in pick_columns(df, params["columns"]) if c != time and c not in by]
@@ -196,14 +198,24 @@ def lag(df, params, ctx):
         if not pd.api.types.is_numeric_dtype(df[column]):
             raise ModuleError(f"column '{column}' is not numeric")
     if (
-        not pd.api.types.is_numeric_dtype(df[time])
+        pd.api.types.is_bool_dtype(df[time])
+        or not pd.api.types.is_numeric_dtype(df[time])
         or not (df[time].dropna() == df[time].dropna().round()).all()
     ):
         raise ModuleError(f"time column '{time}' must hold whole numbers")
     lags = _lags(params["lags"])
     check_cells(len(df), len(df.columns) + len(columns) * len(lags))
+    # a narrow integer (a byte of days) would wrap round when a lag is added: work on a wide one
+    original_time = wide = df[time]
+    if pd.api.types.is_integer_dtype(wide):
+        wide = wide.astype(
+            "Int64" if isinstance(wide.dtype, pd.api.extensions.ExtensionDtype) else "int64"
+        )
+    df = df.assign(**{time: wide})
     keys = [*by, time]
-    reduced = getattr(df.groupby(keys)[columns], params["how"])().reset_index()
+    grouped = df.groupby(keys)[columns]
+    # a group and time whose values are all missing stays empty (a sum would give 0)
+    reduced = (grouped.sum(min_count=1) if params["how"] == "sum" else grouped.mean()).reset_index()
     out = df
     for k in lags:
         earlier = reduced.copy()
@@ -213,6 +225,7 @@ def lag(df, params, ctx):
         ]
         earlier = earlier.rename(columns=dict(zip(columns, fresh, strict=True)))
         out = out.merge(earlier, how="left", on=keys)
+    out[time] = original_time.array  # the column as it came, not the wide copy
     return out
 
 
