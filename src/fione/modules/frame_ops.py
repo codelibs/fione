@@ -186,6 +186,71 @@ def join(df, params, ctx):
     return merged.drop(columns=parts)
 
 
+def _lags(text: str) -> list[int]:
+    """The whole numbers of a comma-separated list, at least 1 each."""
+    try:
+        lags = [int(part) for part in text.split(",") if part.strip()]
+    except ValueError:
+        raise ModuleError(f"lags must be whole numbers separated by commas, got '{text}'") from None
+    if not lags or min(lags) < 1:
+        raise ModuleError("lags must name one or more whole numbers of at least 1")
+    return list(dict.fromkeys(lags))
+
+
+def lag(df, params, ctx):
+    """Add, for each row, the value of the ``columns`` at an earlier ``time`` of the same ``by``
+    group: ``column_lag1`` is the value one step of ``time`` before, ``column_lag3`` three steps
+    before. ``time`` holds whole numbers (a month number, a day number); the step is counted in
+    them, not in rows, so a time with no row gives an empty value instead of the one before
+    it. Rows of a group with the same time are first reduced to their ``how`` (mean or sum), so
+    ``by`` can be coarser than a row: lagging the mean of an item over all shops. No row reads
+    its own time or a later one."""
+    time = require_column(df, params["time"])
+    by = pick_columns(df, params["by"]) if params["by"] else []
+    if time in by:
+        raise ModuleError("by cannot include the time column")
+    if len(set(by)) != len(by) or len(set(params["columns"])) != len(params["columns"]):
+        raise ModuleError("by and columns cannot name a column twice")
+    if not params["columns"]:
+        raise ModuleError("name the columns to lag")
+    columns = [c for c in pick_columns(df, params["columns"]) if c != time and c not in by]
+    if not columns:
+        raise ModuleError("the columns to lag cannot be only the time or the by columns")
+    for column in columns:
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            raise ModuleError(f"column '{column}' is not numeric")
+    if (
+        pd.api.types.is_bool_dtype(df[time])
+        or not pd.api.types.is_numeric_dtype(df[time])
+        or not (df[time].dropna() == df[time].dropna().round()).all()
+    ):
+        raise ModuleError(f"time column '{time}' must hold whole numbers")
+    lags = _lags(params["lags"])
+    check_cells(len(df), len(df.columns) + len(columns) * len(lags))
+    # a narrow integer (a byte of days) would wrap round when a lag is added: work on a wide one
+    original_time = wide = df[time]
+    if pd.api.types.is_integer_dtype(wide):
+        wide = wide.astype(
+            "Int64" if isinstance(wide.dtype, pd.api.extensions.ExtensionDtype) else "int64"
+        )
+    df = df.assign(**{time: wide})
+    keys = [*by, time]
+    grouped = df.groupby(keys)[columns]
+    # a group and time whose values are all missing stays empty (a sum would give 0)
+    reduced = (grouped.sum(min_count=1) if params["how"] == "sum" else grouped.mean()).reset_index()
+    out = df
+    for k in lags:
+        earlier = reduced.copy()
+        earlier[time] = earlier[time] + k  # the value at time t is read by the rows at t + k
+        fresh = unique_names([str(c) for c in out.columns] + [f"{c}_lag{k}" for c in columns])[
+            len(out.columns) :
+        ]
+        earlier = earlier.rename(columns=dict(zip(columns, fresh, strict=True)))
+        out = out.merge(earlier, how="left", on=keys)
+    out[time] = original_time.array  # the column as it came, not the wide copy
+    return out
+
+
 def cslice(df, params, ctx):
     return df[pick_columns(df, params["columns"])]
 
@@ -391,6 +456,19 @@ _op(
     },
     ("other_dataset_id",),
     join,
+)
+_op(
+    "lag",
+    "Add values from earlier times",
+    {
+        "time": _NAME,
+        "by": _NAMES,
+        "columns": _NAMES,
+        "lags": {"type": "string", "maxLength": 200, "default": "1"},
+        "how": {"type": "string", "enum": ["mean", "sum"], "default": "mean"},
+    },
+    ("time", "columns"),
+    lag,
 )
 _op(
     "pivot",

@@ -161,6 +161,22 @@ a first trial in its share is skipped. A late candidate stays in the model
 only when its cross-validation scores improve the ensemble; otherwise it gets weight 0 and is
 dropped. They are not run for data without a text column.
 
+## Values from earlier times
+
+For data over time, the value of a column at an earlier time is often the best feature (last
+month's sales of the same shop and item). The built-in **Add values from earlier times**
+module (`lag`) adds them: name the `time` column (whole numbers such as a month number), the
+columns to read (`columns`), the group each row belongs to (`by`, such as a shop and an item) and
+the steps back (`lags`, such as `1,2,3,12`). `sales_lag3` is the value of `sales` three steps of
+the time before, so a time with no row gives an empty value, never the row before. The rows of
+a group at one time are reduced to their mean (or sum, with `how`) first, so a coarser `by`
+gives, for example, the mean of an item over all its shops one month earlier. No row reads its
+own time or a later one, but the module does not know which rows are to be predicted: to give
+the rows to predict their lags, put them in the same dataset (with the target empty) before
+adding the lags. Training refuses a target with missing values, so take the rows to learn from
+with **Slice rows** (such as `month < 34`) before training, and the rows to predict with another
+slice for the prediction.
+
 ## Learning a skewed target
 
 For a regression target of 0 or more that is skewed (prices, counts, durations) and is
