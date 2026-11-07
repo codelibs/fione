@@ -14,7 +14,10 @@ TABLE_ID = "table_id"
 SIMILAR_NAME = "similar_name"
 VALUES = "values"  # no name relates the columns; their values do
 
-_ID_WORDS = frozenset({"id", "nbr", "number", "no", "key", "code", "num", "uid", "ref"})
+# ``id`` is a key anywhere in a name (SK_ID_CURR); the others only as the last word, so that
+# ``order_number`` is a key and ``number_of_items`` is not
+_ID_WORD = "id"
+_LAST_ID_WORDS = frozenset({"nbr", "number", "no", "key", "code", "uid", "ref"})
 _SIMILAR_RATIO = 0.75
 _MIN_ABBREVIATION = 3
 
@@ -31,13 +34,17 @@ def _singular(word: str) -> str:
 
 
 def is_id_like(column: str) -> bool:
-    """The name has a word such as id, key, number or code."""
-    return any(w in _ID_WORDS for w in _words(column))
+    """The name has the word id, or ends in a word such as key, number or code."""
+    words = _words(column)
+    return _ID_WORD in words or bool(words) and words[-1] in _LAST_ID_WORDS
 
 
 def _stem(column: str) -> list[str]:
     """The words of the name less the id words and plurals: ``SK_ID_CURR`` gives sk, curr."""
-    return [w for w in map(_singular, _words(column)) if w not in _ID_WORDS]
+    words = _words(column)
+    if words and words[-1] in _LAST_ID_WORDS:
+        words = words[:-1]
+    return [w for w in map(_singular, words) if w != _ID_WORD]
 
 
 def related(table_a: str, column_a: str, table_b: str, column_b: str) -> str | None:

@@ -275,6 +275,25 @@ def test_find_table_links_does_not_match_small_integers_or_unrelated_values(env)
     assert call(env, "find_table_links", {"project_id": env.b.id})["links"] == []
 
 
+def test_find_table_links_does_not_match_a_count_with_ids_that_start_at_one(env):
+    customers = pd.DataFrame({"id": range(1, 1001), "city": ["a", "b"] * 500})
+    orders = pd.DataFrame({"quantity": [i % 30 + 1 for i in range(400)], "label": ["q"] * 400})
+    _ingest(env, env.b, customers=customers, orders=orders)
+    assert call(env, "find_table_links", {"project_id": env.b.id})["links"] == []
+
+
+def test_find_table_links_puts_a_link_by_name_before_one_by_values(env):
+    codes = [f"s{i:03d}" for i in range(80)]
+    customers = pd.DataFrame({"cid": range(1, 81), "serial": codes})
+    orders = pd.DataFrame(
+        {"cid": [i % 80 + 41 for i in range(240)], "unit": [codes[i % 80] for i in range(240)]}
+    )
+    _ingest(env, env.b, customers=customers, orders=orders)
+    links = call(env, "find_table_links", {"project_id": env.b.id})["links"]
+    assert [link.get("basis") for link in links] == [None, "values"]
+    assert links[0]["shared"] < links[1]["shared"] == 1.0
+
+
 def test_find_table_links_says_what_it_did_not_examine(env, monkeypatch):
     frame = pd.DataFrame({"k": range(30), "v": range(30)})
     for i in range(3):

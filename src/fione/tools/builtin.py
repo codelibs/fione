@@ -911,6 +911,14 @@ _MIN_SHARED = 0.5
 _MIN_REPEATED_KEYS = 20  # keys that repeat on both sides need this many values to be reported
 _MAX_LINKS = 20
 _LINK_VALUE_COLUMNS = 8  # columns of a dataset compared by their values, whatever their names
+# the names that relate two columns say more than their values alone; the sort puts the most
+# certain links first, and the next call is made on the first
+_BASIS_RANK = {
+    link_names.SAME_NAME: 0,
+    link_names.TABLE_ID: 0,
+    link_names.SIMILAR_NAME: 1,
+    link_names.VALUES: 2,
+}
 _MAX_REPEATING_LINKS = 2  # links where both sides repeat come last and are the least certain
 
 
@@ -953,7 +961,7 @@ def _link(
     (values_a, unique_a), (values_b, unique_b) = found
     if basis == link_names.VALUES:
         # one side is the key and most values of the other are in it
-        if unique_a == unique_b or not key_ok[0 if unique_a else 1]:
+        if unique_a == unique_b or not all(key_ok):
             return None
         key, other = (values_a, values_b) if unique_a else (values_b, values_a)
         inter = len(key & other)
@@ -1000,8 +1008,8 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
     id_like = {
         d.id: [n for n in usable[d.id].values() if link_names.is_id_like(n)] for d in datasets
     }
-    # a whole-number column is a key by its values only when its name says id; a small
-    # integer such as a count or a rank overlaps with any other
+    # a whole-number column is a key by its values only when its name says id (on both sides);
+    # a small integer such as a count or a rank overlaps with any other
     key_columns = {
         d.id: {
             n
@@ -1068,6 +1076,7 @@ def _find_table_links(ctx: ToolContext, args: dict) -> dict:
         key=lambda item: (
             item[1]["relation"] == "many_to_many",
             -item[0] if item[1]["relation"] == "many_to_many" else 0,
+            _BASIS_RANK[item[1].get("basis", link_names.SAME_NAME)],
             -item[1]["shared"],
         )
     )

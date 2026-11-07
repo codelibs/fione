@@ -22,6 +22,10 @@ from fione.tools import link_names
         ("a", "MONTHS_BALANCE", "b", "CNT_INSTALMENT", None),  # not id-like
         ("a", "amount", "b", "total_amount", None),  # similar but not id-like
         ("a", "id", "b", "id", "same_name"),
+        ("order_items", "item_id", "items", "id", "table_id"),
+        ("items", "id", "orders", "num_items", None),  # a count
+        ("items", "id", "orders", "number_of_items", None),
+        ("orders", "order_number", "payments", "order_id", "similar_name"),
     ],
 )
 def test_related(table_a, column_a, table_b, column_b, expected):
@@ -30,5 +34,15 @@ def test_related(table_a, column_a, table_b, column_b, expected):
 
 
 def test_is_id_like():
-    assert all(map(link_names.is_id_like, ["id", "SK_ID_CURR", "storeNbr", "zip_code", "userId"]))
-    assert not any(map(link_names.is_id_like, ["amount", "date", "identity", "notes"]))
+    assert all(
+        map(
+            link_names.is_id_like,
+            ["id", "SK_ID_CURR", "storeNbr", "zip_code", "userId", "order_number"],
+        )
+    )
+    assert not any(
+        map(
+            link_names.is_id_like,
+            ["amount", "date", "identity", "notes", "num_items", "number_of_items"],
+        )
+    )
