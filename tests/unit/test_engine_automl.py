@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from fione.engine import automl as automl_module
 from fione.engine import search
 from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, AutoML
-from fione.engine.config import ConfigError, DeadlineExceeded, NoModelError, TrainConfig
+from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
 from fione.engine.search import STARTUP_TRIALS
 
@@ -1110,3 +1110,27 @@ def test_a_time_column_that_cannot_order_the_rows_is_refused():
         _fit(df.assign(day=df["day"].mask(df.index == 3)), time_column="day", **options)
     with pytest.raises(ConfigError, match="numbers or dates"):
         _fit(df.assign(day="soon"), time_column="day", **options)
+
+
+def test_the_refit_of_time_ordered_folds_takes_its_rounds_from_the_last_fold():
+    """The folds that look ahead train on 1/6 to 5/6 of the rows: the last has the most rows, so
+    its rounds are nearest to those of a fit on all of them; the others are not averaged in."""
+    from types import SimpleNamespace
+
+    from fione.engine.search import Clock
+
+    asked = []
+    spec = SimpleNamespace(
+        view="v",
+        seed=0,
+        rounds=lambda model: model,
+        fit_full=lambda params, X, y, clock, rounds, weight: asked.append(rounds) or "full",
+    )
+    result = SimpleNamespace(spec=spec, models=[10, 20, 30, 40, 100], best_secs=1.0, best_params={})
+    prep = SimpleNamespace(v=lambda X: X)
+    clock = Clock(Deadline(60), lambda: False)
+    for ahead, rounds in ((False, 44), (True, 110)):  # the mean of all, or the last, times 1.1
+        model, problem = automl_module._refit(
+            result, None, None, prep, {}, clock, None, ahead=ahead
+        )
+        assert (model, problem) == ("full", None) and asked[-1] == rounds

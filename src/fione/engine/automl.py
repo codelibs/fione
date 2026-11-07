@@ -514,6 +514,7 @@ class AutoML:
 
     def _members(self, results, weights, X, y, prep, clock, weight, stop_reason):
         """Final members, heaviest first, and the refit time per family."""
+        ahead = self.config.time_column is not None
         views: dict[str, pd.DataFrame] = {}
         chosen = sorted((n for n in results if weights[n] > 0), key=lambda n: -weights[n])
         candidates, refit_secs = [], {}
@@ -524,7 +525,7 @@ class AutoML:
             models = result.models
             if stop_reason != "cancelled" and not self.should_stop() and result.spec.refit:
                 start = time.monotonic()
-                model, problem = _refit(result, X, y, prep, views, clock, weight)
+                model, problem = _refit(result, X, y, prep, views, clock, weight, ahead=ahead)
                 refit_secs[name] = time.monotonic() - start
                 if model is not None:
                     models = [model]
@@ -598,7 +599,17 @@ class AutoML:
                 ):
                     continue
                 start = time.monotonic()
-                model, problem = _refit(results[name], X, y, prep, views, clock, weight, extra)
+                model, problem = _refit(
+                    results[name],
+                    X,
+                    y,
+                    prep,
+                    views,
+                    clock,
+                    weight,
+                    extra,
+                    self.config.time_column is not None,
+                )
                 refit_secs[name] += time.monotonic() - start
                 if isinstance(problem, Exception):
                     self.emit(error_notice("refit_error", spec.name, problem))
@@ -626,17 +637,23 @@ def _mb(size: float) -> str:
     return f"{size / 2**20:.0f} MB"
 
 
-def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight, bag: int = 0):
+def _refit(
+    result: FamilyResult, X, y, prep, views, clock: Clock, weight, bag: int = 0, ahead: bool = False
+):
     """``(model refit on all rows, None)``, or ``(None, why)`` with why ``"time"``,
     ``"cancelled"`` or the exception the refit raised. ``bag`` > 0 refits with another seed."""
     spec = result.spec
-    # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit.
-    if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / (len(result.models) - 1):
+    # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit. Folds
+    # that look ahead in time train on 1/(k+1) to k/(k+1) of them: k/2 full-data fits in all.
+    fits = len(result.models) / 2 if ahead else len(result.models) - 1
+    if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / fits:
         return None, "cancelled" if clock.should_stop() else "time"
     try:
         if spec.view not in views:
             views[spec.view] = getattr(prep, spec.view)(X)
-        best = np.mean([spec.rounds(model) for model in result.models])
+        # the last fold of the time-ordered ones has the most rows, nearest to all of them
+        learned = result.models[-1:] if ahead else result.models
+        best = np.mean([spec.rounds(model) for model in learned])
         rounds = min(MAX_ROUNDS, max(1, round(best * REFIT_ROUNDS_FACTOR)))
         seed = spec.seed
         spec.seed = (seed + BAG_SEED_STEP * bag) % BAG_SEED_SPACE
