@@ -59,7 +59,8 @@ def test_the_built_in_ids_and_kinds():
     modules = registry.builtin_modules()
     ids = [m.id for m in modules]
     frame_ops = (
-        "cbind concat cor cslice fillna floor join pivot rbind replace rslice sort split tokenize"
+        "cbind concat cor cslice fillna floor join lag pivot rbind replace rslice sort split"
+        " tokenize"
     )
     assert ids == sorted(frame_ops.split()) + [
         "kmeans_predict",
@@ -1209,3 +1210,67 @@ def test_lowrank_components_are_limited_by_the_rows_too(method):
             expect(a=[1.0], b=[2.0], c=[3.0]),
             {"method": method, "n_components": 2},
         )
+
+
+def test_lag_reads_the_value_at_an_earlier_time_not_the_row_before():
+    # shop 1 has no row at month 3: the lag of month 4 is empty, not month 2's value
+    df = pd.DataFrame(
+        {
+            "shop": [1, 1, 1, 2, 2, 2],
+            "month": [1, 2, 4, 1, 2, 3],
+            "sales": [10.0, 20.0, 40.0, 1.0, 2.0, 3.0],
+        }
+    )
+    out, _ = run_op(
+        "lag", df, {"time": "month", "by": ["shop"], "columns": ["sales"], "lags": "1,2"}
+    )
+    assert list(out.columns) == ["shop", "month", "sales", "sales_lag1", "sales_lag2"]
+    assert list(out["sales_lag1"].fillna(-1)) == [-1, 10.0, -1, -1, 1.0, 2.0]
+    assert list(out["sales_lag2"].fillna(-1)) == [-1, -1, 20.0, -1, -1, 1.0]
+    assert list(out["sales"]) == [10.0, 20.0, 40.0, 1.0, 2.0, 3.0]  # rows and order are kept
+
+
+def test_lag_reduces_the_rows_of_a_group_and_time_to_one_value_first():
+    # by "item" only: the mean (or sum) of the item over its shops at the earlier time
+    df = pd.DataFrame(
+        {
+            "item": [7, 7, 7, 7, 9],
+            "shop": [1, 2, 1, 2, 1],
+            "month": [1, 1, 2, 2, 2],
+            "n": [2.0, 4.0, 5.0, 7.0, 1.0],
+        }
+    )
+    mean, _ = run_op("lag", df, {"time": "month", "by": ["item"], "columns": ["n"]})
+    assert list(mean["n_lag1"].fillna(-1)) == [-1, -1, 3.0, 3.0, -1]
+    total, _ = run_op("lag", df, {"time": "month", "by": ["item"], "columns": ["n"], "how": "sum"})
+    assert list(total["n_lag1"].fillna(-1)) == [-1, -1, 6.0, 6.0, -1]
+    assert len(mean) == len(df)  # a row is never multiplied
+
+
+def test_lag_without_a_group_lags_the_whole_frame_and_names_do_not_collide():
+    df = pd.DataFrame({"t": [1, 2, 3], "v": [1.0, 2.0, 3.0], "v_lag1": ["a", "b", "c"]})
+    out, _ = run_op("lag", df, {"time": "t", "columns": ["v"]})
+    assert list(out.columns) == ["t", "v", "v_lag1", "v_lag1_2"]
+    assert list(out["v_lag1_2"].fillna(-1)) == [-1, 1.0, 2.0]
+
+
+def test_lag_leaves_a_missing_time_or_group_empty_and_refuses_unclear_input():
+    df = pd.DataFrame(
+        {"g": [1, 1, None], "t": [1.0, 2.0, np.nan], "v": [5.0, 6.0, 7.0], "half": [0.5, 1.0, 1.5]}
+    )
+    out, _ = run_op("lag", df, {"time": "t", "by": ["g"], "columns": ["v"]})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 5.0, -1]
+    for params, message in (
+        ({"time": "t", "columns": []}, "name the columns"),
+        ({"time": "t", "columns": ["g"], "by": ["g"]}, "only the time or the by"),
+        ({"time": "t", "by": ["t"], "columns": ["v"]}, "cannot include the time"),
+        ({"time": "t", "columns": ["v"], "lags": "0"}, "at least 1"),
+        ({"time": "t", "columns": ["v"], "lags": "x"}, "separated by commas"),
+        ({"time": "zz", "columns": ["v"]}, "unknown column 'zz'"),
+        ({"time": "half", "columns": ["v"]}, "whole numbers"),
+    ):
+        with pytest.raises(ModuleError, match=message):
+            run_op("lag", df, params)
+    names = pd.DataFrame({"t": [1, 2], "s": ["a", "b"]})
+    with pytest.raises(ModuleError, match="is not numeric"):
+        run_op("lag", names, {"time": "t", "columns": ["s"]})
