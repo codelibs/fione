@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,14 +29,34 @@ jobs:
       - run: uv run python scripts/check_licenses.py
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      # Unit, API, web and contract tests (acceptance, e2e and docker are deselected
-      # by default). Spread over the runner's cores: the suite is thousands of small tests.
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      # Unit, API, web and contract tests (acceptance, e2e and docker are deselected by
+      # default). Thousands of tests that train small models: a quarter of them per job
+      # (see FIONE_TEST_SHARD in tests/conftest.py), spread over each runner's cores.
       - run: uv run pytest -q -n auto
+        env:
+          FIONE_TEST_SHARD: ${{ matrix.shard }}/4
 
   e2e:
     # Pushes to the main branches only: the browser suite against the Compose stack.
     if: github.event_name == 'push'
-    needs: test
+    needs: [lint, test]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

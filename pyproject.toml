@@ -58,4 +58,4 @@ markers = [
     "docker: needs a Docker daemon (select with -m docker)",
     "llm: needs a real model server (set FIONE_TEST_LLM_BASE_URL and FIONE_TEST_LLM_MODEL, or FIONE_TEST_ANTHROPIC_API_KEY for Claude; select with -m llm)",
 ]
-addopts = "-m 'not acceptance and not e2e and not timing and not docker and not llm'"
+addopts = "-m 'not acceptance and not e2e and not timing and not docker and not llm' --dist loadgroup"

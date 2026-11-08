@@ -38,7 +38,10 @@ def _codes(df):
 
 
 def _fit(df, families=None, **config):
-    config.setdefault("max_runtime_secs", 60)
+    # A generous budget: a family whose time share expires before its first trial finishes is
+    # skipped, and a loaded machine would then leave it out. With max_models set, the search
+    # ends early, so the budget costs nothing when idle.
+    config.setdefault("max_runtime_secs", 180)
     return AutoML(TrainConfig(**config), families=families).fit(df)
 
 
@@ -343,7 +346,7 @@ def test_late_variants_run_in_the_time_left_and_the_ensemble_may_ignore_them():
         df,
         ["TextLinear", *LATE_ORDER],
         target="topic",
-        max_runtime_secs=40,
+        max_runtime_secs=120,  # the variants run in the time the base search leaves
         feature_engineering=False,
     )
     board = model.leaderboard

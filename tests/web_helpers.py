@@ -64,7 +64,7 @@ def _objects(client, conn, owner, project_id) -> dict:
         storage, conn, project_id, "iris_test", DatasetType.TEST, io.BytesIO(iris_test_csv())
     )
     model = store_model(conn, storage, client.app.state.secret, project_id)
-    config = {"target": "species", "max_runtime_secs": 60}
+    config = {"target": "species", "max_runtime_secs": 60, **FAST}  # runs if a runner is on
     job = store.enqueue(
         conn, "automl", project_id, owner.id, {"dataset_id": train.id, "config": config}
     )
