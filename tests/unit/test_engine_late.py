@@ -526,3 +526,9 @@ def test_late_families_that_do_not_run_for_lack_of_time_are_reported_together(mo
     assert len(notices) == 1
     assert all(name in notices[0]["message"] for name in LATE_ORDER)
     assert _notices(monkeypatch, set(), [*FAMILY_ORDER, *LATE_ORDER]) == []
+
+
+def test_late_families_without_the_reference_result_are_not_blamed_on_time(monkeypatch):
+    # TextLinear has no model (and says why); the variants have no estimate to be judged by.
+    notices = _notices(monkeypatch, {"TextLinear"}, [*FAMILY_ORDER, *LATE_ORDER])
+    assert [n["family"] for n in notices] == ["TextLinear"]

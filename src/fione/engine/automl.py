@@ -503,7 +503,9 @@ class AutoML:
             left = own.remaining()
             share = left * weights[name] / sum(weights[f] for f in rest)
             if late and not _late_fits(FAMILIES[name], share, results, self.explicit):
-                skipped.append(name)
+                # Without the reference result there was no estimate: not a matter of time.
+                if FAMILIES[name].reference in results:
+                    skipped.append(name)
                 continue
             try:
                 result = run_family(
