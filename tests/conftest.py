@@ -1,4 +1,6 @@
+import os
 import warnings
+import zlib
 from contextlib import ExitStack
 
 import pytest
@@ -13,6 +15,26 @@ with warnings.catch_warnings():
 from api_helpers import make_settings  # noqa: E402
 from fione.api.app import create_app  # noqa: E402
 from fione.engine import automl  # noqa: E402
+
+
+def pytest_collection_modifyitems(config, items):
+    """``FIONE_TEST_SHARD=2/3`` runs the second of three slices of the suite, so CI can spread
+    it over several machines. A test lands in a slice by a hash of its id (of its ``xdist_group``
+    name if it has one, so that the tests sharing a group stay together): the slices are about
+    the same size, and the same test always lands in the same one."""
+    shard = os.environ.get("FIONE_TEST_SHARD")
+    if not shard:
+        return
+    index, count = (int(part) for part in shard.split("/"))
+    assert 1 <= index <= count, f"FIONE_TEST_SHARD must be i/n with 1 <= i <= n, not {shard}"
+    kept, dropped = [], []
+    for item in items:
+        group = item.get_closest_marker("xdist_group")
+        key = group.args[0] if group else item.nodeid
+        in_shard = zlib.crc32(key.encode()) % count == index - 1
+        (kept if in_shard else dropped).append(item)
+    items[:] = kept
+    config.hook.pytest_deselected(items=dropped)
 
 
 @pytest.fixture(autouse=True)

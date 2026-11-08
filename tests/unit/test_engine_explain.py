@@ -29,6 +29,10 @@ from fione.engine.families import FAMILIES
 from fione.engine.model import Member, TrainedModel
 from fione.engine.prep import Prep
 
+# The three models of ``_fit`` take a minute to train, once per process: the tests that share them
+# run on one worker (and in one CI shard).
+pytestmark = pytest.mark.xdist_group("explain-models")
+
 TASKS = ("binary", "multiclass", "regression")
 TARGETS = {"binary": "good", "multiclass": "判定", "regression": "value"}
 
