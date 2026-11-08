@@ -56,8 +56,10 @@ their fold models; the model has ``stop_reason == "cancelled"``. ``NoModelError`
 no family completed a trial, because of the cancellation or because the budget is too small.
 
 A family whose first trial does not fit in its share of the search time (a text model fits all
-its data in one unit and cannot be cut short) has no model; a ``notice`` says what the trial
-needed. The late families that are not run for lack of time are named in one ``notice``.
+its data in one unit and cannot be cut short) is lent ``LOAD_MARGIN`` times the time the trial
+is estimated to need when that is at most ``LEND_LIMIT`` of the search time left; otherwise it
+has no model, and a ``notice`` says what the trial needed. The late families that are not run
+for lack of time are named in one ``notice``.
 
 A family that raises (a library failure) is skipped with a ``notice`` of kind ``family_error``,
 keeping its best trial so far; a refit that raises falls back to the fold models with a
@@ -123,6 +125,11 @@ FAMILY_WEIGHTS = {
 LATE_ORDER = ("TextLinearChar", "TextLinearPlain", "TextLinearWide")
 LATE_WEIGHTS = {"TextLinearChar": 0.5, "TextLinearPlain": 0.25, "TextLinearWide": 0.25}
 LATE_SHARE = 0.15  # of the search time is kept for the late families, when any applies
+# A first trial that cannot be cut short and needs more than its family's share is lent the
+# time, ``LOAD_MARGIN`` times what it is estimated to need (the machine may be busy), if that
+# is at most ``LEND_LIMIT`` of the search time left.
+LOAD_MARGIN = 1.3
+LEND_LIMIT = 0.5
 FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
 # A short run gets more: the choice needs about this long on a few thousand rows, and without it
 # the most useful candidates run out of time unconfirmed. Never over FEATURE_MAX_SHARE.
@@ -507,15 +514,16 @@ class AutoML:
                 if FAMILIES[name].reference in results:
                     skipped.append(name)
                 continue
-            try:
-                result = run_family(
+
+            def attempt(deadline, name=name, max_trials=max_trials):
+                return run_family(
                     name,
                     X,
                     y,
                     folds,
                     task,
                     prep,
-                    own.child(share),
+                    deadline,
                     self.emit,
                     self.should_stop,
                     seed=c.seed,
@@ -527,6 +535,18 @@ class AutoML:
                     sample_weight=weight,
                     repeats=repeats,
                 )
+
+            try:
+                try:
+                    result = attempt(own.child(share))
+                except NoModelError as e:
+                    # A first trial that cannot be cut short and needs more than the share is
+                    # lent the time, with a margin for a busy machine, when that is not much of
+                    # what is left; the later families share what remains.
+                    lent = (e.needed_secs or 0.0) * LOAD_MARGIN
+                    if late or not share < lent <= LEND_LIMIT * own.remaining():
+                        raise
+                    result = attempt(own.child(lent))
             except NoModelError as e:
                 if late:
                     skipped.append(name)

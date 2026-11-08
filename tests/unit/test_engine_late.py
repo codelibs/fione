@@ -532,3 +532,49 @@ def test_late_families_without_the_reference_result_are_not_blamed_on_time(monke
     # TextLinear has no model (and says why); the variants have no estimate to be judged by.
     notices = _notices(monkeypatch, {"TextLinear"}, [*FAMILY_ORDER, *LATE_ORDER])
     assert [n["family"] for n in notices] == ["TextLinear"]
+
+
+def test_a_first_trial_that_needs_more_than_its_share_is_lent_the_time(monkeypatch):
+    calls = []
+
+    def fake(name, X, y, folds, task, prep, deadline, *args, **kwargs):
+        calls.append((name, deadline.remaining()))
+        if name == "TextLinear" and deadline.remaining() < need:
+            raise automl_module.NoModelError("no time", need)
+        row = {"family": name, "trial": 0, "state": "complete", "score": 0.5, "elapsed": 0.1}
+        row["params"] = {}
+        return search.FamilyResult(
+            np.zeros((1, 2)),
+            [object()],
+            {},
+            1,
+            0.5,
+            0.0,
+            FAMILIES[name],
+            "no_improvement",
+            log=[row],
+        )
+
+    def run():
+        calls.clear()
+        monkeypatch.setattr(automl_module, "run_family", fake)
+        runner = AutoML(TrainConfig(target="y"))
+        out = runner._search(
+            list(FAMILY_ORDER), None, None, None, "classification", None,
+            search.Deadline(100), None, None,
+        )  # fmt: skip
+        return out[0], out[2], [secs for name, secs in calls if name == "TextLinear"]
+
+    # TextLinear's share of the 100 s: 0.2 of the 0.824 not yet run, about 24 s.
+    need = 20.0
+    results, reasons, tries = run()
+    assert len(tries) == 1 and "TextLinear" in results  # it fitted in its share
+
+    need = 26.0  # more than the share: lent 1.3 x 26 s, which is under half of the time left
+    results, reasons, tries = run()
+    assert len(tries) == 2 and tries[1] == pytest.approx(need * automl_module.LOAD_MARGIN, rel=0.02)
+    assert "TextLinear" in results
+
+    need = 40.0  # lending 52 s would be over half of the time left: no model
+    results, reasons, tries = run()
+    assert len(tries) == 1 and "TextLinear" not in results and reasons["TextLinear"] == "time"
