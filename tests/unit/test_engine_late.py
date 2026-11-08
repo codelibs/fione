@@ -55,7 +55,8 @@ def _schedule(
     takes no time (with ``exhaust``, the last base family takes the whole search time, 0.3 s).
     TextLinear's first trial took ``reference_secs``. With ``spend`` (the search time, in
     seconds), every base family uses up its whole share. Returns ``(name, time share, max trials)``
-    per call."""
+    per call. The first pass gets all the time of the base families, whatever ``SCREEN_SHARE``."""
+    monkeypatch.setattr(automl_module, "SCREEN_SHARE", 1.0)
     calls = []
     total = search.Deadline(spend or (0.3 if exhaust else 100.0))
 
@@ -482,6 +483,7 @@ def _notices(monkeypatch, refused, families):
     """The ``notice`` messages of a search where ``run_family`` raises ``NoModelError`` (needing
     40 s) for the families in ``refused`` and returns a model for the others."""
     seen = []
+    monkeypatch.setattr(automl_module, "SCREEN_SHARE", 1.0)
 
     def fake(name, X, y, folds, task, prep, deadline, *args, **kwargs):
         if name in refused:
@@ -532,3 +534,127 @@ def test_late_families_without_the_reference_result_are_not_blamed_on_time(monke
     # TextLinear has no model (and says why); the variants have no estimate to be judged by.
     notices = _notices(monkeypatch, {"TextLinear"}, [*FAMILY_ORDER, *LATE_ORDER])
     assert [n["family"] for n in notices] == ["TextLinear"]
+
+
+# --- the first pass, the lent time and the families that go on --------------------------------
+
+
+def _search_with(monkeypatch, fake, families, secs, **config):
+    """Run ``AutoML._search`` over ``families`` with ``fake`` as ``run_family``."""
+    monkeypatch.setattr(automl_module, "run_family", fake)
+    runner = AutoML(TrainConfig(target="y", **config))
+    return runner._search(
+        families, None, None, None, "classification", None, search.Deadline(secs), None, None
+    )
+
+
+def _family_result(name, score, reason, warm=None):
+    row = {"family": name, "trial": 0, "state": "complete", "score": score, "elapsed": 0.1}
+    row["params"] = {}
+    trials = 1 if warm is None else warm.trials + 1
+    log = ([] if warm is None else warm.log) + [row]
+    return search.FamilyResult(
+        np.zeros((1, 2)),
+        [object()],
+        {},
+        trials,
+        score,
+        0.0,
+        FAMILIES[name],
+        reason,
+        log=log,
+    )
+
+
+def test_the_first_pass_uses_the_screening_share_of_the_time(monkeypatch):
+    shares = {}
+
+    def fake(name, *args, warm=None, **kwargs):
+        shares[name] = args[5].remaining()
+        return _family_result(name, 0.5, "no_improvement")
+
+    _search_with(monkeypatch, fake, ["LightGBM", "XGBoost"], 100)
+    weights = automl_module.FAMILY_WEIGHTS
+    pool = 100 * automl_module.SCREEN_SHARE
+    assert shares["LightGBM"] == pytest.approx(
+        pool * weights["LightGBM"] / (weights["LightGBM"] + weights["XGBoost"]), rel=0.02
+    )
+
+
+def test_a_cap_on_the_trials_leaves_the_first_pass_all_the_time(monkeypatch):
+    shares = {}
+
+    def fake(name, *args, warm=None, **kwargs):
+        shares[name] = args[5].remaining()
+        return _family_result(name, 0.5, "no_improvement")
+
+    _search_with(monkeypatch, fake, ["LightGBM"], 100, max_models=5)
+    assert shares["LightGBM"] == pytest.approx(100, rel=0.02)
+
+
+def test_families_cut_short_go_on_in_the_order_of_their_scores(monkeypatch):
+    calls = []
+    scores = {"LightGBM": 0.5, "XGBoost": 0.3, "CatBoost": 0.4}
+
+    def fake(name, *args, warm=None, **kwargs):
+        deadline = args[5]
+        calls.append((name, deadline.remaining(), warm))
+        time.sleep(deadline.remaining())  # the family uses all of its time: reason "time"
+        return _family_result(name, scores[name], "time", warm)
+
+    results, logs, reasons, finished, errors = _search_with(
+        monkeypatch, fake, ["LightGBM", "XGBoost", "CatBoost"], 2.0
+    )
+    first, again = calls[:3], calls[3:]
+    assert [name for name, _, _ in first] == ["LightGBM", "XGBoost", "CatBoost"]
+    assert all(warm is None for _, _, warm in first)
+    # The best score first; each gets half of the time left, the last one all of it.
+    assert [name for name, _, _ in again] == ["XGBoost", "CatBoost", "LightGBM"]
+    assert all(warm is not None for _, _, warm in again)
+    left = 2.0 - sum(secs for _, secs, _ in first)
+    assert again[0][1] == pytest.approx(left / 2, rel=0.3)
+    assert again[1][1] == pytest.approx(left / 4, rel=0.4)
+    # Every trial is counted once, in the log and in the total.
+    assert finished == 6 and len(logs) == 6
+    assert results["XGBoost"].trials == 2 and reasons["XGBoost"] == "time"
+
+
+def test_a_family_that_stopped_by_itself_does_not_go_on(monkeypatch):
+    calls = []
+
+    def fake(name, *args, warm=None, **kwargs):
+        calls.append((name, warm is not None))
+        return _family_result(name, 0.5, "no_improvement")
+
+    _search_with(monkeypatch, fake, ["LightGBM", "XGBoost"], 100)
+    assert calls == [("LightGBM", False), ("XGBoost", False)]
+
+
+def test_a_first_trial_that_needs_more_than_its_share_is_lent_the_time(monkeypatch):
+    calls = []
+
+    def fake(name, *args, warm=None, **kwargs):
+        secs = args[5].remaining()
+        calls.append((name, secs))
+        if name == "TextLinear" and secs < need:
+            raise automl_module.NoModelError("no time", need)
+        return _family_result(name, 0.5, "no_improvement")
+
+    # TextLinear's share is about 35 s of the 100 s: 0.2 / (0.2 + 0.144) of the 60 s first pass.
+    need = 30.0
+    results, _, reasons, _, _ = _search_with(monkeypatch, fake, ["TextLinear", "XGBoost"], 100)
+    tries = [secs for name, secs in calls if name == "TextLinear"]
+    assert len(tries) == 1 and "TextLinear" in results  # it fitted in its share
+
+    need = 36.0  # more than the share: lent 1.3 x 36 s, which is under half of the time left
+    calls.clear()
+    results, _, reasons, _, _ = _search_with(monkeypatch, fake, ["TextLinear", "XGBoost"], 100)
+    tries = [secs for name, secs in calls if name == "TextLinear"]
+    assert len(tries) == 2 and tries[1] == pytest.approx(need * automl_module.LOAD_MARGIN, rel=0.02)
+    assert "TextLinear" in results
+
+    need = 80.0  # lending 104 s would be over half of the time left: no model, and a notice
+    calls.clear()
+    results, _, reasons, _, _ = _search_with(monkeypatch, fake, ["TextLinear", "XGBoost"], 100)
+    assert len([1 for name, _ in calls if name == "TextLinear"]) == 1
+    assert "TextLinear" not in results and reasons["TextLinear"] == "time"

@@ -14,6 +14,14 @@ spec 5.1/5.7) and spends it in phases:
    family leaves unused flows to the next ones. The search scores trials with log loss / RMSE.
    Each family hands on its ``TOP_TRIALS`` best trials, as candidates ``Family``,
    ``Family#2`` and ``Family#3``.
+   The first pass over the base families spends ``SCREEN_SHARE`` of their time that way (all of
+   it with ``max_models``). The time left, including what families left unused, goes to the
+   families whose search the first pass cut short: they go on, the one with the best score first
+   with half of the time left, the next with half of the rest, the last with all of it. Cheap
+   families stop by themselves, so the expensive ones that have run a trial or two get more.
+   A first trial that cannot be cut short (a text model) and needs more than its share is lent
+   ``LOAD_MARGIN`` times the time it is estimated to need, when that is at most ``LEND_LIMIT`` of
+   the search time left.
    After them come the *late* families (``LATE_ORDER``: variants of TextLinear, for data with
    prose). When any applies, ``LATE_SHARE`` of the search time is kept for them, taken from
    the base families' shares (scaled to 0.85) except TextLinear's, which is as without them.
@@ -123,6 +131,14 @@ FAMILY_WEIGHTS = {
 LATE_ORDER = ("TextLinearChar", "TextLinearPlain", "TextLinearWide")
 LATE_WEIGHTS = {"TextLinearChar": 0.5, "TextLinearPlain": 0.25, "TextLinearWide": 0.25}
 LATE_SHARE = 0.15  # of the search time is kept for the late families, when any applies
+# The first pass over the base families gets this share of their time. A family whose search it
+# cuts short goes on afterwards, the one with the best score first (``AutoML._search``).
+SCREEN_SHARE = 0.6
+# A first trial that cannot be cut short and needs more than its family's share is lent the
+# time, ``LOAD_MARGIN`` times what it is estimated to need (the machine may be busy), if that
+# is at most ``LEND_LIMIT`` of the search time left.
+LOAD_MARGIN = 1.3
+LEND_LIMIT = 0.5
 FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
 # A short run gets more: the choice needs about this long on a few thousand rows, and without it
 # the most useful candidates run out of time unconfirmed. Never over FEATURE_MAX_SHARE.
@@ -484,11 +500,88 @@ class AutoML:
         keep = any(f in LATE_ORDER for f in families) and any(f not in LATE_ORDER for f in families)
         base = search.child((1 - LATE_SHARE) * search.remaining()) if keep else search
         references = {FAMILIES[f].reference for f in families if f in LATE_ORDER}
+        # The first pass over the base families uses ``SCREEN_SHARE`` of their time; what is left
+        # goes, after it, to the families whose search was cut short (see ``focus``). A cap on the
+        # trials (``max_models``) is met by the first pass alone.
+        screening = c.max_models is None and any(f not in LATE_ORDER for f in families)
+        pool = base.child(SCREEN_SHARE * base.remaining()) if screening else base
+        focused = False
+
+        def attempt(name, deadline, max_trials, warm=None):
+            return run_family(
+                name,
+                X,
+                y,
+                folds,
+                task,
+                prep,
+                deadline,
+                self.emit,
+                self.should_stop,
+                seed=c.seed,
+                max_trial_secs=c.max_runtime_secs_per_model,
+                max_trials=max_trials,
+                stopping_rounds=c.stopping_rounds,
+                stopping_tolerance=c.stopping_tolerance,
+                stopping_score=stopping_score,
+                sample_weight=weight,
+                repeats=repeats,
+                warm=warm,
+            )
+
+        def record(name, result, known=0):
+            """Count and keep ``result``, a search that went on after ``known`` trials."""
+            nonlocal finished
+            if result.error is not None:
+                errors[name] = result.error
+            finished += result.trials - known
+            logs.extend(
+                {**{k: row[k] for k in TRIAL_COLUMNS[:-1]}, "params": json.dumps(row["params"])}
+                for row in result.log[known:]
+            )
+            if result.models:
+                for key in [k for k in results if k.startswith(f"{name}#")]:
+                    del results[key]
+                results[name] = result
+                for rank, runner_up in enumerate(result.runners_up, start=2):
+                    results[f"{name}#{rank}"] = runner_up
+
+        def focus():
+            """Go on with the base families whose search was cut short by the time, the one with
+            the best score first. Each gets half of the time left, the last one all of it, so
+            the better families get more trials; a family that stops by itself passes on what it
+            does not use."""
+            cut = sorted(
+                (n for n in results if "#" not in n and reasons.get(n) == "time"),
+                key=lambda n: results[n].best_score,
+            )
+            cut = [n for n in cut if n not in LATE_ORDER]
+            for rank, name in enumerate(cut):
+                if self.should_stop() or base.expired():
+                    break
+                share = base.remaining() / (2 if rank < len(cut) - 1 else 1)
+                known = results[name].trials
+                try:
+                    result = attempt(name, base.child(share), None, results[name])
+                except Exception as e:
+                    self.emit(error_notice("family_error", name, e))
+                    reasons[name], errors[name] = "error", e
+                    continue
+                reasons[name] = result.reason
+                record(name, result, known)
+                if result.reason == "cancelled":
+                    break
+
         for i, name in enumerate(families):
             if self.should_stop():
                 reasons[name] = "cancelled"
                 break
             late = name in LATE_ORDER
+            if late and screening and not focused:
+                focused = True
+                focus()
+                if self.should_stop():
+                    break
             # The late families take no trials from the others: a family only counts those of
             # its own kind after it.
             rest = [f for f in families[i:] if (f in LATE_ORDER) == late]
@@ -500,7 +593,10 @@ class AutoML:
                 max_trials = max(1, c.max_models - finished - (len(rest) - 1))
             weights = LATE_WEIGHTS if late else FAMILY_WEIGHTS
             own = search if late or name in references else base
-            left = own.remaining()
+            if late or pool is base:
+                left = own.remaining()
+            else:  # the first pass of the base families: what is left of the pool
+                left = pool.remaining() / (1 - LATE_SHARE if keep and name in references else 1)
             share = left * weights[name] / sum(weights[f] for f in rest)
             if late and not _late_fits(FAMILIES[name], share, results, self.explicit):
                 # Without the reference result there was no estimate: not a matter of time.
@@ -508,25 +604,16 @@ class AutoML:
                     skipped.append(name)
                 continue
             try:
-                result = run_family(
-                    name,
-                    X,
-                    y,
-                    folds,
-                    task,
-                    prep,
-                    own.child(share),
-                    self.emit,
-                    self.should_stop,
-                    seed=c.seed,
-                    max_trial_secs=c.max_runtime_secs_per_model,
-                    max_trials=max_trials,
-                    stopping_rounds=c.stopping_rounds,
-                    stopping_tolerance=c.stopping_tolerance,
-                    stopping_score=stopping_score,
-                    sample_weight=weight,
-                    repeats=repeats,
-                )
+                try:
+                    result = attempt(name, own.child(share), max_trials)
+                except NoModelError as e:
+                    # A first trial that cannot be cut short and needs more than the share is
+                    # lent the time, with a margin for a busy machine, when that is not much of
+                    # what is left.
+                    lent = (e.needed_secs or 0.0) * LOAD_MARGIN
+                    if late or not share < lent <= LEND_LIMIT * own.remaining():
+                        raise
+                    result = attempt(name, own.child(lent), max_trials)
             except NoModelError as e:
                 if late:
                     skipped.append(name)
@@ -538,21 +625,13 @@ class AutoML:
                 self.emit(error_notice("family_error", name, e))
                 reasons[name], errors[name] = "error", e
                 continue
-            if result.error is not None:
-                errors[name] = result.error
-            finished += result.trials
             if not (late and result.reason == "time"):  # a late family is meant to use what is left
                 reasons[name] = result.reason
-            logs += [
-                {**{k: row[k] for k in TRIAL_COLUMNS[:-1]}, "params": json.dumps(row["params"])}
-                for row in result.log
-            ]
-            if result.models:
-                results[name] = result
-                for rank, runner_up in enumerate(result.runners_up, start=2):
-                    results[f"{name}#{rank}"] = runner_up
+            record(name, result)
             if result.reason == "cancelled":
                 break
+        if screening and not focused:
+            focus()
         if skipped:
             self._notice(
                 f"{', '.join(skipped)}: not run, the search time left was too short for a first "
