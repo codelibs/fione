@@ -370,6 +370,60 @@ def test_later_trials_never_start_a_fit_that_would_straddle_the_deadline(slow):
     assert elapsed <= budget
 
 
+def test_a_first_trial_with_its_own_deadline_is_finished_and_the_search_then_ends(
+    slow, monkeypatch
+):
+    monkeypatch.setattr(slow, "unit", 0.1)
+    X, y = _classification(50, 4)
+    prep, y, folds = _setup(X, y)
+    events = []
+
+    def run(first_deadline):
+        return run_family(
+            "Slow",
+            X,
+            y,
+            folds,
+            "classification",
+            prep,
+            Deadline(0.3),  # five folds of 0.1 s cannot fit in this
+            events.append,
+            lambda: False,
+            first_deadline=first_deadline,
+        )
+
+    with pytest.raises(NoModelError):
+        run(None)
+    start = time.monotonic()
+    result = run(Deadline(10))
+    # The first trial ran to its end, past the family's deadline, and no other was started.
+    assert result.trials == 1 and result.reason == "time"
+    assert 0.45 <= time.monotonic() - start < 3
+    assert len(result.models) == len(folds)
+
+
+def test_trials_after_the_first_stay_within_the_family_deadline(slow, monkeypatch):
+    monkeypatch.setattr(slow, "unit", 0.1)
+    X, y = _classification(50, 4)
+    prep, y, folds = _setup(X, y)
+    start = time.monotonic()
+    result = run_family(
+        "Slow",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(1.8),  # a trial takes 0.5 s: room for three
+        lambda e: None,
+        lambda: False,
+        first_deadline=Deadline(30),
+    )
+    # With the first deadline used throughout, the search would run for many seconds.
+    assert result.trials >= 2 and result.reason == "time"
+    assert time.monotonic() - start < 3.2
+
+
 def test_first_trial_gives_up_as_soon_as_its_folds_cannot_fit(slow, monkeypatch):
     monkeypatch.setattr(slow, "unit", 0.3)
     X, y = _classification(50, 4)
