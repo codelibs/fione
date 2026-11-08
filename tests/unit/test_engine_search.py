@@ -140,15 +140,13 @@ def _calibrated(spec, X_tr, y_tr) -> tuple[float, float]:
 
     ``fit`` refuses to start (``DeadlineExceeded``) when less than ``UNIT_SAFETY`` times the
     family's first, uninterruptible unit remains, and that unit is probed on this machine. On a
-    fast machine this is the classic 0.3 s budget with 2 s slack; on a slow or busy one both
+    fast machine this is the classic 0.3 s budget with 0.5 s slack; on a slow or busy one both
     grow with the measured unit, so the test still proves "stops near the deadline with a
     usable model" without depending on the hardware.
     """
     spec.estimate_unit(spec.defaults, X_tr, y_tr)  # the probe fit() would run first
     unit = spec.unit_secs or 0.0
-    # The slack is wide because a shared CI runner can stall a fit for a second; one that does
-    # not stop at its deadline runs for tens of seconds, far past it.
-    return max(0.3, 2 * UNIT_SAFETY * unit), max(2.0, 4 * unit)
+    return max(0.3, 2 * UNIT_SAFETY * unit), max(0.5, 2 * unit)
 
 
 @pytest.mark.parametrize("name", list(FAMILIES))
@@ -209,6 +207,10 @@ def test_fit_full_raises_when_it_cannot_finish(name):
     spec = FAMILIES[name]("classification", 2, n_jobs=n_threads(len(X)))
     view = getattr(prep, spec.view)(X)
     budget, slack = _calibrated(spec, view, y)
+    # Wider than for ``fit``: a shared CI runner stalled a fit for 1 s. Here the exception already
+    # shows that the fit stopped short, and the time is a loose check; run to the end, the
+    # families here take 7 s (XGBoost) to 5 minutes (DeepLearning) on this data, ExtraTrees 1 s.
+    slack = max(slack, 2.0)
     start = time.monotonic()
     with pytest.raises(DeadlineExceeded):
         spec.fit_full(spec.defaults, view, y, Deadline(budget), rounds=MAX_ROUNDS)
