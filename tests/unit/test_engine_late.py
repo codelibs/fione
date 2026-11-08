@@ -512,13 +512,48 @@ def test_a_base_family_without_a_model_for_lack_of_time_is_reported(monkeypatch)
     notices = _notices(monkeypatch, {"TextLinear"}, list(FAMILY_ORDER))
     assert [n["family"] for n in notices] == ["TextLinear"]
     message = notices[0]["message"]
-    # Its share of the 100 s: its weight among the families not yet run (all but LightGBM).
-    weights = automl_module.FAMILY_WEIGHTS
-    share = 100 * weights["TextLinear"] / (1 - weights["LightGBM"])
-    assert (
-        f"estimated to need about 40 s but its share of the search time was {share:.0f} s"
-        in message
-    )
+    # Its first trial could have half of the 100 s (more than its share, about 24 s).
+    assert "estimated to need about 40 s but the search time it could have was 50 s" in message
+
+
+def test_a_first_trial_may_take_half_of_the_time_left_but_a_late_family_gets_its_share(
+    monkeypatch,
+):
+    firsts = {}
+
+    def fake(name, X, y, folds, task, prep, deadline, *args, first_deadline=None, **kwargs):
+        firsts[name] = (
+            deadline.remaining(),
+            None if first_deadline is None else first_deadline.remaining(),
+        )
+        row = {"family": name, "trial": 0, "state": "complete", "score": 0.5, "elapsed": 0.1}
+        row["params"] = {}
+        return search.FamilyResult(
+            np.zeros((1, 2)),
+            [object()],
+            {},
+            1,
+            0.5,
+            0.0,
+            FAMILIES[name],
+            "no_improvement",
+            log=[row],
+        )
+
+    monkeypatch.setattr(automl_module, "run_family", fake)
+    runner = AutoML(TrainConfig(target="y"))
+    runner._search(
+        [*FAMILY_ORDER, *LATE_ORDER], None, None, None, "classification", None,
+        search.Deadline(100), None, None,
+    )  # fmt: skip
+    # No time passes, so the base families have 85 s each time: half of it, 42.5 s, is more than
+    # any share (LightGBM's is 0.176 x 85 s).
+    share, first = firsts["LightGBM"]
+    assert share == pytest.approx(0.176 * 85, rel=0.02) and first == pytest.approx(42.5, rel=0.02)
+    # Linear is last: its share is all that is left (85 s), more than half of it.
+    assert firsts["Linear"][0] == pytest.approx(85, rel=0.02)
+    assert firsts["Linear"][1] == pytest.approx(85, rel=0.02)
+    assert all(firsts[name][1] is None for name in LATE_ORDER)
 
 
 def test_late_families_that_do_not_run_for_lack_of_time_are_reported_together(monkeypatch):
