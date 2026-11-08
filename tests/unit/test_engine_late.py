@@ -473,3 +473,56 @@ def test_the_variants_read_what_their_names_say():
     assert max(int(c[1:].split("_")[0]) for c in plain.dense) < derived
     assert max(int(c[1:].split("_")[0]) for c in base.dense) >= derived
     assert plain.texts == base.texts and plain.vectorizers[0].max_features == 30_000
+
+
+# --- a family that gets no model for lack of time says so ------------------------------------
+
+
+def _notices(monkeypatch, refused, families):
+    """The ``notice`` messages of a search where ``run_family`` raises ``NoModelError`` (needing
+    40 s) for the families in ``refused`` and returns a model for the others."""
+    seen = []
+
+    def fake(name, X, y, folds, task, prep, deadline, *args, **kwargs):
+        if name in refused:
+            raise automl_module.NoModelError("no time", 40.0)
+        row = {"family": name, "trial": 0, "state": "complete", "score": 0.5, "elapsed": 0.1}
+        row["params"] = {}
+        return search.FamilyResult(
+            np.zeros((1, 2)),
+            [object()],
+            {},
+            1,
+            0.5,
+            0.0,
+            FAMILIES[name],
+            "no_improvement",
+            log=[row],
+        )
+
+    monkeypatch.setattr(automl_module, "run_family", fake)
+    runner = AutoML(TrainConfig(target="y"), emit=seen.append)
+    runner._search(
+        families, None, None, None, "classification", None, search.Deadline(100), None, None
+    )
+    return [e.data for e in seen if e.type == "notice"]
+
+
+def test_a_base_family_without_a_model_for_lack_of_time_is_reported(monkeypatch):
+    notices = _notices(monkeypatch, {"TextLinear"}, list(FAMILY_ORDER))
+    assert [n["family"] for n in notices] == ["TextLinear"]
+    message = notices[0]["message"]
+    # Its share of the 100 s: its weight among the families not yet run (all but LightGBM).
+    weights = automl_module.FAMILY_WEIGHTS
+    share = 100 * weights["TextLinear"] / (1 - weights["LightGBM"])
+    assert (
+        f"estimated to need about 40 s but its share of the search time was {share:.0f} s"
+        in message
+    )
+
+
+def test_late_families_that_do_not_run_for_lack_of_time_are_reported_together(monkeypatch):
+    notices = _notices(monkeypatch, set(LATE_ORDER), [*FAMILY_ORDER, *LATE_ORDER])
+    assert len(notices) == 1
+    assert all(name in notices[0]["message"] for name in LATE_ORDER)
+    assert _notices(monkeypatch, set(), [*FAMILY_ORDER, *LATE_ORDER]) == []
