@@ -165,8 +165,9 @@ dropped. They are not run for data without a text column.
 
 For data over time, the value of a column at an earlier time is often the best feature (last
 month's sales of the same shop and item). The built-in **Add values from earlier times**
-module (`lag`) adds them: name the `time` column (whole numbers such as a month number, or dates, where a step is a day), the
-columns to read (`columns`), the group each row belongs to (`by`, such as a shop and an item) and
+module (`lag`) adds them: name the `time` column (whole numbers such as a month number, or dates,
+where a step is a day; text must be written year-month-day, such as `2015-07-01`), the columns to
+read (`columns`), the group each row belongs to (`by`, such as a shop and an item) and
 the steps back (`lags`, such as `1,2,3,12`). `sales_lag3` is the value of `sales` three steps of
 the time before, so a time with no row gives an empty value, never the row before. The rows of
 a group at one time are reduced to their mean (or sum, with `how`) first, so a coarser `by`

@@ -198,29 +198,39 @@ def _lags(text: str) -> list[int]:
     return list(dict.fromkeys(lags))
 
 
+# Text read as a date: a day as 2015-07-01 or 2015/07/01 (a time of day may follow), or 20150701.
+# A month, a year, a quarter or a day-first date would be read as other days, so they are refused.
+_DATE_TEXT = re.compile(r"\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T].*)?|\d{8})\s*")
+
+
 def _day_numbers(values, name):
-    """The days since 1970-01-01 of a column of dates (or of text a date can be read from), as
-    whole numbers; a date with a time of day is refused, and a missing date stays missing."""
+    """The days since 1970-01-01 of a column of dates (or of text with year, month and day in
+    that order), as whole numbers; a date with a time of day is refused, and a missing date
+    stays missing."""
     bad = ModuleError(f"time column '{name}' must hold whole numbers or dates")
+    kind = pd.api.types.infer_dtype(values, skipna=True)
     # only dates and text: numbers held as objects would be read as nanoseconds from 1970
-    if pd.api.types.infer_dtype(values, skipna=True) not in (
-        "string",
-        "datetime",
-        "datetime64",
-        "date",
-    ):
+    if kind not in ("string", "datetime", "datetime64", "date"):
         raise bad
+    if kind == "string" and not values.dropna().astype(str).map(_DATE_TEXT.fullmatch).notna().all():
+        raise ModuleError(
+            f"time column '{name}' has text that is not a date written year-month-day, "
+            "such as 2015-07-01"
+        )
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)  # "could not infer format"
             stamps = pd.to_datetime(values)
     except (ValueError, TypeError):
-        raise bad from None
+        raise ModuleError(
+            f"time column '{name}' has dates that cannot be read in one format (use 2015-07-01)"
+        ) from None
     if stamps.dt.tz is not None:
         stamps = stamps.dt.tz_localize(None)
     if not (stamps.isna() | (stamps == stamps.dt.normalize())).all():
         raise ModuleError(f"time column '{name}' has a time of day; it must hold whole days")
-    return ((stamps - pd.Timestamp(0)) // pd.Timedelta(days=1)).astype("Int64")
+    epoch = pd.Timestamp(0).as_unit(stamps.dt.unit)  # a date far from 1970 is out of range in ns
+    return ((stamps - epoch) // pd.Timedelta(days=1)).astype("Int64")
 
 
 def lag(df, params, ctx):
