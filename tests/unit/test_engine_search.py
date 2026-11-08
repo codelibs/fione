@@ -207,6 +207,10 @@ def test_fit_full_raises_when_it_cannot_finish(name):
     spec = FAMILIES[name]("classification", 2, n_jobs=n_threads(len(X)))
     view = getattr(prep, spec.view)(X)
     budget, slack = _calibrated(spec, view, y)
+    # Wider than for ``fit``: a shared CI runner stalled a fit for 1 s. Here the exception already
+    # shows that the fit stopped short, and the time is a loose check; run to the end, the
+    # families here take 7 s (XGBoost) to 5 minutes (DeepLearning) on this data, ExtraTrees 1 s.
+    slack = max(slack, 2.0)
     start = time.monotonic()
     with pytest.raises(DeadlineExceeded):
         spec.fit_full(spec.defaults, view, y, Deadline(budget), rounds=MAX_ROUNDS)
