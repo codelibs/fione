@@ -201,7 +201,8 @@ calls `propose_first_join` with it (when they have not said, it asks first), and
 first join: the base is the dataset that has that column, and the other dataset is the one its
 best link joins to, among the links that have one row per key on a side. The other dataset is
 summarized when it has several rows per key, and looked up as it is when it has one (a table of
-sales gets its stores' columns). A pair of datasets the person names is proposed with
+sales gets its stores' columns). A link on the column to predict itself is left out: a table that
+holds a row for each class would hand the answer to the join. A pair of datasets the person names is proposed with
 `propose_join`.
 
 A join key is one column, or several that identify a row together (a shop and an item; the

@@ -1501,13 +1501,27 @@ def _sides(link: dict) -> tuple[int, int]:
     return (b, a) if link["one_row_per_key"] == b else (a, b)
 
 
-def _first_join(links: list[dict], holders: set[int]) -> tuple[dict, int] | None:
+def _base_columns(link: dict, base: int) -> tuple[str, str]:
+    """The key column of ``base`` in ``link``, and the key column of the other dataset."""
+    column_base, column_other = link.get("columns") or [link["column"]] * 2
+    if base == link["datasets"][0]:
+        return column_base, column_other
+    return column_other, column_base
+
+
+def _first_join(links: list[dict], holders: set[int], target: str) -> tuple[dict, int] | None:
     """The best link of a dataset in ``holders`` (those with the column to predict) that a join
     can follow, and the base: the dataset of ``holders`` it links. A link where both sides
-    repeat is left out, since one side would have to be summarized first."""
+    repeat is left out, since one side would have to be summarized first, and so is a link on
+    the column to predict itself, since the rows of the other dataset would follow from the
+    answer (a table that describes each class)."""
     for link in links:
         base = next((d for d in link["datasets"] if d in holders), None)
-        if base is not None and link["relation"] != "many_to_many":
+        if (
+            base is not None
+            and link["relation"] != "many_to_many"
+            and _base_columns(link, base)[0].lower() != target
+        ):
             return link, base
     return None
 
@@ -1525,7 +1539,7 @@ def _propose_first_join(ctx: ToolContext, args: dict) -> dict:
     holders = {d.id for d in datasets if any(n.lower() == wanted for n, _ in d.schema)}
     if not holders:
         raise ToolError(f"no dataset of the project has a column named {args['target']!r}")
-    chosen = _first_join(links, holders)
+    chosen = _first_join(links, holders, wanted)
     if chosen is None:
         raise ToolError(
             "no dataset with that column has a link that a join can follow; call "
@@ -1533,9 +1547,7 @@ def _propose_first_join(ctx: ToolContext, args: dict) -> dict:
         )
     link, base = chosen
     other = next(d for d in link["datasets"] if d != base)
-    column_base, column_other = link.get("columns") or [link["column"]] * 2
-    if base != link["datasets"][0]:
-        column_base, column_other = column_other, column_base
+    column_base, column_other = _base_columns(link, base)
     join = {
         "dataset_id": base,
         "other_dataset_id": other,
