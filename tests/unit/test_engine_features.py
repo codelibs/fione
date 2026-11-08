@@ -18,6 +18,7 @@ from fione.engine.features import (
     IdParts,
     NumberPairs,
     RowCounts,
+    TextPairs,
     TextShape,
     TextTokens,
     TextTopics,
@@ -171,6 +172,115 @@ def test_row_counts_count_missing_and_zero_values():
     out = RowCounts(["a", "b", "c"], ["a", "b"]).fit(X).transform(X)
     assert out["missing_count"].tolist() == [1, 2, 1, 0]
     assert out["zero_count"].tolist() == [1, 0, 0, 2]
+
+
+def test_text_pairs_compare_the_words_of_two_columns():
+    X = pd.DataFrame(
+        {
+            "a": ["How to learn Python 3", "What is a cat", "Same words", None, "go 2 the end"],
+            "b": [
+                "how to learn Python 3?",
+                "Why is the sky blue today",
+                "words Same",
+                "x y",
+                "go 3 the end",
+            ],
+        }
+    )
+    group = TextPairs(["a", "b"]).fit(X)
+    out = group.transform(X).set_axis(TextPairs._PARTS, axis=1)
+    assert out.loc[0, "equal"] == 1 and out.loc[0, "jaccard"] == 1 and out.loc[0, "common"] == 5
+    assert out.loc[1, "common"] == 1 and out.loc[1, "same_first"] == 0
+    assert out.loc[1, "words_diff"] == 2 and out.loc[1, "words_ratio"] == pytest.approx(4 / 6)
+    assert out.loc[1, "shorter_share"] == pytest.approx(1 / 4)
+    assert out.loc[2, "jaccard"] == 1 and out.loc[2, "equal"] == 0  # the same words, not the order
+    assert out.loc[2, "same_first"] == 0 and out.loc[2, "same_last"] == 0
+    assert out.loc[3].isna().all()  # a missing text
+    assert out.loc[4, "same_numbers"] == 0 and out.loc[4, "same_first"] == 1
+    assert out.loc[4, "same_last"] == 1
+    assert group.sources == [("a", "b")] * len(TextPairs._PARTS)
+
+
+def test_text_pairs_do_not_depend_on_how_many_rows_are_read_at_once(monkeypatch):
+    X = pd.DataFrame(
+        {
+            "a": [f"x{i % 3} y z{i % 5}" for i in range(25)],
+            "b": [f"y x{i % 4} q" for i in range(25)],
+        }
+    )
+    group = TextPairs(["a", "b"]).fit(X)
+    whole = group.transform(X)
+    monkeypatch.setattr(features, "PAIR_ROWS", 4)
+    pd.testing.assert_frame_equal(group.transform(X), whole)
+    assert len(group.transform(X.head(0))) == 0
+
+
+def test_candidates_offer_text_pairs_only_for_two_text_columns():
+    rng = np.random.default_rng(0)
+    words = [f"word{i}" for i in range(40)]
+    sentence = lambda: " ".join(rng.choice(words, 6))  # noqa: E731
+    X = pd.DataFrame({"a": [sentence() for _ in range(200)], "b": [sentence() for _ in range(200)]})
+    labels = [g.label for g in features.candidates(Prep().fit(X), X, [])]
+    assert "similarity of texts" in labels
+    one = X[["a"]]
+    labels = [g.label for g in features.candidates(Prep().fit(one), one, [])]
+    assert "similarity of texts" not in labels
+
+
+def test_candidates_try_text_pairs_early_for_running_texts_and_last_for_other_texts():
+    rng = np.random.default_rng(0)
+    words = [f"word{i}" for i in range(40)]
+    sentence = lambda n: " ".join(rng.choice(words, n))  # noqa: E731
+    prose = pd.DataFrame({c: [sentence(8) for _ in range(200)] for c in "ab"})
+    labels = [g.label for g in features.candidates(Prep().fit(prose), prose, [])]
+    assert labels.index("similarity of texts") < labels.index("text tokens of a")
+    codes = pd.DataFrame({c: [f"{rng.choice(words)} {k % 50}" for k in range(200)] for c in "ab"})
+    labels = [g.label for g in features.candidates(Prep().fit(codes), codes, [])]
+    assert labels[-1] == "similarity of texts"  # no identifier column here
+
+
+def test_text_pairs_compare_running_texts_even_when_other_text_columns_rank_higher():
+    rng = np.random.default_rng(0)
+    words = [f"word{i}" for i in range(60)]
+    n = 300
+    X = pd.DataFrame(
+        {
+            **{f"c{i}": [f"{rng.choice(words[:5])} {k % 40}" for k in range(n)] for i in range(3)},
+            **{
+                q: [" ".join(rng.choice(words, 9)) + f" {k}" for k in range(n)]
+                for q in ("q1", "q2")
+            },
+        }
+    )
+    ranked = ["c0", "c1", "c2", "q1", "q2"]
+    found = features.candidates(Prep().fit(X), X, ranked)
+    pairs = next(g for g in found if g.label == "similarity of texts")
+    assert pairs.columns[:2] == ("q1", "q2")
+    labels = [g.label for g in found]
+    assert labels.index("similarity of texts") < labels.index("text tokens of c0")
+
+
+def test_the_gate_adopts_text_pairs_that_explain_whether_two_texts_match(monkeypatch):
+    rng = np.random.default_rng(0)
+    words = [f"w{i}" for i in range(300)]
+    n = 1500
+    first, second, y = [], [], []
+    for _ in range(n):
+        one = list(rng.choice(words, 8, replace=False))
+        same = rng.random() < 0.5
+        other = list(one) if same else list(rng.choice(words, 8, replace=False))
+        if same:
+            rng.shuffle(other)
+            other[0] = str(rng.choice(words))
+        first.append(" ".join(one))
+        second.append(" ".join(other))
+        y.append(int(same))
+    X, y = pd.DataFrame({"a": first, "b": second}), np.array(y)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    assert "similarity of texts" in {g.label for g in kept}
+    monkeypatch.setattr(features, "MAX_PAIR_TEXTS", 1)  # never offered
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    assert "similarity of texts" not in {v.group for v in verdicts}
 
 
 def test_date_parts_and_differences():
@@ -624,6 +734,7 @@ def test_every_kind_of_group_pickles_and_transforms_alike():
                 f"{['red', 'green', 'blue'][i % 3]} {['apple', 'pear'][i % 2]} {i}"
                 for i in range(n)
             ],
+            "u": [f"{['red', 'blue'][i % 2]} {i % 7} apple" for i in range(n)],
             "when": pd.date_range("2024-01-01", periods=n, freq="7h"),
             "then": pd.date_range("2023-06-01", periods=n, freq="5h"),
         }
@@ -633,6 +744,7 @@ def test_every_kind_of_group_pickles_and_transforms_alike():
         TextTokens("t"),
         CategoryFrequency(["c", "d"]),
         RowCounts(list(X.columns), ["a", "b"]),
+        TextPairs(["t", "u"]),
         DateParts(["when", "then"]),
         DateDifferences(["when", "then"]),
         NumberPairs("ratio", ["a", "b"]),

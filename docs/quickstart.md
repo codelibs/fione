@@ -246,6 +246,11 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   word count, share of digits and capitals and the first number; for running text (a median
   of five words or more, or the titles described under Text columns) also 32 *topics*, the main directions of word use found by an SVD of
   the word weights (TF-IDF);
+- pairs of text columns: with two or more text columns, for each pair among three of them
+  (running texts first), such as a question and its candidate duplicate or a title and a
+  description: how many words they share, their share of all the words and of the shorter text,
+  the difference and ratio of the word counts, and whether the first word, the last word, the
+  numbers or all the words are the same;
 - categories: how common each is, and how common each pair is;
 - identifiers: a string column (two of them at most) with at least 12 distinct values and no
   spaces, whose values (the first 1,000 non-missing ones are judged) split by `_`, `/`, `-`, `:`
