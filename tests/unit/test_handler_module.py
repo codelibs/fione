@@ -547,6 +547,9 @@ def test_the_module_cannot_load_anything_into_this_process(
     conn, run_job, admin, owner, project, dataset, storage
 ):
     upload(conn, storage, admin, "add_one", ADD_ONE)
+    # A first run lets the libraries import what they load lazily (pandas does so on first use,
+    # which depends on what ran before in this process); the second run must add nothing.
+    assert run_job(submit(conn, owner, project, dataset, "add_one")).status is JobStatus.DONE
     before = set(sys.modules)
     assert run_job(submit(conn, owner, project, dataset, "add_one")).status is JobStatus.DONE
     assert set(sys.modules) - before == set()

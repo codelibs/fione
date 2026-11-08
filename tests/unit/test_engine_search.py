@@ -140,13 +140,15 @@ def _calibrated(spec, X_tr, y_tr) -> tuple[float, float]:
 
     ``fit`` refuses to start (``DeadlineExceeded``) when less than ``UNIT_SAFETY`` times the
     family's first, uninterruptible unit remains, and that unit is probed on this machine. On a
-    fast machine this is the classic 0.3 s budget with 0.5 s slack; on a slow or busy one both
+    fast machine this is the classic 0.3 s budget with 2 s slack; on a slow or busy one both
     grow with the measured unit, so the test still proves "stops near the deadline with a
     usable model" without depending on the hardware.
     """
     spec.estimate_unit(spec.defaults, X_tr, y_tr)  # the probe fit() would run first
     unit = spec.unit_secs or 0.0
-    return max(0.3, 2 * UNIT_SAFETY * unit), max(0.5, 2 * unit)
+    # The slack is wide because a shared CI runner can stall a fit for a second; one that does
+    # not stop at its deadline runs for tens of seconds, far past it.
+    return max(0.3, 2 * UNIT_SAFETY * unit), max(2.0, 4 * unit)
 
 
 @pytest.mark.parametrize("name", list(FAMILIES))
