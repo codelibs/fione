@@ -57,6 +57,9 @@ class ToolContext:
     project_id: str | None = None  # when set, no tool reaches an object of any other project
     via: Literal["chat", "mcp", "test"] = "test"  # the channel, for the log
     max_result_bytes: int = MAX_RESULT_BYTES  # a chat lowers it to what its context can hold
+    # a chat lets find_table_links ask the model for links the names do not show: (question,
+    # tool) -> the arguments of the tool call, or None when the model gave none
+    ask_model: Callable[[str, dict], dict | None] | None = None
 
 
 _TOOLS: dict[str, Tool] = {}

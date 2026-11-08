@@ -61,6 +61,7 @@ MIN_RESULT_BYTES = 2_000  # a tool result may always take this much
 MAX_ARGUMENT_CHARS = 8_000  # of one call's arguments
 WRITE_INTERVAL_SECS = 0.3  # between writes of the text as it streams
 _POLL_SECS = 0.05
+ASK_SECS = 30.0  # what a tool may wait for the model's answer to its question
 _CALL_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _TOOL_NAME_CHARS = 64
 PROPOSE = {
@@ -194,6 +195,7 @@ class _Turn:
         self.language = language
         self.row = 0  # the assistant message being written
         self.partial = ""  # its text so far
+        self._asked: dict[str, dict | None] = {}  # what the model answered to a tool's question
 
     def run(self, row: int) -> None:
         self.row = row
@@ -342,10 +344,11 @@ class _Turn:
     def _abandoned(self) -> bool:
         return self.cancel.is_set() or time.monotonic() >= self.deadline
 
-    def _bounded(self, work, *, give_up: bool = False):
+    def _bounded(self, work, *, give_up: bool = False, until: float | None = None):
         """``work()`` in a thread of its own, left to end by itself at a cancel or the
         deadline (an HTTP call can stall past its timeouts): then the turn stops, or with
-        ``give_up`` this returns None and the turn goes on to its own checks."""
+        ``give_up`` this returns None and the turn goes on to its own checks; so it does at
+        ``until`` (a ``time.monotonic()`` value), with ``give_up``."""
         done = threading.Event()
         outcome: dict = {}
 
@@ -359,7 +362,7 @@ class _Turn:
 
         threading.Thread(target=run, name="llm-provider", daemon=True).start()
         while not done.wait(_POLL_SECS):
-            if self._abandoned():
+            if self._abandoned() or (give_up and until is not None and time.monotonic() >= until):
                 if give_up:
                     return None
                 self._check_stop()
@@ -455,6 +458,7 @@ class _Turn:
                     project_id=project_id,
                     via="chat",
                     max_result_bytes=self._result_bytes(),
+                    ask_model=self._ask_model,
                 )
                 try:
                     result = call_tool(call.name, args, ctx)
@@ -489,6 +493,36 @@ class _Turn:
                 self.conn, self.conversation_id, "assistant", "", state="running"
             )
         return following.id
+
+    def _ask_model(self, question: str, tool: dict) -> dict | None:
+        """The arguments of the call to ``tool`` that the model makes to answer ``question``,
+        or None: no call, or no answer before the turn's deadline or a cancel. A tool asks
+        this for what its data cannot say (find_table_links, for columns of another name that
+        mean the same); the same question in a turn is asked once."""
+        if question in self._asked:
+            return self._asked[question]
+        limit = min(self.deadline, time.monotonic() + ASK_SECS)  # a slow model costs the links
+        try:  # of the model, not the turn
+            completion = self._bounded(
+                lambda: self.client.complete(
+                    [{"role": "user", "content": question}],
+                    [tool],
+                    deadline=limit,
+                    cancelled=self.cancel.is_set,
+                ),
+                give_up=True,
+                until=limit,
+            )
+        except LlmError:
+            self._asked[question] = None  # the turn's own next call tells why
+            return None
+        answer = None
+        for call in completion.tool_calls if completion else []:
+            if call.name == tool["function"]["name"]:
+                answer = _arguments(call.arguments)
+                break
+        self._asked[question] = answer
+        return answer
 
     def _propose(self, args: dict, result: dict, kind: str) -> dict:
         """Store the proposal of a ``propose_training_config`` or ``propose_join`` result; the

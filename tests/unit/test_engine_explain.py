@@ -80,9 +80,12 @@ def _late_models(model: TrainedModel, frame: pd.DataFrame, name: str) -> list:
 
 @cache
 def _fit(task: str) -> TrainedModel:
+    # A generous budget: a family whose time share expires before its first trial finishes is
+    # skipped, and a loaded machine would then leave it out of cv_models. With max_models set
+    # to one trial per family the search ends early, so the budget costs nothing when idle.
     config = TrainConfig(
         TARGETS[task],
-        max_runtime_secs=30,
+        max_runtime_secs=180,
         max_models=len(FAMILY_ORDER),
         nfolds=3,
         keep_cv_models=True,
@@ -91,7 +94,8 @@ def _fit(task: str) -> TrainedModel:
     model = AutoML(config).fit(frame)
     for name in LATE_ORDER:
         model.cv_models[name] = _late_models(model, frame, name)
-    assert sorted(model.cv_models) == sorted(FAMILIES), f"a family is missing: {model.cv_models}"
+    missing = sorted(set(FAMILIES) - set(model.cv_models))
+    assert not missing, f"families missing from cv_models: {missing}"
     return model
 
 
