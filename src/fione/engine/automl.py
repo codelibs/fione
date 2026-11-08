@@ -55,6 +55,10 @@ When ``should_stop()`` turns true, the search ends, nothing is refit, and the me
 their fold models; the model has ``stop_reason == "cancelled"``. ``NoModelError`` is raised when
 no family completed a trial, because of the cancellation or because the budget is too small.
 
+A family whose first trial does not fit in its share of the search time (a text model fits all
+its data in one unit and cannot be cut short) has no model; a ``notice`` says what the trial
+needed. The late families that are not run for lack of time are named in one ``notice``.
+
 A family that raises (a library failure) is skipped with a ``notice`` of kind ``family_error``,
 keeping its best trial so far; a refit that raises falls back to the fold models with a
 ``refit_error`` notice; diagnostics that raise leave ``diagnostics`` None, with a
@@ -472,6 +476,7 @@ class AutoML:
         reasons: dict[str, str] = {}
         errors: dict[str, Exception] = {}
         finished = 0
+        skipped: list[str] = []  # late families not run for lack of time
         # With late families to run, the base ones share the search time less ``LATE_SHARE``:
         # their shares are scaled by 1 - LATE_SHARE; what they leave unused is left over too.
         # The family a late one is a variant of keeps its share as without late families.
@@ -498,6 +503,7 @@ class AutoML:
             left = own.remaining()
             share = left * weights[name] / sum(weights[f] for f in rest)
             if late and not _late_fits(FAMILIES[name], share, results, self.explicit):
+                skipped.append(name)
                 continue
             try:
                 result = run_family(
@@ -519,9 +525,12 @@ class AutoML:
                     sample_weight=weight,
                     repeats=repeats,
                 )
-            except NoModelError:
-                if not late:
+            except NoModelError as e:
+                if late:
+                    skipped.append(name)
+                else:
                     reasons[name] = "time"
+                    self._notice(_no_time_message(name, share, e.needed_secs), family=name)
                 continue
             except Exception as e:  # outside any trial, e.g. building the view
                 self.emit(error_notice("family_error", name, e))
@@ -542,6 +551,12 @@ class AutoML:
                     results[f"{name}#{rank}"] = runner_up
             if result.reason == "cancelled":
                 break
+        if skipped:
+            self._notice(
+                f"{', '.join(skipped)}: not run, the search time left was too short for a first "
+                "trial",
+                family=skipped[0],
+            )
         return results, logs, reasons, finished, errors
 
     def _check_classes_in_training(self, y, folds, classes) -> None:
@@ -694,6 +709,17 @@ def _late_fits(
     if reference is None:
         return explicit
     return share >= spec.cost * reference.log[0]["elapsed"]
+
+
+def _no_time_message(name: str, share: float, needed: float | None) -> str:
+    """Why a family has no model: its first trial did not fit in its ``share`` of the search time
+    (``needed`` seconds, when known)."""
+    if needed is None:
+        return f"{name}: no model, its share of the search time ({share:.0f} s) was too short"
+    return (
+        f"{name}: no model, one trial is estimated to need about {needed:.0f} s but its share of "
+        f"the search time was {share:.0f} s; a longer max_runtime_secs would let it run"
+    )
 
 
 def _mb(size: float) -> str:
