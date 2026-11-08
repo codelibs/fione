@@ -375,12 +375,14 @@ def test_first_trial_gives_up_as_soon_as_its_folds_cannot_fit(slow, monkeypatch)
     X, y = _classification(50, 4)
     prep, y, folds = _setup(X, y)
     start = time.monotonic()
-    with pytest.raises(NoModelError):  # 5 folds x 0.3 s cannot fit in 1 s
+    with pytest.raises(NoModelError) as caught:  # 5 folds x 0.3 s cannot fit in 1 s
         run_family(
             "Slow", X, y, folds, "classification", prep, Deadline(1), lambda e: None, lambda: False
         )
     assert time.monotonic() - start < 0.5
     assert len(slow.starts) == 1
+    # The error says what the folds needed: a unit each, with the safety margin.
+    assert caught.value.needed_secs == pytest.approx(len(folds) * UNIT_SAFETY * 0.3, rel=0.2)
 
 
 def test_expired_deadline_raises_no_model_error():
