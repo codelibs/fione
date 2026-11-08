@@ -6,6 +6,7 @@ Each takes one frame (``cbind``, ``concat``, ``join`` and ``rbind`` a second one
 
 import operator
 import re
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -197,14 +198,33 @@ def _lags(text: str) -> list[int]:
     return list(dict.fromkeys(lags))
 
 
+def _day_numbers(values, name):
+    """The days since 1970-01-01 of a column of dates (or of text a date can be read from), as
+    whole numbers; a date with a time of day is refused, and a missing date stays missing."""
+    bad = ModuleError(f"time column '{name}' must hold whole numbers or dates")
+    if pd.api.types.is_bool_dtype(values):
+        raise bad
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)  # "could not infer format"
+            stamps = pd.to_datetime(values)
+    except (ValueError, TypeError):
+        raise bad from None
+    if stamps.dt.tz is not None:
+        stamps = stamps.dt.tz_localize(None)
+    if not (stamps.isna() | (stamps == stamps.dt.normalize())).all():
+        raise ModuleError(f"time column '{name}' has a time of day; it must hold whole days")
+    return ((stamps - pd.Timestamp(0)) // pd.Timedelta(days=1)).astype("Int64")
+
+
 def lag(df, params, ctx):
     """Add, for each row, the value of the ``columns`` at an earlier ``time`` of the same ``by``
     group: ``column_lag1`` is the value one step of ``time`` before, ``column_lag3`` three steps
-    before. ``time`` holds whole numbers (a month number, a day number); the step is counted in
-    them, not in rows, so a time with no row gives an empty value instead of the one before
-    it. Rows of a group with the same time are first reduced to their ``how`` (mean or sum), so
-    ``by`` can be coarser than a row: lagging the mean of an item over all shops. No row reads
-    its own time or a later one."""
+    before. ``time`` holds whole numbers (a month number, a day number) or dates (the step is
+    then a day); the step is counted in them, not in rows, so a time with no row gives an empty
+    value instead of the one before it. Rows of a group with the same time are first reduced to
+    their ``how`` (mean or sum), so ``by`` can be coarser than a row: lagging the mean of an item
+    over all shops. No row reads its own time or a later one."""
     time = require_column(df, params["time"])
     by = pick_columns(df, params["by"]) if params["by"] else []
     if time in by:
@@ -219,16 +239,14 @@ def lag(df, params, ctx):
     for column in columns:
         if not pd.api.types.is_numeric_dtype(df[column]):
             raise ModuleError(f"column '{column}' is not numeric")
-    if (
-        pd.api.types.is_bool_dtype(df[time])
-        or not pd.api.types.is_numeric_dtype(df[time])
-        or not (df[time].dropna() == df[time].dropna().round()).all()
-    ):
-        raise ModuleError(f"time column '{time}' must hold whole numbers")
+    original_time = wide = df[time]
+    if not pd.api.types.is_numeric_dtype(wide) or pd.api.types.is_bool_dtype(wide):
+        wide = _day_numbers(wide, time)
+    elif not (wide.dropna() == wide.dropna().round()).all():
+        raise ModuleError(f"time column '{time}' must hold whole numbers or dates")
     lags = _lags(params["lags"])
     check_cells(len(df), len(df.columns) + len(columns) * len(lags))
     # a narrow integer (a byte of days) would wrap round when a lag is added: work on a wide one
-    original_time = wide = df[time]
     if pd.api.types.is_integer_dtype(wide):
         wide = wide.astype(
             "Int64" if isinstance(wide.dtype, pd.api.extensions.ExtensionDtype) else "int64"
