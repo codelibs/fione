@@ -798,6 +798,21 @@ def test_propose_first_join_does_not_summarize_a_one_to_one_link(env):
     assert found["config"]["summarize"] is False and found["config"]["other_key"] == ""
 
 
+def test_propose_first_join_does_not_join_on_the_column_to_predict(env):
+    classes = ["a", "b", "c", "d"]
+    users = pd.DataFrame({"id": range(1, 81), "dest": [classes[i % 4] for i in range(80)]})
+    described = pd.DataFrame({"dest": classes, "width": [3.5, 1.5, 9.0, 4.0]})
+    visits = pd.DataFrame({"user_id": [i % 80 + 1 for i in range(400)], "secs": range(400)})
+    by_name = _ingest(env, env.b, users=users, described=described, visits=visits)
+    links = call(env, "find_table_links", {"project_id": env.b.id})["links"]
+    assert any(link.get("column") == "dest" for link in links)  # the link is found
+    found = call(env, "propose_first_join", {"project_id": env.b.id, "target": "Dest"})
+    # the table of classes is not joined (its columns follow from the answer): the visits are
+    assert found["dataset_id"] == by_name["users"]
+    assert found["config"]["other_dataset_id"] == by_name["visits"]
+    assert found["config"]["key"] == "id" and found["config"]["other_key"] == "user_id"
+
+
 def test_propose_first_join_says_what_it_cannot_do(env):
     repeating = pd.DataFrame({"k": [i % 40 for i in range(120)], "a": range(120)})
     other = pd.DataFrame({"k": [i % 40 for i in range(160)], "b": range(160)})
