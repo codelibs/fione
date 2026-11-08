@@ -547,6 +547,11 @@ def test_the_module_cannot_load_anything_into_this_process(
     conn, run_job, admin, owner, project, dataset, storage
 ):
     upload(conn, storage, admin, "add_one", ADD_ONE)
+    # Another module runs first, so that the libraries import what they load lazily on first use
+    # (pandas does, and whether it happened already depends on what ran before in this process).
+    # The first run of the module under test is measured: what it leaks, it leaks then.
+    upload(conn, storage, admin, "warm_up", "def run(df, params, ctx):\n    return df")
+    assert run_job(submit(conn, owner, project, dataset, "warm_up")).status is JobStatus.DONE
     before = set(sys.modules)
     assert run_job(submit(conn, owner, project, dataset, "add_one")).status is JobStatus.DONE
     assert set(sys.modules) - before == set()

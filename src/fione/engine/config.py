@@ -20,7 +20,12 @@ class TargetError(ConfigError):
 
 
 class NoModelError(RuntimeError):
-    """No model could be trained, e.g. because the time budget is too small."""
+    """No model could be trained, e.g. because the time budget is too small. ``needed_secs`` is
+    the time a first trial would have needed, when it is known."""
+
+    def __init__(self, message: str, needed_secs: float | None = None):
+        super().__init__(message)
+        self.needed_secs = needed_secs
 
 
 class DeadlineExceeded(Exception):

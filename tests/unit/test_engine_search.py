@@ -207,6 +207,10 @@ def test_fit_full_raises_when_it_cannot_finish(name):
     spec = FAMILIES[name]("classification", 2, n_jobs=n_threads(len(X)))
     view = getattr(prep, spec.view)(X)
     budget, slack = _calibrated(spec, view, y)
+    # Wider than for ``fit``: a shared CI runner stalled a fit for 1 s. Here the exception already
+    # shows that the fit stopped short, and the time is a loose check; run to the end, the
+    # families here take 7 s (XGBoost) to 5 minutes (DeepLearning) on this data, ExtraTrees 1 s.
+    slack = max(slack, 2.0)
     start = time.monotonic()
     with pytest.raises(DeadlineExceeded):
         spec.fit_full(spec.defaults, view, y, Deadline(budget), rounds=MAX_ROUNDS)
@@ -371,12 +375,14 @@ def test_first_trial_gives_up_as_soon_as_its_folds_cannot_fit(slow, monkeypatch)
     X, y = _classification(50, 4)
     prep, y, folds = _setup(X, y)
     start = time.monotonic()
-    with pytest.raises(NoModelError):  # 5 folds x 0.3 s cannot fit in 1 s
+    with pytest.raises(NoModelError) as caught:  # 5 folds x 0.3 s cannot fit in 1 s
         run_family(
             "Slow", X, y, folds, "classification", prep, Deadline(1), lambda e: None, lambda: False
         )
     assert time.monotonic() - start < 0.5
     assert len(slow.starts) == 1
+    # The error says what the folds needed: a unit each, with the safety margin.
+    assert caught.value.needed_secs == pytest.approx(len(folds) * UNIT_SAFETY * 0.3, rel=0.2)
 
 
 def test_expired_deadline_raises_no_model_error():

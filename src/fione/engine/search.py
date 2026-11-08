@@ -431,7 +431,9 @@ def run_family(
         emit(Event("trial", data=data))
     emit(Event("stopped", data={"family": name, "reason": reason}))
     if best is None and reason == "time":
-        raise NoModelError("time budget too small to train any model")
+        # What the first trial needed, by the rule that refused it: every fold gets a unit.
+        needed = len(folds) * UNIT_SAFETY * spec.unit_secs if spec.unit_secs else None
+        raise NoModelError("time budget too small to train any model", needed)
     elapsed = time.monotonic() - start
     emit(
         Event(
