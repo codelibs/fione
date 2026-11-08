@@ -1362,13 +1362,16 @@ def test_manager_shutdown_cancels_running_turns(env, manager):
 
 
 def test_manager_ends_a_turn_that_waited_past_its_deadline(env, fake_llm):
-    fake = fake_llm([{"text": "slow", "delay": 2}])
+    fake = fake_llm([{"text": "slow", "delay": 4}])
     settings = settings_for(env, fake, llm_max_concurrent_turns=1)
-    settings = settings.model_copy(update={"llm_turn_timeout_secs": 1})
+    settings = settings.model_copy(update={"llm_turn_timeout_secs": 2})
     one = TurnManager(env.db_path, env.storage, settings, StubMonitor("ready"))
     try:
         second = store.create_conversation(env.conn, env.owner, env.project.id, "second")
         one.submit(env.conn, env.owner, env.project.id, env.conversation.id, "Hi", language="en")
+        # The waiting turn's deadline is much nearer than the end of the first turn's (2 s), so
+        # the order does not depend on how fast this machine is.
+        one._settings = settings.model_copy(update={"llm_turn_timeout_secs": 0.2})
         one.submit(env.conn, env.owner, env.project.id, second.id, "Hi", language="en")
         last = final(env, second.id)
     finally:

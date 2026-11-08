@@ -1,3 +1,4 @@
+import datetime
 import importlib.util
 import json
 import os
@@ -1346,3 +1347,88 @@ def test_lag_refuses_a_time_of_booleans_and_a_column_named_twice():
         run_op("lag", ok, {"time": "t", "by": ["g", "g"], "columns": ["v"]})
     with pytest.raises(ModuleError, match="twice"):
         run_op("lag", ok, {"time": "t", "columns": ["v", "v"]})
+
+
+def test_lag_counts_the_steps_of_a_date_column_in_days():
+    # shop 1 has no row on the 3rd: the lag of the 4th is empty; the dates come back as given
+    dates = ["2015-07-01", "2015-07-02", "2015-07-04", "2015-07-01", "2015-07-02"]
+    df = pd.DataFrame(
+        {"shop": [1, 1, 1, 2, 2], "day": pd.to_datetime(dates), "sales": [10.0, 20.0, 40, 1, 2]}
+    )
+    params = {"time": "day", "by": ["shop"], "columns": ["sales"], "lags": "1,3"}
+    out, _ = run_op("lag", df, params)
+    assert list(out["sales_lag1"].fillna(-1)) == [-1, 10.0, -1, -1, 1.0]
+    assert list(out["sales_lag3"].fillna(-1)) == [-1, -1, 10.0, -1, -1]
+    assert out["day"].dtype == df["day"].dtype and list(out["day"]) == list(df["day"])
+    as_text, _ = run_op("lag", df.assign(day=dates), params)  # text a date can be read from
+    assert list(as_text["sales_lag1"].fillna(-1)) == list(out["sales_lag1"].fillna(-1))
+    assert list(as_text["day"]) == dates
+    # a timezone changes nothing
+    zoned = df.assign(day=df["day"].dt.tz_localize("Asia/Tokyo"))
+    assert list(run_op("lag", zoned, params)[0]["sales_lag1"].fillna(-1)) == [-1, 10.0, -1, -1, 1.0]
+    # a month boundary is one day too; a missing date has no lag
+    jump = pd.DataFrame(
+        {"day": pd.to_datetime(["2015-06-30", "2015-07-01", None]), "v": [1.0, 2.0, 3.0]}
+    )
+    out, _ = run_op("lag", jump, {"time": "day", "columns": ["v"]})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 1.0, -1]
+
+
+def test_lag_refuses_a_date_with_a_time_of_day_and_text_that_is_not_a_date():
+    stamps = [pd.Timestamp("2015-07-01 06:00"), pd.Timestamp("2015-07-02")]
+    df = pd.DataFrame({"t": stamps, "v": [1.0, 2.0]})
+    with pytest.raises(ModuleError, match="time of day"):
+        run_op("lag", df, {"time": "t", "columns": ["v"]})
+    with pytest.raises(ModuleError, match="year-month-day"):
+        run_op("lag", df.assign(t=["x", "y"]), {"time": "t", "columns": ["v"]})
+
+
+def test_lag_does_not_read_numbers_held_as_text_or_objects_as_dates():
+    for values, message in (
+        (["1", "2", "3"], "year-month-day"),
+        (["201501", "201502", "201503"], "year-month-day"),
+        (pd.Series([1, 2, 3], dtype=object), "whole numbers or dates"),
+    ):
+        df = pd.DataFrame({"t": values, "v": [1.0, 2.0, 3.0]})
+        with pytest.raises(ModuleError, match=message):
+            run_op("lag", df, {"time": "t", "columns": ["v"]})
+    compact = pd.DataFrame({"t": ["20150701", "20150702"], "v": [1.0, 2.0]})  # a date, read as one
+    out, _ = run_op("lag", compact, {"time": "t", "columns": ["v"]})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 1.0]
+
+
+def test_lag_refuses_text_that_a_date_reader_would_take_for_other_days():
+    # a month, a year, a quarter or a day-first date would give lags that are empty without a word
+    for values in (
+        ["2015-01", "2015-02", "2015-03"],
+        ["2015", "2016", "2017"],
+        ["2015Q1", "2015Q2", "2015Q3"],
+        ["01/07/2015", "02/07/2015", "13/07/2015"],
+    ):
+        df = pd.DataFrame({"t": values, "v": [1.0, 2.0, 3.0]})
+        with pytest.raises(ModuleError, match="year-month-day"):
+            run_op("lag", df, {"time": "t", "columns": ["v"]})
+    mixed = pd.DataFrame(
+        {"t": ["2015-07-01T00:00+09:00", "2015-07-02T00:00+00:00"], "v": [1.0, 2.0]}
+    )
+    with pytest.raises(ModuleError, match="cannot be read in one format"):
+        run_op("lag", mixed, {"time": "t", "columns": ["v"]})
+
+
+def test_lag_reads_dates_far_from_1970():
+    # 9999-12-31 is a usual "no end date"; it must not fail the job (nanoseconds stop at 2262)
+    far = pd.DataFrame(
+        {
+            "t": [
+                datetime.date(2015, 7, 1),
+                datetime.date(2015, 7, 2),
+                datetime.date(9999, 12, 31),
+            ],
+            "v": [1.0, 2.0, 3.0],
+        }
+    )
+    out, _ = run_op("lag", far, {"time": "t", "columns": ["v"]})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 1.0, -1]
+    old = pd.DataFrame({"t": ["1500-01-01", "1500-01-02"], "v": [1.0, 2.0]})
+    out, _ = run_op("lag", old, {"time": "t", "columns": ["v"]})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 1.0]
