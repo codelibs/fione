@@ -385,6 +385,7 @@ def form_for(csrf: str, **changes) -> dict:
         "max_runtime_secs_per_model": "30",
         "max_models": "9",
         "nfolds": "4",
+        "time_column": "petal width (cm)",
         "seed": "4294967295",
         "balance_classes": "on",
         "decision": "argmax",
@@ -436,6 +437,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "max_runtime_secs_per_model": 30,
         "max_models": 9,
         "nfolds": 4,
+        "time_column": "petal width (cm)",
         "seed": 2**32 - 1,
         "balance_classes": True,
         "decision": "argmax",
@@ -449,9 +451,24 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "keep_cv_models": True,
         "keep_cv_fold_assignment": True,
         "ignored_columns": ["sepal width (cm)", "petal length (cm)"],
+        "cv_group_column": None,
+        "cv_repeats": None,
     }
     assert {f.name for f in dataclasses.fields(TrainConfig)} == set(expected)  # all covered
     assert config.to_dict() == expected
+
+
+def test_the_time_column_is_optional_and_must_be_a_column_other_than_the_target(world):
+    csrf = world.login("ed")
+    url = world.path("/projects/{p}/datasets/{train}/train")
+    sent = world.client.post(url, data=form_for(csrf, time_column=""), follow_redirects=False)
+    job_id = int(location(sent).rsplit("/", 1)[1])
+    with closing(connect(world.client)) as conn:
+        assert store.get_job(conn, job_id).payload["config"]["time_column"] is None
+    for bad in ("species", "nope"):  # the target; a column the data has not
+        refused = world.client.post(url, data=form_for(csrf, time_column=bad))
+        assert refused.status_code == 422
+        assert i18n.t("train.error.time_column", "en") in refused.text
 
 
 def test_the_balanced_decision_is_queued_and_a_bad_one_is_refused(world):
@@ -481,6 +498,31 @@ def test_the_log_transform_is_queued_and_a_bad_one_is_refused(world):
         url, data=form_for(csrf, target_transform="sqrt"), follow_redirects=False
     )
     assert refused.status_code == 422
+
+
+def test_the_group_column_is_queued_and_a_bad_one_is_refused(world):
+    csrf = world.login("ed")
+    url = world.path("/projects/{p}/datasets/{train}/train")
+    sent = world.client.post(
+        url,
+        data=form_for(csrf, cv_group_column="sepal width (cm)", time_column=""),
+        follow_redirects=False,
+    )
+    job_id = int(location(sent).rsplit("/", 1)[1])
+    with closing(connect(world.client)) as conn:
+        config = store.get_job(conn, job_id).payload["config"]
+    assert config["cv_group_column"] == "sepal width (cm)"
+    for column in ("nope", "species"):  # not a column; the target
+        refused = world.client.post(
+            url, data=form_for(csrf, cv_group_column=column, time_column=""), follow_redirects=False
+        )
+        assert refused.status_code == 422
+    both = world.client.post(  # the form also orders the rows in time
+        url, data=form_for(csrf, cv_group_column="sepal width (cm)"), follow_redirects=False
+    )
+    assert both.status_code == 422
+    page = world.client.get(url)
+    assert 'name="cv_group_column"' in page.text
 
 
 def test_unchecked_flags_and_empty_optionals_are_false_and_none(world):

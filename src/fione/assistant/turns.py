@@ -120,10 +120,15 @@ def _acknowledgement(kind: str, result: dict, args: dict | None = None) -> dict:
     (the card has the settings, which the model needs no second copy of)."""
     config = result.get("config") or {}
     if kind == "join":
-        summary = {k: config.get(k) for k in ("other_dataset_id", "key", "summarize", "columns")}
+        summary = {
+            k: config.get(k) for k in ("other_dataset_id", "key", "keys", "summarize", "columns")
+        }
+        summary = {k: v for k, v in summary.items() if k != "keys" or v}
         summary["dataset_id"] = result.get("dataset_id") or (args or {}).get("dataset_id")
     else:
-        summary = {k: config.get(k) for k in ("target", "task", "ignored_columns")}
+        summary = {
+            k: config.get(k) for k in ("target", "task", "ignored_columns", "cv_group_column")
+        }
     warnings = [w["message"] for w in result.get("warnings") or [] if isinstance(w, dict)]
     return {
         "proposal": True,

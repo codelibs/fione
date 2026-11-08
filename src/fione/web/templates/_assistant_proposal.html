@@ -16,7 +16,11 @@
     <dt>{{ t('assistant.proposal.join_other') }}</dt>
     <dd>{% if card.other_name %}{{ card.other_name }}{% else %}{{ t('assistant.proposal.dataset_gone') }}{% endif %}</dd>
     <dt>{{ t('assistant.proposal.join_key') }}</dt>
+    {% if c.get("keys") %}
+    <dd>{{ c.get("keys") | join(", ") }}{% if c.get("other_keys") %} = {{ c.get("other_keys") | join(", ") }}{% endif %}</dd>
+    {% else %}
     <dd>{{ c.key }}{% if c.other_key %} = {{ c.other_key }}{% endif %}</dd>
+    {% endif %}
     <dt>{{ t('assistant.proposal.join_summarize') }}</dt>
     <dd>{{ t('assistant.proposal.join_summarize_yes' if c.summarize else 'assistant.proposal.join_summarize_no') }}</dd>
     <dt>{{ t('assistant.proposal.join_columns') }}</dt>
@@ -40,6 +44,10 @@
     {% if (c.target_transform | default("none")) != "none" %}
     <dt>{{ t('train.f.target_transform') }}</dt>
     <dd>{{ t('train.transform.' ~ c.target_transform) }}</dd>
+    {% endif %}
+    {% if c.cv_group_column %}
+    <dt>{{ t('train.f.cv_group_column') }}</dt>
+    <dd>{{ c.cv_group_column }}</dd>
     {% endif %}
     {% if c.ignored_columns %}
     <dt>{{ t('assistant.proposal.ignored') }}</dt>

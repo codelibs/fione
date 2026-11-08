@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from fione.engine import automl as automl_module
 from fione.engine import search
 from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, AutoML
-from fione.engine.config import ConfigError, DeadlineExceeded, NoModelError, TrainConfig
+from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
 from fione.engine.search import STARTUP_TRIALS
 
@@ -330,7 +330,13 @@ def test_balance_classes_weights_every_fit_and_lifts_minority_recall(monkeypatch
     for balance in (False, True):
         weights.clear()
         model = _fit(
-            train, families=["LightGBM"], target="y", max_models=1, balance_classes=balance, seed=1
+            train,
+            families=["LightGBM"],
+            target="y",
+            max_models=1,
+            balance_classes=balance,
+            seed=1,
+            cv_repeats=1,
         )
         pred = model.predict(test)
         recall[balance] = (pred[test["y"] == 1] == 1).mean()
@@ -618,7 +624,9 @@ def test_a_crash_after_a_good_trial_keeps_that_trial(monkeypatch):
     monkeypatch.setattr(LightGBM, "_fit", second_trial_fails)
     monkeypatch.setattr(FamilySpec, "fit_full", _boom)  # keep the fold models to inspect
     events = []
-    model = _fit(_binary(300), events, families=["LightGBM"], target="y", max_models=3)
+    model = _fit(
+        _binary(300), events, families=["LightGBM"], target="y", max_models=3, cv_repeats=1
+    )
     assert len(model.trials) == 1
     assert [len(m.models) for m in model.members] == [5]
     assert _errors(events, "family_error")[0]["message"] == "late failure"
@@ -633,6 +641,7 @@ def test_an_errored_family_never_counts_as_stagnation(monkeypatch):
         target="y",
         stopping_rounds=1,
         stopping_tolerance=0.5,  # LightGBM stagnates after two trials
+        cv_repeats=1,
     )
     assert model.stop_reason == "error"
 
@@ -1041,3 +1050,312 @@ def test_a_fit_without_high_cardinality_strings_does_not_depend_on_their_unseen_
     expected = run()
     monkeypatch.setattr(automl_module, "Prep", NoUnseenShare)
     pd.testing.assert_frame_equal(run(), expected)
+
+
+# --- group folds ----------------------------------------------------------------
+
+
+def _grouped(n_groups=30, per_group=10, seed=0):
+    df = _binary(n_groups * per_group, seed)
+    df["user"] = np.repeat([f"u{i}" for i in range(n_groups)], per_group)
+    return df
+
+
+def test_a_group_column_keeps_each_group_in_one_fold():
+    df = _grouped()
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=3,
+        cv_group_column="user",
+        feature_engineering=False,
+        keep_cv_fold_assignment=True,
+    )
+    folds_of = pd.Series(model.fold_assignment).groupby(df["user"].to_numpy()).nunique()
+    assert (folds_of == 1).all()
+
+
+def test_the_group_column_is_not_a_feature_when_ignored():
+    df = _grouped()
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        cv_group_column="user",
+        ignored_columns=["user"],
+        feature_engineering=False,
+    )
+    assert "user" not in model.columns
+
+
+def test_unknown_group_column_is_rejected():
+    with pytest.raises(ConfigError, match="cv_group_column 'nope'"):
+        _fit(_binary(100), target="y", cv_group_column="nope")
+
+
+def test_a_single_group_is_rejected():
+    df = _binary(100)
+    df["user"] = "same"
+    with pytest.raises(ConfigError, match="at least 2 groups"):
+        _fit(df, target="y", cv_group_column="user")
+
+
+def test_fewer_groups_than_folds_reduce_the_folds_with_a_notice():
+    df = _grouped(n_groups=3)
+    events = []
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=5,
+        cv_group_column="user",
+        feature_engineering=False,
+    )
+    notices = [e.data for e in events if e.type == "notice"]
+    assert any(n.get("nfolds_reduced_to") == 3 for n in notices)
+
+
+def test_missing_group_values_form_one_group():
+    df = _grouped()
+    df.loc[df.index[:20], "user"] = None
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=3,
+        cv_group_column="user",
+        feature_engineering=False,
+        keep_cv_fold_assignment=True,
+    )
+    assert len(set(model.fold_assignment[:20])) == 1
+
+
+def test_a_class_living_in_one_group_is_refused_for_group_folds():
+    df = _grouped()
+    df["y"] = (df["user"] == "u0").astype(int)
+    with pytest.raises(ConfigError, match="occurs in too few groups"):
+        _fit(df, families=["LightGBM"], target="y", max_models=1, cv_group_column="user")
+
+
+# --- repeated folds -------------------------------------------------------------
+
+
+def _started(events):
+    return next(e.data for e in events if e.type == "started")
+
+
+def _trend(n=800, seed=0):
+    """A target that grows with the day: shuffled folds interpolate it, later days cannot."""
+    rng = np.random.default_rng(seed)
+    day = np.arange(n) // 4
+    df = pd.DataFrame({"x": rng.normal(size=n), "day": day})
+    df["y"] = day * 1.0 + df["x"] * 0.1 + rng.normal(scale=0.1, size=n)
+    return df.sample(frac=1, random_state=seed).reset_index(drop=True)  # not in order of day
+
+
+def _ensemble_score(model):
+    board = model.leaderboard
+    return float(board.loc[board["family"] == "Ensemble", "cv_score"].iloc[0])
+
+
+def test_a_time_column_validates_on_later_rows_and_is_stricter_than_shuffled_folds():
+    df = _trend()
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    shuffled = _fit(df, feature_engineering=False, **options)
+    events = []
+    ordered = _fit(
+        df,
+        events,
+        time_column="day",
+        keep_cv_predictions=True,
+        keep_cv_fold_assignment=True,
+        **options,
+    )
+    assert _ensemble_score(ordered) > 3 * _ensemble_score(shuffled)  # later days were never seen
+    notice = next(e for e in events if e.data.get("kind") == "time_validation")
+    assert notice.data["folds"] == 5
+    # the first part of the days is only learned from: no prediction, no fold
+    first = (df["day"] <= 33).to_numpy()  # 800 rows in 6 parts: days 0 to 33
+    assert (ordered.fold_assignment[first] == -1).all()
+    assert (ordered.fold_assignment[~first] >= 0).all()
+    assert np.isnan(ordered.cv_predictions[first]).all()
+    assert np.isfinite(ordered.cv_predictions[~first]).all()
+    assert ordered.cv_predictions.shape == (len(df),)
+    assert ordered.predict(df).shape == (len(df),)  # a model is still fitted on every row
+
+
+def test_the_time_column_may_be_ignored_as_a_feature_and_may_hold_dates():
+    df = _trend(400)
+    df["when"] = (pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")).dt.strftime(
+        "%Y-%m-%d"
+    )
+    model = _fit(
+        df,
+        target="y",
+        task="regression",
+        families=["LightGBM"],
+        max_models=1,
+        time_column="when",
+        ignored_columns=["when", "day"],
+        keep_cv_fold_assignment=True,
+    )
+    assert "when" not in model.columns and (model.fold_assignment >= 0).sum() > 0
+
+
+def test_a_time_column_that_cannot_order_the_rows_is_refused():
+    df = _trend(200)
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    with pytest.raises(ConfigError, match="not in the data"):
+        _fit(df, time_column="nope", **options)
+    with pytest.raises(ConfigError, match="missing values"):
+        _fit(df.assign(day=df["day"].mask(df.index == 3)), time_column="day", **options)
+    with pytest.raises(ConfigError, match="numbers or dates"):
+        _fit(df.assign(day="soon"), time_column="day", **options)
+
+
+def test_the_refit_of_time_ordered_folds_takes_its_rounds_from_the_last_fold():
+    """The folds that look ahead train on 1/6 to 5/6 of the rows: the last has the most rows, so
+    its rounds are nearest to those of a fit on all of them; the others are not averaged in."""
+    from types import SimpleNamespace
+
+    from fione.engine.search import Clock
+
+    asked = []
+    spec = SimpleNamespace(
+        view="v",
+        seed=0,
+        rounds=lambda model: model,
+        fit_full=lambda params, X, y, clock, rounds, weight: asked.append(rounds) or "full",
+    )
+    result = SimpleNamespace(
+        spec=spec, models=[10, 20, 30, 40, 100], best_secs=1.0, best_params={}, repeats=1
+    )
+    prep = SimpleNamespace(v=lambda X: X)
+    clock = Clock(Deadline(60), lambda: False)
+    for ahead, rounds in ((False, 44), (True, 110)):  # the mean of all, or the last, times 1.1
+        model, problem = automl_module._refit(
+            result, None, None, prep, {}, clock, None, ahead=ahead
+        )
+        assert (model, problem) == ("full", None) and asked[-1] == rounds
+
+
+def test_fold_std_leaves_out_a_fold_where_the_metric_is_undefined():
+    from fione.engine import metrics
+
+    y = np.array([0, 1, 0, 1, 0, 0])
+    one = np.array([0.2, 0.8, 0.3, 0.7, 0.1, 0.4])
+    p = np.column_stack([1 - one, one])
+    folds = [
+        (np.array([4, 5]), np.array([0, 1])),
+        (np.array([0, 1]), np.array([2, 3])),
+        (np.array([0, 1]), np.array([4, 5])),
+    ]
+    assert np.isfinite(metrics.fold_std("auc", y, p, folds))  # the last part has one class
+    assert np.isnan(metrics.fold_std("auc", y, p, folds[2:]))
+
+
+def test_the_members_without_a_refit_keep_only_the_last_time_ordered_fold_model():
+    df = _trend(600)
+    events = []
+    model = _fit(
+        df,
+        events,
+        target="y",
+        task="regression",
+        families=["DeepLearning"],
+        max_models=1,
+        time_column="day",
+    )
+    member = next(m for m in model.members if m.spec.name == "DeepLearning")
+    assert len(member.models) == 1  # not five models, four of them learned from older rows only
+
+
+def test_a_group_column_and_a_time_column_cannot_be_used_together():
+    df = _grouped()
+    df["when"] = np.arange(len(df))
+    with pytest.raises(ConfigError, match="cannot be used together"):
+        _fit(df, target="y", cv_group_column="user", time_column="when")
+
+
+def test_few_rows_repeat_the_folds_and_the_ensemble_sees_every_repeat(monkeypatch):
+    seen = {}
+    real = automl_module.caruana
+
+    def spy(oof, y, task, *args, **kwargs):
+        seen["rows"] = {len(p) for p in oof.values()}
+        seen["y"] = len(y)
+        return real(oof, y, task, *args, **kwargs)
+
+    monkeypatch.setattr(automl_module, "caruana", spy)
+    df = _binary(300)
+    events = []
+    model = _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=3,
+        feature_engineering=False,
+        keep_cv_predictions=True,
+        keep_cv_models=True,
+        keep_cv_fold_assignment=True,
+    )
+    assert _started(events)["cv_repeats"] == 3
+    assert seen == {"rows": {900}, "y": 900}
+    # what is reported comes from the first repeat alone
+    assert model.cv_predictions.shape == (300, 2)
+    assert sorted(set(model.fold_assignment)) == [0, 1, 2]
+    assert len(model.cv_models["LightGBM"]) == 3
+
+
+def test_cv_repeats_one_turns_the_repetition_off_and_more_forces_it():
+    df = _binary(300)
+    for repeats, expected in ((1, 1), (2, 2)):
+        events = []
+        _fit(
+            df,
+            events,
+            families=["LightGBM"],
+            target="y",
+            max_models=1,
+            feature_engineering=False,
+            cv_repeats=repeats,
+        )
+        assert _started(events)["cv_repeats"] == expected
+
+
+def test_as_few_groups_as_folds_are_not_repeated():
+    events = []
+    _fit(
+        _grouped(n_groups=5),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=5,
+        cv_group_column="user",
+        feature_engineering=False,
+    )
+    assert _started(events)["cv_repeats"] == 1
+
+
+def test_folds_in_time_order_are_not_repeated():
+    events = []
+    _fit(
+        _trend(600),
+        events,
+        target="y",
+        task="regression",
+        families=["LightGBM"],
+        max_models=1,
+        time_column="day",
+        cv_repeats=3,
+    )
+    assert _started(events)["cv_repeats"] == 1

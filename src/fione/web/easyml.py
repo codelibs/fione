@@ -56,6 +56,7 @@ from fione.tools.builtin import (
     is_skewed_target,
     propose,
     rare_class_share,
+    repeated_id_column,
     runtime_need_secs,
     sample_profile,
 )
@@ -365,13 +366,17 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
 
 
 def _tips(found, task: str) -> list[tuple[str, dict]]:
-    """``(key, vars)`` for advanced settings that suit the column to predict: a skewed
-    non-negative number (``target_transform``) or a rare class (``decision``)."""
+    """``(key, vars)`` for advanced settings that suit the data: a skewed non-negative number
+    to predict (``target_transform``), a rare class (``decision``) and an ID column that repeats
+    over rows (``cv_group_column``)."""
+    tips = []
     if is_skewed_target(found.y, task):
-        return [("analysis.tip.skewed_target", {})]
-    if (share := rare_class_share(found.y, task)) is not None:
-        return [("analysis.tip.rare_class", {"share": _pct(share)})]
-    return []
+        tips.append(("analysis.tip.skewed_target", {}))
+    elif (share := rare_class_share(found.y, task)) is not None:
+        tips.append(("analysis.tip.rare_class", {"share": _pct(share)}))
+    if (repeated := repeated_id_column(found.profile, found.target.name)) is not None:
+        tips.append(("analysis.tip.repeated_id", {"column": repeated.name}))
+    return tips
 
 
 def _pct(rate: float) -> str:

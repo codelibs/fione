@@ -144,7 +144,7 @@ which corrects the same imbalance while learning, and it is ignored for regressi
 
 ## Text columns
 
-A column of running text (the median value has five words or more) is read in two ways. Its
+A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product) is read in two ways. Its
 topics are derived features (see below). A model family called TextLinear also reads its words:
 a logistic (or ridge) regression on the TF-IDF weights of words and word pairs, with the other
 columns beside them, learned again on each training fold. It joins the search and the ensemble
@@ -161,6 +161,22 @@ a first trial in its share is skipped. A late candidate stays in the model
 only when its cross-validation scores improve the ensemble; otherwise it gets weight 0 and is
 dropped. They are not run for data without a text column.
 
+## Values from earlier times
+
+For data over time, the value of a column at an earlier time is often the best feature (last
+month's sales of the same shop and item). The built-in **Add values from earlier times**
+module (`lag`) adds them: name the `time` column (whole numbers such as a month number), the
+columns to read (`columns`), the group each row belongs to (`by`, such as a shop and an item) and
+the steps back (`lags`, such as `1,2,3,12`). `sales_lag3` is the value of `sales` three steps of
+the time before, so a time with no row gives an empty value, never the row before. The rows of
+a group at one time are reduced to their mean (or sum, with `how`) first, so a coarser `by`
+gives, for example, the mean of an item over all its shops one month earlier. No row reads its
+own time or a later one, but the module does not know which rows are to be predicted: to give
+the rows to predict their lags, put them in the same dataset (with the target empty) before
+adding the lags. Training refuses a target with missing values, so take the rows to learn from
+with **Slice rows** (such as `month < 34`) before training, and the rows to predict with another
+slice for the prediction.
+
 ## Learning a skewed target
 
 For a regression target of 0 or more that is skewed (prices, counts, durations) and is
@@ -172,6 +188,54 @@ change from the bias to the prediction in proportion to each column's effect on 
 which is an approximation. Only the scores of the search itself (the trial history) stay on the
 logarithm scale. Every value must be above -1, and the setting is ignored for classification.
 
+## Data that follows time
+
+When the rows to predict come after the rows to learn from (sales of next month, a later
+period of a market), shuffled cross-validation parts overstate the score: a model learns from
+days after the ones it predicts. Choose a column that orders the rows in time ("Order of the
+rows in time", `time_column` in the API; a number, a date, or text a date can be read from, with
+no missing value). Fione then cuts the rows, in the order of that column, into `nfolds` + 1 parts of
+about the same size. Fold *j* checks the models on part *j* and learns from the parts before
+it, so no model learns from a later row than it predicts. Rows with the same value of the
+column are in the same part, and a column with few different values gives fewer folds.
+
+The first part is only learned from. The scores, the ensemble weights, the diagnostics and the
+cross-validation predictions cover the other parts; a row of the first part has no prediction
+(empty in the kept predictions, fold -1 in the fold assignment). The final models learn
+from all the rows. The column can be left out of the inputs and still order the rows.
+Derived features are not tried in this mode, since their check uses shuffled folds. A
+classification needs every class in the earlier parts of each fold, and more than one class in
+the parts that are predicted. A family that has no final refit (DeepLearning) keeps only the model
+of the last fold, which learned from the most rows.
+
+## Repeating the cross-validation
+
+With few rows, one random split into folds is noisy: a search over many trials then picks
+settings that happened to score well on that split, and the model does worse on new data than
+its score says. Up to 2,000 rows Fione therefore draws the folds three times with other seeds
+(twice up to 5,000 rows) and judges each trial by the mean of the repeats' scores; the ensemble
+is chosen on all repeats. The models, the diagnostics, the leaderboard and the cross-validation
+predictions come from the first repeat. Set "Repeats of cross-validation" (`cv_repeats` in the
+API) to choose the number yourself (1 to 10); 1 turns it off. With as few groups as folds
+(see below) the folds cannot differ between repeats, and folds in time order are one fixed
+partition, so neither is repeated. A run of fixed length tries fewer trials the more repeats it
+has.
+
+## Keeping related rows together
+
+Fione scores a model on rows it did not learn from, chosen at random. When several rows
+belong together (the same customer, patient or store) and the data you will predict holds other
+ones, a random split puts rows of one customer on both sides, and the score looks better than it
+is. Choose that column as "Keep related rows together by" (`cv_group_column` in the API): the
+rows with one value then always stay in the same validation fold, in the search and in the choice
+of derived features alike. The column is still an input unless you leave it out. A missing value
+counts as one group, and with fewer groups than folds the number of folds is lowered to the
+number of groups (at least two groups are needed). A class that occurs in so few groups that
+some fold's training rows lack it is refused, with the column named. The analysis page and the
+assistant suggest this when a column named like an ID (`user_id`, `顧客ID`) repeats its values over rows.
+
+A group column and a time column cannot be used together.
+
 ## Derived features
 
 Fione builds *derived features* that never read the target, and chooses among them by
@@ -179,7 +243,7 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
 
 - text columns: the common words (letter runs, so `C85` gives `c`) as 0/1 flags, plus length,
   word count, share of digits and capitals and the first number; for running text (a median
-  of five words or more) also 32 *topics*, the main directions of word use found by an SVD of
+  of five words or more, or the titles described under Text columns) also 32 *topics*, the main directions of word use found by an SVD of
   the word weights (TF-IDF);
 - categories: how common each is, and how common each pair is;
 - identifiers: a string column (two of them at most) with at least 12 distinct values and no

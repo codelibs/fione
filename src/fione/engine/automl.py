@@ -6,7 +6,9 @@ spec 5.1/5.7) and spends it in phases:
 1. Checks, the choice of derived features (``fione.engine.features``; at most
    ``FEATURE_SHARE`` of the time, or ``FEATURE_MIN_SECS`` of a short run, and off with
    ``feature_engineering=False``), ``Prep.fit``
-   and the folds: measured, not otherwise budgeted. Call the time left after them L.
+   and the folds (a ``cv_group_column`` keeps the rows of a group in one fold, in the search and
+   in the choice of derived features alike): measured, not otherwise budgeted. Call the time left
+   after them L.
 2. Search: 0.65 L. Families run one after another in ``FAMILY_ORDER``; each gets the search
    time still left times its ``FAMILY_WEIGHTS`` share among the families not yet run, so time a
    family leaves unused flows to the next ones. The search scores trials with log loss / RMSE.
@@ -21,7 +23,12 @@ spec 5.1/5.7) and spends it in phases:
    not yet run, and only when its first trial is expected to fit in that share (``cost`` times
    the first trial of TextLinear). A late family that does not apply to the data is not run and
    changes nothing; one that does not improve the ensemble gets weight 0 from ``caruana``.
-3. Ensemble selection: ``caruana`` on the candidates' out-of-fold (OOF) predictions; cheap.
+   With few rows the folds are drawn again, with other seeds, ``repeats_for`` times (or
+   ``cv_repeats``): a trial's score is the mean of the repeats' scores, each judged alone,
+   which makes the search less likely to pick parameters that were only lucky on one split.
+   Fold models, diagnostics, the leaderboard and the fold assignment come from the first repeat.
+3. Ensemble selection: ``caruana`` on the candidates' out-of-fold (OOF) predictions, all repeats
+   one below the other; cheap.
 4. Final refit: until the reserve (about 0.2 L when the search used its whole share; more when
    it ended early). Each member with weight > 0 is refit once on all rows with its best
    parameters: boosting for 1.1 x the mean best iteration of its fold models, without early
@@ -79,8 +86,11 @@ from fione.engine.search import (
     Clock,
     FamilyResult,
     Folds,
+    covered,
     error_notice,
-    make_folds,
+    make_time_folds,
+    repeat_folds,
+    repeats_for,
     run_family,
 )
 
@@ -184,6 +194,33 @@ class AutoML:
         stopping_metric = metrics.resolve(c.stopping_metric, task, "stopping_metric")
         notices: list[Event] = []
         y, classes, nfolds = validate_target(target, task, c.nfolds, notices.append)
+        # Folds in time order are one fixed partition: another seed would not change them.
+        repeats = 1 if c.time_column else c.cv_repeats or repeats_for(len(X))
+        row_groups = None
+        if c.cv_group_column is not None:
+            if c.cv_group_column not in df.columns:
+                raise ConfigError(f"cv_group_column '{c.cv_group_column}' is not in the data")
+            row_groups = pd.factorize(df[c.cv_group_column], use_na_sentinel=False)[0]
+            distinct = int(row_groups.max()) + 1
+            if distinct < 2:
+                raise ConfigError(
+                    f"the group column '{c.cv_group_column}' needs at least 2 groups, "
+                    f"it has {distinct}"
+                )
+            if distinct <= nfolds:
+                repeats = 1  # each group is a fold: every seed gives the same partition
+            if distinct < nfolds:
+                nfolds = distinct
+                notices.append(
+                    Event(
+                        "notice",
+                        data={
+                            "message": f"nfolds reduced to {nfolds}: only {distinct} groups",
+                            "nfolds_reduced_to": nfolds,
+                            "reason": f"only {distinct} groups",
+                        },
+                    )
+                )
         self._event(
             "started",
             config=c.to_dict(),
@@ -191,6 +228,7 @@ class AutoML:
             n_cols=X.shape[1],
             task=task,
             nfolds=nfolds,
+            cv_repeats=repeats,
         )
         for notice in notices:
             self.emit(notice)
@@ -212,9 +250,27 @@ class AutoML:
             self._notice("decision is ignored for regression")
         elif c.decision == "balanced":
             prior = np.bincount(y) / len(y)
-        groups, tried = self._engineer(X, y, task, nfolds, deadline)
+        if c.time_column is None:
+            groups, tried = self._engineer(X, y, task, nfolds, deadline, row_groups)
+        else:  # the gate judges a feature on shuffled folds, which look at the future
+            groups, tried = [], None
+            if c.feature_engineering:
+                self._notice("derived features are not tried with a time column")
         prep = Prep().fit(X, groups)
-        folds = make_folds(y, task, nfolds, c.seed)
+        if c.time_column is None:
+            folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
+            first_run = folds[:nfolds]  # reported: the other repeats only judge the search
+            if row_groups is not None and task == "classification":
+                self._check_classes_in_training(y, folds, classes)
+        else:
+            folds = first_run = make_time_folds(_order_codes(df, c.time_column), y, task, nfolds)
+            self._notice(
+                f"validating on {len(folds)} later parts of the data in order of "
+                f"'{c.time_column}'; the first part is only learned from",
+                kind="time_validation",
+                folds=len(folds),
+            )
+        rows = covered(folds, len(y))  # the rows some fold predicts (all but the first part)
         families = self._without_wide_linear_view(prep, len(X))
         # The words are read only from prose columns.
         families = [f for f in families if f != "TextLinear" or prep.prose] or families
@@ -233,8 +289,11 @@ class AutoML:
             task,
             prep,
             deadline.child(SEARCH_SHARE * left),
-            None if default_stopping else (lambda oof: metrics.loss(stopping_metric, y, oof)),
+            None
+            if default_stopping
+            else (lambda oof: metrics.loss(stopping_metric, y[rows], oof[rows])),
             weight,
+            repeats,
         )
         stop_reason = self._stop_reason(reasons, finished)
         if not results:
@@ -250,16 +309,19 @@ class AutoML:
             raise NoModelError("time budget too small to train any model")
         self._event("stopped", reason=stop_reason)
 
-        oof = {name: result.oof for name, result in results.items()}
-        weights = caruana(oof, y, task)
-        scores = {name: metrics.value(sort_metric, y, p, prior) for name, p in oof.items()}
+        oof = {name: result.oof[rows] for name, result in results.items()}
+        y_valid = y[rows]
+        # The weights are chosen on every repeat's predictions, one below the other.
+        stacked = {name: result.stacked(rows) for name, result in results.items()}
+        weights = caruana(stacked, np.tile(y_valid, repeats), task)
+        scores = {name: metrics.value(sort_metric, y_valid, p, prior) for name, p in oof.items()}
         pick = max if sort_metric in metrics.HIGHER_IS_BETTER else min
         self._event(
             "ensemble",
             sort_metric=sort_metric,
             weights=weights,
             scores=scores,
-            ensemble_score=metrics.value(sort_metric, y, _blend(oof, weights), prior),
+            ensemble_score=metrics.value(sort_metric, y_valid, _blend(oof, weights), prior),
             best_single=pick(scores, key=scores.get),
         )
 
@@ -274,7 +336,7 @@ class AutoML:
         original = np.expm1 if y is not y_seen else _same
         blended = original(_blend(oof, final))
         try:
-            found = diagnostics(task, y_seen, blended, classes, seed=c.seed, prior=prior)
+            found = diagnostics(task, y_seen[rows], blended, classes, seed=c.seed, prior=prior)
         except Exception as e:
             found = None
             self._notice(
@@ -282,11 +344,22 @@ class AutoML:
                 kind="diagnostics_error",
                 exception=type(e).__name__,
             )
+        # the folds' rows, counted among the validated rows only
+        at = [(None, np.searchsorted(rows, valid)) for _, valid in first_run]
         leaderboard = _leaderboard(
-            results, final, refit_secs, blended, y_seen, folds, sort_metric, original, prior
+            results,
+            final,
+            refit_secs,
+            blended,
+            y_seen[rows],
+            at,
+            sort_metric,
+            original,
+            prior,
+            rows,
         )
-        assignment = np.empty(len(y), dtype=np.int64)
-        for i, (_, valid) in enumerate(folds):
+        assignment = np.full(len(y), -1, dtype=np.int64)  # -1: never validated
+        for i, (_, valid) in enumerate(first_run):
             assignment[valid] = i
         model = TrainedModel(
             task=task,
@@ -298,11 +371,11 @@ class AutoML:
             feature_importance=feature_importance(members, prep),
             stop_reason=stop_reason,
             config=c,
-            metrics=metrics.summary(task, y_seen, blended, prior),
+            metrics=metrics.summary(task, y_seen[rows], blended, prior),
             prep=prep,
             members=members,
             label_dtype=target.dtype,
-            cv_predictions=blended if c.keep_cv_predictions else None,
+            cv_predictions=_spread(blended, rows, len(y)) if c.keep_cv_predictions else None,
             cv_models={n: r.models for n, r in results.items() if "#" not in n}
             if c.keep_cv_models
             else None,
@@ -324,7 +397,9 @@ class AutoML:
     def _feature_secs(left: float) -> float:
         return max(FEATURE_SHARE * left, min(FEATURE_MIN_SECS, FEATURE_MAX_SHARE * left))
 
-    def _engineer(self, X, y, task, nfolds, deadline) -> tuple[list, list[dict] | None]:
+    def _engineer(
+        self, X, y, task, nfolds, deadline, row_groups=None
+    ) -> tuple[list, list[dict] | None]:
         """The derived-feature groups to add and the verdict on every candidate (None when
         switched off). The choice gets at most ``FEATURE_SHARE`` of the time, or of a short run
         ``FEATURE_MIN_SECS`` (but under ``FEATURE_MAX_SHARE``)."""
@@ -339,6 +414,7 @@ class AutoML:
                 self.config.seed,
                 deadline.child(self._feature_secs(deadline.remaining())),
                 self.should_stop,
+                row_groups,
             )
         except Exception as e:  # the base features still train
             self.emit(error_notice("features_error", "features", e))
@@ -385,7 +461,9 @@ class AutoML:
             and FAMILIES[name].coef_bytes(prep, outputs) <= SIZE_CAP
         ]
 
-    def _search(self, families, X, y, folds, task, prep, search: Deadline, stopping_score, weight):
+    def _search(
+        self, families, X, y, folds, task, prep, search: Deadline, stopping_score, weight, repeats=1
+    ):
         """Run the families in order, the late ones last; returns (results with models, trial
         rows, end reason per family, finished trial count, exception per failed family)."""
         c = self.config
@@ -439,6 +517,7 @@ class AutoML:
                     stopping_tolerance=c.stopping_tolerance,
                     stopping_score=stopping_score,
                     sample_weight=weight,
+                    repeats=repeats,
                 )
             except NoModelError:
                 if not late:
@@ -465,6 +544,18 @@ class AutoML:
                 break
         return results, logs, reasons, finished, errors
 
+    def _check_classes_in_training(self, y, folds, classes) -> None:
+        """Group folds do not balance the classes: a class that lives in a single group is
+        missing from the training rows of its fold, and several families then fail on it."""
+        for train, valid in folds:
+            missing = np.setdiff1d(np.unique(y[valid]), np.unique(y[train]))
+            if len(missing):
+                raise ConfigError(
+                    f"class {classes[int(missing[0])]!r} occurs in too few groups of "
+                    f"'{self.config.cv_group_column}' to be in the training rows of every fold; "
+                    "choose another group column or leave it empty"
+                )
+
     def _stop_reason(self, reasons: dict[str, str], finished: int) -> str:
         ends = set(reasons.values())
         if self.should_stop() or "cancelled" in ends:
@@ -483,6 +574,7 @@ class AutoML:
 
     def _members(self, results, weights, X, y, prep, clock, weight, stop_reason):
         """Final members, heaviest first, and the refit time per family."""
+        ahead = self.config.time_column is not None
         views: dict[str, pd.DataFrame] = {}
         chosen = sorted((n for n in results if weights[n] > 0), key=lambda n: -weights[n])
         candidates, refit_secs = [], {}
@@ -490,10 +582,12 @@ class AutoML:
         refitted: set[str] = set()
         for name in chosen:
             result = results[name]
-            models = result.models
+            # time-ordered fold models learned from 1/(k+1) to k/(k+1) of the rows: only
+            # the last, with the most, stands in when there is no refit
+            models = result.models[-1:] if ahead else result.models
             if stop_reason != "cancelled" and not self.should_stop() and result.spec.refit:
                 start = time.monotonic()
-                model, problem = _refit(result, X, y, prep, views, clock, weight)
+                model, problem = _refit(result, X, y, prep, views, clock, weight, ahead=ahead)
                 refit_secs[name] = time.monotonic() - start
                 if model is not None:
                     models = [model]
@@ -507,7 +601,8 @@ class AutoML:
                         else "did not fit in the time left"
                     )
                     self._notice(
-                        f"{name}: the final refit {why}; using its {len(models)} fold models",
+                        f"{name}: the final refit {why}; using its "
+                        f"{len(models)} fold model{'s' if len(models) != 1 else ''}",
                         family=result.spec.name,
                     )
             members_of[name] = models
@@ -567,7 +662,17 @@ class AutoML:
                 ):
                     continue
                 start = time.monotonic()
-                model, problem = _refit(results[name], X, y, prep, views, clock, weight, extra)
+                model, problem = _refit(
+                    results[name],
+                    X,
+                    y,
+                    prep,
+                    views,
+                    clock,
+                    weight,
+                    extra,
+                    self.config.time_column is not None,
+                )
                 refit_secs[name] += time.monotonic() - start
                 if isinstance(problem, Exception):
                     self.emit(error_notice("refit_error", spec.name, problem))
@@ -595,17 +700,24 @@ def _mb(size: float) -> str:
     return f"{size / 2**20:.0f} MB"
 
 
-def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight, bag: int = 0):
+def _refit(
+    result: FamilyResult, X, y, prep, views, clock: Clock, weight, bag: int = 0, ahead: bool = False
+):
     """``(model refit on all rows, None)``, or ``(None, why)`` with why ``"time"``,
     ``"cancelled"`` or the exception the refit raised. ``bag`` > 0 refits with another seed."""
     spec = result.spec
-    # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit.
-    if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / (len(result.models) - 1):
+    # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit. Folds
+    # that look ahead in time train on 1/(k+1) to k/(k+1) of them: k/2 full-data fits in all. The
+    # trial fitted every fold of every repeat.
+    fits = result.repeats * (len(result.models) / 2 if ahead else len(result.models) - 1)
+    if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / fits:
         return None, "cancelled" if clock.should_stop() else "time"
     try:
         if spec.view not in views:
             views[spec.view] = getattr(prep, spec.view)(X)
-        best = np.mean([spec.rounds(model) for model in result.models])
+        # the last fold of the time-ordered ones has the most rows, nearest to all of them
+        learned = result.models[-1:] if ahead else result.models
+        best = np.mean([spec.rounds(model) for model in learned])
         rounds = min(MAX_ROUNDS, max(1, round(best * REFIT_ROUNDS_FACTOR)))
         seed = spec.seed
         spec.seed = (seed + BAG_SEED_STEP * bag) % BAG_SEED_SPACE
@@ -620,6 +732,33 @@ def _refit(result: FamilyResult, X, y, prep, views, clock: Clock, weight, bag: i
         return None, e
 
 
+def _order_codes(df: pd.DataFrame, column: str) -> np.ndarray:
+    """Whole numbers that put the rows in the order of ``column`` (a number, a date, or text a
+    date can be read from), equal for equal values."""
+    if column not in df.columns:
+        raise ConfigError(f"time column '{column}' is not in the data")
+    values = df[column]
+    if values.isna().any():
+        raise ConfigError(f"time column '{column}' has missing values")
+    if not (pd.api.types.is_numeric_dtype(values) or pd.api.types.is_datetime64_any_dtype(values)):
+        try:
+            values = pd.to_datetime(values)
+        except (ValueError, TypeError):
+            raise ConfigError(
+                f"time column '{column}' must hold numbers or dates it can order by"
+            ) from None
+    return pd.factorize(values, sort=True)[0].astype(np.int64)
+
+
+def _spread(values: np.ndarray, rows: np.ndarray, n: int) -> np.ndarray:
+    """``values`` of the validated ``rows`` in an array of ``n`` rows, empty (NaN) elsewhere."""
+    if len(rows) == n:
+        return values
+    out = np.full((n, *values.shape[1:]), np.nan)
+    out[rows] = values
+    return out
+
+
 def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
     return sum(w * oof[name] for name, w in weights.items() if w > 0)
 
@@ -629,7 +768,7 @@ def _same(values: np.ndarray) -> np.ndarray:
 
 
 def _leaderboard(
-    results, weights, refit_secs, blended, y, folds: Folds, sort_metric, original, prior
+    results, weights, refit_secs, blended, y, folds: Folds, sort_metric, original, prior, valid_rows
 ) -> pd.DataFrame:
     """One row per candidate (a family's best trial, then its runners-up) and one for the
     ensemble. The ensemble's weights were chosen on the same OOF predictions it is scored on, so
@@ -637,7 +776,7 @@ def _leaderboard(
     ``blended`` are in."""
     rows = []
     for name, result in results.items():
-        oof = original(result.oof)
+        oof = original(result.oof[valid_rows])
         rows.append(
             {
                 "model": f"{result.spec.name}_{result.best_trial}",

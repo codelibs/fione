@@ -9,7 +9,7 @@ import pytest
 from sklearn.datasets import make_classification, make_regression
 
 from fione.engine import search
-from fione.engine.config import Deadline, DeadlineExceeded, NoModelError
+from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError
 from fione.engine.families import (
     FAMILIES,
     MAX_ROUNDS,
@@ -19,7 +19,15 @@ from fione.engine.families import (
     n_threads,
 )
 from fione.engine.prep import Prep, validate_target
-from fione.engine.search import CAP_MARGIN, STARTUP_TRIALS, make_folds, run_family
+from fione.engine.search import (
+    CAP_MARGIN,
+    STARTUP_TRIALS,
+    make_folds,
+    repeat_folds,
+    repeats_for,
+    run_family,
+    score,
+)
 
 TRIAL_KEYS = {"family", "trial", "score", "params", "elapsed", "best_so_far"}
 
@@ -879,3 +887,141 @@ def test_one_top_trial_hands_on_no_runners_up(monkeypatch):
     monkeypatch.setattr(search, "TOP_TRIALS", 1)
     result, _, _ = _search_with_runners_up()
     assert result.runners_up == []
+
+
+def _group_ids(n, groups, seed=0):
+    return np.random.default_rng(seed).integers(0, groups, n)
+
+
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_group_folds_never_split_a_group_and_cover_every_row(task):
+    rng = np.random.default_rng(1)
+    y = rng.integers(0, 2, 300) if task == "classification" else rng.normal(size=300)
+    groups = _group_ids(300, 40)
+    folds = make_folds(y, task, 5, 0, groups)
+    assert len(folds) == 5
+    valid_rows = np.concatenate([valid for _, valid in folds])
+    assert sorted(valid_rows) == list(range(300))
+    for train, valid in folds:
+        assert not set(groups[train]) & set(groups[valid])
+
+
+def test_group_folds_are_deterministic_and_follow_the_seed():
+    y = np.random.default_rng(1).integers(0, 2, 300)
+    groups = _group_ids(300, 40)
+    first = make_folds(y, "classification", 5, 0, groups)
+    again = make_folds(y, "classification", 5, 0, groups)
+    other = make_folds(y, "classification", 5, 1, groups)
+    assert all(np.array_equal(a[1], b[1]) for a, b in zip(first, again, strict=True))
+    assert any(not np.array_equal(a[1], b[1]) for a, b in zip(first, other, strict=True))
+
+
+@pytest.mark.parametrize(
+    ("rows", "repeats"), [(10, 3), (2_000, 3), (2_001, 2), (5_000, 2), (5_001, 1), (1_000_000, 1)]
+)
+def test_the_folds_are_repeated_for_few_rows(rows, repeats):
+    assert repeats_for(rows) == repeats
+
+
+def test_repeated_folds_are_runs_of_other_partitions():
+    y = np.random.default_rng(1).integers(0, 2, 200)
+    folds = repeat_folds(y, "classification", 4, 3, repeats=3)
+    assert len(folds) == 12
+    first = make_folds(y, "classification", 4, 3)
+    assert all(np.array_equal(a[1], b[1]) for a, b in zip(folds[:4], first, strict=True))
+    runs = [folds[i * 4 : (i + 1) * 4] for i in range(3)]
+    for run in runs:
+        assert sorted(np.concatenate([valid for _, valid in run])) == list(range(200))
+    assert not np.array_equal(runs[0][0][1], runs[1][0][1])
+
+
+def test_repeated_group_folds_keep_each_group_together_in_every_run():
+    y = np.random.default_rng(1).integers(0, 2, 300)
+    groups = _group_ids(300, 40)
+    for train, valid in repeat_folds(y, "classification", 5, 0, groups, 2):
+        assert not set(groups[train]) & set(groups[valid])
+
+
+def test_a_repeated_search_scores_each_repeat_alone_and_keeps_the_first_runs_models():
+    X, y = _classification(300, 6)
+    prep = Prep().fit(X)
+    folds = repeat_folds(y, "classification", 3, 0, repeats=3)
+    result = run_family(
+        "LightGBM",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(30),
+        lambda event: None,
+        lambda: False,
+        max_trials=2,
+        repeats=3,
+    )
+    assert len(result.models) == 3 and result.repeats == 3 and len(result.oofs) == 3
+    assert result.oof is result.oofs[0]
+    assert result.stacked(np.arange(len(y))).shape == (3 * len(y), 2)
+    assert result.stacked(np.arange(10)).shape == (30, 2)
+    mean = np.mean([score("classification", y, oof) for oof in result.oofs])
+    assert result.best_score == pytest.approx(mean)
+    assert not np.allclose(result.oofs[0], result.oofs[1])  # other splits, other predictions
+
+
+def test_one_repeat_is_the_plain_search():
+    X, y = _classification(300, 6)
+    prep = Prep().fit(X)
+    result = run_family(
+        "LightGBM",
+        X,
+        y,
+        make_folds(y, "classification", 3, 0),
+        "classification",
+        prep,
+        Deadline(30),
+        lambda event: None,
+        lambda: False,
+        max_trials=1,
+    )
+    assert result.repeats == 1 and result.oofs == []
+    assert np.array_equal(result.stacked(np.arange(10)), result.oof[:10])
+
+
+def test_time_folds_learn_only_from_earlier_rows():
+    order = np.repeat(np.arange(60), 5)[np.random.default_rng(0).permutation(300)]
+    y = np.zeros(300)
+    folds = search.make_time_folds(order, y, "regression", 4)
+    assert len(folds) == 4
+    for train, valid in folds:
+        assert order[train].max() < order[valid].min()  # nothing is learned from a later row
+        assert len(np.intersect1d(train, valid)) == 0
+    # the folds go forward, and the first part is never predicted
+    firsts = [order[valid].min() for _, valid in folds]
+    assert firsts == sorted(firsts)
+    seen = search.covered(folds, 300)
+    assert len(seen) == 240 and order[seen].min() == 12
+
+
+def test_time_folds_keep_rows_of_one_moment_together_and_need_two_parts():
+    order = np.array([1, 1, 1, 1, 2, 2, 2, 2, 2, 2])
+    folds = search.make_time_folds(order, np.zeros(10), "regression", 5)
+    assert len(folds) == 1  # two moments: one learned from, one predicted
+    assert set(order[folds[0][0]]) == {1} and set(order[folds[0][1]]) == {2}
+    with pytest.raises(ConfigError, match="too few different values"):
+        search.make_time_folds(np.ones(10, dtype=int), np.zeros(10), "regression", 3)
+
+
+def test_time_folds_of_a_classification_refuse_a_class_that_comes_late():
+    order = np.arange(40)
+    y = np.array([0] * 30 + [1] * 10)  # the class 1 first appears after the early parts
+    with pytest.raises(ConfigError, match="a class has no row"):
+        search.make_time_folds(order, y, "classification", 4)
+    ok = np.arange(40) % 2
+    assert len(search.make_time_folds(order, ok, "classification", 4)) == 4
+
+
+def test_time_folds_refuse_later_parts_with_a_single_class():
+    order = np.arange(60)
+    y = np.array([0, 1] * 10 + [0] * 40)  # both classes early, only one in the parts to predict
+    with pytest.raises(ConfigError, match="single class"):
+        search.make_time_folds(order, y, "classification", 2)

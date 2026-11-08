@@ -300,6 +300,8 @@ def test_submit_training_takes_a_config_object_and_an_editor_member(
         ),
         ({**CONFIG, "target": "nope"}, "target column 'nope' is not in the data"),
         ({**CONFIG, "ignored_columns": ["species"]}, "cannot also be ignored"),
+        ({**CONFIG, "time_column": "nope"}, "time column 'nope' is not in the data"),
+        ({**CONFIG, "time_column": "species"}, "cannot be the target"),
         ({**CONFIG, "nfolds": 1}, "nfolds"),
         ({"max_runtime_secs": 5}, "target is required"),
         ({**CONFIG, "bogus": 1}, "unknown parameters"),

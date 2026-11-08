@@ -140,7 +140,17 @@
         <legend class="fieldset__legend">{{ t('train.g.validation') }}</legend>
         <div class="form-grid">
           {{ number("nfolds", 2) }}
+          {{ number("cv_repeats", 1, optional=True) }}
           {{ number("seed", 0, seed_max) }}
+        </div>
+        <div class="field">
+          <label class="field__label" for="f-time_column">{{ t('train.f.time_column') }}</label>
+          <select class="input input-md input-limited" id="f-time_column" name="time_column"{{ described("time_column") }}>
+            <option value=""{% if not values.time_column %} selected{% endif %}>{{ t('train.time_column.none') }}</option>
+            {% for col in columns if not col.target %}<option value="{{ col.profile.name }}"{% if values.time_column == col.profile.name %} selected{% endif %}>{{ col.profile.name }}</option>{% endfor %}
+          </select>
+          <p class="field__hint" id="time_column-hint">{{ t('train.h.time_column') }}</p>
+          {{ error("time_column") }}
         </div>
         {{ flag("balance_classes") }}
         <div class="field">
@@ -158,6 +168,15 @@
           </select>
           <p class="field__hint" id="target_transform-hint">{{ t('train.h.target_transform') }}</p>
           {{ error("target_transform") }}
+        </div>
+        <div class="field">
+          <label class="field__label" for="f-cv_group_column">{{ t('train.f.cv_group_column') }}</label>
+          <select class="input input-md input-limited" id="f-cv_group_column" name="cv_group_column"{{ described("cv_group_column") }}>
+            <option value="">{{ t('train.group.none') }}</option>
+            {% for col in columns if not col.target %}<option value="{{ col.profile.name }}"{% if values.cv_group_column == col.profile.name %} selected{% endif %}>{{ col.profile.name }}</option>{% endfor %}
+          </select>
+          <p class="field__hint" id="cv_group_column-hint">{{ t('train.h.cv_group_column') }}</p>
+          {{ error("cv_group_column") }}
         </div>
         {{ flag("feature_engineering") }}
       </fieldset>

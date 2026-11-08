@@ -262,7 +262,7 @@ def test_a_degraded_run_still_records_the_model(
     # A long budget: the run ends when every family stagnates, and a slow machine must not run
     # a family out of time first.
     config = {**CONFIG, "max_runtime_secs": 60, "max_models": None}
-    config |= {"stopping_rounds": 1, "stopping_tolerance": 0.5}
+    config |= {"stopping_rounds": 1, "stopping_tolerance": 0.5, "cv_repeats": 1}
     job = models.submit_training(conn, storage, owner, project.id, dataset.id, config, name="quick")
     done = run_job(job)
     assert done.status is JobStatus.DONE, done.message

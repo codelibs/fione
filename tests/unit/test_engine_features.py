@@ -39,9 +39,7 @@ def people(n=600, seed=0):
     surname = rng.choice([f"Name{i}" for i in range(80)], n)
     X = pd.DataFrame(
         {
-            "name": [
-                f"{s}, {t}. Person{i}" for i, (s, t) in enumerate(zip(surname, title, strict=True))
-            ],
+            "name": [f"{s}, {t}." for s, t in zip(surname, title, strict=True)],
             "noise": rng.normal(size=n),
             "group": rng.choice(["a", "b", "c"], n),
         }
@@ -131,7 +129,7 @@ def test_text_topics_without_words_give_no_features():
 
 def test_text_topics_are_offered_for_prose_only():
     X, _ = sentences()
-    X["name"] = [f"Person, Mr. Number {i}" for i in range(len(X))]  # 4 words: a name, not prose
+    X["name"] = [f"Mr. Number{i}" for i in range(len(X))]  # 2 words: a name, not prose
     labels = [g.label for g in features.candidates(Prep().fit(X), X, [])]
     assert "text topics of text" in labels and "text topics of name" not in labels
 
@@ -383,6 +381,23 @@ def test_the_gate_adopts_a_group_that_explains_the_label():
     assert "text tokens of name" in adopted
     assert [g.label for g in kept] == [v.group for v in verdicts if v.adopted]
     assert all(v.reason == "adopted" for v in verdicts if v.adopted)
+
+
+def test_the_gate_keeps_the_rows_of_a_group_in_one_fold():
+    X, y = people()
+    groups = np.arange(len(X)) // 6
+    gate = features._Gate(X, y, "classification", 5, 0, groups=groups)
+    for repeat in range(2):
+        for train, valid in gate.folds(repeat):
+            assert not set(groups[train]) & set(groups[valid])
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120), row_groups=groups)
+    assert verdicts
+
+
+def test_the_gate_lowers_its_folds_to_the_groups_it_has():
+    X, y = people()
+    gate = features._Gate(X, y, "classification", 5, 0, groups=np.arange(len(X)) % 3)
+    assert gate.nfolds == 3
 
 
 def test_the_gate_adopts_nothing_for_noise():

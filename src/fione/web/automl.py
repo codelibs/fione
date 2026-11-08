@@ -26,7 +26,7 @@ from fione.api.routes_jobs import delete_finished_job, delete_finished_jobs_of
 from fione.api.schemas import job_out
 from fione.data.profile import SCORE_REASONS, leak_code
 from fione.engine import metrics
-from fione.engine.config import ConfigError, TargetError, TrainConfig
+from fione.engine.config import MAX_CV_REPEATS, ConfigError, TargetError, TrainConfig
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
 from fione.models import service as models
@@ -79,10 +79,13 @@ SINGLE_FIELDS = (
     "max_runtime_secs_per_model",
     "max_models",
     "nfolds",
+    "cv_repeats",
+    "time_column",
     "seed",
     "balance_classes",
     "decision",
     "target_transform",
+    "cv_group_column",
     "feature_engineering",
     "stopping_rounds",
     "stopping_metric",
@@ -433,6 +436,8 @@ def _form_values(defaults: dict) -> dict:
         "max_runtime_minutes": str(int(minutes)) if minutes.is_integer() else "",
         "max_runtime_secs_per_model": "",
         "max_models": "",
+        "cv_repeats": "",
+        "time_column": "",
     }
     for name in (
         "nfolds",
@@ -445,10 +450,11 @@ def _form_values(defaults: dict) -> dict:
         "target_transform",
     ):
         values[name] = str(defaults[name])
+    values["cv_group_column"] = defaults["cv_group_column"] or ""
     values["stopping_tolerance"] = f"{defaults['stopping_tolerance']:g}"
     for name in FLAGS:
         values[name] = defaults[name]
-    for name in ("max_runtime_secs_per_model", "max_models"):
+    for name in ("max_runtime_secs_per_model", "max_models", "cv_repeats"):
         if defaults[name] is not None:
             values[name] = str(defaults[name])
     return values
@@ -562,6 +568,16 @@ def _parse_train(form: FormData, names: list[str], inferred_task: str):
     if values["target_transform"] not in TRANSFORMS:
         errors["target_transform"] = "train.error.target_transform"
     config["target_transform"] = values["target_transform"]
+    group = values["cv_group_column"]
+    if group and (group == target or group not in names):
+        errors["cv_group_column"] = "train.error.cv_group_column"
+    config["cv_group_column"] = group or None
+    time_column = values["time_column"]
+    if time_column and (time_column not in names or time_column == target):
+        errors["time_column"] = "train.error.time_column"
+    config["time_column"] = time_column or None
+    if group and time_column:
+        errors["cv_group_column"] = "train.error.group_or_time"
     minutes = values["max_runtime_minutes"].strip()
     if len(minutes) > MAX_RUNTIME_DIGITS or _whole(minutes, 1) is None:
         errors["max_runtime_minutes"] = "analysis.error.runtime"
@@ -570,6 +586,7 @@ def _parse_train(form: FormData, names: list[str], inferred_task: str):
     for name, low, high in (
         ("max_runtime_secs_per_model", 1, None),
         ("max_models", 1, None),
+        ("cv_repeats", 1, MAX_CV_REPEATS),
     ):
         if values[name].strip() == "":
             config[name] = None

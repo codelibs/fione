@@ -18,6 +18,12 @@ the task and the metric that scores the fit, and may drop columns such as an ID:
 The metric is one of ``accuracy``, ``balanced_accuracy``, ``auc``, ``average_precision`` and ``f1``
 (the last three for two classes; ``f1`` is of the second class), ``rmse``, ``mae`` and ``rmsle``;
 it goes to the ``metric`` and ``score`` columns beside the log loss / RMSE of ``loss``.
+With ``"order": "column"`` the holdout is the last 20% of the rows in the order of that column
+(rows of the same value stay together) instead of a random one, for data whose test period comes
+after the training period; every split is then the same holdout, and only the seed of the fit
+differs (the split number is the seed unless ``--config`` sets one). The column stays a feature
+unless ``drop`` names it; name it in ``--config`` as ``{"time_column": "column"}`` to also
+validate in order of it (add it to ``ignored_columns`` to leave it out of the features).
 Keep the spec, the data and the results out of the repository.
 
 ``run`` fits every dataset on ``--splits`` random 80/20 splits (the split number is the seed) and
@@ -116,7 +122,10 @@ def load(name: str, data_home: str, local: dict[str, dict]) -> tuple[pd.DataFram
     """(frame with the target column, target name, task)."""
     if name in local:
         entry = local[name]
-        frame = pd.read_csv(entry["file"]).drop(columns=entry.get("drop", []))
+        kept = [
+            c for c in entry.get("drop", []) if c != entry.get("order")
+        ]  # dropped after the split
+        frame = pd.read_csv(entry["file"]).drop(columns=kept)
         target, task = entry["target"], entry["task"]
         frame[target] = frame[target].astype(str if task == "classification" else float)
         return frame, target, task
@@ -169,6 +178,24 @@ def score(
     return float(accuracy_score(y, labels))
 
 
+def last_fifth(frame: pd.DataFrame, order: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The first 80% of the rows in the order of ``order``, and the last 20%; rows of one value
+    are on the same side (the cut moves to the start of its value)."""
+    if order not in frame.columns:
+        raise SystemExit(f"order column {order!r} is not in the data")
+    keys = frame[order]
+    if keys.isna().any():
+        raise SystemExit(f"order column {order!r} has missing values")
+    if keys.dtype == object:  # dates as text are put in date order, not in text order
+        keys = pd.to_datetime(keys)
+    ranked = frame.iloc[np.argsort(keys.to_numpy(), kind="stable")]
+    values = keys.iloc[np.argsort(keys.to_numpy(), kind="stable")].to_numpy()
+    cut = int(np.searchsorted(values, values[int(len(values) * 0.8)], side="left"))
+    if cut == 0:
+        raise SystemExit(f"order column {order!r} has too few different values")
+    return ranked.iloc[:cut], ranked.iloc[cut:]
+
+
 def run_one(job: tuple[str, int, str, dict, str, dict, dict]) -> dict:
     """Fit one dataset on one split; the holdout numbers are the row."""
     from fione.engine.automl import AutoML
@@ -179,10 +206,17 @@ def run_one(job: tuple[str, int, str, dict, str, dict, dict]) -> dict:
         module, attribute = target_name.rsplit(".", 1)
         setattr(importlib.import_module(module), attribute, value)
     frame, target, task = load(name, data_home, local)
-    strat = frame[target] if task == "classification" else None
-    train, test = train_test_split(frame, test_size=0.2, random_state=split, stratify=strat)
+    entry = local.get(name, {})
+    if entry.get("order"):
+        train, test = last_fifth(frame, entry["order"])
+        if entry["order"] in entry.get("drop", []) and config.get("time_column") != entry["order"]:
+            train, test = train.drop(columns=entry["order"]), test.drop(columns=entry["order"])
+    else:
+        strat = frame[target] if task == "classification" else None
+        train, test = train_test_split(frame, test_size=0.2, random_state=split, stratify=strat)
     started = time.monotonic()
-    model = AutoML(TrainConfig(**{"target": target, "task": task, **config})).fit(train)
+    seed = {"seed": split} if entry.get("order") else {}  # a holdout in order is not random
+    model = AutoML(TrainConfig(**{"target": target, "task": task, **seed, **config})).fit(train)
     secs = time.monotonic() - started
     y = test[target].to_numpy()
     row = dict(label=label, dataset=name, split=split, task=task, secs=round(secs, 1))

@@ -39,6 +39,16 @@ def test_a_config_saved_before_the_settings_reads_their_defaults():
     assert (config.decision, config.target_transform) == ("argmax", "none")
 
 
+def test_the_group_column_defaults_to_none_and_old_configs_read_it():
+    config = TrainConfig(target="y")
+    assert (config.cv_group_column, config.cv_repeats) == (None, None)
+    del config.__dict__["cv_group_column"], config.__dict__["cv_repeats"]
+    assert (config.cv_group_column, config.cv_repeats) == (None, None)
+    assert (
+        TrainConfig.from_dict({"target": "y", "cv_group_column": "user"}).cv_group_column == "user"
+    )
+
+
 def test_train_config_dict_round_trip():
     config = TrainConfig(target="y", task="regression", max_runtime_secs=60, ignored_columns=["id"])
     assert TrainConfig.from_dict(config.to_dict()) == config
@@ -74,6 +84,12 @@ def test_from_dict_rejects_unknown_and_missing_keys():
         ({"decision": "balanced", "balance_classes": True}, "use one"),
         ({"ignored_columns": "id"}, "ignored_columns"),
         ({"ignored_columns": ["y"]}, "target"),
+        ({"cv_repeats": 0}, "cv_repeats"),
+        ({"cv_repeats": 11}, "cv_repeats must be a whole number from 1 to 10"),
+        ({"cv_repeats": 1.5}, "cv_repeats"),
+        ({"cv_group_column": ""}, "cv_group_column"),
+        ({"cv_group_column": 3}, "cv_group_column"),
+        ({"cv_group_column": "y"}, "target"),
     ],
 )
 def test_validate_rejects_bad_values(changes, message):
@@ -116,3 +132,15 @@ def test_event_defaults_timestamp_and_data():
     assert event.type == "trial"
     assert before <= event.ts <= time.time()
     assert Event("started").data == {}
+
+
+def test_the_time_column_defaults_to_none_and_must_name_a_column():
+    config = TrainConfig(target="y")
+    assert config.time_column is None
+    del config.__dict__["time_column"]  # a config saved before the setting
+    assert config.time_column is None
+    assert TrainConfig.from_dict({"target": "y", "time_column": "day"}).time_column == "day"
+    with pytest.raises(ConfigError, match="time_column must name a column"):
+        TrainConfig(target="y", time_column="").validate()
+    with pytest.raises(ConfigError, match="cannot be the target"):
+        TrainConfig(target="y", time_column="y").validate()
