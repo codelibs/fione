@@ -202,7 +202,13 @@ def _day_numbers(values, name):
     """The days since 1970-01-01 of a column of dates (or of text a date can be read from), as
     whole numbers; a date with a time of day is refused, and a missing date stays missing."""
     bad = ModuleError(f"time column '{name}' must hold whole numbers or dates")
-    if pd.api.types.is_bool_dtype(values):
+    # only dates and text: numbers held as objects would be read as nanoseconds from 1970
+    if pd.api.types.infer_dtype(values, skipna=True) not in (
+        "string",
+        "datetime",
+        "datetime64",
+        "date",
+    ):
         raise bad
     try:
         with warnings.catch_warnings():

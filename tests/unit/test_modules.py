@@ -1380,3 +1380,13 @@ def test_lag_refuses_a_date_with_a_time_of_day_and_text_that_is_not_a_date():
         run_op("lag", df, {"time": "t", "columns": ["v"]})
     with pytest.raises(ModuleError, match="whole numbers or dates"):
         run_op("lag", df.assign(t=["x", "y"]), {"time": "t", "columns": ["v"]})
+
+
+def test_lag_does_not_read_numbers_held_as_text_or_objects_as_dates():
+    for values in (["1", "2", "3"], ["201501", "201502"], pd.Series([1, 2, 3], dtype=object)):
+        df = pd.DataFrame({"t": values, "v": [1.0, 2.0, 3.0][: len(values)]})
+        with pytest.raises(ModuleError, match="whole numbers or dates"):
+            run_op("lag", df, {"time": "t", "columns": ["v"]})
+    compact = pd.DataFrame({"t": ["20150701", "20150702"], "v": [1.0, 2.0]})  # a date, read as one
+    out, _ = run_op("lag", compact, {"time": "t", "columns": ["v"]})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 1.0]
