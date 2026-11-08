@@ -19,7 +19,7 @@ from fione.engine.families import (
     n_threads,
 )
 from fione.engine.prep import Prep, validate_target
-from fione.engine.search import STARTUP_TRIALS, make_folds, run_family
+from fione.engine.search import CAP_MARGIN, STARTUP_TRIALS, make_folds, run_family
 
 TRIAL_KEYS = {"family", "trial", "score", "params", "elapsed", "best_so_far"}
 
@@ -409,11 +409,19 @@ def test_time_limit_ends_search_with_time_reason():
     assert [e.data["reason"] for e in events if e.type == "stopped"] == ["time"]
 
 
+def _cap_limit(events, folds, result, max_trial_secs):
+    """The largest per-trial cap the search applied. The single notice reports the cap when it
+    was first raised, but the cap keeps rising as the measured unit time does."""
+    noticed = max([e.data["max_trial_secs"] for e in events if e.type == "notice"], default=0)
+    final = CAP_MARGIN * len(folds) * UNIT_SAFETY * (result.spec.unit_secs or 0)
+    return max(max_trial_secs, noticed, final)
+
+
 def test_max_trial_secs_truncates_trials_instead_of_discarding_them():
     X, y = _classification(20_000, 20)
     prep, y, folds = _setup(X, y)
     events = []
-    run_family(
+    result = run_family(
         "LightGBM",
         X,
         y,
@@ -427,8 +435,7 @@ def test_max_trial_secs_truncates_trials_instead_of_discarding_them():
     )
     trials = [e for e in events if e.type == "trial"]
     assert len(trials) == 2
-    # The cap is raised (with a notice) when a fold's measured unit needs more than 0.5 s.
-    limit = max([e.data["max_trial_secs"] for e in events if e.type == "notice"], default=0.5)
+    limit = _cap_limit(events, folds, result, 0.5)
     assert all(e.data["elapsed"] < limit + max(0.5, limit / 2) for e in trials)
 
 
@@ -439,7 +446,7 @@ def test_a_capped_trial_keeps_its_last_fold_when_earlier_folds_overran(monkeypat
     X, y = _classification(100, 4)
     prep, y, folds = _setup(X, y)
     events = []
-    run_family(
+    result = run_family(
         "Boosting",
         X,
         y,
@@ -453,7 +460,7 @@ def test_a_capped_trial_keeps_its_last_fold_when_earlier_folds_overran(monkeypat
     )
     trials = [e for e in events if e.type == "trial"]
     assert [e.data["state"] for e in trials] == ["complete", "complete"]
-    limit = max(e.data["max_trial_secs"] for e in events if e.type == "notice")
+    limit = _cap_limit(events, folds, result, 0.1)
     assert all(e.data["elapsed"] < 2 * limit for e in trials)
 
 
