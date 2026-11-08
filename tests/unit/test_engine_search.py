@@ -381,44 +381,6 @@ def test_first_trial_gives_up_as_soon_as_its_folds_cannot_fit(slow, monkeypatch)
     assert caught.value.needed_secs == pytest.approx(len(folds) * UNIT_SAFETY * 0.3, rel=0.2)
 
 
-def test_a_search_goes_on_from_an_earlier_result():
-    X, y = _classification(300, 6)
-    prep, y, folds = _setup(X, y)
-
-    def run(max_trials, warm=None):
-        events = []
-        result = run_family(
-            "LightGBM",
-            X,
-            y,
-            folds,
-            "classification",
-            prep,
-            Deadline(60),
-            events.append,
-            lambda: False,
-            max_trials=max_trials,
-            warm=warm,
-        )
-        return result, [e.data["trial"] for e in events if e.type == "trial"]
-
-    first, numbers = run(3)
-    assert numbers == [0, 1, 2] and first.trials == 3
-    second, numbers = run(5, warm=first)
-    # Only the trials after the first three ran (the defaults were not run again), and the
-    # result holds all five, the best of them in the lead.
-    assert numbers == [3, 4] and second.trials == 5
-    assert [row["trial"] for row in second.log] == [0, 1, 2, 3, 4]
-    assert second.log[:3] == first.log
-    assert second.best_score <= first.best_score
-    assert second.spec is first.spec
-    assert len(second.stop_history) == 5 and second.elapsed > first.elapsed
-    # The earlier best model stays in the running when no later trial beats it.
-    best = min(second.log, key=lambda row: row["score"])
-    assert second.best_score == pytest.approx(best["score"])
-    assert len(second.runners_up) == 2
-
-
 def test_expired_deadline_raises_no_model_error():
     X, y = _classification(200, 5)
     prep, y, folds = _setup(X, y)

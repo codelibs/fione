@@ -83,8 +83,6 @@ class FamilyResult:
     # mean of the repeats' scores. Empty when the folds are not repeated.
     oofs: list[np.ndarray] = field(default_factory=list)
     repeats: int = 1
-    # The best stopping score after each finished trial: what a search that goes on needs.
-    stop_history: list[float] = field(default_factory=list)
 
     def stacked(self, rows: np.ndarray) -> np.ndarray:
         """The predictions of ``rows`` in all repeats, one repeat below the other."""
@@ -309,20 +307,12 @@ def run_family(
     stopping_score: Callable[[np.ndarray], float] | None = None,
     sample_weight: np.ndarray | None = None,
     repeats: int = 1,
-    warm: "FamilyResult | None" = None,
 ) -> FamilyResult:
     """Search family ``name`` within ``deadline``; ``y`` is float targets or class codes 0..k-1.
-    ``folds`` holds ``repeats`` runs of folds (see ``repeat_folds``).
-
-    With ``warm``, the result of an earlier search of this family on the same data, the search
-    goes on where it ended: the sampler learns from the trials already run, their best models
-    stay in the running, and the result counts all trials (``max_trials`` too)."""
+    ``folds`` holds ``repeats`` runs of folds (see ``repeat_folds``)."""
     start = time.monotonic()
     n_classes = int(y.max()) + 1 if task == "classification" else 0
-    if warm is None:
-        spec = FAMILIES[name](task, n_classes, seed=seed, n_jobs=n_threads(len(X)))
-    else:
-        spec = warm.spec  # with the unit time it measured
+    spec = FAMILIES[name](task, n_classes, seed=seed, n_jobs=n_threads(len(X)))
 
     def cap() -> float | None:
         if max_trial_secs is None or not spec.unit_secs:
@@ -338,6 +328,7 @@ def run_family(
         ),
         pruner=optuna.pruners.MedianPruner(n_startup_trials=3),
     )
+    study.enqueue_trial(spec.defaults)
     best: _Outcome | None = None
     leaders: list[
         tuple[_Outcome, dict, int, float]
@@ -347,24 +338,6 @@ def run_family(
     raised = False  # the max_trial_secs notice was sent
     error: Exception | None = None
     finished = 0
-    if warm is None:
-        study.enqueue_trial(spec.defaults)
-    else:
-        for row in warm.log:  # the sampler is told what the trials scored
-            study.enqueue_trial(row["params"])
-            trial = study.ask()
-            spec.space(trial)
-            if row["state"] == "pruned":
-                study.tell(trial, state=optuna.trial.TrialState.PRUNED)
-            else:
-                study.tell(trial, row["score"])
-        for kept in (warm, *warm.runners_up):
-            outcome = _Outcome("complete", kept.best_score, kept.oof, kept.models, kept.oofs)
-            leaders.append((outcome, kept.best_params, kept.best_trial, kept.best_secs))
-        best = leaders[0][0]
-        log, stop_history = list(warm.log), list(warm.stop_history)
-        stop_best = min(stop_history, default=math.inf)
-        finished = warm.trials
     while True:
         if should_stop():
             reason = "cancelled"
@@ -461,7 +434,7 @@ def run_family(
         # What the first trial needed, by the rule that refused it: every fold gets a unit.
         needed = len(folds) * UNIT_SAFETY * spec.unit_secs if spec.unit_secs else None
         raise NoModelError("time budget too small to train any model", needed)
-    elapsed = time.monotonic() - start + (warm.elapsed if warm is not None else 0.0)
+    elapsed = time.monotonic() - start
     emit(
         Event(
             "family_done",
@@ -506,7 +479,6 @@ def run_family(
             list(runners_up),
             outcome.oofs if repeats > 1 else [],
             repeats,
-            list(stop_history),
         )
 
     return result(*leaders[0][:4], [result(*leader) for leader in leaders[1:]])
