@@ -76,7 +76,7 @@ def test_from_dict_rejects_unknown_and_missing_keys():
         ({"seed": 2**32}, "seed must be a whole number from 0 to 4294967295"),
         ({"stopping_rounds": -1}, "stopping_rounds"),
         ({"stopping_tolerance": -0.1}, "stopping_tolerance"),
-        ({"stopping_metric": "f1"}, "stopping_metric"),
+        ({"stopping_metric": "deviance"}, "stopping_metric"),
         ({"sort_metric": "speed"}, "sort_metric"),
         ({"balance_classes": "yes"}, "balance_classes"),
         ({"decision": "majority"}, "decision must be one of"),

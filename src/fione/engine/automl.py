@@ -249,6 +249,10 @@ class AutoML:
             if (y <= -1).any():
                 raise ConfigError("target_transform 'log1p' needs target values above -1")
             y = np.log1p(y)
+        # What is reported and ranked is in the target's own units.
+        original = np.expm1 if y is not y_seen else _same
+        for field, name in (("sort_metric", sort_metric), ("stopping_metric", stopping_metric)):
+            metrics.check(name, y_seen, len(classes), field)
         prior = None
         if c.decision == "balanced" and task == "regression":
             self._notice("decision is ignored for regression")
@@ -295,7 +299,9 @@ class AutoML:
             deadline.child(SEARCH_SHARE * left),
             None
             if default_stopping
-            else (lambda oof: metrics.loss(stopping_metric, y[rows], oof[rows])),
+            else (
+                lambda oof: metrics.loss(stopping_metric, y_seen[rows], original(oof[rows]), prior)
+            ),
             weight,
             repeats,
         )
@@ -318,15 +324,22 @@ class AutoML:
         # The weights are chosen on every repeat's predictions, one below the other.
         stacked = {name: result.stacked(rows) for name, result in results.items()}
         weights = caruana(stacked, np.tile(y_valid, repeats), task)
-        scores = {name: metrics.value(sort_metric, y_valid, p, prior) for name, p in oof.items()}
+        scores = {
+            name: metrics.value(sort_metric, y_seen[rows], original(p), prior)
+            for name, p in oof.items()
+        }
         pick = max if sort_metric in metrics.HIGHER_IS_BETTER else min
         self._event(
             "ensemble",
             sort_metric=sort_metric,
             weights=weights,
             scores=scores,
-            ensemble_score=metrics.value(sort_metric, y_valid, _blend(oof, weights), prior),
-            best_single=pick(scores, key=scores.get),
+            ensemble_score=metrics.value(
+                sort_metric, y_seen[rows], original(_blend(oof, weights)), prior
+            ),
+            best_single=pick(
+                {k: v for k, v in scores.items() if np.isfinite(v)} or scores, key=scores.get
+            ),
         )
 
         refit = deadline.child(deadline.remaining() - reserve)
@@ -336,8 +349,6 @@ class AutoML:
         if self.should_stop():
             stop_reason = "cancelled"
         final = {member.key: member.weight for member in members}
-        # What is reported (scores, diagnostics, cv predictions) is in the target's own units.
-        original = np.expm1 if y is not y_seen else _same
         blended = original(_blend(oof, final))
         try:
             found = diagnostics(task, y_seen[rows], blended, classes, seed=c.seed, prior=prior)

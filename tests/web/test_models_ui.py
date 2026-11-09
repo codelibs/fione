@@ -1431,3 +1431,18 @@ def test_the_settings_list_names_the_decision_rule_by_its_label():
     assert shown["decision"] == ("balanced", "train.decision.balanced")
     shown = dict(models_ui._config(SimpleNamespace(config={"target_transform": "log1p"})))
     assert shown["target_transform"] == ("log1p", "train.transform.log1p")
+
+
+def test_metrics_tab_names_and_explains_the_extra_metrics(world):
+    world.login("vi")
+    mid = record_like(
+        world, world.p, metrics={"accuracy": 0.9, "f1": 0.8, "qwk": 0.7, "mystery": 1.0}
+    )
+    url = world.path("/projects/{p}/models/") + f"{mid}?tab=metrics"
+    panel = metrics_panel(world.client.get(url).text)
+    assert '<th scope="row">F1</th>' in panel
+    assert '<th scope="row">Quadratic weighted kappa</th>' in panel
+    assert "Kappa that counts a miss by more steps worse" in panel
+    assert '<th scope="row">mystery</th>' in panel  # a name nobody translated stays as it is
+    ja = metrics_panel(world.client.get(url, headers={"Accept-Language": "ja"}).text)
+    assert '<th scope="row">二次重み付きカッパ</th>' in ja
