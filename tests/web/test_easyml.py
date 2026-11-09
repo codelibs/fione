@@ -285,6 +285,23 @@ def test_a_custom_runtime_is_used_in_minutes(analysis):
     assert config["ignored_columns"] == []
 
 
+@pytest.mark.parametrize(
+    ("label", "metric"), [(["a"] * 380 + ["b"] * 20, "aucpr"), (["a", "b"] * 200, "auto")]
+)
+def test_the_ranking_metric_follows_the_data(owner, label, metric):
+    client, pid, csrf = owner
+    frame = pd.DataFrame({"x": np.random.default_rng(1).normal(size=400), "label": label})
+    url = location(
+        upload(client, f"/projects/{pid}/upload", csrf, frame.to_csv(index=False).encode())
+    )
+    form = run_form(csrf, target="label", inputs=["x"])
+    r = client.post(url.replace("/analyze", "/run"), data=form, follow_redirects=False)
+    job_id = int(location(r).rsplit("/", 1)[1])
+    with closing(connect(client)) as conn:
+        config = store.get_job(conn, job_id).payload["config"]
+    assert config["sort_metric"] == metric
+
+
 def test_unchecked_inputs_are_ignored_columns(analysis):
     client, run_url, csrf = analysis
     r = client.post(run_url, data=run_form(csrf, inputs=INPUTS[:2]), follow_redirects=False)

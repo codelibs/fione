@@ -252,3 +252,59 @@ def test_map_at_3_is_defined_for_three_classes_and_top_3_is_not():
     metrics.check("map3", np.array([0, 1, 2]), 3, "sort_metric")
     with pytest.raises(ConfigError, match="top3_accuracy"):
         metrics.check("top3_accuracy", np.array([0, 1, 2]), 3, "sort_metric")
+
+
+def test_tune_prior_picks_the_threshold_that_serves_the_metric():
+    y = np.array([0] * 90 + [1] * 10)
+    p1 = np.concatenate([np.linspace(0.0, 0.5, 90), np.linspace(0.3, 0.9, 10)])
+    pred = np.column_stack([1 - p1, p1])
+    prior = metrics.tune_prior("f1", y, pred)
+    assert prior.sum() == pytest.approx(1.0) and (prior > 0).all()
+    tuned = metrics.value("f1", y, pred, prior)
+    assert tuned > metrics.value("f1", y, pred)  # at 0.5 almost nothing is predicted
+    for t in np.linspace(0.05, 0.95, 19):  # no other threshold does better
+        assert tuned >= metrics.value("f1", y, pred, np.array([1 - t, t])) - 1e-12
+    picked = metrics.choose(pred, prior)
+    assert (picked == (p1 > prior[1]).astype(int)).all()
+
+
+def test_only_metrics_that_count_right_answers_can_be_tuned():
+    assert "f1" in metrics.TUNABLE and "qwk" in metrics.TUNABLE
+    assert not {"logloss", "auc", "precision", "recall", "brier"} & metrics.TUNABLE
+    assert metrics.TUNABLE <= set(metrics.ALLOWED["classification"])
+
+
+@pytest.mark.parametrize("name", sorted(metrics.TUNABLE))
+def test_tune_prior_is_the_best_threshold_by_brute_force(name):
+    rng = np.random.default_rng(3)
+    y = (rng.random(400) < 0.2).astype(int)
+    p1 = np.round(np.clip(0.15 + 0.5 * y + rng.normal(0, 0.25, 400), 0.01, 0.99), 1)  # many ties
+    pred = np.column_stack([1 - p1, p1])
+    prior = metrics.tune_prior(name, y, pred)
+    best = metrics.loss(name, y, pred, prior)
+    # every cut of the distinct probabilities, none and all predicted positive included
+    cuts = np.concatenate([[1.0], np.unique(p1)[::-1], [0.0]])
+    others = [
+        metrics.loss(name, y, pred, np.array([1 - t, t]))
+        for t in (cuts[:-1] + cuts[1:]) / 2
+        if 0 < t < 1
+    ]
+    assert best <= min(others) + 1e-9
+    assert not ((p1 == prior[1]).any())  # no row sits on the threshold
+
+
+def test_tune_prior_can_predict_nothing_or_everything():
+    y = np.array([0, 0, 0, 0, 1])
+    flat = np.tile([0.8, 0.2], (5, 1))
+    assert metrics.tune_prior("accuracy", y, flat)[1] > 0.2  # nothing is positive
+    y = np.array([1, 1, 1, 1, 0])
+    assert metrics.tune_prior("f1", y, flat)[1] < 0.2  # everything is positive
+
+
+def test_check_tuned_wants_two_classes_and_a_metric_that_counts_right_answers():
+    metrics.check_tuned("f1", 2)
+    with pytest.raises(ConfigError, match="two classes"):
+        metrics.check_tuned("f1", 3)
+    for name in ("logloss", "aucpr", "recall"):
+        with pytest.raises(ConfigError, match="sort_metric"):
+            metrics.check_tuned(name, 2)

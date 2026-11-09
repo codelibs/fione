@@ -148,6 +148,11 @@ every metric that fits the data is listed on the model's Metrics tab, in the tar
   (`normalized_gini`), Poisson deviance (`poisson`) and quadratic weighted kappa of the rounded
   predictions (`rounded_qwk`).
 
+When you name no metric, EasyML and the assistant's proposal rank by average precision (`aucpr`)
+for two classes with a rare one (under 10% of the rows), and the engine's *Automatic* is log loss
+or RMSE otherwise. Name the score your goal uses (a metric the task fixes, say) in the training
+settings, in the API, or to the assistant, which can set it in its proposal.
+
 Metrics that count right answers (accuracy, F1, kappa, ...) use the predicted class described
 below; with more than two classes precision, recall and F1 are the mean over the classes, and with
 two classes they describe the class listed last. The ranking measures (AUC, average precision,
@@ -166,6 +171,17 @@ the training data, so rare classes are predicted more often. The probabilities d
 the accuracy and the confusion matrix of the training result, batch prediction, Fione Serving
 and the explanation follow the same rule. It cannot be combined with "Balance the classes",
 which corrects the same imbalance while learning, and it is ignored for regression.
+
+For two classes scored by a metric that counts right answers, *Fit to the ranking metric*
+(`decision: "tuned"`) picks the probability threshold that gives that metric its best value on the
+validation predictions, instead of 0.5; the ranking metric must be one of accuracy, error rate,
+balanced accuracy, mean error per class, F1, MCC, kappa or `qwk` (precision and recall alone would
+be best served by predicting almost nothing or almost everything). The threshold is stored with
+the model and used by predictions, Fione Serving and the explanation; the probabilities do not
+change, and the leaderboard scores each row at its own best threshold. The threshold is chosen on
+the same validation predictions the scores are reported on, so those scores are somewhat
+optimistic, most with few rows or few cases of the rare class. The stopping metric, and the
+ensemble's progress scores while training, are evaluated at 0.5.
 
 ## Text columns
 

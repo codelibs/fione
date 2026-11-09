@@ -254,10 +254,13 @@ class AutoML:
         for field, name in (("sort_metric", sort_metric), ("stopping_metric", stopping_metric)):
             metrics.check(name, y_seen, len(classes), field)
         prior = None
-        if c.decision == "balanced" and task == "regression":
+        tuned = c.decision == "tuned" and task == "classification"
+        if c.decision in ("balanced", "tuned") and task == "regression":
             self._notice("decision is ignored for regression")
         elif c.decision == "balanced":
             prior = np.bincount(y) / len(y)
+        elif tuned:  # the threshold is fitted on the final blend, after the search
+            metrics.check_tuned(sort_metric, len(classes))
         if c.time_column is None:
             groups, tried = self._engineer(X, y, task, nfolds, deadline, row_groups)
         else:  # the gate judges a feature on shuffled folds, which look at the future
@@ -329,6 +332,7 @@ class AutoML:
             for name, p in oof.items()
         }
         pick = max if sort_metric in metrics.HIGHER_IS_BETTER else min
+        # (a tuned decision has no threshold yet: these progress scores count at argmax)
         self._event(
             "ensemble",
             sort_metric=sort_metric,
@@ -350,6 +354,8 @@ class AutoML:
             stop_reason = "cancelled"
         final = {member.key: member.weight for member in members}
         blended = original(_blend(oof, final))
+        if tuned:
+            prior = metrics.tune_prior(sort_metric, y_seen[rows], blended)
         try:
             found = diagnostics(task, y_seen[rows], blended, classes, seed=c.seed, prior=prior)
         except Exception as e:
@@ -372,6 +378,7 @@ class AutoML:
             original,
             prior,
             rows,
+            tuned,
         )
         assignment = np.full(len(y), -1, dtype=np.int64)  # -1: never validated
         for i, (_, valid) in enumerate(first_run):
@@ -807,21 +814,33 @@ def _same(values: np.ndarray) -> np.ndarray:
 
 
 def _leaderboard(
-    results, weights, refit_secs, blended, y, folds: Folds, sort_metric, original, prior, valid_rows
+    results,
+    weights,
+    refit_secs,
+    blended,
+    y,
+    folds: Folds,
+    sort_metric,
+    original,
+    prior,
+    valid_rows,
+    tuned=False,
 ) -> pd.DataFrame:
     """One row per candidate (a family's best trial, then its runners-up) and one for the
     ensemble. The ensemble's weights were chosen on the same OOF predictions it is scored on, so
     its row is slightly optimistic. ``original`` maps an OOF prediction to the units ``y`` and
-    ``blended`` are in."""
+    ``blended`` are in. With ``tuned`` every row counts right answers at its own best threshold."""
     rows = []
     for name, result in results.items():
         oof = original(result.oof[valid_rows])
+        # a tuned decision is fitted to each row's own predictions
+        own = metrics.tune_prior(sort_metric, y, oof) if tuned else prior
         rows.append(
             {
                 "model": f"{result.spec.name}_{result.best_trial}",
                 "family": result.spec.name,
-                "cv_score": metrics.value(sort_metric, y, oof, prior),
-                "cv_std": metrics.fold_std(sort_metric, y, oof, folds, prior),
+                "cv_score": metrics.value(sort_metric, y, oof, own),
+                "cv_std": metrics.fold_std(sort_metric, y, oof, folds, own),
                 "train_secs": result.best_secs + refit_secs.get(name, 0.0),
                 "weight": weights.get(name, 0.0),
             }

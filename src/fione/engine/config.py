@@ -33,7 +33,7 @@ class DeadlineExceeded(Exception):
 
 
 _TASKS = ("auto", "classification", "regression")
-_DECISIONS = ("argmax", "balanced")
+_DECISIONS = ("argmax", "balanced", "tuned")
 _TRANSFORMS = ("none", "log1p")
 # The folds' random_state (numpy's RandomState through scikit-learn) takes 0..2**32 - 1.
 MAX_SEED = 2**32 - 1
@@ -103,7 +103,7 @@ class TrainConfig:
     nfolds: int = 5
     seed: int = 0
     balance_classes: bool = False
-    decision: Literal["argmax", "balanced"] = "argmax"
+    decision: Literal["argmax", "balanced", "tuned"] = "argmax"
     target_transform: Literal["none", "log1p"] = "none"
     feature_engineering: bool = True
     stopping_rounds: int = 10

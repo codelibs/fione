@@ -295,23 +295,36 @@ def submit_training(
         raise ConfigError(f"cv_group_column '{config.cv_group_column}' is not in the data")
     if config.time_column is not None and config.time_column not in columns:
         raise ConfigError(f"time column '{config.time_column}' is not in the data")
-    task = check_target(storage, dataset, config.target, config.task, config.nfolds)
-    for field in ("stopping_metric", "sort_metric"):  # as AutoML.fit resolves them
-        metrics.resolve(getattr(config, field), task, field)
+    check_target(storage, dataset, config.target, config.task, config.nfolds, config)
     payload = {"dataset_id": dataset_id, "config": config.to_dict(), "name": name}
     return store.enqueue(conn, "automl", project_id, user.id, payload)
 
 
-def check_target(storage: Storage, dataset, target: str, task: str, nfolds: int = 5) -> str:
+def check_target(
+    storage: Storage,
+    dataset,
+    target: str,
+    task: str,
+    nfolds: int = 5,
+    config: TrainConfig | None = None,
+) -> str:
     """The task training ``dataset`` on ``target`` would have (``auto`` resolved as the engine
     does); ``TargetError`` if the engine would refuse the whole target column, and
-    ``DatasetNotFound`` if the dataset's data is gone from storage."""
+    ``DatasetNotFound`` if the dataset's data is gone from storage. With ``config``, also
+    ``ConfigError`` if its metrics or decision do not fit the task and the target's values."""
     try:
         y = read_dataset(storage, dataset, [target])[target]
     except KeyError:  # storage: no such object
         raise DatasetNotFound(dataset.id) from None
     resolved = infer_task(y) if task == "auto" else task
-    validate_target(y, resolved, nfolds)
+    encoded, classes, _ = validate_target(y, resolved, nfolds)
+    if config is not None:
+        chosen = {}
+        for field in ("stopping_metric", "sort_metric"):  # as AutoML.fit resolves them
+            chosen[field] = metrics.resolve(getattr(config, field), resolved, field)
+            metrics.check(chosen[field], encoded, len(classes), field)
+        if config.decision == "tuned" and resolved == "classification":
+            metrics.check_tuned(chosen["sort_metric"], len(classes))
     return resolved
 
 

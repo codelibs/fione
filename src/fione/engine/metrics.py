@@ -40,7 +40,8 @@ class Metric:
 
 def choose(pred: np.ndarray, prior: np.ndarray | None = None) -> np.ndarray:
     """The class index per row: the largest probability, or with ``prior`` (the classes'
-    shares of the training data) the largest probability relative to its class's share."""
+    shares of the training data, or ``(1 - t, t)`` for the threshold t of a tuned decision) the
+    largest probability relative to its weight."""
     return (pred if prior is None else pred / prior).argmax(axis=1)
 
 
@@ -386,6 +387,82 @@ def value(name: str, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None =
         raise ValueError(f"unknown metric {name!r}")
     with np.errstate(all="ignore"):
         return REGISTRY[name].compute(y, pred, prior)
+
+
+# The metrics a decision can be tuned for. Precision and recall are left out: either one is
+# best served by predicting almost nothing or almost everything.
+TUNABLE = frozenset(
+    {
+        "accuracy",
+        "misclassification",
+        "balanced_accuracy",
+        "mean_per_class_error",
+        "f1",
+        "mcc",
+        "kappa",
+        "qwk",
+    }
+)
+
+
+def check_tuned(sort_metric: str, classes: int) -> None:
+    """ConfigError unless ``decision="tuned"`` can be fitted: two classes, and a ranking metric
+    from ``TUNABLE`` (``sort_metric`` resolved)."""
+    if classes != 2:
+        raise ConfigError("decision 'tuned' needs a target with two classes")
+    if sort_metric not in TUNABLE:
+        raise ConfigError(
+            f"decision 'tuned' needs a sort_metric that counts right answers "
+            f"({sorted(TUNABLE)}), got {sort_metric!r}"
+        )
+
+
+def _from_counts(name: str, tp, fp, fn, tn) -> np.ndarray:
+    """The metric of the 2x2 tables (arrays of counts; the second class is the positive one)."""
+    n = tp + fp + fn + tn
+    with np.errstate(all="ignore"):
+        if name in ("accuracy", "misclassification"):
+            right = (tp + tn) / n
+            return right if name == "accuracy" else 1.0 - right
+        if name in ("balanced_accuracy", "mean_per_class_error"):
+            recalls = [tp / (tp + fn), tn / (tn + fp)]
+            present = [r for r in recalls if np.isfinite(r).all()]  # a class with no rows
+            mean = sum(present) / len(present)
+            return mean if name == "balanced_accuracy" else 1.0 - mean
+        if name == "f1":
+            return np.where(2 * tp + fp + fn > 0, 2 * tp / (2 * tp + fp + fn), 0.0)
+        if name == "mcc":
+            root = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+            return np.where(root > 0, (tp * tn - fp * fn) / root, 0.0)
+        # kappa, and qwk, which is the same for two classes
+        right = (tp + tn) / n
+        chance = ((tp + fp) * (tp + fn) + (tn + fn) * (tn + fp)) / n**2
+        return np.where(chance < 1.0, (right - chance) / (1.0 - chance), np.nan)
+
+
+def tune_prior(name: str, y: np.ndarray, pred: np.ndarray) -> np.ndarray:
+    """The ``prior`` (two classes) under which ``choose`` picks the second class exactly when its
+    probability is above the threshold that serves the metric ``name`` best on ``pred``:
+    ``(1 - t, t)`` does it, as ``p1 / t > p0 / (1 - t)`` is ``p1 > t``. The thresholds tried
+    are the midpoints between neighbouring probabilities (so no row sits on the threshold),
+    all judged from one sort. Of equal values the one nearest to 0.5 wins."""
+    p1 = pred[:, 1]
+    order = np.argsort(-p1, kind="stable")
+    ranked, positive = p1[order], (y[order] == 1)
+    cut = np.append(np.flatnonzero(np.diff(ranked) != 0), len(ranked) - 1)  # last row of a value
+    values = ranked[cut]  # the distinct probabilities, largest first
+    # Candidate k predicts the second class for the k largest distinct probabilities (0..all).
+    tp = np.concatenate([[0.0], np.cumsum(positive)[cut]])
+    fp = np.concatenate([[0.0], cut + 1.0]) - tp
+    total = float(positive.sum())
+    scored = _from_counts(name, tp, fp, total - tp, (len(y) - total) - fp)
+    t = (np.concatenate([[1.0], values]) + np.concatenate([values, [0.0]])) / 2.0
+    t = np.clip(t, 1e-6, 1 - 1e-6)
+    sign = 1.0 if name in HIGHER_IS_BETTER else -1.0
+    score = np.where(np.isfinite(scored), sign * scored, -np.inf)
+    best = np.flatnonzero(score == score.max())
+    t = float(t[best[np.argmin(np.abs(t[best] - 0.5))]])
+    return np.array([1.0 - t, t])
 
 
 def loss(name: str, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None = None) -> float:

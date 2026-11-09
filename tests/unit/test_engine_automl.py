@@ -407,6 +407,36 @@ def test_balanced_decision_scores_the_leaderboard_by_the_same_rule(monkeypatch):
     assert ensemble == pytest.approx(model.metrics["accuracy"])
 
 
+def test_tuned_decision_fits_the_threshold_to_the_metric_and_keeps_the_probabilities(monkeypatch):
+    df = _binary(4_000, weights=[0.95], class_sep=0.6, flip_y=0.01)
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    fit = {"families": ["LightGBM"], "target": "y", "max_models": 1, "sort_metric": "f1"}
+    plain = _fit(df, **fit)
+    model = _fit(df, decision="tuned", keep_cv_predictions=True, **fit)
+    t = model.class_prior[1]
+    assert 0 < t < 1 and model.class_prior[0] == pytest.approx(1 - t)
+    proba = model.predict_proba(df).to_numpy()
+    assert (model.predict(df) == (proba[:, 1] > t).astype(int)).all()
+    chosen = (model.cv_predictions[:, 1] > t).astype(int)
+    truth = df["y"].to_numpy()
+    f1 = 2 * (chosen & truth).sum() / (chosen.sum() + truth.sum())
+    assert model.metrics["f1"] == pytest.approx(f1)
+    assert model.metrics["f1"] > plain.metrics["f1"]  # the 0.5 threshold misses a rare class
+    ensemble = model.leaderboard.set_index("model").loc["Ensemble", "cv_score"]
+    assert ensemble == pytest.approx(model.metrics["f1"])
+    np.testing.assert_allclose(proba, plain.predict_proba(df).to_numpy(), atol=0.05)
+
+
+def test_tuned_decision_needs_two_classes_and_a_metric_that_counts_right_answers():
+    with pytest.raises(ConfigError, match="sort_metric"):
+        _fit(_binary(300), target="y", decision="tuned")  # the metric is log loss
+    with pytest.raises(ConfigError, match="sort_metric"):
+        _fit(_binary(300), target="y", decision="tuned", sort_metric="recall")
+    three = _binary(600, n_classes=3, n_clusters_per_class=1)
+    with pytest.raises(ConfigError, match="two classes"):
+        _fit(three, target="y", decision="tuned", sort_metric="f1")
+
+
 def test_the_default_decision_leaves_no_prior():
     assert _fit(_binary(300), families=["LightGBM"], target="y", max_models=1).class_prior is None
 

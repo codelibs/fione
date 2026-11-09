@@ -48,7 +48,7 @@ from fione.models.service import ModelNotFound, ModelRecord
 from fione.modules.registry import redact
 from fione.predict.batch import PREDICT, check_inputs
 from fione.projects import service as projects
-from fione.projects.ingest import read_dataset_rows, read_dataset_sample
+from fione.projects.ingest import read_dataset, read_dataset_rows, read_dataset_sample
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.schema import clean_text
 from fione.tools.builtin import (
@@ -56,6 +56,7 @@ from fione.tools.builtin import (
     is_skewed_target,
     propose,
     rare_class_share,
+    recommended_metric,
     repeated_id_column,
     runtime_need_secs,
     sample_profile,
@@ -529,6 +530,11 @@ def run(request: Request, conn: Conn, pid: str, did: str, form: Posted) -> Respo
     }
     errors, detail = {}, None
     try:
+        try:
+            y = read_dataset(_storage(request), dataset, [target])[target]
+        except KeyError:  # its data is gone from storage
+            raise DatasetNotFound(dataset.id) from None
+        config["sort_metric"] = recommended_metric(y, task)
         job = models.submit_training(
             conn, _storage(request), ctx.auth.user, pid, dataset.id, config
         )
