@@ -258,7 +258,9 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   one feature per field, the number for a numeric field and how common the value is otherwise,
   and the number of training rows that share the first field (the size of a group). A value not
   seen in training gives a missing feature, not zero. This group is tried last;
-- rows: the number of missing values and of zeros;
+- rows: the number of missing values and of zeros; with 10 number columns or more also the
+  mean, median, maximum and standard deviation of the row's numbers that are neither zero nor
+  missing, after a signed log so that columns of different scales weigh alike;
 - dates: hour, minute, week, quarter, day of the year, weekend, and the seconds between date
   columns;
 - numbers: sums, differences, products and ratios of the few most useful number columns, their

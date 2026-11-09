@@ -2,8 +2,8 @@
 
 A ``Group`` is a family of derived numeric features that read raw input columns: shape, tokens
 and topics of text columns, how much two text columns share, frequencies of categories,
-row-wise counts, date parts and differences, pairwise arithmetic of numbers, group means,
-frequencies of category pairs, parts of structured identifiers.
+row-wise counts and statistics, date parts and differences, pairwise arithmetic of numbers,
+group means, frequencies of category pairs, parts of structured identifiers.
 ``Prep.fit`` fits the groups it is given on the training features alone, so they never see the
 target: a model can be scored on out-of-fold predictions without leaking, however many groups exist.
 
@@ -27,6 +27,7 @@ with several sources splits its share equally among them.
 import copy
 import itertools
 import re
+import warnings
 from collections import Counter
 from dataclasses import dataclass
 
@@ -71,6 +72,8 @@ TOPIC_ROWS = 20_000  # rows the topics are fitted on
 TOKENS = 8  # tokens kept per text column
 TOKEN_SUPPORT = 0.02  # share of the rows a token must occur in (and at least 5 rows)
 MAX_PAIR_COLUMNS = 5  # numbers or dates combined pairwise
+STATISTIC_CELLS = 20_000_000  # cells the statistics are computed over at a time, to bound memory
+MIN_STATISTIC_COLUMNS = 10  # numeric columns a row needs for statistics over them to mean much
 ID_DELIMITERS = (
     "_",
     "/",
@@ -328,6 +331,39 @@ class RowCounts(Group):
             pd.concat([_number(df[c]) for c in self._numbers], axis=1) if self._numbers else None
         )
         out["zero_count"] = (zeros == 0).sum(axis=1).astype(float) if zeros is not None else 0.0
+        return pd.DataFrame(out, index=df.index)
+
+
+class RowStatistics(Group):
+    """Mean, median, maximum and standard deviation of a row's numbers, over those that are
+    neither zero nor missing, after a signed log so that columns of different scales weigh alike
+    (a row without any gets missing values)."""
+
+    def __init__(self, numbers: list[str]):
+        self.label, self.columns = "statistics of numbers per row", tuple(numbers)
+
+    def _fit(self, X):
+        self._sources = {
+            f"{name}_nonzero": self.columns for name in ("mean", "median", "max", "std")
+        }
+
+    def _compute(self, df):
+        step = max(1, STATISTIC_CELLS // len(self.columns))
+        parts = [self._chunk(df.iloc[i : i + step]) for i in range(0, len(df), step)]
+        return pd.concat(parts) if parts else self._chunk(df)
+
+    def _chunk(self, df):
+        values = np.column_stack([_number(df[c]).to_numpy() for c in self.columns])
+        values = np.sign(values) * np.log1p(np.abs(values))
+        values[values == 0] = np.nan
+        with warnings.catch_warnings():  # a row of nothing but zeros and gaps
+            warnings.simplefilter("ignore", RuntimeWarning)
+            out = {
+                "mean_nonzero": np.nanmean(values, axis=1),
+                "median_nonzero": np.nanmedian(values, axis=1),
+                "max_nonzero": np.nanmax(values, axis=1),
+                "std_nonzero": np.nanstd(values, axis=1),
+            }
         return pd.DataFrame(out, index=df.index)
 
 
@@ -676,6 +712,8 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
     if categories:
         found.append(CategoryFrequency(categories))
     found.append(RowCounts(columns, prep.numeric_columns))
+    if len(prep.numeric_columns) >= MIN_STATISTIC_COLUMNS:  # early: the gate may run out of time
+        found.append(RowStatistics(prep.numeric_columns))
     if dates:
         found.append(DateParts(dates, prep.timed))
     if len(dates) > 1:

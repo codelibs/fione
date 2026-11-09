@@ -102,6 +102,7 @@ class Prep:
     dayfirst: tuple = ()  # date string columns that put the day before the month
     timed: tuple = ()  # date columns that carry a time of day
     _unseen: dict = {}  # frequency column -> share given to a value not seen in training (old: 0)
+    _no_trend: tuple = ()  # view columns the linear view leaves out (see ``_fit_no_trend``)
 
     def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
@@ -172,8 +173,27 @@ class Prep:
         base = self._base(X)
         numbers = base.drop(columns=list(self._category_at))
         self._medians = numbers.median().fillna(0.0).to_dict()
+        self._fit_no_trend(base)
         self._fit_linear(base, numbers)
         return self
+
+    def _fit_no_trend(self, base: pd.DataFrame) -> None:
+        """The seconds-since-epoch part of a date column whose year is the same on every training
+        row. Within one year it is a straight line through month and day, so a linear model
+        splits the same effect between them in opposite weights. That holds on the training rows;
+        on a date of the next year, where the month starts again, the weights add up to a
+        prediction far outside the target's range. A time order of validation cannot show it,
+        because the folds stay within the year."""
+        off = []
+        at = 0  # position of the column's first feature
+        for column, kind in self._plan:
+            if kind != "datetime":
+                at += 1
+                continue
+            if base[f"f{at + _DATE_PARTS.index('year')}"].nunique() <= 1:
+                off.append(f"f{at + _DATE_PARTS.index('ordinal')}")
+            at += len(_DATE_PARTS) + (column in self.timed)
+        self._no_trend = tuple(off)
 
     def _fit_linear(self, base: pd.DataFrame, numbers: pd.DataFrame) -> None:
         """What the linear view needs: number scales, the missing-value flags and the one-hot
@@ -187,8 +207,9 @@ class Prep:
         self._scale = {
             position: (float(filled[position].mean()), float(filled[position].std() or 1.0))
             for position in filled.columns
+            if position not in self._no_trend
         }
-        self._flags = [p for p in base.columns if base[p].isna().any()]
+        self._flags = [p for p in base.columns if base[p].isna().any() and p not in self._no_trend]
         self._levels = {}
         for position in self._category_at:
             counts = base[position].value_counts()
@@ -307,6 +328,7 @@ class Prep:
         The digits after ``f`` name the feature (position in ``feature_names``) a column
         derives from. Unseen and rare levels are all zeros."""
         base = self._base(df)
+        base = base.drop(columns=list(self._no_trend))
         names = []
         for position in base.columns:
             if position in self._category_at:
