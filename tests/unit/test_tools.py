@@ -687,6 +687,28 @@ def test_propose_hints_at_settings_that_suit_the_target(env):
         "share": "5.0"
     }
     assert rare["config"]["decision"] == "argmax"  # a hint, not a choice
+    assert rare["config"]["sort_metric"] == "aucpr"  # the default for a rare class of two
+    assert skewed["config"]["sort_metric"] == "auto"
+    named = call(
+        env, "propose_training_config", {"dataset_id": ds.id, "target": "rare", "sort_metric": "f1"}
+    )
+    assert named["config"]["sort_metric"] == "f1"  # what the user names wins
+    explicit = call(
+        env,
+        "propose_training_config",
+        {"dataset_id": ds.id, "target": "rare", "sort_metric": "auto"},
+    )
+    assert explicit["config"]["sort_metric"] == "auto"
+
+
+def test_the_recommended_metric_follows_the_problem():
+    rare = pd.Series([0] * 95 + [1] * 5)
+    assert builtin.recommended_metric(rare, "classification") == "aucpr"
+    assert builtin.recommended_metric(pd.Series([0, 1] * 50), "classification") == "auto"
+    assert (
+        builtin.recommended_metric(pd.Series([0] * 96 + [1, 2, 3, 4]), "classification") == "auto"
+    )
+    assert builtin.recommended_metric(pd.Series(np.arange(100.0)), "regression") == "auto"
 
 
 @pytest.fixture
@@ -747,6 +769,41 @@ def test_propose_sets_the_group_column_the_user_chose(env, grouped):
         call(env, "propose_training_config", {**base, "group_column": "nope"})
     with pytest.raises(ToolError, match="group_column"):
         call(env, "propose_training_config", {**base, "group_column": "label"})
+
+
+def test_propose_sets_the_metric_the_goal_names(env):
+    base = {"dataset_id": env.dataset.id, "target": "label"}
+    config = call(env, "propose_training_config", base)["config"]
+    assert config["sort_metric"] == "auto"
+    chosen = call(env, "propose_training_config", {**base, "sort_metric": "F1"})["config"]
+    assert chosen["sort_metric"] == "f1"
+    with pytest.raises(ToolError, match="sort_metric"):
+        call(env, "propose_training_config", {**base, "sort_metric": "rmse"})
+    with pytest.raises(ToolError, match="sort_metric"):
+        call(env, "propose_training_config", {**base, "sort_metric": "nonsense"})
+    with pytest.raises(ToolError, match="top3_accuracy"):  # the target has fewer classes
+        call(env, "propose_training_config", {**base, "sort_metric": "top3_accuracy"})
+
+
+def test_propose_refuses_a_tuned_decision_that_cannot_be_fitted(env):
+    base = {"dataset_id": env.dataset.id, "target": "label", "decision": "tuned"}
+    with pytest.raises(ToolError, match="sort_metric"):  # the metric is log loss
+        call(env, "propose_training_config", base)
+    with pytest.raises(ToolError, match="sort_metric"):
+        call(env, "propose_training_config", {**base, "sort_metric": "recall"})
+    config = call(env, "propose_training_config", {**base, "sort_metric": "f1"})["config"]
+    assert (config["decision"], config["sort_metric"]) == ("tuned", "f1")
+
+
+def test_propose_refuses_a_metric_the_target_values_cannot_use(env):
+    frame = pd.DataFrame({"x": np.arange(300, dtype=float), "signed": np.linspace(-5, 5, 300)})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "signed", DatasetType.TRAIN, [frame]
+    )
+    base = {"dataset_id": ds.id, "target": "signed"}
+    assert call(env, "propose_training_config", {**base, "sort_metric": "mae"})
+    with pytest.raises(ToolError, match="rmsle"):
+        call(env, "propose_training_config", {**base, "sort_metric": "rmsle"})
 
 
 def test_propose_refuses_settings_the_target_cannot_use(env):

@@ -346,7 +346,7 @@ def _config(record: ModelRecord) -> list[tuple[str, tuple[str, str | None]]]:
             key = "common.yes" if value else "common.no"
         elif name == "task" and value in ("auto", "classification", "regression"):
             key = f"train.task.{value}"
-        elif name == "decision" and value in ("argmax", "balanced"):
+        elif name == "decision" and value in ("argmax", "balanced", "tuned"):
             key = f"train.decision.{value}"
         elif name == "target_transform" and value in ("none", "log1p"):
             key = f"train.transform.{value}"

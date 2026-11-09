@@ -93,6 +93,16 @@ def test_the_card_shows_the_settings_that_are_not_the_default(setup):
         conn.commit()
     html = world.client.get(page).text
     assert "Adjust for class sizes" in html and "Logarithm (log1p)" in html
+    assert "Ranking metric" not in html
+    changed = dict(changed, sort_metric="qwk")
+    with closing(connect(world.client)) as conn:
+        conn.execute(
+            "UPDATE chat_proposals SET config_json = ? WHERE id = ?",
+            (json.dumps(changed), proposal.id),
+        )
+        conn.commit()
+    html = world.client.get(page).text
+    assert "Ranking metric" in html and "Quadratic weighted kappa (classification)" in html
 
 
 def test_the_card_explains_in_the_language_of_the_page(setup):

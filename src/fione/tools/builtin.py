@@ -35,6 +35,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
 from fione.auth.roles import ProjectAccess, Role, can_access_project, project_access
@@ -48,9 +49,10 @@ from fione.data.profile import (
     profile_dataset,
 )
 from fione.engine import diagnostics as diag
+from fione.engine import metrics
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.explain import PD_GRID
-from fione.engine.prep import infer_task
+from fione.engine.prep import _sorted_labels, infer_task
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import explanations
@@ -716,6 +718,18 @@ def rare_class_share(y: pd.Series, task: str) -> float | None:
     return share if share < RARE_CLASS_SHARE else None
 
 
+def recommended_metric(y: pd.Series, task: str) -> str:
+    """The ranking metric that suits the data when the user names none: average precision
+    (``aucpr``) for two classes whose last-listed one is rare (under ``RARE_CLASS_SHARE`` of the
+    rows), which log loss and accuracy hide behind the common class; else ``auto`` (log loss or
+    RMSE). Average precision is that of the class listed last, so it must be the rare one."""
+    y = y.dropna()
+    if rare_class_share(y, task) is None or y.nunique() != 2:
+        return "auto"
+    rare = y.value_counts().idxmin()
+    return "aucpr" if rare == _sorted_labels(y)[-1] else "auto"
+
+
 def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | None:
     """The first column other than ``target`` that is named like an identifier and repeats its
     values over rows (``REPEATED_ID_GROUPS`` or more values, ``REPEATED_ID_MIN_ROWS`` rows each on
@@ -798,6 +812,22 @@ def _warning(code: str, message: str, **params) -> dict:
     """A proposal's warning: ``message`` is English for the model; the card translates the
     ``code`` with its ``params``."""
     return {"code": code, "message": message, "params": params}
+
+
+def _metric_for(name, y: pd.Series, task: str) -> str:
+    """The metric ``name`` the user's goal names, if it fits the task and the target."""
+    name = str(name).lower()
+    if name == "auto":
+        return name
+    y = y.dropna()
+    numbers = y.to_numpy(dtype=float) if task == "regression" else np.zeros(1, dtype=int)
+    classes = int(y.nunique()) if task == "classification" else 0
+    try:
+        name = metrics.resolve(name, task, "sort_metric")
+        metrics.check(name, numbers, classes, "sort_metric")
+    except ConfigError as e:
+        raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
+    return name
 
 
 def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
@@ -896,8 +926,16 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 share=f"{max(share * 100, 0.1):.1f}",
             )
         )
-    overrides = {
-        k: args[k] for k in ("max_runtime_secs", "decision", "target_transform") if k in args
+    overrides = {"sort_metric": recommended_metric(found.y, task)}
+    overrides |= {
+        k: args[k]
+        for k in (
+            "max_runtime_secs",
+            "decision",
+            "target_transform",
+            "sort_metric",
+        )
+        if k in args
     }
     if "group_column" in args:
         group = args["group_column"]
@@ -919,6 +957,14 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 column=column,
             )
         )
+    if "sort_metric" in overrides:
+        overrides["sort_metric"] = _metric_for(overrides["sort_metric"], found.y, task)
+    if overrides.get("decision") == "tuned" and task == "classification":
+        try:
+            name = metrics.resolve(overrides["sort_metric"], task, "sort_metric")
+            metrics.check_tuned(name, int(found.y.nunique()))
+        except ConfigError as e:
+            raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
     if overrides.get("decision", "argmax") != "argmax" and task != "classification":
         raise ToolError("decision applies to a classification target only")
     if overrides.get("target_transform", "none") != "none":
@@ -1724,20 +1770,21 @@ for _tool in (
     ),
     Tool(
         "propose_training_config",
-        "Propose a training configuration for a dataset and target column. This only returns a "
-        "proposal for the user to confirm; nothing is started. Set the optional max_runtime_secs, "
-        "decision ('balanced': a rare class and a score such as balanced accuracy) and "
-        "target_transform ('log1p': a skewed target and a score such as RMSLE) only when the "
-        "user's goal calls for it. group_column: a repeating id (a customer) whose rows stay "
-        "together in validation.",
+        "Propose a training configuration for a dataset and target; the user confirms it. "
+        "Set the optional settings only if the goal calls for them: "
+        "max_runtime_secs; decision ('balanced': a rare class, balanced accuracy); "
+        "target_transform ('log1p': a skewed target, RMSLE); sort_metric (the score the goal "
+        "names: f1, qwk, rmsle, ...); group_column (a repeating id, like a customer, whose "
+        "rows stay together).",
         _schema(
             {
                 "dataset_id": _ID,
                 "target": _COLUMN,
                 "notes": {"type": "string", "maxLength": 2000},
                 "max_runtime_secs": {"type": "integer", "minimum": 1},
-                "decision": {"type": "string", "enum": ["argmax", "balanced"]},
+                "decision": {"type": "string", "enum": ["argmax", "balanced", "tuned"]},
                 "target_transform": {"type": "string", "enum": ["none", "log1p"]},
+                "sort_metric": {"type": "string"},
                 "group_column": _COLUMN,
             },
             ["dataset_id", "target"],

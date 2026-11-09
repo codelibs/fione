@@ -385,6 +385,8 @@ def test_a_target_the_engine_would_refuse_is_refused_before_a_job_is_queued(
         ({**CONFIG, "sort_metric": "rmse"}, "sort_metric 'rmse' does not apply to classification"),
         ({**CONFIG, "stopping_metric": "r2"}, "stopping_metric 'r2' does not apply"),
         ({**CONFIG, "sort_metric": "rmsle"}, "does not apply to classification"),
+        ({**CONFIG, "decision": "tuned", "sort_metric": "f1"}, "needs a target with two classes"),
+        ({**CONFIG, "sort_metric": "top3_accuracy"}, "sort_metric 'top3_accuracy' needs"),
         ({**CONFIG, "seed": -1}, "seed must be a whole number from 0 to 4294967295"),
         ({**CONFIG, "seed": 2**32}, "seed must be a whole number from 0 to 4294967295"),
     ],
@@ -395,6 +397,21 @@ def test_metrics_and_seed_the_engine_cannot_use_are_refused_up_front(
     with pytest.raises(ConfigError, match=message):
         models.submit_training(conn, storage, owner, project.id, dataset.id, config)
     assert job_count(conn) == 0
+
+
+def test_a_tuned_decision_needs_a_metric_that_counts_right_answers(conn, storage, owner, project):
+    frame = pd.read_csv(io.BytesIO(iris_csv()))
+    two = frame[frame["species"] != "virginica"]
+    data = io.BytesIO(two.to_csv(index=False).encode())
+    dataset = ingest_csv(storage, conn, project.id, "two", DatasetType.TRAIN, data)
+    tuned = {**CONFIG, "decision": "tuned"}
+    for config in (tuned, {**tuned, "sort_metric": "recall"}):
+        with pytest.raises(ConfigError, match="decision 'tuned' needs a sort_metric"):
+            models.submit_training(conn, storage, owner, project.id, dataset.id, config)
+    job = models.submit_training(
+        conn, storage, owner, project.id, dataset.id, {**tuned, "sort_metric": "f1"}
+    )
+    assert job.payload["config"]["decision"] == "tuned"
 
 
 def test_the_largest_seed_and_task_metrics_are_accepted(conn, storage, owner, project, dataset):

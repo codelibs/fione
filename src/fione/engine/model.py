@@ -46,7 +46,8 @@ class TrainedModel:
     fold_assignment: np.ndarray | None = None
     diagnostics: dict | None = None  # fione.engine.diagnostics of the OOF predictions; JSON
     features: list[dict] | None = None  # derived-feature groups tried, and why (engine.features)
-    class_prior: np.ndarray | None = None  # the classes' shares, set by decision="balanced"
+    # The classes' shares (decision="balanced"), or (1 - t, t) for the threshold t ("tuned").
+    class_prior: np.ndarray | None = None
 
     def choose(self, proba: np.ndarray) -> np.ndarray:
         """The class index per row of ``proba`` under the model's decision rule."""
