@@ -210,9 +210,9 @@
           <tbody>
             {% for name, value in metric_rows %}
             <tr>
-              <th scope="row">{{ t('metric.' ~ name) if name in ("logloss", "accuracy", "auc", "rmse", "mae", "r2") else name }}</th>
+              <th scope="row">{{ t('metric.' ~ name) if name in known_metrics else name }}</th>
               <td class="num">{{ value|cellnum if value is not none else "—" }}</td>
-              <td class="text-sm cell-value">{{ t('metric.' ~ name ~ '.explain') if name in ("logloss", "accuracy", "auc", "rmse", "mae", "r2") else "" }}</td>
+              <td class="text-sm cell-value">{{ t('metric.' ~ name ~ '.explain') if name in known_metrics else "" }}</td>
             </tr>
             {% endfor %}
           </tbody>

@@ -351,8 +351,8 @@ def _config(record: ModelRecord) -> list[tuple[str, tuple[str, str | None]]]:
         elif name == "target_transform" and value in ("none", "log1p"):
             key = f"train.transform.{value}"
         elif name in ("stopping_metric", "sort_metric") and isinstance(value, str):
-            known = ("auto", "logloss", "auc", "accuracy", "rmse", "mae", "r2")
-            key = f"train.metric.{value.lower()}" if value.lower() in known else None
+            known = value.lower() == "auto" or value.lower() in engine_metrics.REGISTRY
+            key = f"train.metric.{value.lower()}" if known else None
         if isinstance(value, list):
             value = ", ".join(str(v) for v in value) or "—"
         out.append((name, ("—" if value is None else str(value), key)))
@@ -1149,6 +1149,7 @@ def _model_view(
         importance=ranked,
         importance_chart=importance_chart,
         metric_rows=metric_rows,
+        known_metrics=engine_metrics.REGISTRY,
         diagnostics=_diagnostics_view(record, lang),
         diagnostics_stored=record.diagnostics is not None,
         explain=_explain_tab(request, conn, ctx, record, lang),

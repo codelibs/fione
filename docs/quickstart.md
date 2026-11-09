@@ -131,6 +131,31 @@ To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.m
 questions about your data and models in plain language, use [the assistant](assistant.md)
 (it needs a language model: Ollama or Claude).
 
+## Choosing the score
+
+"Ranking metric" orders the leaderboard; "Stopping metric" decides whether a try improved
+(`sort_metric` and `stopping_metric` in the API; *Automatic* is log loss for classification and
+RMSE for regression). The models are always trained on log loss or squared error, and so are the
+weights of the final blend: the metric ranks the models, stops the search and is reported, and
+every metric that fits the data is listed on the model's Metrics tab, in the target's own units.
+
+- Classification: log loss, AUC, accuracy, average precision (`aucpr`), Gini, lift of the top 10%
+  (`lift_top_group`), balanced accuracy, error rate (`misclassification`), mean error per class
+  (`mean_per_class_error`), F1, precision, recall, MCC, kappa, quadratic weighted kappa (`qwk`),
+  Brier score, top-3 accuracy (`top3_accuracy`) and MAP@3 (`map3`).
+- Regression: RMSE, MAE, R², MSE, RMSLE, MAPE, SMAPE, median absolute error (`medae`), explained
+  variance, correlation (`pearson`), rank correlation (`spearman`), normalized Gini
+  (`normalized_gini`), Poisson deviance (`poisson`) and quadratic weighted kappa of the rounded
+  predictions (`rounded_qwk`).
+
+Metrics that count right answers (accuracy, F1, kappa, ...) use the predicted class described
+below; with more than two classes precision, recall and F1 are the mean over the classes, and with
+two classes they describe the class listed last. The ranking measures (AUC, average precision,
+Gini, lift) are reported for two classes only. Kappa and `qwk` take the classes in their sorted
+order, so `qwk` suits ratings. RMSLE, Poisson deviance and normalized Gini need target values of
+0 or more, MAPE needs values other than 0, `rounded_qwk` needs whole numbers, and top-3 accuracy
+needs more than three classes and MAP@3 three or more; training stops with an error when the target does not fit.
+
 ## Choosing the predicted class
 
 A classification model predicts the class with the largest probability. When one class is much

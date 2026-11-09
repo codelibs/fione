@@ -14,10 +14,10 @@ from fione.engine import search
 from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, AutoML
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
+from fione.engine.metrics import HIGHER_IS_BETTER
 from fione.engine.search import STARTUP_TRIALS
 
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
-HIGHER_IS_BETTER = {"auc", "accuracy", "r2"}
 
 
 def _fit(df, events=None, families=None, should_stop=None, **config):
@@ -88,7 +88,7 @@ def test_breast_cancer_holdout_auc():
     model = _fit(train, target="target", max_models=4)
     proba = model.predict_proba(test)
     assert roc_auc_score(test["target"], proba[1]) >= 0.95
-    assert set(model.metrics) == {"logloss", "accuracy", "auc"}
+    assert {"logloss", "accuracy", "auc", "f1", "mcc"} <= set(model.metrics)
 
 
 def test_friedman_regression_returns_floats_on_the_input_index():
@@ -102,7 +102,7 @@ def test_friedman_regression_returns_floats_on_the_input_index():
     pred = model.predict(test)
     assert pred.dtype == np.float64 and pred.index.equals(test.index)
     assert r2_score(test["y"], pred) >= 0.8
-    assert set(model.metrics) == {"rmse", "mae", "r2"}
+    assert {"rmse", "mae", "r2", "mse", "spearman"} <= set(model.metrics)
     with pytest.raises(ConfigError):
         model.predict_proba(test)
 
@@ -118,7 +118,8 @@ def test_classification_labels_keep_their_values(iris):
     assert np.allclose(proba.sum(axis=1), 1)
     assert proba.index.equals(test.index)
     assert set(model.predict(test)) <= set(model.classes_)
-    assert set(model.metrics) == {"logloss", "accuracy"}
+    assert {"logloss", "accuracy", "f1", "kappa"} <= set(model.metrics)
+    assert "auc" not in model.metrics
 
 
 def test_leaderboard_has_a_row_per_candidate_plus_the_ensemble(iris):
@@ -255,12 +256,24 @@ def test_model_round_trips_through_joblib(iris, tmp_path):
         ("regression", "rmse"),
         ("regression", "mae"),
         ("regression", "r2"),
+        ("classification", "f1"),
+        ("classification", "aucpr"),
+        ("classification", "balanced_accuracy"),
+        ("classification", "mcc"),
+        ("classification", "qwk"),
+        ("classification", "brier"),
+        ("regression", "rmsle"),
+        ("regression", "mape"),
+        ("regression", "spearman"),
+        ("regression", "normalized_gini"),
+        ("regression", "poisson"),
     ],
 )
 def test_leaderboard_is_sorted_by_the_sort_metric(task, metric):
     df = _binary(400)
     if task == "regression":
-        df["y"] = df["x0"] * 2 + df["x1"] + np.random.default_rng(0).normal(size=len(df))
+        noise = np.random.default_rng(0).normal(size=len(df))
+        df["y"] = 30 + df["x0"] * 2 + df["x1"] + noise
     model = _fit(
         df,
         families=["LightGBM", "ExtraTrees"],
@@ -280,7 +293,7 @@ def test_leaderboard_is_sorted_by_the_sort_metric(task, metric):
     [
         ("classification", "sort_metric", "rmse"),
         ("regression", "sort_metric", "auc"),
-        ("classification", "sort_metric", "aucpr"),
+        ("classification", "sort_metric", "rmsle"),
         ("regression", "stopping_metric", "logloss"),
     ],
 )
@@ -435,6 +448,43 @@ def test_log1p_target_is_learned_on_the_log_scale_and_reported_in_its_own_units(
     assert ensemble == pytest.approx(rmse)
     assert model.predict(df).between(0, 1.5 * df["y"].max()).all()
     assert model.diagnostics["task"] == "regression"
+
+
+def test_metrics_of_relative_error_are_scored_in_the_targets_own_units_with_log1p(monkeypatch):
+    df = _skewed()
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=2,
+        sort_metric="mape",
+        stopping_metric="rmsle",
+        target_transform="log1p",
+        keep_cv_predictions=True,
+    )
+    shown, truth = model.cv_predictions, df["y"].to_numpy()
+    mape = float(np.mean(np.abs(truth - shown) / truth))
+    ensemble = model.leaderboard.set_index("model").loc["Ensemble", "cv_score"]
+    assert ensemble == pytest.approx(mape)
+    assert model.metrics["mape"] == pytest.approx(mape)
+
+
+@pytest.mark.parametrize(
+    "task, metric, make",
+    [
+        ("regression", "rmsle", lambda df: df.assign(y=df["x0"])),  # negative values
+        ("regression", "mape", lambda df: df.assign(y=(df["x0"] > 0).astype(float))),  # zeros
+        ("regression", "rounded_qwk", lambda df: df.assign(y=df["x0"])),  # fractions
+        ("classification", "top3_accuracy", lambda df: df),  # two classes
+    ],
+)
+def test_metric_the_target_does_not_fit_is_rejected_before_training(task, metric, make):
+    df = make(_binary(200))
+    with pytest.raises(ConfigError, match=metric):
+        _fit(df, target="y", task=task, sort_metric=metric)
+    with pytest.raises(ConfigError, match=metric):
+        _fit(df, target="y", task=task, stopping_metric=metric)
 
 
 def test_log1p_target_is_ignored_for_classification_with_a_notice():

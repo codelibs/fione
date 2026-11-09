@@ -87,7 +87,7 @@ def test_resolve_metric(task, name, resolved):
 
 @pytest.mark.parametrize(
     "task, name",
-    [("classification", "rmse"), ("regression", "auc"), ("classification", "aucpr")],
+    [("classification", "rmse"), ("regression", "auc"), ("classification", "rmsle")],
 )
 def test_resolve_rejects_metrics_that_do_not_fit_the_task(task, name):
     with pytest.raises(ConfigError, match="sort_metric"):
@@ -111,16 +111,18 @@ def test_multiclass_auc_is_one_vs_rest_macro():
     assert metrics.value("auc", y, p) == pytest.approx(1.0)
 
 
-def test_summary_lists_the_task_metrics():
+def test_summary_lists_the_metrics_that_fit_the_data():
     y = np.array([0, 1, 1, 0])
     p = np.array([[0.9, 0.1], [0.2, 0.8], [0.3, 0.7], [0.6, 0.4]])
-    assert set(metrics.summary("classification", y, p)) == {"logloss", "accuracy", "auc"}
-    assert set(metrics.summary("classification", np.array([0, 1, 2]), np.eye(3))) == {
-        "logloss",
-        "accuracy",
-    }
-    assert set(metrics.summary("regression", np.arange(4.0), np.arange(4.0))) == {
-        "rmse",
-        "mae",
-        "r2",
-    }
+    two = set(metrics.summary("classification", y, p))
+    assert {"logloss", "accuracy", "auc", "aucpr", "f1", "mcc", "qwk", "brier"} <= two
+    assert not {"top3_accuracy", "map3"} & two  # they need more than 3 classes
+    three = set(metrics.summary("classification", np.array([0, 1, 2]), np.eye(3)))
+    assert {"logloss", "accuracy", "f1", "kappa"} <= three
+    assert not {"auc", "aucpr", "gini", "lift_top_group"} & three  # ranking measures: two classes
+    values = np.arange(1.0, 5.0)
+    regression = set(metrics.summary("regression", values, values))
+    assert {"rmse", "mae", "r2", "rmsle", "mape", "poisson", "rounded_qwk"} <= regression
+    signed = set(metrics.summary("regression", values - 2.5, values - 2.5))
+    assert {"rmse", "mae", "r2", "smape", "spearman"} <= signed
+    assert not {"rmsle", "poisson", "normalized_gini", "rounded_qwk"} & signed

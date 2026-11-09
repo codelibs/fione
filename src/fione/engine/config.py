@@ -38,24 +38,43 @@ _TRANSFORMS = ("none", "log1p")
 # The folds' random_state (numpy's RandomState through scikit-learn) takes 0..2**32 - 1.
 MAX_SEED = 2**32 - 1
 MAX_CV_REPEATS = 10  # every repeat refits every fold of every trial
-# The metric names, compared case-insensitively. The AutoML accepts the
-# subset that fits the task (see ``fione.engine.metrics``).
+# The metric names, compared case-insensitively: ``auto`` and every metric of
+# ``fione.engine.metrics``, which accepts the subset that fits the task.
 _METRICS = frozenset(
     {
         "auto",
-        "accuracy",
-        "r2",
-        "deviance",
         "logloss",
-        "mse",
-        "rmse",
-        "mae",
-        "rmsle",
         "auc",
+        "accuracy",
         "aucpr",
+        "gini",
         "lift_top_group",
+        "balanced_accuracy",
         "misclassification",
         "mean_per_class_error",
+        "f1",
+        "precision",
+        "recall",
+        "mcc",
+        "kappa",
+        "qwk",
+        "brier",
+        "top3_accuracy",
+        "map3",
+        "rmse",
+        "mae",
+        "r2",
+        "mse",
+        "rmsle",
+        "mape",
+        "smape",
+        "medae",
+        "explained_variance",
+        "pearson",
+        "spearman",
+        "normalized_gini",
+        "poisson",
+        "rounded_qwk",
     }
 )
 

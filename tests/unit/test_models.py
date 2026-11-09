@@ -384,7 +384,7 @@ def test_a_target_the_engine_would_refuse_is_refused_before_a_job_is_queued(
     [
         ({**CONFIG, "sort_metric": "rmse"}, "sort_metric 'rmse' does not apply to classification"),
         ({**CONFIG, "stopping_metric": "r2"}, "stopping_metric 'r2' does not apply"),
-        ({**CONFIG, "sort_metric": "deviance"}, "does not apply to classification"),
+        ({**CONFIG, "sort_metric": "rmsle"}, "does not apply to classification"),
         ({**CONFIG, "seed": -1}, "seed must be a whole number from 0 to 4294967295"),
         ({**CONFIG, "seed": 2**32}, "seed must be a whole number from 0 to 4294967295"),
     ],
