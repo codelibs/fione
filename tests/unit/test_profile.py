@@ -123,6 +123,21 @@ def test_long_high_cardinality_strings_are_text():
     assert _kind(pd.Series(values)) == "text"
 
 
+def test_a_prose_column_reports_its_mean_length_and_other_columns_do_not():
+    text = [f"this is a fairly long free text comment number {i % 400}" for i in range(500)]
+    unique = [f"every comment here is different, and this is number {i}" for i in range(500)]
+    codes = [f"AB{i % 400}-XY" for i in range(500)]
+    df = pd.DataFrame({"t": text, "u": unique, "k": codes, "n": range(500), "c": ["a", "b"] * 250})
+    columns = {c.name: c for c in profile_dataset(df).columns}
+    assert columns["t"].kind == "text" and columns["u"].kind == "text"  # different, yet prose
+    assert columns["t"].mean_length == pytest.approx(np.mean([len(v) for v in text]))
+    assert columns["u"].mean_length == pytest.approx(np.mean([len(v) for v in unique]))
+    assert [columns[n].mean_length for n in "knc"] == [None, None, None]
+    assert columns["k"].kind != "text"
+    ids = pd.DataFrame({"i": [f"AB{i:05d}-XY" for i in range(500)]})
+    assert profile_dataset(ids).columns[0].kind == "id"  # all different codes stay ids
+
+
 def test_short_mid_cardinality_strings_are_categorical():
     values = [f"c{i % 600}" for i in range(800)]
     assert _kind(pd.Series(values)) == "categorical"

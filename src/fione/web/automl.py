@@ -484,7 +484,7 @@ def _train_view(
     left_out = {"analysis.tip.runtime_long"}
     if values is None:  # first shown: the run time the size of the data needs
         values = _form_values(_defaults())
-        values["max_runtime_minutes"] = str(recommended_runtime(dataset))
+        values["max_runtime_minutes"] = str(recommended_runtime(dataset, found.profile))
     else:
         left_out.add("analysis.tip.runtime")
     if inputs is None:

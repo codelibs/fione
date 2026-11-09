@@ -52,7 +52,7 @@ from fione.engine import diagnostics as diag
 from fione.engine import metrics
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.explain import PD_GRID
-from fione.engine.prep import _sorted_labels, infer_task
+from fione.engine.prep import MAX_PROSE, _sorted_labels, infer_task
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import explanations
@@ -673,6 +673,11 @@ def _get_training_events(ctx: ToolContext, args: dict) -> dict:
 # on the larger sets measured; a run should try about TRIALS_WANTED of them.
 SECS_PER_CELL = 6e-6
 TRIALS_WANTED = 30
+# A text model fits all its data in one unit that cannot be cut short, and its first trial may
+# take only part of the search time (half of what is left when it starts, about 0.2 of the
+# run). One trial costs about 2e-6 seconds per character, so the run needs about this many
+# per character of text for the model to get a trial.
+SECS_PER_TEXT_CHAR = 1e-5
 MAX_RUNTIME_SECS = 1800
 MIN_RUNTIME_SECS = 120
 # Skew above which a target of 0 or more is suggested for target_transform="log1p". On every
@@ -687,15 +692,22 @@ REPEATED_ID_MIN_ROWS = 2  # rows per value, on average
 _ID_NAME = re.compile(r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(?![a-z])|番号")
 
 
-def runtime_need_secs(dataset: Dataset) -> float:
-    """Seconds a run needs to try about ``TRIALS_WANTED`` models on ``dataset``."""
+def runtime_need_secs(dataset: Dataset, profile: DatasetProfile | None = None) -> float:
+    """Seconds a run needs to try about ``TRIALS_WANTED`` models on ``dataset``, or, when
+    ``profile`` shows prose columns (the first ``MAX_PROSE`` are read), to give a text model one
+    trial (``SECS_PER_TEXT_CHAR``), if that is more."""
     cells = dataset.n_rows * max(1, dataset.n_cols - 1)
-    return cells * SECS_PER_CELL * TRIALS_WANTED
+    need = cells * SECS_PER_CELL * TRIALS_WANTED
+    if profile is None:
+        return need
+    prose = [c for c in profile.columns if c.mean_length is not None][:MAX_PROSE]
+    chars = dataset.n_rows * sum(c.mean_length * (1 - c.missing_rate) for c in prose)
+    return max(need, chars * SECS_PER_TEXT_CHAR)
 
 
-def _runtime_secs(dataset: Dataset) -> int:
+def _runtime_secs(dataset: Dataset, profile: DatasetProfile | None = None) -> int:
     """The proposed run time: ``runtime_need_secs`` in whole minutes, from 2 to 30 minutes."""
-    minutes = math.ceil(runtime_need_secs(dataset) / 60)
+    minutes = math.ceil(runtime_need_secs(dataset, profile) / 60)
     return min(MAX_RUNTIME_SECS, max(MIN_RUNTIME_SECS, minutes * 60))
 
 
@@ -976,7 +988,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         config = TrainConfig(
             target=target,
             task=task,
-            **{"max_runtime_secs": _runtime_secs(dataset), **overrides},
+            **{"max_runtime_secs": _runtime_secs(dataset, profile), **overrides},
             ignored_columns=ignored,
         ).validate()
     except ConfigError as e:

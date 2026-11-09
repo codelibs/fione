@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import logging
+import math
 from types import SimpleNamespace
 
 import numpy as np
@@ -642,6 +643,26 @@ def test_propose_cleans_notes_and_never_interprets_them(env):
 def test_runtime_follows_the_size_of_the_data(rows, cols, secs):
     dataset = SimpleNamespace(n_rows=rows, n_cols=cols)  # in whole minutes, from 2 to 30
     assert builtin._runtime_secs(dataset) == secs
+
+
+def test_the_proposed_run_time_counts_the_text_of_the_data(env, monkeypatch):
+    comments = pd.Series(
+        [f"free text comment number {i % 300} " + "word " * 40 for i in range(400)]
+    )
+    frame = pd.DataFrame({"comment": comments, "label": ["a", "b"] * 200})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "prose", DatasetType.TRAIN, [frame]
+    )
+
+    def secs():
+        return call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})[
+            "config"
+        ]["max_runtime_secs"]
+
+    assert secs() == 120
+    monkeypatch.setattr(builtin, "SECS_PER_TEXT_CHAR", 0.0044)
+    need = 400 * comments.str.len().mean() * 0.0044
+    assert need > 360 and secs() == 60 * math.ceil(need / 60)
 
 
 def test_propose_sets_only_the_settings_the_user_wanted(env):

@@ -12,7 +12,8 @@ Kind inference (first matching rule wins; ``n`` = non-null values, ``u`` = disti
 4. Integer dtype: ``id`` if ``u == n`` and ``n >= 20``; ``categorical`` if ``u <= 10`` and
    ``u / n <= 0.05`` (0/1 flags, small codes); otherwise ``numeric``.
 5. Other numeric dtype (floats): ``numeric``. Floats are never ``id``.
-6. String/object: ``id`` if ``u == n`` and ``n >= 20``; ``categorical`` if ``u / n <= 0.5`` or
+6. String/object: ``id`` if ``u == n`` and ``n >= 20`` and the values are not prose (``is_prose``:
+   comments that are all different are ``text``); ``categorical`` if ``u / n <= 0.5`` or
    ``u <= 50``; ``text`` if the mean string length is above 30; ``categorical`` if ``u <= 1000``;
    ``text`` otherwise.
 
@@ -37,7 +38,7 @@ import pandas as pd
 from pandas.api import types as pdt
 
 from fione.data.frames import looks_like_dates, parse_datetimes
-from fione.engine.prep import Task, infer_task
+from fione.engine.prep import Task, infer_task, is_prose
 
 Kind = Literal["numeric", "categorical", "text", "datetime", "id", "constant"]
 
@@ -88,6 +89,9 @@ class ColumnProfile:
     histogram: list[tuple[float, int]] | None
     top_values: list[tuple[str, int]] | None
     outlier_rate: float | None
+    mean_length: float | None = (
+        None  # characters per value, of a ``text`` column the engine reads as prose
+    )
 
 
 @dataclass
@@ -142,7 +146,7 @@ def _infer_kind(nonnull: pd.Series, n_unique: int) -> Kind:
     if looks_like_dates(nonnull):
         return "datetime"
     if n_unique == n and n >= _ID_MIN_ROWS:
-        return "id"
+        return "text" if is_prose(nonnull) else "id"
     if n_unique / n <= 0.5 or n_unique <= 50:
         return "categorical"
     if nonnull.astype(str).str.len().mean() > 30:
@@ -191,6 +195,9 @@ def _profile_column(name: str, s: pd.Series) -> ColumnProfile:
         stats, histogram, outlier_rate = _numeric_details(nonnull)
     if kind in ("categorical", "text", "id"):
         top_values = _top_values(counts)
+    mean_length = None
+    if kind == "text" and is_prose(nonnull):
+        mean_length = float(nonnull.astype(str).str.len().mean())
     return ColumnProfile(
         name=name,
         kind=kind,
@@ -200,6 +207,7 @@ def _profile_column(name: str, s: pd.Series) -> ColumnProfile:
         histogram=histogram,
         top_values=top_values,
         outlier_rate=outlier_rate,
+        mean_length=mean_length,
     )
 
 
