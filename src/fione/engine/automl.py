@@ -55,9 +55,13 @@ When ``should_stop()`` turns true, the search ends, nothing is refit, and the me
 their fold models; the model has ``stop_reason == "cancelled"``. ``NoModelError`` is raised when
 no family completed a trial, because of the cancellation or because the budget is too small.
 
-A family whose first trial does not fit in its share of the search time (a text model fits all
-its data in one unit and cannot be cut short) has no model; a ``notice`` says what the trial
-needed. The late families that are not run for lack of time are named in one ``notice``.
+The first trial of a base family may take up to ``FIRST_TRIAL_SHARE`` of the search time left
+when that is more than the family's share: the families come in order of priority, the better
+ones finish a trial (on a large table one takes minutes, and a trial cut short by a small
+share scores worse), and those after them get what remains. Later trials stay within the
+share. A family whose first trial does not fit even then (a text model fits all its data in one
+unit and cannot be cut short) has no model; a ``notice`` says what the trial needed. The late
+families that are not run for lack of time are named in one ``notice``.
 
 A family that raises (a library failure) is skipped with a ``notice`` of kind ``family_error``,
 keeping its best trial so far; a refit that raises falls back to the fold models with a
@@ -123,6 +127,12 @@ FAMILY_WEIGHTS = {
 LATE_ORDER = ("TextLinearChar", "TextLinearPlain", "TextLinearWide")
 LATE_WEIGHTS = {"TextLinearChar": 0.5, "TextLinearPlain": 0.25, "TextLinearWide": 0.25}
 LATE_SHARE = 0.15  # of the search time is kept for the late families, when any applies
+# The first trial of a base family may take up to this share of the search time left, if that is
+# more than the family's share. Two cases need it: a text model fits all its data in one unit and
+# cannot be cut short, so a share below one trial leaves it without a model; and on a large table
+# a boosting family needs minutes for one trial, and a trial cut short by a small share scores
+# worse. Where every family already fits a trial in its share, it changes nothing.
+FIRST_TRIAL_SHARE = 0.5
 FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
 # A short run gets more: the choice needs about this long on a few thousand rows, and without it
 # the most useful candidates run out of time unconfirmed. Never over FEATURE_MAX_SHARE.
@@ -525,6 +535,10 @@ class AutoML:
                 if FAMILIES[name].reference in results:
                     skipped.append(name)
                 continue
+            # A base family's first trial may take more than the family's share (up to
+            # ``FIRST_TRIAL_SHARE`` of the time left): the families come in order of priority,
+            # and the better ones finish a trial, while those after them get what remains.
+            allowed = share if late else max(share, FIRST_TRIAL_SHARE * left)
             try:
                 result = run_family(
                     name,
@@ -544,13 +558,14 @@ class AutoML:
                     stopping_score=stopping_score,
                     sample_weight=weight,
                     repeats=repeats,
+                    first_deadline=None if late else own.child(allowed),
                 )
             except NoModelError as e:
                 if late:
                     skipped.append(name)
                 else:
                     reasons[name] = "time"
-                    self._notice(_no_time_message(name, share, e.needed_secs), family=name)
+                    self._notice(_no_time_message(name, allowed, e.needed_secs), family=name)
                 continue
             except Exception as e:  # outside any trial, e.g. building the view
                 self.emit(error_notice("family_error", name, e))
@@ -731,14 +746,14 @@ def _late_fits(
     return share >= spec.cost * reference.log[0]["elapsed"]
 
 
-def _no_time_message(name: str, share: float, needed: float | None) -> str:
-    """Why a family has no model: its first trial did not fit in its ``share`` of the search time
-    (``needed`` seconds, when known)."""
+def _no_time_message(name: str, allowed: float, needed: float | None) -> str:
+    """Why a family has no model: its first trial did not fit in the ``allowed`` seconds of the
+    search time (it is estimated to need ``needed``, when known)."""
     if needed is None:
-        return f"{name}: no model, its share of the search time ({share:.0f} s) was too short"
+        return f"{name}: no model, the search time it could have ({allowed:.0f} s) was too short"
     return (
-        f"{name}: no model, one trial is estimated to need about {needed:.0f} s but its share of "
-        f"the search time was {share:.0f} s; a longer max_runtime_secs would let it run"
+        f"{name}: no model, one trial is estimated to need about {needed:.0f} s but the search "
+        f"time it could have was {allowed:.0f} s; a longer max_runtime_secs would let it run"
     )
 
 

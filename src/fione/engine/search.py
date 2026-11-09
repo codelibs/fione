@@ -307,9 +307,14 @@ def run_family(
     stopping_score: Callable[[np.ndarray], float] | None = None,
     sample_weight: np.ndarray | None = None,
     repeats: int = 1,
+    first_deadline: Deadline | None = None,
 ) -> FamilyResult:
     """Search family ``name`` within ``deadline``; ``y`` is float targets or class codes 0..k-1.
-    ``folds`` holds ``repeats`` runs of folds (see ``repeat_folds``)."""
+    ``folds`` holds ``repeats`` runs of folds (see ``repeat_folds``).
+
+    ``first_deadline`` (a later one than ``deadline``) bounds the first trial instead of
+    ``deadline``: a family whose share is too short for one trial still gets a whole one, and
+    its search ends at ``deadline`` as soon as that trial is done."""
     start = time.monotonic()
     n_classes = int(y.max()) + 1 if task == "classification" else 0
     spec = FAMILIES[name](task, n_classes, seed=seed, n_jobs=n_threads(len(X)))
@@ -351,7 +356,8 @@ def run_family(
                 reason = "no_improvement"
                 break
         unit = spec.unit_secs
-        if deadline.expired() or (
+        until = first_deadline if finished == 0 and first_deadline is not None else deadline
+        if until.expired() or (
             finished and unit and deadline.remaining() < len(folds) * UNIT_SAFETY * unit
         ):
             reason = "time"
@@ -373,7 +379,7 @@ def run_family(
                 y,
                 folds,
                 trial,
-                deadline,
+                until,
                 cap,
                 split,
                 first,
