@@ -556,3 +556,45 @@ def test_a_prep_pickled_without_the_unseen_share_still_loads_and_keeps_zero():
     assert loaded._unseen == {}
     new = pd.DataFrame({"x": [0.0], "name": ["new-1"]})
     assert loaded.tree(new).iloc[0, loaded.feature_names.index("name")] == 0.0
+
+
+def _days(start, n):
+    return pd.DataFrame({"when": pd.date_range(start, periods=n).strftime("%Y-%m-%d")})
+
+
+def _ordinal_in_linear_view(prep, frame):
+    position = f"f{prep.feature_names.index('when__ordinal')}"
+    return position in prep.linear(frame).columns
+
+
+def test_the_linear_view_has_no_epoch_seconds_when_the_year_is_the_same_on_every_row():
+    year = _days("2016-01-01", 360)
+    prep = Prep().fit(year)
+    assert not _ordinal_in_linear_view(prep, year)
+    assert "when__ordinal" in prep.feature_names
+    assert prep.tree(year).shape[1] == len(prep.feature_names)  # trees keep every part
+    assert prep.linear(year).shape[1] == prep.linear_width
+
+
+def test_the_linear_view_keeps_epoch_seconds_when_the_data_covers_two_years():
+    two = _days("2015-07-01", 500)
+    assert _ordinal_in_linear_view(Prep().fit(two), two)
+
+
+def test_a_linear_model_fitted_within_one_year_stays_in_range_in_the_next_january():
+    from sklearn.linear_model import Ridge
+
+    year = _days("2016-01-01", 360)
+    month = pd.to_datetime(year["when"]).dt.month.to_numpy()
+    y = 2.0 + 0.3 * np.sin(month * np.pi / 6)
+    prep = Prep().fit(year)
+    model = Ridge(alpha=1e-3).fit(prep.linear(year), y)
+    ahead = prep.linear(_days("2017-01-01", 31))
+    assert np.abs(model.predict(ahead)).max() < 5  # with the epoch seconds it is about -17
+
+
+def test_epoch_seconds_are_found_by_position_not_by_a_column_name():
+    year = _days("2016-01-01", 360)
+    year.insert(0, "when__year", np.where(np.arange(360) < 180, 2000, 2001))  # a user column
+    prep = Prep().fit(year)
+    assert not _ordinal_in_linear_view(prep, year)
