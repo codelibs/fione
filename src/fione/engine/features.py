@@ -1,9 +1,9 @@
 """Generic derived features, and the validation gate that decides which of them a model keeps.
 
 A ``Group`` is a family of derived numeric features that read raw input columns: shape, tokens
-and topics of text columns, frequencies of categories, row-wise counts and statistics, date
-parts and differences, pairwise arithmetic of numbers, group means, frequencies of category
-pairs, parts of structured identifiers.
+and topics of text columns, how much two text columns share, frequencies of categories,
+row-wise counts and statistics, date parts and differences, pairwise arithmetic of numbers,
+group means, frequencies of category pairs, parts of structured identifiers.
 ``Prep.fit`` fits the groups it is given on the training features alone, so they never see the
 target: a model can be scored on out-of-fold predictions without leaking, however many groups exist.
 
@@ -63,6 +63,8 @@ MAX_CLUSTER_COLUMNS = 10
 TEXT_MIN_DISTINCT = 12  # string columns with fewer values are plain categories
 TEXT_MIN_STRUCTURED = 0.2  # share of values with several words or letters mixed with digits
 MAX_TEXT_COLUMNS = 6  # text columns that get groups (the most useful by rank)
+MAX_PAIR_TEXTS = 3  # text columns compared pairwise (running texts first, then by rank)
+PAIR_ROWS = 100_000  # rows whose words are held at a time while texts are compared
 MAX_REPEATED_VALUES = 10_000  # repeated values stored per column
 TOPICS = 32  # components of the word-weight matrix kept per prose column
 TOPIC_WORDS = 30_000  # most frequent words the topics are read from
@@ -86,6 +88,7 @@ ID_UNIQUE = 0.5  # a field with more distinct values per row than this acts as a
 ID_GROUPED = 0.9  # the first field gives a group size only when it has fewer distinct values
 MAX_GROUP_CATEGORIES = 50  # levels of a category that group means are taken over
 MIN_GROUP_ROWS = 5  # rows a level needs for its mean
+_WORD = re.compile(r"[^\W_]+")  # runs of letters and digits
 _TOKEN = re.compile(r"[^\W\d_]+")  # runs of letters, so "C85" gives "c" and "PC 17599" gives "pc"
 
 
@@ -184,6 +187,67 @@ class TextTokens(Group):
             for t in self._tokens
         }
         return pd.DataFrame(out, index=df.index).astype(float)
+
+
+class TextPairs(Group):
+    """How much two text columns share, for each pair of a few: words in common, their share of
+    all the words and of the shorter text, the difference and ratio of the word counts, whether
+    the first or the last word and the set of numbers are the same, and whether the words are
+    equal. A tree model cannot compare two texts, but it can split on these."""
+
+    _PARTS = (
+        "common",
+        "jaccard",
+        "shorter_share",
+        "words_diff",
+        "words_ratio",
+        "same_first",
+        "same_last",
+        "same_numbers",
+        "equal",
+    )
+
+    def __init__(self, columns: list[str]):
+        self.label, self.columns = "similarity of texts", tuple(columns)
+        self._pairs = list(itertools.combinations(columns, 2))
+
+    def _fit(self, X):
+        self._sources = {f"{a} ~ {b}__{p}": (a, b) for a, b in self._pairs for p in self._PARTS}
+
+    @staticmethod
+    def _stats(one, other):
+        a, b = set(one), set(other)
+        common, union = len(a & b), len(a | b)
+        longer = max(len(one), len(other))
+        digits = lambda words: {w for w in words if w.isdigit()}  # noqa: E731
+        return (
+            common,
+            common / max(union, 1),
+            common / max(min(len(a), len(b)), 1),
+            abs(len(one) - len(other)),
+            min(len(one), len(other)) / max(longer, 1),
+            one[:1] == other[:1],
+            one[-1:] == other[-1:],
+            digits(a) == digits(b),
+            one == other,
+        )
+
+    def _compute(self, df):
+        parts = [self._block(df.iloc[i : i + PAIR_ROWS]) for i in range(0, len(df), PAIR_ROWS)]
+        return pd.concat(parts) if parts else self._block(df)
+
+    def _block(self, df):
+        # each column is read once, however many pairs it is in
+        words = {c: _as_str(df[c]).str.lower().str.findall(_WORD) for c in self.columns}
+        out = {}
+        for a, b in self._pairs:
+            stats = np.full((len(df), len(self._PARTS)), np.nan)
+            for i, (one, other) in enumerate(zip(words[a], words[b], strict=True)):
+                if isinstance(one, list) and isinstance(other, list):
+                    stats[i] = self._stats(one, other)
+            for i, part in enumerate(self._PARTS):
+                out[f"{a} ~ {b}__{part}"] = stats[:, i]
+        return pd.DataFrame(out, index=df.index)
 
 
 class TextTopics(Group):
@@ -635,6 +699,14 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
     dates = by_rank(c for c in columns if kinds[c] == "datetime")
     # The topics of prose come first: they are worth the most, and the gate may run out of time.
     found: list[Group] = [TextTopics(c) for c in by_rank(text)[:MAX_TEXT_COLUMNS] if is_prose(X[c])]
+    # Running texts are compared first: their rank is low (nearly every value is unique), but
+    # two of them are the pair worth comparing.
+    running = [c for c in by_rank(text) if is_prose(X[c])]
+    compared = (running + [c for c in by_rank(text) if c not in running])[:MAX_PAIR_TEXTS]
+    pairs = TextPairs(compared) if len(compared) > 1 else None
+    if pairs and len(running) > 1:
+        found.append(pairs)  # worth more than the tokens and shapes after it
+        pairs = None
     for column in by_rank(text)[:MAX_TEXT_COLUMNS]:
         found += [TextTokens(column), TextShape(column)]
     if categories:
@@ -658,6 +730,8 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
     cluster_columns = by_rank(prep.numeric_columns)[:MAX_CLUSTER_COLUMNS]
     if len(cluster_columns) > 1:
         found.append(ClusterDistances(cluster_columns))
+    if pairs:  # other texts (names, codes): after the rest, which it can then only delay
+        found.append(pairs)
     identifiers = [c for c in by_rank(strings) if _id_layout(X[c])]
     if identifiers:  # last: the most specific, built only for data that has such a column
         found.append(IdParts(identifiers[:MAX_ID_COLUMNS]))
