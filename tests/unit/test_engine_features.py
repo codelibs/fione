@@ -18,6 +18,7 @@ from fione.engine.features import (
     IdParts,
     NumberPairs,
     RowCounts,
+    RowStatistics,
     TextShape,
     TextTokens,
     TextTopics,
@@ -171,6 +172,59 @@ def test_row_counts_count_missing_and_zero_values():
     out = RowCounts(["a", "b", "c"], ["a", "b"]).fit(X).transform(X)
     assert out["missing_count"].tolist() == [1, 2, 1, 0]
     assert out["zero_count"].tolist() == [1, 0, 0, 2]
+
+
+def test_row_statistics_summarise_the_numbers_that_are_neither_zero_nor_missing():
+    X = pd.DataFrame({"a": [0, 3.0, None, -3.0], "b": [0, 0, 0, 7.0], "c": [0, 1.0, 0, 0]})
+    group = RowStatistics(["a", "b", "c"]).fit(X)
+    out = group.transform(X)
+    one, three, seven = np.log1p(1), np.log1p(3), np.log1p(7)
+    assert list(out.columns) == [f"{n}_nonzero" for n in ("mean", "median", "max", "std")]
+    assert out.loc[0].isna().all()  # nothing but zeros
+    assert out.loc[1, "mean_nonzero"] == pytest.approx((three + one) / 2)
+    assert out.loc[1, "max_nonzero"] == pytest.approx(three)
+    assert out.loc[2].isna().all()  # a gap and zeros
+    assert out.loc[3, "max_nonzero"] == pytest.approx(seven)  # the sign survives the log
+    assert out.loc[3, "median_nonzero"] == pytest.approx((seven - three) / 2)
+    assert out.loc[3, "std_nonzero"] == pytest.approx(np.std([-three, seven]))
+    assert group.sources == [("a", "b", "c")] * 4
+
+
+def test_candidates_offer_row_statistics_only_for_many_numbers():
+    rng = np.random.default_rng(0)
+    wide = pd.DataFrame(rng.normal(size=(50, 12)), columns=[f"n{i}" for i in range(12)])
+    labels = [g.label for g in features.candidates(Prep().fit(wide), wide, [])]
+    assert "statistics of numbers per row" in labels
+    narrow = wide.iloc[:, :4]
+    labels = [g.label for g in features.candidates(Prep().fit(narrow), narrow, [])]
+    assert "statistics of numbers per row" not in labels
+
+
+def test_row_statistics_do_not_depend_on_how_many_rows_are_computed_at_once(monkeypatch):
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(rng.normal(size=(25, 4)) * (rng.random((25, 4)) < 0.6), columns=list("abcd"))
+    group = RowStatistics(list(X.columns)).fit(X)
+    whole = group.transform(X)
+    monkeypatch.setattr(features, "STATISTIC_CELLS", 12)  # 3 rows at a time
+    pd.testing.assert_frame_equal(group.transform(X), whole)
+    assert len(group.transform(X.head(0))) == 0
+
+
+def test_the_gate_adopts_row_statistics_that_explain_a_target_of_many_sparse_columns(monkeypatch):
+    rng = np.random.default_rng(0)
+    n, width = 1200, 40
+    X = pd.DataFrame(
+        rng.exponential(1000, (n, width)) * (rng.random((n, width)) < 0.2),
+        columns=[f"n{i}" for i in range(width)],
+    )
+    level = rng.normal(size=n)  # the log scale of a row's values moves them all together
+    X = X * np.exp(level)[:, None]
+    y = np.log1p(X.where(X > 0)).mean(axis=1).fillna(0).to_numpy()
+    kept, verdicts = select_groups(X, y, "regression", 5, 0, Deadline(120))
+    assert "statistics of numbers per row" in {g.label for g in kept}
+    monkeypatch.setattr(features, "MIN_STATISTIC_COLUMNS", 10**6)  # not offered
+    kept, verdicts = select_groups(X, y, "regression", 5, 0, Deadline(120))
+    assert "statistics of numbers per row" not in {v.group for v in verdicts}
 
 
 def test_date_parts_and_differences():
@@ -633,6 +687,7 @@ def test_every_kind_of_group_pickles_and_transforms_alike():
         TextTokens("t"),
         CategoryFrequency(["c", "d"]),
         RowCounts(list(X.columns), ["a", "b"]),
+        RowStatistics(["a", "b"]),
         DateParts(["when", "then"]),
         DateDifferences(["when", "then"]),
         NumberPairs("ratio", ["a", "b"]),
