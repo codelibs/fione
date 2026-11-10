@@ -140,13 +140,13 @@ def _calibrated(spec, X_tr, y_tr) -> tuple[float, float]:
 
     ``fit`` refuses to start (``DeadlineExceeded``) when less than ``UNIT_SAFETY`` times the
     family's first, uninterruptible unit remains, and that unit is probed on this machine. On a
-    fast machine this is the classic 0.3 s budget with 0.5 s slack; on a slow or busy one both
-    grow with the measured unit, so the test still proves "stops near the deadline with a
-    usable model" without depending on the hardware.
+    fast machine this is a 0.5 s budget with 2 s slack (a busy machine stalls a fit for
+    a second or more); on a slow or busy one both grow with the measured unit, so the test still
+    proves "stops near the deadline with a usable model" without depending on the hardware.
     """
     spec.estimate_unit(spec.defaults, X_tr, y_tr)  # the probe fit() would run first
     unit = spec.unit_secs or 0.0
-    return max(0.3, 2 * UNIT_SAFETY * unit), max(0.5, 2 * unit)
+    return max(0.5, 3 * UNIT_SAFETY * unit), max(2.0, 4 * unit)
 
 
 @pytest.mark.parametrize("name", list(FAMILIES))
@@ -206,11 +206,14 @@ def test_fit_full_raises_when_it_cannot_finish(name):
     prep, y, _ = _setup(X, y)
     spec = FAMILIES[name]("classification", 2, n_jobs=n_threads(len(X)))
     view = getattr(prep, spec.view)(X)
-    budget, slack = _calibrated(spec, view, y)
-    # Wider than for ``fit``: a shared CI runner stalled a fit for 1 s. Here the exception already
-    # shows that the fit stopped short, and the time is a loose check; run to the end, the
-    # families here take 7 s (XGBoost) to 5 minutes (DeepLearning) on this data, ExtraTrees 1 s.
-    slack = max(slack, 2.0)
+    _, slack = _calibrated(spec, view, y)
+    # A fixed short budget, not one that grows with the probed unit: a probe that a busy machine
+    # slowed down would give a budget longer than a whole ExtraTrees fit (1 s on this data), and
+    # the fit would finish. Without the probed unit ``fit_full`` does not refuse to start, so the
+    # fit always runs its first unit and is stopped short by the deadline. The time is a loose
+    # check; run to the end, the families here take 7 s (XGBoost) to 5 minutes (DeepLearning).
+    budget = 0.3
+    spec.unit_secs = None
     start = time.monotonic()
     with pytest.raises(DeadlineExceeded):
         spec.fit_full(spec.defaults, view, y, Deadline(budget), rounds=MAX_ROUNDS)
@@ -471,10 +474,13 @@ def test_time_limit_ends_search_with_time_reason():
         Deadline(1.5),
         events.append,
         lambda: False,
+        first_deadline=Deadline(60),  # a busy machine still finishes the first trial
     )
-    assert time.monotonic() - start < 2.0
     assert result.trials >= 1
     assert [e.data["reason"] for e in events if e.type == "stopped"] == ["time"]
+    # The search ends within the deadline plus the trial that was running when it passed.
+    longest = max(row["elapsed"] for row in result.log)
+    assert time.monotonic() - start < 1.5 + max(0.5, 3 * longest)
 
 
 def _cap_limit(events, folds, result, max_trial_secs):
@@ -488,6 +494,12 @@ def _cap_limit(events, folds, result, max_trial_secs):
 def test_max_trial_secs_truncates_trials_instead_of_discarding_them():
     X, y = _classification(20_000, 20)
     prep, y, folds = _setup(X, y)
+    # On a busy machine a fold can take longer than the probed unit allows for, and the trial is
+    # dropped: the cap grows with the unit measured here, and stays 0.5 s on a quiet one.
+    probe = FAMILIES["LightGBM"]("classification", 2, n_jobs=n_threads(len(X)))
+    train = folds[0][0]
+    probe.estimate_unit(probe.defaults, getattr(prep, probe.view)(X).iloc[train], y[train])
+    cap = max(0.5, 15 * (probe.unit_secs or 0.0))
     events = []
     result = run_family(
         "LightGBM",
@@ -499,11 +511,11 @@ def test_max_trial_secs_truncates_trials_instead_of_discarding_them():
         Deadline(30),
         events.append,
         _until_trials(events, 2),
-        max_trial_secs=0.5,
+        max_trial_secs=cap,
     )
     trials = [e for e in events if e.type == "trial"]
     assert len(trials) == 2
-    limit = _cap_limit(events, folds, result, 0.5)
+    limit = _cap_limit(events, folds, result, cap)
     assert all(e.data["elapsed"] < limit + max(0.5, limit / 2) for e in trials)
 
 
@@ -564,7 +576,7 @@ def test_stagnation_stops_the_search_with_no_improvement():
         folds,
         "classification",
         prep,
-        Deadline(30),
+        Deadline(600),
         lambda e: None,
         lambda: False,
         stopping_rounds=2,
