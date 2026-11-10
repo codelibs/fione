@@ -901,3 +901,13 @@ def test_dates_keep_their_index_and_missing_values():
     s = pd.Series(["02-10-2012 09:00", None, "25-10-2012 10:00"], index=[5, 5, 9])
     out = parse_datetimes(s, dayfirst=True)
     assert out.index.tolist() == [5, 5, 9] and out.isna().tolist() == [False, True, False]
+
+
+def test_month_names_alone_are_no_dates_and_do_not_break_the_profile():
+    # Read alone, a month name is dated year 1, outside what a timestamp column holds.
+    months = pd.Series(["may", "jun", "jul", "aug"] * 3000, name="month")
+    assert parse_datetimes(months).isna().all()
+    mixed = parse_datetimes(pd.Series(["2020-01-02", "may", "3/4/2021"]))
+    assert mixed.notna().tolist() == [True, False, True]
+    profile = profile_dataset(pd.DataFrame({"month": months, "y": range(len(months))}))
+    assert profile.columns[0].kind == "categorical"
