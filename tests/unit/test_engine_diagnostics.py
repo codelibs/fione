@@ -288,7 +288,7 @@ def _iris():
 @pytest.fixture(scope="module")
 def iris_model():
     config = TrainConfig(
-        target="target", max_runtime_secs=10, max_models=4, keep_cv_predictions=True
+        target="target", max_runtime_secs=30, max_models=4, keep_cv_predictions=True
     )
     return AutoML(config).fit(_iris())
 
@@ -320,7 +320,7 @@ def test_automl_fit_diagnoses_the_blend_with_its_seed():
     df = pd.DataFrame({"x": rng.normal(size=200)})
     df["y"] = 2 * df["x"] + rng.normal(scale=0.1, size=200)
     config = TrainConfig(
-        target="y", max_runtime_secs=10, max_models=1, seed=5, keep_cv_predictions=True
+        target="y", max_runtime_secs=30, max_models=1, seed=5, keep_cv_predictions=True
     )
     model = AutoML(config, families=["LightGBM"]).fit(df)
     y = df["y"].to_numpy()
@@ -334,7 +334,7 @@ def test_diagnostics_failure_does_not_fail_training(monkeypatch):
 
     monkeypatch.setattr(automl_module, "diagnostics", fail)
     events = []
-    config = TrainConfig(target="target", max_runtime_secs=10, max_models=1)
+    config = TrainConfig(target="target", max_runtime_secs=30, max_models=1)
     model = AutoML(config, events.append, families=["LightGBM"]).fit(_iris())
     assert model.diagnostics is None
     notices = [e.data for e in events if e.type == "notice"]
