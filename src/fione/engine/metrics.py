@@ -38,10 +38,19 @@ class Metric:
     why: str = ""  # said when ``applies`` is false
 
 
+class Cuts(np.ndarray):
+    """The decision of a tuned ordinal target: ``k - 1`` increasing cut points on the expected
+    class (the probabilities times the class numbers); a row is the class its expected value
+    falls in. It is given to ``choose`` where a prior would be."""
+
+
 def choose(pred: np.ndarray, prior: np.ndarray | None = None) -> np.ndarray:
     """The class index per row: the largest probability, or with ``prior`` (the classes'
     shares of the training data, or ``(1 - t, t)`` for the threshold t of a tuned decision) the
-    largest probability relative to its weight."""
+    largest probability relative to its weight, or with ``Cuts`` the class that the expected
+    class number falls in."""
+    if isinstance(prior, Cuts):
+        return np.searchsorted(np.asarray(prior), pred @ np.arange(pred.shape[1]))
     return (pred if prior is None else pred / prior).argmax(axis=1)
 
 
@@ -405,11 +414,18 @@ TUNABLE = frozenset(
 )
 
 
+MAX_ORDINAL_CLASSES = 50  # the most classes whose cut points are fitted (qwk)
+
+
 def check_tuned(sort_metric: str, classes: int) -> None:
-    """ConfigError unless ``decision="tuned"`` can be fitted: two classes, and a ranking metric
-    from ``TUNABLE`` (``sort_metric`` resolved)."""
-    if classes != 2:
-        raise ConfigError("decision 'tuned' needs a target with two classes")
+    """ConfigError unless ``decision="tuned"`` can be fitted: two classes, or for ``qwk`` more
+    (their order is the order of the labels; at most ``MAX_ORDINAL_CLASSES``), and a ranking
+    metric from ``TUNABLE`` (``sort_metric`` resolved)."""
+    if classes != 2 and not (sort_metric == "qwk" and classes <= MAX_ORDINAL_CLASSES):
+        raise ConfigError(
+            "decision 'tuned' needs a target with two classes, or sort_metric 'qwk' for up to "
+            f"{MAX_ORDINAL_CLASSES} ordered ones"
+        )
     if sort_metric not in TUNABLE:
         raise ConfigError(
             f"decision 'tuned' needs a sort_metric that counts right answers "
@@ -440,12 +456,54 @@ def _from_counts(name: str, tp, fp, fn, tn) -> np.ndarray:
         return np.where(chance < 1.0, (right - chance) / (1.0 - chance), np.nan)
 
 
+def tune_cuts(y: np.ndarray, pred: np.ndarray) -> Cuts:
+    """The cut points on the expected class that give the best quadratic weighted kappa of the
+    answers ``y`` (class numbers): each cut in turn moves over a grid between its neighbours,
+    a few passes from the middles between the class numbers. The rows are sorted by expected
+    class once and the answers counted up to each place, so that a confusion table is read off
+    the counts at the cut points, whatever the number of rows."""
+    k = pred.shape[1]
+    n = len(y)
+    expected = pred @ np.arange(k)
+    order = np.argsort(expected, kind="stable")
+    ranked = expected[order]
+    counts = np.zeros((k, n + 1), dtype=np.int64)  # counts[c, i]: answers c among the i lowest
+    for c in range(k):
+        counts[c, 1:] = np.cumsum(y[order] == c)
+    cuts = np.arange(k - 1) + 0.5
+
+    def kappa(at):
+        # a row is the class of the first cut it does not pass: rows up to a cut are below it
+        edges = np.concatenate([[0], np.searchsorted(ranked, at, side="right"), [n]])
+        return _kappa_of(counts[:, edges[1:]] - counts[:, edges[:-1]], quadratic=True)
+
+    best = kappa(cuts)
+    best = -np.inf if not np.isfinite(best) else best
+    for _ in range(3):
+        before = best
+        for i in range(k - 1):
+            low = cuts[i - 1] if i else -0.5
+            high = cuts[i + 1] if i < k - 2 else k - 0.5
+            for at in np.linspace(low, high, 41)[1:-1]:
+                trial = cuts.copy()
+                trial[i] = at
+                value = kappa(trial)
+                if np.isfinite(value) and value > best + 1e-12:
+                    best, cuts = value, trial
+        if best <= before:
+            break
+    return cuts.view(Cuts)
+
+
 def tune_prior(name: str, y: np.ndarray, pred: np.ndarray) -> np.ndarray:
     """The ``prior`` (two classes) under which ``choose`` picks the second class exactly when its
     probability is above the threshold that serves the metric ``name`` best on ``pred``:
     ``(1 - t, t)`` does it, as ``p1 / t > p0 / (1 - t)`` is ``p1 > t``. The thresholds tried
     are the midpoints between neighbouring probabilities (so no row sits on the threshold),
-    all judged from one sort. Of equal values the one nearest to 0.5 wins."""
+    all judged from one sort. Of equal values the one nearest to 0.5 wins. For ``qwk`` with more
+    than two classes it is the ``Cuts`` of ``tune_cuts``."""
+    if pred.shape[1] > 2:
+        return tune_cuts(y, pred)
     p1 = pred[:, 1]
     order = np.argsort(-p1, kind="stable")
     ranked, positive = p1[order], (y[order] == 1)
