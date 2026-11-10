@@ -17,6 +17,8 @@ from fione.engine.features import TextShape
 from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep
 
+# The variants of TextLinear; LinearWide, the other late family, is tested in test_engine_levels.
+TEXT_LATE = tuple(name for name in LATE_ORDER if name != "LinearWide")
 CLASSES = ["food", "law", "space"]
 
 
@@ -49,7 +51,7 @@ def _fit(df, families=None, **config):
 
 
 def _schedule(
-    monkeypatch, reference_secs, max_models=None, late=LATE_ORDER, exhaust=False, spend=None
+    monkeypatch, reference_secs, max_models=None, late=TEXT_LATE, exhaust=False, spend=None
 ):
     """Run ``AutoML._search`` over the base families and ``late`` with a ``run_family`` that
     takes no time (with ``exhaust``, the last base family takes the whole search time, 0.3 s).
@@ -94,7 +96,7 @@ def _schedule(
 
 def test_late_families_get_a_share_of_the_search_time_left(monkeypatch):
     calls = _schedule(monkeypatch, reference_secs=0.1)
-    assert [name for name, _, _ in calls] == [*FAMILY_ORDER, *LATE_ORDER]
+    assert [name for name, _, _ in calls] == [*FAMILY_ORDER, *TEXT_LATE]
     shares = {name: share for name, share, _ in calls}
     # Nothing was used, so 100 s are left; each gets its weight among those not yet run.
     assert shares["TextLinearChar"] == pytest.approx(50, rel=0.01)
@@ -119,7 +121,7 @@ def test_a_share_of_the_search_time_is_kept_for_the_late_families(monkeypatch):
     calls = _schedule(monkeypatch, reference_secs=0.001, spend=2.0)
     shares = {name: secs for name, secs, _ in calls}
     assert shares["TextLinearChar"] == pytest.approx(0.5 * 0.3, rel=0.25)
-    assert [name for name, _, _ in calls][-3:] == list(LATE_ORDER)  # and they all ran
+    assert [name for name, _, _ in calls][-3:] == list(TEXT_LATE)  # and they all ran
     others = sum(secs for name, secs, _ in calls if name in FAMILY_ORDER and name != "TextLinear")
     assert others <= (1 - share) * 2.0 * 1.02  # the others together never pass 85% of the time
 
@@ -155,7 +157,7 @@ def test_late_families_alone_have_the_whole_search_time(monkeypatch):
     assert calls[0][1] == pytest.approx(100, rel=0.01)  # not 15 s
 
 
-@pytest.mark.parametrize("name", LATE_ORDER)
+@pytest.mark.parametrize("name", TEXT_LATE)
 def test_an_explicit_list_of_late_families_is_trained_even_without_prose(name):
     rng = np.random.default_rng(0)
     df = pd.DataFrame(rng.normal(size=(150, 3)), columns=list("abc"))
@@ -174,7 +176,7 @@ def test_a_late_family_runs_only_if_its_first_trial_is_expected_to_fit(monkeypat
     # TextLinear's first trial took 20 s: the character variant (5 times as long) needs 100 s
     # but its share is 50 s; the time it leaves is shared by the others.
     calls = _schedule(monkeypatch, reference_secs=20.0)
-    late = [(name, share) for name, share, _ in calls if name in LATE_ORDER]
+    late = [(name, share) for name, share, _ in calls if name in TEXT_LATE]
     assert [name for name, _ in late] == ["TextLinearPlain", "TextLinearWide"]
     assert late[0][1] == pytest.approx(100 * 0.25 / 0.5, rel=0.01)
     assert late[1][1] == pytest.approx(100, rel=0.01)
@@ -239,7 +241,7 @@ def _prose():
 
 def test_prose_makes_every_late_family_apply():
     runner, prep, X, y = _prose()
-    assert runner._late_families(prep, X, y, "classification") == list(LATE_ORDER)
+    assert runner._late_families(prep, X, y, "classification") == list(TEXT_LATE)
     assert AutoML(TrainConfig(target="t"), families=["TextLinearWide"]).late == ["TextLinearWide"]
     assert AutoML(TrainConfig(target="t"), families=["LightGBM"]).late == []
 
@@ -314,7 +316,7 @@ def test_late_families_need_the_reference_result_unless_the_list_is_explicit(mon
         )
 
     monkeypatch.setattr(automl_module, "run_family", fake)
-    names = ["TextLinear", *LATE_ORDER]
+    names = ["TextLinear", *TEXT_LATE]
     for families, expected in ((None, ["TextLinear"]), (names, names)):
         calls.clear()
         runner = AutoML(TrainConfig(target="y"), families=families)
@@ -344,7 +346,7 @@ def test_late_variants_run_in_the_time_left_and_the_ensemble_may_ignore_them():
     X = df.drop(columns=["topic"])
     model = _fit(
         df,
-        ["TextLinear", *LATE_ORDER],
+        ["TextLinear", *TEXT_LATE],
         target="topic",
         max_runtime_secs=120,  # the variants run in the time the base search leaves
         feature_engineering=False,
@@ -361,7 +363,7 @@ def test_late_variants_run_in_the_time_left_and_the_ensemble_may_ignore_them():
     pd.testing.assert_frame_equal(restored.predict_proba(X), model.predict_proba(X))
 
 
-@pytest.mark.parametrize("name", LATE_ORDER)
+@pytest.mark.parametrize("name", TEXT_LATE)
 def test_a_late_family_with_weight_zero_is_not_a_member(name):
     df = _posts(300)
     X = df.drop(columns=["topic"])
@@ -422,7 +424,7 @@ def _trained(prep, spec, model, df):
     )
 
 
-@pytest.mark.parametrize("name", LATE_ORDER)
+@pytest.mark.parametrize("name", TEXT_LATE)
 def test_a_variant_fits_predicts_pickles_and_explains(name):
     df, X, y, prep = _variant_data()
     spec = FAMILIES[name]("classification", 3)
@@ -453,7 +455,7 @@ def test_a_variant_fits_predicts_pickles_and_explains(name):
 def test_the_variants_read_what_their_names_say():
     df, X, y, prep = _variant_data()
     fitted = {}
-    for name in ("TextLinear", *LATE_ORDER):
+    for name in ("TextLinear", *TEXT_LATE):
         spec = FAMILIES[name]("classification", 3)
         fitted[name] = spec.fit(
             spec.defaults, getattr(prep, spec.view)(X), y, None, None, search.Deadline(60)
@@ -543,7 +545,7 @@ def test_a_first_trial_may_take_half_of_the_time_left_but_a_late_family_gets_its
     monkeypatch.setattr(automl_module, "run_family", fake)
     runner = AutoML(TrainConfig(target="y"))
     runner._search(
-        [*FAMILY_ORDER, *LATE_ORDER], None, None, None, "classification", None,
+        [*FAMILY_ORDER, *TEXT_LATE], None, None, None, "classification", None,
         search.Deadline(100), None, None,
     )  # fmt: skip
     # No time passes, so the base families have 85 s each time: half of it, 42.5 s, is more than
@@ -553,17 +555,17 @@ def test_a_first_trial_may_take_half_of_the_time_left_but_a_late_family_gets_its
     # Linear is last: its share is all that is left (85 s), more than half of it.
     assert firsts["Linear"][0] == pytest.approx(85, rel=0.02)
     assert firsts["Linear"][1] == pytest.approx(85, rel=0.02)
-    assert all(firsts[name][1] is None for name in LATE_ORDER)
+    assert all(firsts[name][1] is None for name in TEXT_LATE)
 
 
 def test_late_families_that_do_not_run_for_lack_of_time_are_reported_together(monkeypatch):
-    notices = _notices(monkeypatch, set(LATE_ORDER), [*FAMILY_ORDER, *LATE_ORDER])
+    notices = _notices(monkeypatch, set(TEXT_LATE), [*FAMILY_ORDER, *TEXT_LATE])
     assert len(notices) == 1
-    assert all(name in notices[0]["message"] for name in LATE_ORDER)
-    assert _notices(monkeypatch, set(), [*FAMILY_ORDER, *LATE_ORDER]) == []
+    assert all(name in notices[0]["message"] for name in TEXT_LATE)
+    assert _notices(monkeypatch, set(), [*FAMILY_ORDER, *TEXT_LATE]) == []
 
 
 def test_late_families_without_the_reference_result_are_not_blamed_on_time(monkeypatch):
     # TextLinear has no model (and says why); the variants have no estimate to be judged by.
-    notices = _notices(monkeypatch, {"TextLinear"}, [*FAMILY_ORDER, *LATE_ORDER])
+    notices = _notices(monkeypatch, {"TextLinear"}, [*FAMILY_ORDER, *TEXT_LATE])
     assert [n["family"] for n in notices] == ["TextLinear"]
