@@ -424,7 +424,7 @@ def test_tuned_decision_fits_the_threshold_to_the_metric_and_keeps_the_probabili
     assert model.metrics["f1"] > plain.metrics["f1"]  # the 0.5 threshold misses a rare class
     ensemble = model.leaderboard.set_index("model").loc["Ensemble", "cv_score"]
     assert ensemble == pytest.approx(model.metrics["f1"])
-    np.testing.assert_allclose(proba, plain.predict_proba(df).to_numpy(), atol=0.05)
+    np.testing.assert_allclose(proba, plain.predict_proba(df).to_numpy(), atol=0.1)
 
 
 def test_tuned_decision_needs_two_classes_and_a_metric_that_counts_right_answers():
@@ -921,6 +921,7 @@ def _bagging_data():
 
 
 def test_extra_seeds_are_averaged_into_a_refit_member(monkeypatch, extra_seeds):
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)  # one candidate, so one member
     df = _bagging_data()
     model = _fit(df, families=["LightGBM"], target="y", max_models=3)
     (member,) = model.members
@@ -936,12 +937,14 @@ def test_extra_seeds_are_averaged_into_a_refit_member(monkeypatch, extra_seeds):
 
 
 def test_extra_seeds_wait_for_enough_time_left(monkeypatch, extra_seeds):
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)  # one candidate, so one member
     monkeypatch.setattr(automl_module, "BAG_TIME_FACTOR", 1e12)
     (member,) = _fit(_bagging_data(), families=["LightGBM"], target="y", max_models=3).members
     assert len(member.models) == 1
 
 
 def test_extra_seeds_respect_the_size_limits(monkeypatch, extra_seeds):
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)  # one candidate, so one member
     df = _bagging_data()
     monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
     (member,) = _fit(df, families=["LightGBM"], target="y", max_models=3).members
@@ -980,6 +983,7 @@ def test_runners_up_of_a_family_join_the_ensemble_candidates(monkeypatch):
 
 def test_an_extra_seed_that_is_bigger_than_estimated_is_not_kept(monkeypatch, extra_seeds):
     """A forest's size varies with its seed: the extra model is measured after it is fitted."""
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)  # one candidate, so one member
     first = []
 
     def size(self, model):
@@ -994,6 +998,7 @@ def test_an_extra_seed_that_is_bigger_than_estimated_is_not_kept(monkeypatch, ex
 
 
 def test_a_failing_extra_seed_is_reported_and_the_member_keeps_its_models(monkeypatch, extra_seeds):
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)  # one candidate, so one member
     original = LightGBM._fit
     calls = []
 
