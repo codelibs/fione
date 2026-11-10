@@ -626,6 +626,16 @@ def test_the_run_time_follows_the_size_of_the_data(owner, monkeypatch):
     assert 'value="30" checked' in page and "even 30 minutes" in page
 
 
+def test_the_run_time_counts_the_text_of_the_data(owner, monkeypatch):
+    comments = [f"free text comment number {i % 300} " + "word " * 40 for i in range(400)]
+    frame = pd.DataFrame({"comment": comments, "label": ["a", "b"] * 200})
+    assert 'value="3" checked' in tips_page(owner, frame)
+    # 400 comments of about 240 characters: 96,000 characters, 7 minutes
+    monkeypatch.setattr(builtin, "SECS_PER_TEXT_CHAR", 0.0044)
+    page = tips_page(owner, frame)
+    assert 'value="10" checked' in page and "set to 10 minutes" in page
+
+
 def pro_form(owner, frame: pd.DataFrame) -> str:
     """The Pro training form of ``frame`` once uploaded: its URL."""
     client, pid, csrf = owner
@@ -655,6 +665,12 @@ def test_the_pro_form_run_time_follows_the_size_of_the_data(owner, monkeypatch):
     page = client.get(url).text
     assert 'name="max_runtime_minutes" value="10"' in page
     assert "set to 10 minutes" in page
+    comments = [f"free text comment number {i % 300} " + "word " * 40 for i in range(400)]
+    text_url = pro_form(owner, pd.DataFrame({"comment": comments, "label": ["a", "b"] * 200}))
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 6e-6)
+    assert 'name="max_runtime_minutes" value="3"' in client.get(text_url).text
+    monkeypatch.setattr(builtin, "SECS_PER_TEXT_CHAR", 0.0044)  # 400 x 228 characters: 7 minutes
+    assert 'name="max_runtime_minutes" value="10"' in client.get(text_url).text
 
 
 def test_the_pro_form_never_points_at_the_wizard_run_time_choices(owner, monkeypatch):

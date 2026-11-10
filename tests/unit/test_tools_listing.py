@@ -1,6 +1,7 @@
 """The listing tools, the project scope of a tool call and the channel in the call log."""
 
 import logging
+import math
 from types import SimpleNamespace
 
 import pandas as pd
@@ -9,6 +10,7 @@ import pytest
 from fione import db
 from fione.auth import service as auth
 from fione.auth.roles import ProjectAccess, Role
+from fione.data.profile import ColumnProfile
 from fione.jobs import store
 from fione.models import service as models
 from fione.projects import ingest
@@ -16,6 +18,7 @@ from fione.projects import service as projects
 from fione.projects.service import DatasetType
 from fione.storage import LocalStorage
 from fione.tools import ToolContext, ToolError, builtin, call_tool, list_tools, registry
+from fione.tools.builtin import runtime_need_secs
 from fione.tools.registry import DATA_NOTICE, NOT_ALLOWED
 
 TOOL_NAMES = {
@@ -875,3 +878,27 @@ def test_propose_join_refuses_what_a_join_cannot_do(env):
     # a conversation of project B cannot reach project A
     with pytest.raises(ToolError, match=NOT_ALLOWED):
         call(env, "propose_join", args, project_id=env.b.id)
+
+
+def test_the_run_time_need_counts_the_text_of_the_data():
+    dataset = SimpleNamespace(n_rows=100_000, n_cols=3)
+    text = ColumnProfile("t", "text", 0.0, 90_000, None, None, None, None, mean_length=400.0)
+    plain = ColumnProfile("x", "numeric", 0.0, 90_000, None, None, None, None)
+    cells = 100_000 * 2 * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
+    assert runtime_need_secs(dataset) == cells
+    assert runtime_need_secs(dataset, SimpleNamespace(columns=[plain])) == cells
+    profile = SimpleNamespace(columns=[text, plain])
+    assert runtime_need_secs(dataset, profile) == pytest.approx(
+        100_000 * 400 * builtin.SECS_PER_TEXT_CHAR
+    )
+    many = SimpleNamespace(columns=[text, text, text, text])  # only the first MAX_PROSE are read
+    assert runtime_need_secs(dataset, many) == pytest.approx(
+        3 * 100_000 * 400 * builtin.SECS_PER_TEXT_CHAR
+    )
+    half_empty = ColumnProfile("t", "text", 0.5, 90_000, None, None, None, None, mean_length=400.0)
+    assert runtime_need_secs(dataset, SimpleNamespace(columns=[half_empty])) == pytest.approx(
+        100_000 * 200 * builtin.SECS_PER_TEXT_CHAR
+    )
+    assert builtin._runtime_secs(dataset, profile) == 60 * math.ceil(
+        100_000 * 400 * builtin.SECS_PER_TEXT_CHAR / 60
+    )
