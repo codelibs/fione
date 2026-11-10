@@ -771,12 +771,40 @@ def test_propose_does_not_suggest_grouping_for_plain_columns(env, grouped):
         assert "repeated_id" not in codes(result), name
 
 
-@pytest.mark.parametrize("name", ["id", "user_id", "userId", "UserID", "顧客ID", "注文番号"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "id",
+        "user_id",
+        "userId",
+        "UserID",
+        "顧客ID",
+        "注文番号",
+        "subject",
+        "subject.",
+        "Patient",
+        "customers",
+    ],
+)
 def test_id_like_names_are_recognised(name):
     assert builtin._ID_NAME.search(name)
 
 
-@pytest.mark.parametrize("name", ["paid", "idle", "valid", "PAID", "width", "identity"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "paid",
+        "idle",
+        "valid",
+        "PAID",
+        "width",
+        "identity",
+        "subjective",
+        "username_length_x",
+        "accounting",
+        "membership",
+    ],
+)
 def test_other_names_are_not(name):
     assert not builtin._ID_NAME.search(name)
 
@@ -1687,3 +1715,22 @@ def test_new_tools_are_flat_and_read_only():
     source = listed["get_feature_importance"]["parameters"]["properties"]["source"]
     assert source["enum"] == ["gain", "contributions"] and source["default"] == "gain"
     assert listed["get_partial_dependence"]["parameters"]["required"] == ["model_id", "column"]
+
+
+def test_a_column_named_like_an_identifier_comes_before_one_named_for_the_entity():
+    rng = np.random.default_rng(0)
+    n = 600
+    frame = pd.DataFrame(
+        {
+            "device": rng.integers(0, 30, n),
+            "user_id": np.repeat(np.arange(40), n // 40),
+            "label": rng.integers(0, 2, n),
+        }
+    )
+    assert builtin.repeated_id_column(profile_dataset(frame, "label"), "label").name == "user_id"
+    assert (
+        builtin.repeated_id_column(
+            profile_dataset(frame.drop(columns="user_id"), "label"), "label"
+        ).name
+        == "device"
+    )
