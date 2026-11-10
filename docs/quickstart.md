@@ -207,7 +207,10 @@ dropped. They are not run for data without a text column.
 For data over time, the value of a column at an earlier time is often the best feature (last
 month's sales of the same shop and item). The built-in **Add values from earlier times**
 module (`lag`) adds them: name the `time` column (whole numbers such as a month number, or dates,
-where a step is a day; text must be written year-month-day, such as `2015-07-01`), the columns to
+where a step is a day; text must be written year-month-day, such as `2015-07-01`; for times that
+are not whole numbers, such as readings every 0.0001, or dates a week apart, set `step` to the gap
+between neighbouring times, 0.0001 or 7, and every time must be a whole number of steps from the
+others), the columns to
 read (`columns`), the group each row belongs to (`by`, such as a shop and an item) and
 the steps back (`lags`, such as `1,2,3,12`). `sales_lag3` is the value of `sales` three steps of
 the time before, so a time with no row gives an empty value, never the row before. The rows of
@@ -225,16 +228,21 @@ For a signal or a sensor, the rows next to a row often say more than the row: a 
 the readings around it stay near, how much they spread. The built-in **Add statistics of nearby
 values** module (`rolling`) adds them: name the `order` column (numbers, or dates such as
 `2015-07-01`; text must be a date written year-month-day), the columns to read (`columns`),
-the group each row belongs to (`by`, such as a machine), the `window` (a number of rows) and
-the statistics (`stats`: `mean`, `std`, `min`, `max`, separated by commas). The rows are taken
+the group each row belongs to (`by`, such as a machine), the `window` (a number of rows) or the `span`
+(a range of the order, such as 0.0005, or a number of days for dates; name one of the two) and
+the statistics (`stats`: `mean`, `std`, `min`, `max`, separated by commas). A `span` makes a row
+read the rows within that range, so a gap in the readings gives a shorter window instead of
+one that reaches further back. The rows are taken
 in the order of the `order` column, whatever order they are in the file. With `side` set to
 `before` (the default), `signal_before5_mean` is the mean of the 5 rows before the row: only
 rows whose order is earlier than the row's, so the row itself, later rows and rows with the
 same order (several rows of one day) are never read. With `around`, `signal_around5_std` is the
 standard deviation of the 5 rows centred on the row, itself included (the window must be odd);
 it reads later rows and rows with the same order, so use it only on columns whose later values
-are also known when the model is used, never on the target. A window at the edge of a group is
-shorter, and a `std` needs at least two values. A row with no `order` or no `by` value gets
+are also known when the model is used, never on the target. With a `span`, `before` reads the
+rows within the span before the row and `around` the rows within half of the span either side of
+it, itself included. A window at the edge of a group is shorter, a `std` needs at least two
+values, and an infinite value counts as missing. A row with no `order` or no `by` value gets
 empty values and is left out of the windows of the others.
 
 ## Learning a skewed target

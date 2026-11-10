@@ -1440,8 +1440,155 @@ def test_rolling_works_on_nullable_columns_and_an_empty_frame():
     )
     out, _ = run_op("rolling", df, {"order": "t", "columns": ["v"], "window": 2})
     assert list(out["v_before2_mean"].fillna(-1)) == [1.0, -1, -1, 1.0]
-    empty, _ = run_op("rolling", df.iloc[:0], {"order": "t", "columns": ["v"]})
+    empty, _ = run_op("rolling", df.iloc[:0], {"order": "t", "columns": ["v"], "window": 3})
     assert list(empty.columns) == ["t", "v", "v_before3_mean"] and len(empty) == 0
+
+
+def test_rolling_by_span_counts_the_range_of_the_order_not_the_rows():
+    # the readings come every 0.1 but two are missing: a span of 0.3 holds fewer rows there
+    t = np.round(np.arange(10) * 0.1, 1)
+    df = pd.DataFrame({"t": t, "v": np.arange(10.0)}).drop(index=[3, 4]).reset_index(drop=True)
+    out, _ = run_op("rolling", df, {"order": "t", "columns": ["v"], "span": 0.3})
+    assert list(out.columns) == ["t", "v", "v_before_span0.3_mean"]
+    # the readings from 0.3 before up to, not including, the row's own; the edge is in even though
+    # 0.5 - 0.3 is not 0.2 exactly
+    expected = [-1, 0.0, 0.5, 2.0, 5.0, 5.5, 6.0, 7.0]
+    assert list(out["v_before_span0.3_mean"].fillna(-1)) == expected
+    around, _ = run_op(
+        "rolling", df, {"order": "t", "columns": ["v"], "span": 0.2, "side": "around"}
+    )
+    # within 0.1 either side, itself included: t=0.5 sees 0.5 and 0.6, not 0.2
+    assert around["v_around_span0.2_mean"].iloc[3] == 5.5
+
+
+def test_rolling_by_span_matches_the_rows_when_the_readings_are_evenly_spaced():
+    rng = np.random.default_rng(1)
+    n = 300
+    df = pd.DataFrame(
+        {"t": np.arange(n) * 0.0001, "g": np.arange(n) // 100, "v": rng.normal(size=n)}
+    )
+    for side, rows, span in (("before", 5, 0.0005), ("around", 11, 0.0011)):
+        by_rows, _ = run_op(
+            "rolling",
+            df,
+            {"order": "t", "by": ["g"], "columns": ["v"], "window": rows, "side": side},
+        )
+        by_span, _ = run_op(
+            "rolling", df, {"order": "t", "by": ["g"], "columns": ["v"], "span": span, "side": side}
+        )
+        np.testing.assert_allclose(
+            by_span.iloc[:, -1].to_numpy(), by_rows.iloc[:, -1].to_numpy(), equal_nan=True
+        )
+
+
+def test_rolling_by_span_matches_a_brute_force_range_on_messy_data():
+    rng = np.random.default_rng(5)
+    n = 500
+    df = pd.DataFrame(
+        {
+            "g": rng.integers(0, 4, n).astype(float),
+            "h": rng.choice(["a", "b"], n),
+            "t": rng.integers(0, 60, n).astype(float),  # ties and gaps
+            "v": rng.normal(size=n),
+        }
+    )
+    df.loc[rng.choice(n, 15), "g"] = np.nan
+    df.loc[rng.choice(n, 15), "t"] = np.nan
+    for side, span in (("before", 7.0), ("around", 8.0)):
+        out, _ = run_op(
+            "rolling",
+            df,
+            {
+                "order": "t",
+                "by": ["g", "h"],
+                "columns": ["v"],
+                "span": span,
+                "side": side,
+                "stats": "mean,max",
+            },
+        )
+        for stat in ("mean", "max"):
+            expected = np.full(n, np.nan)
+            for i, row in df.iterrows():
+                if np.isnan(row["g"]) or np.isnan(row["t"]):
+                    continue
+                part = df[(df["g"] == row["g"]) & (df["h"] == row["h"]) & df["t"].notna()]
+                if side == "before":
+                    part = part[(part["t"] >= row["t"] - span) & (part["t"] < row["t"])]
+                else:
+                    part = part[(part["t"] - row["t"]).abs() <= span / 2]
+                if len(part):
+                    expected[i] = getattr(part["v"], stat)()
+            np.testing.assert_allclose(
+                out[f"v_{side}_span{span:g}_{stat}"].to_numpy(), expected, equal_nan=True
+            )
+
+
+def test_span_and_step_allow_for_the_coarse_floats_of_large_times():
+    # epoch seconds with a reading every millisecond: neighbours are 0.00099993 or 0.00100017 apart
+    t = 1.7e9 + np.arange(6) * 0.001
+    df = pd.DataFrame({"t": t, "v": np.arange(6.0)})
+    out, _ = run_op("rolling", df, {"order": "t", "columns": ["v"], "span": 0.001})
+    assert list(out["v_before_span0.001_mean"].fillna(-1)) == [-1, 0, 1, 2, 3, 4]
+    out, _ = run_op("lag", df, {"time": "t", "columns": ["v"], "step": 0.001})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 0, 1, 2, 3, 4]
+    # nanoseconds as whole numbers are compared exactly, not as floats
+    ns = pd.DataFrame(
+        {"t": 1_700_000_000_000_000_123 + np.arange(4) * 10_000_000, "v": [1.0, 2, 3, 4]}
+    )
+    out, _ = run_op("lag", ns, {"time": "t", "columns": ["v"], "step": 10_000_000})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 1.0, 2.0, 3.0]
+
+
+def test_lag_step_does_not_merge_different_times_and_refuses_a_step_too_small():
+    big = pd.DataFrame({"t": [0, 1, 10_000_000], "v": [1.0, 2.0, 3.0]})
+    with pytest.raises(ModuleError, match="whole number of steps"):
+        run_op("lag", big, {"time": "t", "columns": ["v"], "step": 1e7})
+    with pytest.raises(ModuleError, match="too many steps"):
+        run_op("lag", big.iloc[:2], {"time": "t", "columns": ["v"], "step": 1e-20})
+    span = pd.DataFrame({"t": [0.0, 1.0], "v": [1.0, 2.0]})
+    out, _ = run_op("rolling", span, {"order": "t", "columns": ["v"], "span": 0.00005})
+    assert "v_before_span0.00005_mean" in out.columns
+
+
+def test_rolling_window_bounds_never_go_back_between_groups_and_orders():
+    # pandas' windowed statistics are wrong if the first or last row of a window moves back
+    from fione.modules import frame_ops
+
+    rng = np.random.default_rng(9)
+    for _ in range(300):
+        n = int(rng.integers(0, 40))
+        groups = np.sort(rng.integers(0, 5, n))
+        order = rng.integers(0, 12, n).astype(float)
+        order[rng.random(n) < 0.15] = np.nan  # a missing order sorts last in its group
+        order = (
+            pd.Series(order)
+            .groupby(groups)
+            .transform(lambda part: part.sort_values(na_position="last").to_numpy())
+            .to_numpy()
+        )
+        for window, span, around in ((3, 0, False), (3, 0, True), (0, 4.0, False), (0, 5.0, True)):
+            start, end = frame_ops._window_rows(groups, order, order, window, span, around)
+            assert (np.diff(start) >= 0).all() and (np.diff(end) >= 0).all()
+            assert (start <= end).all() and (start >= 0).all() and (end <= n).all()
+
+
+def test_lag_reads_times_a_step_apart_and_refuses_the_others():
+    # readings every 0.0001 (float noise included) and Monday dates a week apart
+    t = np.arange(6) * 0.0001 + 0.00005
+    df = pd.DataFrame({"t": t, "v": np.arange(6.0)}).drop(index=[3])
+    out, _ = run_op("lag", df, {"time": "t", "columns": ["v"], "lags": "1,2", "step": 0.0001})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 0.0, 1.0, -1, 4.0]
+    assert list(out["v_lag2"].fillna(-1)) == [-1, -1, 0.0, 2.0, -1]
+    weeks = pd.DataFrame({"d": ["2015-07-06", "2015-07-13", "2015-07-27"], "v": [1.0, 2.0, 4.0]})
+    out, _ = run_op("lag", weeks, {"time": "d", "columns": ["v"], "step": 7})
+    assert list(out["v_lag1"].fillna(-1)) == [-1, 1.0, -1]
+    with pytest.raises(ModuleError, match="whole number of steps"):
+        run_op("lag", df, {"time": "t", "columns": ["v"], "step": 0.0003})
+    with pytest.raises(ModuleError, match="whole numbers or dates .*step"):
+        run_op("lag", df, {"time": "t", "columns": ["v"]})
+    with pytest.raises(ModuleError, match="above 0"):
+        run_op("lag", df, {"time": "t", "columns": ["v"], "step": 0})
 
 
 def test_rolling_refuses_unclear_input():
@@ -1454,9 +1601,11 @@ def test_rolling_refuses_unclear_input():
             "b": [True, False, True],
         }
     )
-    base = {"order": "t", "columns": ["v"]}
+    base = {"order": "t", "columns": ["v"], "window": 3}
     for params, message in (
         ({**base, "window": 4, "side": "around"}, "odd number"),
+        ({**base, "window": 0}, "a window .* or a span"),
+        ({**base, "span": 2.0}, "a window .* or a span"),
         ({**base, "stats": "median"}, "stats must name"),
         ({**base, "columns": ["s"]}, "not numeric"),
         ({**base, "order": "s"}, "year-month-day"),
