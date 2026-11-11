@@ -42,8 +42,8 @@ def _codes(df):
 def _fit(df, families=None, **config):
     # A generous budget: a family whose time share expires before its first trial finishes is
     # skipped, and a loaded machine would then leave it out. With max_models set, the search
-    # ends early, so the budget costs nothing when idle.
-    config.setdefault("max_runtime_secs", 180)
+    # ends early, so a long budget only matters when time is short.
+    config.setdefault("max_runtime_secs", 600)
     return AutoML(TrainConfig(**config), families=families).fit(df)
 
 

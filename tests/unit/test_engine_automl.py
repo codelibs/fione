@@ -21,7 +21,11 @@ LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "w
 
 
 def _fit(df, events=None, families=None, should_stop=None, **config):
-    config.setdefault("max_runtime_secs", 60)
+    # A fit that sets max_models or stopping_rounds ends by itself, and a test that counts its
+    # trials, members or stop reason must not run out of time first on a loaded machine: it gets
+    # a generous budget, which only matters when time is short. The others use up their time.
+    ends_itself = "max_models" in config or "stopping_rounds" in config
+    config.setdefault("max_runtime_secs", 600 if ends_itself else 60)
     sink = events.append if events is not None else (lambda e: None)
     kwargs = {} if should_stop is None else {"should_stop": should_stop}
     return AutoML(TrainConfig(**config), sink, families=families, **kwargs).fit(df)
