@@ -288,6 +288,18 @@ class AutoML:
                 "with cut points fitted to the order of the classes: set decision to tuned",
                 kind="ordinal_decision",
             )
+        if task == "regression" and sort_metric == "rounded_qwk":
+            ratings = np.unique(y_seen)
+            if (
+                3 <= len(ratings) <= metrics.MAX_ORDINAL_CLASSES
+                and (ratings == ratings.round()).all()
+            ):
+                self._notice(
+                    "rounded_qwk rounds the prediction at the middles between whole numbers; "
+                    "as a classification with sort_metric qwk and decision tuned, cut points are "
+                    "fitted to the order of the classes",
+                    kind="ordinal_decision",
+                )
         if c.time_column is None:
             groups, tried = self._engineer(X, y, task, nfolds, deadline, row_groups)
         else:  # the gate judges a feature on shuffled folds, which look at the future
@@ -517,12 +529,25 @@ class AutoML:
             return []
         outputs = int(y.max()) + 1 if task == "classification" else 1
         outputs = 1 if outputs == 2 else outputs
-        return [
+        late = [
             name
             for name in self.late
             if FAMILIES[name].applies(prep, X)
             and FAMILIES[name].coef_bytes(prep, outputs) <= SIZE_CAP
         ]
+        # The character n-grams are the one variant left out for the length of the text alone.
+        if (
+            "TextLinearChar" in self.late
+            and FAMILIES["TextLinear"].applies(prep, X)
+            and not FAMILIES["TextLinearChar"].applies(prep, X)
+        ):
+            self._notice(
+                "TextLinearChar left out: the text is too long for character n-grams, or a "
+                "column has no spaces",
+                kind="families_left_out",
+                families=["TextLinearChar"],
+            )
+        return late
 
     def _search(
         self, families, X, y, folds, task, prep, search: Deadline, stopping_score, weight, repeats=1

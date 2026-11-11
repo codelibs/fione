@@ -338,6 +338,21 @@ def test_late_families_are_left_out_when_the_text_or_its_model_would_be_too_big(
     assert runner._late_families(prep, X, y, "classification") == []
 
 
+def test_a_text_too_long_for_character_ngrams_says_that_the_variant_was_left_out(monkeypatch):
+    events = []
+    df = _posts()
+    X = df.drop(columns=["topic"])
+    runner = AutoML(TrainConfig(target="topic"), events.append)
+    prep, y = Prep().fit(X, [TextShape("post")]), _codes(df)
+    assert "TextLinearChar" in runner._late_families(prep, X, y, "classification")
+    assert not [e for e in events if e.type == "notice"]
+    monkeypatch.setattr("fione.engine.families.TEXT_CHAR_BUDGET", 100)
+    late = runner._late_families(prep, X, y, "classification")
+    assert "TextLinearChar" not in late and "TextLinearWide" in late
+    (notice,) = [e.data for e in events if e.type == "notice"]
+    assert notice["kind"] == "families_left_out" and notice["families"] == ["TextLinearChar"]
+
+
 # --- a real run ----------------------------------------------------------------------------
 
 
