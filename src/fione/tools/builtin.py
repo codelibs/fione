@@ -686,8 +686,8 @@ MIN_RUNTIME_SECS = 120
 TARGET_SKEW = 1.0
 RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balanced"
 # A column named like an identifier (id, user_id, userId, 顧客ID, 番号) or like whom the rows are
-# about (subject, patient, customer, ... alone) that holds each value in several rows, at least
-# REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
+# about (subject, patient, customer, query, ... alone) that holds each value in several rows, at
+# least REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
 REPEATED_ID_GROUPS = 10
 REPEATED_ID_MIN_ROWS = 2  # rows per value, on average
 _IDENTIFIER = re.compile(r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(?![a-z])|番号")
@@ -695,7 +695,7 @@ _IDENTIFIER = re.compile(r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(
 # column that names the one the rows concern, not a trait of it (user_age, session_count).
 _ENTITY = re.compile(
     r"(?i:^(?:subject|patient|user|customer|client|member|person|student|employee|driver"
-    r"|player|device|session|household|account)s?[\W\d_]*$)"
+    r"|player|device|session|household|account|query|qid|group)s?[\W\d_]*$)"
 )
 _ID_NAME = re.compile(f"{_IDENTIFIER.pattern}|{_ENTITY.pattern}")
 

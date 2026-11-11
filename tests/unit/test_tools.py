@@ -784,6 +784,9 @@ def test_propose_does_not_suggest_grouping_for_plain_columns(env, grouped):
         "subject.",
         "Patient",
         "customers",
+        "qid",
+        "Query",
+        "group_2",
     ],
 )
 def test_id_like_names_are_recognised(name):
@@ -803,6 +806,9 @@ def test_id_like_names_are_recognised(name):
         "username_length_x",
         "accounting",
         "membership",
+        "query_length",
+        "group_size",
+        "grouped",
     ],
 )
 def test_other_names_are_not(name):
