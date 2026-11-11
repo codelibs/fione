@@ -1342,6 +1342,25 @@ def test_rolling_takes_the_rows_before_in_the_order_of_a_column_within_a_group()
     assert list(out["v_before2_max"].fillna(-1)) == [20.0, -1, 10.0, 30.0, -1, 1.0]
 
 
+def test_rolling_sums_and_counts_all_the_rows_before_with_a_window_wider_than_the_group():
+    df = pd.DataFrame(
+        {
+            "g": [1, 1, 1, 1, 2, 2],
+            "t": [3, 1, 2, 4, 1, 2],
+            "v": [30.0, 10.0, 20.0, 40.0, 1.0, 2.0],
+        }
+    )
+    out, _ = run_op(
+        "rolling",
+        df,
+        {"order": "t", "by": ["g"], "columns": ["v"], "window": 1_000_000, "stats": "sum,count"},
+    )
+    assert list(out.columns) == ["g", "t", "v", "v_before1000000_sum", "v_before1000000_count"]
+    # a running total of the rows before, per group, in the order of t
+    assert list(out["v_before1000000_sum"].fillna(-1)) == [30.0, -1, 10.0, 60.0, -1, 1.0]
+    assert list(out["v_before1000000_count"].fillna(-1)) == [2, -1, 1, 3, -1, 1]
+
+
 def test_rolling_around_includes_the_row_itself_and_is_shorter_at_the_edges():
     values = pd.Series([1.0, 4.0, 2.0, 8.0, 5.0, 7.0])
     df = pd.DataFrame({"t": range(6), "v": values})
