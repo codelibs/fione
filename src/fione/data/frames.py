@@ -56,6 +56,9 @@ def looks_like_dates(nonnull: pd.Series, need_year: bool = False) -> bool:
     return bool((parsed.notna() & ~plain).mean() >= _MIN_PARSED)
 
 
+_FIRST_YEAR, _LAST_YEAR = 1678, 2261  # the years a nanosecond timestamp holds
+
+
 def parse_datetimes(s: pd.Series, dayfirst: bool | None = None) -> pd.Series:
     """Parse ``s`` as datetimes, leaving unparseable values as NaT.
 
@@ -101,9 +104,11 @@ def _read(s: pd.Series, dayfirst: bool, utc: bool) -> pd.Series:
         year_first = s.str.match(_YEAR_FIRST).fillna(False).to_numpy(bool)
         for rows, day_first in ((missed & year_first, False), (missed & ~year_first, dayfirst)):
             if rows.any():
-                out[rows] = pd.to_datetime(
+                found = pd.to_datetime(
                     s[rows], errors="coerce", format="mixed", dayfirst=day_first, utc=utc
                 )
+                # A month name alone is read as year 1: outside what the column can hold.
+                out[rows] = found.where(found.dt.year.between(_FIRST_YEAR, _LAST_YEAR))
     return out
 
 
