@@ -775,7 +775,7 @@ class TextLinear(FamilySpec):
     name = "TextLinear"
     view = "text"
     seeded = False
-    defaults = {"C": 30.0}
+    defaults = {"C": 4.0}
     max_iter = 300
     words = TEXT_WORDS  # words and word pairs kept per text column
     chars = 0  # character n-grams kept per text column
