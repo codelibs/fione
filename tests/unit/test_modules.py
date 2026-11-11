@@ -60,8 +60,8 @@ def test_the_built_in_ids_and_kinds():
     modules = registry.builtin_modules()
     ids = [m.id for m in modules]
     frame_ops = (
-        "cbind concat cor cslice fillna floor join lag pivot rbind replace rslice sort split"
-        " tokenize"
+        "cbind concat cor cslice fillna floor join lag pivot rbind replace rolling rslice sort"
+        " split tokenize"
     )
     assert ids == sorted(frame_ops.split()) + [
         "kmeans_predict",
@@ -1320,6 +1320,152 @@ def test_lag_leaves_a_missing_time_or_group_empty_and_refuses_unclear_input():
     names = pd.DataFrame({"t": [1, 2], "s": ["a", "b"]})
     with pytest.raises(ModuleError, match="is not numeric"):
         run_op("lag", names, {"time": "t", "columns": ["s"]})
+
+
+def test_rolling_takes_the_rows_before_in_the_order_of_a_column_within_a_group():
+    # the rows are not in time order in the file; the window is the rows before in time order
+    df = pd.DataFrame(
+        {
+            "g": [1, 1, 1, 1, 2, 2],
+            "t": [3.5, 1.5, 2.5, 4.5, 1.0, 2.0],
+            "v": [30.0, 10.0, 20.0, 40.0, 1.0, 2.0],
+        }
+    )
+    out, _ = run_op(
+        "rolling",
+        df,
+        {"order": "t", "by": ["g"], "columns": ["v"], "window": 2, "stats": "mean,max"},
+    )
+    assert list(out.columns) == ["g", "t", "v", "v_before2_mean", "v_before2_max"]
+    assert list(out["v"]) == [30.0, 10.0, 20.0, 40.0, 1.0, 2.0]  # the rows stay where they were
+    assert list(out["v_before2_mean"].fillna(-1)) == [15.0, -1, 10.0, 25.0, -1, 1.0]
+    assert list(out["v_before2_max"].fillna(-1)) == [20.0, -1, 10.0, 30.0, -1, 1.0]
+
+
+def test_rolling_around_includes_the_row_itself_and_is_shorter_at_the_edges():
+    values = pd.Series([1.0, 4.0, 2.0, 8.0, 5.0, 7.0])
+    df = pd.DataFrame({"t": range(6), "v": values})
+    out, _ = run_op(
+        "rolling",
+        df,
+        {"order": "t", "columns": ["v"], "window": 3, "side": "around", "stats": "mean,std,min"},
+    )
+    expected = values.rolling(3, center=True, min_periods=1)
+    np.testing.assert_allclose(out["v_around3_mean"], expected.mean())
+    np.testing.assert_allclose(out["v_around3_std"], expected.std(), equal_nan=True)
+    np.testing.assert_allclose(out["v_around3_min"], expected.min())
+
+
+def test_rolling_leaves_a_row_without_an_order_empty_and_out_of_the_windows():
+    df = pd.DataFrame({"t": [1.0, None, 2.0, 3.0], "v": [1.0, 100.0, 2.0, 3.0]})
+    out, _ = run_op("rolling", df, {"order": "t", "columns": ["v"], "window": 2})
+    assert list(out["v_before2_mean"].fillna(-1)) == [-1, -1, 1.0, 1.5]
+
+
+def test_rolling_reads_dates_in_any_form_and_rows_of_one_order_do_not_read_each_other():
+    dates = ["2015-07-02", "2015-07-01", "2015-07-02", "2015-07-03"]
+    df = pd.DataFrame({"day": dates, "v": [2.0, 1.0, 3.0, 4.0]})
+    params = {"order": "day", "columns": ["v"], "window": 2}
+    out, _ = run_op("rolling", df, params)
+    # the two rows of 07-02 read only 07-01, not each other; 07-03 reads both of them
+    assert list(out["v_before2_mean"].fillna(-1)) == [1.0, -1, 1.0, 2.5]
+    assert list(out["day"]) == dates
+    # the same dates as timestamps, as date objects (a CSV import) and far in the future
+    for day in (
+        pd.to_datetime(dates),
+        [datetime.date.fromisoformat(d) for d in dates],
+        [datetime.datetime.fromisoformat(d) for d in dates],
+    ):
+        again, _ = run_op("rolling", df.assign(day=pd.Series(day, dtype=object)), params)
+        assert list(again["v_before2_mean"].fillna(-1)) == list(out["v_before2_mean"].fillna(-1))
+    far = pd.Series([datetime.date(9999, 12, 31), datetime.date(2015, 7, 1)], dtype=object)
+    ahead, _ = run_op("rolling", pd.DataFrame({"day": far, "v": [2.0, 1.0]}), params)
+    assert list(ahead["v_before2_mean"].fillna(-1)) == [1.0, -1]
+    around, _ = run_op("rolling", df, {**params, "window": 3, "side": "around"})
+    assert list(around["v_around3_mean"]) == [2.0, 1.5, 3.0, 3.5]  # around reads the tied rows
+
+
+def test_rolling_matches_a_window_per_group_on_messy_data():
+    rng = np.random.default_rng(3)
+    n = 400
+    df = pd.DataFrame(
+        {
+            "g": rng.integers(0, 5, n).astype(float),
+            "h": rng.choice(["a", "b"], n),
+            "t": rng.permutation(n).astype(float),
+            "v": rng.normal(size=n),
+        }
+    )
+    df.loc[rng.choice(n, 20), "g"] = np.nan  # no group: empty values
+    df.loc[rng.choice(n, 20), "t"] = np.nan  # no order: empty values, outside every window
+    df.loc[rng.choice(n, 40), "v"] = np.nan
+    for side, window in (("before", 4), ("around", 5), ("around", 1_001)):
+        out, _ = run_op(
+            "rolling",
+            df.set_axis(rng.permutation(n)),  # a shuffled index must not matter
+            {
+                "order": "t",
+                "by": ["g", "h"],
+                "columns": ["v"],
+                "window": window,
+                "side": side,
+                "stats": "mean,std,min,max",
+            },
+        )
+        expected = pd.DataFrame(np.nan, index=range(n), columns=["mean", "std", "min", "max"])
+        usable = df.dropna(subset=["g", "t"])
+        for _, part in usable.groupby(["g", "h"]):
+            part = part.sort_values("t")
+            values = part["v"]
+            if side == "before":
+                rolled = values.shift(1).rolling(window, min_periods=1)
+            else:
+                rolled = values.rolling(window, center=True, min_periods=1)
+            for stat in expected.columns:
+                expected.loc[part.index, stat] = getattr(rolled, stat)()
+        for stat in expected.columns:
+            np.testing.assert_allclose(
+                out[f"v_{side}{window}_{stat}"].to_numpy(),
+                expected[stat].to_numpy(),
+                equal_nan=True,
+            )
+
+
+def test_rolling_works_on_nullable_columns_and_an_empty_frame():
+    df = pd.DataFrame(
+        {
+            "t": pd.array([3, 1, None, 2], dtype="Int64"),
+            "v": pd.array([3, 1, 9, None], dtype="Int64"),
+        }
+    )
+    out, _ = run_op("rolling", df, {"order": "t", "columns": ["v"], "window": 2})
+    assert list(out["v_before2_mean"].fillna(-1)) == [1.0, -1, -1, 1.0]
+    empty, _ = run_op("rolling", df.iloc[:0], {"order": "t", "columns": ["v"]})
+    assert list(empty.columns) == ["t", "v", "v_before3_mean"] and len(empty) == 0
+
+
+def test_rolling_refuses_unclear_input():
+    df = pd.DataFrame(
+        {
+            "t": [1, 2, 3],
+            "g": [1, 1, 1],
+            "v": [1.0, 2.0, 3.0],
+            "s": ["a", "b", "c"],
+            "b": [True, False, True],
+        }
+    )
+    base = {"order": "t", "columns": ["v"]}
+    for params, message in (
+        ({**base, "window": 4, "side": "around"}, "odd number"),
+        ({**base, "stats": "median"}, "stats must name"),
+        ({**base, "columns": ["s"]}, "not numeric"),
+        ({**base, "order": "s"}, "year-month-day"),
+        ({**base, "order": "b"}, "numbers or dates"),
+        ({**base, "by": ["t"]}, "by cannot include the order"),
+        ({"order": "t", "columns": []}, "name the columns"),
+    ):
+        with pytest.raises(ModuleError, match=message):
+            run_op("rolling", df, params)
 
 
 def test_lag_sum_keeps_an_all_missing_group_empty():

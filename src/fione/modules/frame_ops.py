@@ -10,6 +10,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
+from pandas.api.indexers import BaseIndexer
 
 from fione.modules.registry import (
     Module,
@@ -285,6 +286,139 @@ def lag(df, params, ctx):
     return out
 
 
+_WINDOW_STATS = ("mean", "std", "min", "max")
+
+
+def _window_stats(text: str) -> list[str]:
+    """The statistics named in a comma-separated list, without repeats."""
+    stats = [part.strip() for part in text.split(",") if part.strip()]
+    unknown = [stat for stat in stats if stat not in _WINDOW_STATS]
+    if unknown or not stats:
+        raise ModuleError(f"stats must name one or more of {', '.join(_WINDOW_STATS)}")
+    return list(dict.fromkeys(stats))
+
+
+def _order_values(values, name):
+    """The order column as numbers or dates; text must be a date written year-month-day (a time
+    of day may follow)."""
+    kind = pd.api.types.infer_dtype(values, skipna=True)
+    if kind in ("string", "date", "datetime", "datetime64"):
+        if kind == "string" and not (
+            values.dropna().astype(str).map(_DATE_TEXT.fullmatch).notna().all()
+        ):
+            raise ModuleError(
+                f"order column '{name}' has text that is not a date written year-month-day, "
+                "such as 2015-07-01"
+            )
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)  # "could not infer format"
+                values = pd.to_datetime(values)
+        except (ValueError, TypeError):
+            raise ModuleError(
+                f"order column '{name}' has dates that cannot be read in one format"
+            ) from None
+        if values.dt.tz is not None:
+            values = values.dt.tz_localize(None)
+    elif pd.api.types.is_bool_dtype(values) or not (
+        pd.api.types.is_numeric_dtype(values) or pd.api.types.is_datetime64_any_dtype(values)
+    ):
+        raise ModuleError(f"order column '{name}' must hold numbers or dates")
+    return values
+
+
+class _Rows(BaseIndexer):
+    """Window bounds given row by row, for rows sorted by group and order."""
+
+    def __init__(self, start, end):
+        super().__init__()
+        self.start, self.end = start, end
+
+    def get_window_bounds(
+        self, num_values=0, min_periods=None, center=None, closed=None, step=None
+    ):
+        return self.start, self.end
+
+
+def _window_rows(groups, order, window, around):
+    """The first row and the row after the last of each window, for rows sorted by group and
+    order: the ``window`` rows centred on the row (itself included), or the ``window`` rows
+    whose order is earlier than the row's; neither goes over the edge of the group."""
+    n = len(groups)
+    rows = np.arange(n)
+    group_new = np.ones(n, dtype=bool)
+    group_new[1:] = groups[1:] != groups[:-1]
+    first = np.flatnonzero(group_new)
+    last = np.append(first[1:], n)
+    run = np.cumsum(group_new) - 1
+    group_start, group_end = first[run], last[run]
+    if around:
+        reach = window // 2
+        return np.maximum(rows - reach, group_start), np.minimum(rows + reach + 1, group_end)
+    # the first row of the rows that share the row's order: the window ends before it
+    tie_new = group_new.copy()
+    tie_new[1:] |= order[1:] != order[:-1]
+    tie_start = np.flatnonzero(tie_new)[np.cumsum(tie_new) - 1]
+    return np.maximum(tie_start - window, group_start), tie_start
+
+
+def rolling(df, params, ctx):
+    """Add statistics of the values around each row: ``column_before5_mean`` is the mean of the
+    5 rows before it, ``column_around5_std`` the standard deviation of the 5 rows centred on it
+    (itself included). The rows are taken in the order of the ``order`` column within each ``by``
+    group. ``before`` reads only rows whose order is earlier than the row's, so rows with the same
+    order do not read each other; ``around`` reads the rows next to the row, whatever their order.
+    A row with no ``order`` or no ``by`` value gets empty values and is left out of the windows of
+    the others. A window at the edge of a group is shorter."""
+    order = require_column(df, params["order"])
+    by = pick_columns(df, params["by"]) if params["by"] else []
+    if order in by:
+        raise ModuleError("by cannot include the order column")
+    if len(set(by)) != len(by) or len(set(params["columns"])) != len(params["columns"]):
+        raise ModuleError("by and columns cannot name a column twice")
+    if not params["columns"]:
+        raise ModuleError("name the columns to summarize")
+    columns = [c for c in pick_columns(df, params["columns"]) if c != order and c not in by]
+    if not columns:
+        raise ModuleError("the columns to summarize cannot be only the order or the by columns")
+    for column in columns:
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            raise ModuleError(f"column '{column}' is not numeric")
+    key = _order_values(df[order], order).reset_index(drop=True)
+    window, side = params["window"], params["side"]
+    around = side == "around"
+    if around and window % 2 == 0:
+        raise ModuleError("an around window must have an odd number of rows")
+    stats = _window_stats(params["stats"])
+    check_cells(len(df), len(df.columns) + len(columns) * len(stats))
+    base = df[[*by, *columns]].reset_index(drop=True)
+    sorting = base[by].set_axis([f"by{i}" for i in range(len(by))], axis=1).assign(order=key.array)
+    position = sorting.sort_values(list(sorting.columns), kind="stable").index.to_numpy()
+    ordered = base.iloc[position]
+    if by:  # a row with no group value is -1: a run of its own, left empty below
+        groups = ordered.groupby(by, sort=False).ngroup().to_numpy()
+    else:
+        groups = np.zeros(len(ordered), dtype=np.int64)
+    ordered_key = key.iloc[position]
+    start, end = _window_rows(groups, ordered_key.to_numpy(), window, around)
+    usable = ordered_key.notna().to_numpy() & (groups >= 0)  # in the windows and given values
+    names = unique_names(
+        [str(c) for c in df.columns]
+        + [f"{c}_{side}{window}_{stat}" for c in columns for stat in stats]
+    )[len(df.columns) :]
+    out = df.copy()
+    fresh = iter(names)
+    for column in columns:
+        values = ordered[column].reset_index(drop=True).where(usable)
+        summary = values.rolling(_Rows(start, end), min_periods=1).agg(stats)
+        summary[~usable] = np.nan
+        summary.index = position
+        summary = summary.reindex(range(len(df)))
+        for stat in stats:
+            out[next(fresh)] = summary[stat].to_numpy()
+    return out
+
+
 def cslice(df, params, ctx):
     return df[pick_columns(df, params["columns"])]
 
@@ -522,6 +656,20 @@ _op(
     },
     ("column", "value"),
     replace,
+)
+_op(
+    "rolling",
+    "Add statistics of nearby values",
+    {
+        "order": _NAME,
+        "by": _NAMES,
+        "columns": _NAMES,
+        "window": {"type": "integer", "minimum": 1, "maximum": 1_000_000, "default": 3},
+        "side": {"type": "string", "enum": ["before", "around"], "default": "before"},
+        "stats": {"type": "string", "maxLength": 100, "default": "mean"},
+    },
+    ("order", "columns"),
+    rolling,
 )
 _op("rslice", "Slice rows", {"row_conditions": _CONDITIONS}, (), rslice)
 _op(

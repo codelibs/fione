@@ -219,6 +219,24 @@ adding the lags. Training refuses a target with missing values, so take the rows
 with **Slice rows** (such as `month < 34`) before training, and the rows to predict with another
 slice for the prediction.
 
+## Statistics of nearby values
+
+For a signal or a sensor, the rows next to a row often say more than the row: a level that
+the readings around it stay near, how much they spread. The built-in **Add statistics of nearby
+values** module (`rolling`) adds them: name the `order` column (numbers, or dates such as
+`2015-07-01`; text must be a date written year-month-day), the columns to read (`columns`),
+the group each row belongs to (`by`, such as a machine), the `window` (a number of rows) and
+the statistics (`stats`: `mean`, `std`, `min`, `max`, separated by commas). The rows are taken
+in the order of the `order` column, whatever order they are in the file. With `side` set to
+`before` (the default), `signal_before5_mean` is the mean of the 5 rows before the row: only
+rows whose order is earlier than the row's, so the row itself, later rows and rows with the
+same order (several rows of one day) are never read. With `around`, `signal_around5_std` is the
+standard deviation of the 5 rows centred on the row, itself included (the window must be odd);
+it reads later rows and rows with the same order, so use it only on columns whose later values
+are also known when the model is used, never on the target. A window at the edge of a group is
+shorter, and a `std` needs at least two values. A row with no `order` or no `by` value gets
+empty values and is left out of the windows of the others.
+
 ## Learning a skewed target
 
 For a regression target of 0 or more that is skewed (prices, counts, durations) and is
