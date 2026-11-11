@@ -685,11 +685,19 @@ MIN_RUNTIME_SECS = 120
 # keeps the tip off targets that are nearly symmetric.
 TARGET_SKEW = 1.0
 RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balanced"
-# A column named like an identifier (id, user_id, userId, 顧客ID, 番号) that holds each value in
-# several rows, at least REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
+# A column named like an identifier (id, user_id, userId, 顧客ID, 番号) or like whom the rows are
+# about (subject, patient, customer, query, ... alone) that holds each value in several rows, at
+# least REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
 REPEATED_ID_GROUPS = 10
 REPEATED_ID_MIN_ROWS = 2  # rows per value, on average
-_ID_NAME = re.compile(r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(?![a-z])|番号")
+_IDENTIFIER = re.compile(r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(?![a-z])|番号")
+# Whom the rows are about, as the whole name (a plural, digits or punctuation may follow): a
+# column that names the one the rows concern, not a trait of it (user_age, session_count).
+_ENTITY = re.compile(
+    r"(?i:^(?:subject|patient|user|customer|client|member|person|student|employee|driver"
+    r"|player|device|session|household|account|query|qid|group)s?[\W\d_]*$)"
+)
+_ID_NAME = re.compile(f"{_IDENTIFIER.pattern}|{_ENTITY.pattern}")
 
 
 def runtime_need_secs(dataset: Dataset, profile: DatasetProfile | None = None) -> float:
@@ -743,19 +751,22 @@ def recommended_metric(y: pd.Series, task: str) -> str:
 
 
 def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | None:
-    """The first column other than ``target`` that is named like an identifier and repeats its
-    values over rows (``REPEATED_ID_GROUPS`` or more values, ``REPEATED_ID_MIN_ROWS`` rows each on
-    average), where ``cv_group_column`` may keep the validation honest; else None."""
-    for col in profile.columns:
-        if (
-            col.name != target
-            and col.kind in ("categorical", "numeric", "text")
-            and _ID_NAME.search(col.name)
-            and col.n_unique >= REPEATED_ID_GROUPS
-            and profile.n_rows >= REPEATED_ID_MIN_ROWS * col.n_unique
-        ):
-            return col
-    return None
+    """The first column other than ``target`` that is named like an identifier (failing that, for
+    the entity the rows are about) and repeats its values over rows (``REPEATED_ID_GROUPS`` or
+    more values, ``REPEATED_ID_MIN_ROWS`` rows each on average), where ``cv_group_column`` may
+    keep the validation honest; else None."""
+    found = [
+        col
+        for col in profile.columns
+        if col.name != target
+        and col.kind in ("categorical", "numeric", "text")
+        and _ID_NAME.search(col.name)
+        and col.n_unique >= REPEATED_ID_GROUPS
+        and profile.n_rows >= REPEATED_ID_MIN_ROWS * col.n_unique
+    ]
+    # A column named like an identifier comes before one named for the entity.
+    found.sort(key=lambda col: _IDENTIFIER.search(col.name) is None)
+    return found[0] if found else None
 
 
 @dataclasses.dataclass(frozen=True)
