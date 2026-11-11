@@ -1473,3 +1473,20 @@ def test_folds_in_time_order_are_not_repeated():
         cv_repeats=3,
     )
     assert _started(events)["cv_repeats"] == 1
+
+
+def test_derived_features_are_not_tried_on_a_table_wider_than_the_limit(monkeypatch):
+    monkeypatch.setattr(automl_module, "FEATURE_MAX_COLUMNS", 5)
+    chosen = []
+    monkeypatch.setattr(
+        automl_module, "select_groups", lambda *a, **k: chosen.append(1) or ([], [])
+    )
+    events = []
+    _fit(_binary(300), events, target="y", families=["LightGBM"], max_models=1)  # 8 columns
+    assert not chosen
+    assert any(
+        e.type == "notice" and "derived features are not tried" in e.data["message"] for e in events
+    )
+    monkeypatch.setattr(automl_module, "FEATURE_MAX_COLUMNS", 50)
+    _fit(_binary(300), target="y", families=["LightGBM"], max_models=1)
+    assert chosen
