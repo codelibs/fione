@@ -271,6 +271,12 @@ class AutoML:
             prior = np.bincount(y) / len(y)
         elif tuned:  # the threshold is fitted on the final blend, after the search
             metrics.check_tuned(sort_metric, len(classes))
+        elif sort_metric == "qwk" and 2 < len(classes) <= metrics.MAX_ORDINAL_CLASSES:
+            self._notice(
+                "qwk at the most probable class is far below what the same probabilities give "
+                "with cut points fitted to the order of the classes: set decision to tuned",
+                kind="ordinal_decision",
+            )
         if c.time_column is None:
             groups, tried = self._engineer(X, y, task, nfolds, deadline, row_groups)
         else:  # the gate judges a feature on shuffled folds, which look at the future

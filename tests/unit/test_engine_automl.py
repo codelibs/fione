@@ -10,7 +10,7 @@ from sklearn.metrics import r2_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from fione.engine import automl as automl_module
-from fione.engine import search
+from fione.engine import metrics, search
 from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, AutoML
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
@@ -435,6 +435,31 @@ def test_tuned_decision_needs_two_classes_and_a_metric_that_counts_right_answers
     three = _binary(600, n_classes=3, n_clusters_per_class=1)
     with pytest.raises(ConfigError, match="two classes"):
         _fit(three, target="y", decision="tuned", sort_metric="f1")
+
+
+def _ordinal_frame(n=2_000, seed=0):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame(rng.normal(size=(n, 4)), columns=list("abcd"))
+    score = 1.2 * df["a"] + 0.8 * df["b"] + rng.normal(scale=1.5, size=n)
+    df["y"] = np.digitize(score, [-2.0, -0.7, 0.7, 2.0])  # five ordered classes, rare at the ends
+    return df
+
+
+def test_tuned_decision_for_qwk_fits_cut_points_for_ordered_classes(monkeypatch):
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    df = _ordinal_frame()
+    fit = {"families": ["LightGBM"], "target": "y", "max_models": 1, "sort_metric": "qwk"}
+    events = []
+    plain = _fit(df, events, **fit)
+    assert any(e.data.get("kind") == "ordinal_decision" for e in events if e.type == "notice")
+    model = _fit(df, decision="tuned", keep_cv_predictions=True, **fit)
+    cuts = model.class_prior
+    assert isinstance(cuts, metrics.Cuts) and len(cuts) == 4 and (np.diff(cuts) > 0).all()
+    proba = model.predict_proba(df).to_numpy()
+    assert (model.predict(df) == np.searchsorted(np.asarray(cuts), proba @ np.arange(5))).all()
+    assert model.metrics["qwk"] > plain.metrics["qwk"]
+    ensemble = model.leaderboard.set_index("model").loc["Ensemble", "cv_score"]
+    assert ensemble == pytest.approx(model.metrics["qwk"])
 
 
 def test_the_default_decision_leaves_no_prior():

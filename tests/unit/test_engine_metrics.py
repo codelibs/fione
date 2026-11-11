@@ -308,3 +308,46 @@ def test_check_tuned_wants_two_classes_and_a_metric_that_counts_right_answers():
     for name in ("logloss", "aucpr", "recall"):
         with pytest.raises(ConfigError, match="sort_metric"):
             metrics.check_tuned(name, 2)
+
+
+def _ordinal(n=3000, k=5, seed=0):
+    """Answers 0..k-1 and probabilities that centre on the answer but lean to the middle classes
+    (the most probable class is often not the nearest one in order)."""
+    rng = np.random.default_rng(seed)
+    y = rng.integers(0, k, n)
+    score = y + rng.normal(scale=1.2, size=n)
+    logits = -((score[:, None] - np.arange(k)[None]) ** 2) / 2.0
+    logits[:, k // 2] += 1.2
+    pred = np.exp(logits)
+    return y, pred / pred.sum(axis=1, keepdims=True)
+
+
+def test_cuts_choose_the_class_the_expected_class_number_falls_in():
+    pred = np.array([[0.7, 0.2, 0.1], [0.1, 0.2, 0.7], [0.2, 0.6, 0.2], [0.4, 0.3, 0.3]])
+    cuts = np.array([0.5, 1.5]).view(metrics.Cuts)
+    # the expected class numbers are 0.4, 1.6, 1.0 and 0.9
+    assert metrics.choose(pred, cuts).tolist() == [0, 2, 1, 1]
+    assert metrics.choose(pred).tolist() == [0, 2, 1, 0]
+
+
+def test_tune_prior_for_qwk_fits_cut_points_that_beat_the_most_probable_class():
+    y, pred = _ordinal()
+    cuts = metrics.tune_prior("qwk", y, pred)
+    assert isinstance(cuts, metrics.Cuts) and len(cuts) == 4 and (np.diff(cuts) > 0).all()
+    assert metrics.value("qwk", y, pred, cuts) > metrics.value("qwk", y, pred) + 0.03
+    # no single cut point moved a little makes it better
+    best = metrics.value("qwk", y, pred, cuts)
+    for i in range(4):
+        for step in (-0.05, 0.05):
+            moved = np.array(cuts, dtype=float)
+            moved[i] += step
+            if (np.diff(moved) > 0).all():
+                assert metrics.value("qwk", y, pred, moved.view(metrics.Cuts)) <= best + 1e-9
+
+
+def test_check_tuned_allows_many_ordered_classes_for_qwk_only():
+    metrics.check_tuned("qwk", 5)
+    with pytest.raises(ConfigError, match="two classes"):
+        metrics.check_tuned("qwk", metrics.MAX_ORDINAL_CLASSES + 1)
+    with pytest.raises(ConfigError, match="two classes"):
+        metrics.check_tuned("kappa", 5)

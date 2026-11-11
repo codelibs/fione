@@ -183,6 +183,15 @@ the same validation predictions the scores are reported on, so those scores are 
 optimistic, most with few rows or few cases of the rare class. The stopping metric, and the
 ensemble's progress scores while training, are evaluated at 0.5.
 
+For ordered classes (a rating of 0 to 4, an adoption speed) scored by `qwk`, the class with the
+largest probability is a poor answer: it is far from the truth more often than the middle one.
+With `decision: "tuned"` and `sort_metric: "qwk"`, for up to 50 classes in the order of their
+labels, Fione takes each row's expected class number (the probabilities times the class numbers)
+and fits cut points on it, on the validation predictions, that give the best `qwk`; a row is the
+class its expected number falls in. The cut points are stored with the model and used like the
+threshold above; without `tuned`, a `qwk` run says in a notice that it would score better with
+them.
+
 ## Text columns
 
 A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product) is read in two ways. Its
