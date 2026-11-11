@@ -145,6 +145,10 @@ FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
 # the most useful candidates run out of time unconfirmed. Never over FEATURE_MAX_SHARE.
 FEATURE_MIN_SECS = 30.0
 FEATURE_MAX_SHARE = 0.30
+# On a table this wide one fit of the reference model takes a share of the choice's time that
+# leaves nothing to judge a candidate with (a hundred rows: about 2 s per 1,000 columns for each
+# of the folds' fits, and the candidates' own fit grows faster than the columns).
+FEATURE_MAX_COLUMNS = 5_000
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -449,6 +453,12 @@ class AutoML:
         switched off). The choice gets at most ``FEATURE_SHARE`` of the time, or of a short run
         ``FEATURE_MIN_SECS`` (but under ``FEATURE_MAX_SHARE``)."""
         if not self.config.feature_engineering:
+            return [], None
+        if X.shape[1] > FEATURE_MAX_COLUMNS:
+            self._notice(
+                f"derived features are not tried on a table of more than "
+                f"{FEATURE_MAX_COLUMNS:,} columns"
+            )
             return [], None
         try:
             kept, verdicts = select_groups(

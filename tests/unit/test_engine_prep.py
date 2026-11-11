@@ -598,3 +598,12 @@ def test_epoch_seconds_are_found_by_position_not_by_a_column_name():
     year.insert(0, "when__year", np.where(np.arange(360) < 180, 2000, 2001))  # a user column
     prep = Prep().fit(year)
     assert not _ordinal_in_linear_view(prep, year)
+
+
+def test_a_view_of_very_many_columns_is_joined_into_few_blocks_so_slicing_rows_stays_fast():
+    X = pd.DataFrame(RNG.normal(size=(30, 2100)), columns=[f"c{i}" for i in range(2100)])
+    X["flag"] = RNG.choice([True, False], size=30)
+    X["when"] = pd.date_range("2024-01-01", periods=30, freq="D")
+    prep = Prep().fit(X)
+    for view in (prep.tree(X), prep.catboost(X), prep.dense(X)):
+        assert view._mgr.nblocks < 10  # a block per column took 0.5 s per slice at 50,000

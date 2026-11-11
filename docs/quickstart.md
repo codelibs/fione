@@ -356,7 +356,8 @@ over paired cross-validation folds by more than three standard errors and by 0.1
 with at least 70 % of the folds improving, and the kept groups together pass a last check on
 other folds of the same rows. The gate gets a tenth of the run time (a short run gives it 30 seconds, but never more than 30 % of the run). The groups tried,
 their gains and why each was kept or not are on the model (`features`) and in a `features`
-notice.
+notice. A table of more than 5,000 columns gets none: one fit of the quick model on so many
+columns takes longer than the time the gate has, and a `notice` says so.
 
 ## Stop, back up, upgrade
 

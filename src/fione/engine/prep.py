@@ -25,6 +25,7 @@ SHORT_PROSE_WORDS = 3
 SHORT_PROSE_UNIQUE = 0.5  # share of different values in the column
 SHORT_PROSE_WORD_CHARS = 3  # mean letters of a word, so that a code such as C_ID_92a is no text
 MAX_PROSE = 3  # prose columns the text view reads (the first ones)
+CONSOLIDATE_COLUMNS = 2_000  # a view of more columns is joined into few blocks (see _base)
 FEW_LEVELS = (
     30  # a whole-number column with at most this many different values is also read as levels
 )
@@ -288,7 +289,11 @@ class Prep:
         frame = pd.concat([o.reset_index(drop=True) for o in out], axis=1)
         frame.columns = [f"f{i}" for i in range(len(self.feature_names))]
         frame.index = df.index
-        return frame.astype({p: float for p in frame.columns if p not in self._category_at})
+        frame = frame.astype({p: float for p in frame.columns if p not in self._category_at})
+        # A frame built from columns holds a block per column, and slicing the rows of tens of
+        # thousands of blocks takes half a second. Joining them copies the frame: not worth it
+        # unless the columns are very many.
+        return frame.copy() if frame.shape[1] > CONSOLIDATE_COLUMNS else frame
 
     def _categorical(self, base: pd.DataFrame) -> dict[str, pd.Categorical]:
         out = {}
@@ -319,7 +324,8 @@ class Prep:
         base = self._base(df)
         for position, values in self._categorical(base).items():
             base[position] = values.codes.astype(float)
-        return base.fillna(self._medians)
+        filled = base.fillna(self._medians)  # a block per column again
+        return filled.copy() if filled.shape[1] > CONSOLIDATE_COLUMNS else filled
 
     def text(self, df: pd.DataFrame) -> pd.DataFrame:
         """The linear view without the prose columns' frequencies, and after it each prose column
