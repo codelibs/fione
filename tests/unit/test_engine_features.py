@@ -616,6 +616,16 @@ def test_the_gate_works_for_regression_too():
     assert "text tokens of name" in {g.label for g in kept}
 
 
+def test_the_gate_builds_no_view_once_the_time_is_gone(monkeypatch):
+    X, y = people()
+    gate = features._Gate(X, y, "classification", 5, 0, lambda: True)
+    monkeypatch.setattr(
+        features.Prep, "tree", lambda *_: pytest.fail("the view was built after the deadline")
+    )
+    with pytest.raises(features._OutOfTime):
+        gate.losses([], range(1))
+
+
 def test_the_gate_stops_at_the_deadline_and_on_cancellation():
     X, y = people()
     kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(0))

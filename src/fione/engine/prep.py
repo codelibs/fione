@@ -217,14 +217,21 @@ class Prep:
     def _fit_linear(self, base: pd.DataFrame, numbers: pd.DataFrame) -> None:
         """What the linear view needs: number scales, the missing-value flags and the one-hot
         levels (``LINEAR_LEVELS`` most frequent, ties by name) per categorical column."""
-        filled = numbers.fillna(self._medians)
-        self._logged = tuple(
-            p for p in filled.columns if numbers[p].min() >= 0 and numbers[p].skew() > LINEAR_SKEW
+        values = numbers.to_numpy(dtype=float)
+        medians = np.array([self._medians[p] for p in numbers.columns])
+        filled = pd.DataFrame(
+            np.where(np.isnan(values), medians, values),
+            index=numbers.index,
+            columns=numbers.columns,
         )
-        for position in self._logged:
-            filled[position] = np.log1p(filled[position])
+        skewed = (numbers.min() >= 0) & (numbers.skew() > LINEAR_SKEW)
+        self._logged = tuple(skewed.index[skewed])
+        if self._logged:
+            at = [filled.columns.get_loc(p) for p in self._logged]
+            filled.iloc[:, at] = np.log1p(filled.iloc[:, at])
+        means, stds = filled.mean(), filled.std()
         self._scale = {
-            position: (float(filled[position].mean()), float(filled[position].std() or 1.0))
+            position: (float(means[position]), float(stds[position] or 1.0))
             for position in filled.columns
             if position not in self._no_trend
         }
@@ -281,10 +288,7 @@ class Prep:
         frame = pd.concat([o.reset_index(drop=True) for o in out], axis=1)
         frame.columns = [f"f{i}" for i in range(len(self.feature_names))]
         frame.index = df.index
-        for position in frame.columns:
-            if position not in self._category_at:
-                frame[position] = frame[position].astype(float)
-        return frame
+        return frame.astype({p: float for p in frame.columns if p not in self._category_at})
 
     def _categorical(self, base: pd.DataFrame) -> dict[str, pd.Categorical]:
         out = {}

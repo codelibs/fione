@@ -25,7 +25,9 @@ must ignore ``outlier_rate`` unless ``kind == "numeric"``: for a 0/1 flag with a
 the IQR is 0, so the rate merely equals the minority fraction.
 
 Correlations need at least ``_CORR_MIN_PERIODS`` rows where both columns are present, so two sparse
-columns that overlap on a couple of rows cannot report a spurious ``r = +-1``.
+columns that overlap on a couple of rows cannot report a spurious ``r = +-1``. A table with more
+than ``_CORR_MAX_COLUMNS`` numeric columns lists none: the pairs grow with the square of the
+columns, in time and memory, and among that many the strongest are rarely the ones to look at.
 """
 
 import time
@@ -47,6 +49,7 @@ _TOP_VALUES = 10
 _TOP_CORRELATIONS = 20
 _ID_MIN_ROWS = 20
 _CORR_MIN_PERIODS = 10
+_CORR_MAX_COLUMNS = 1000
 _LEAK_CORRELATION = 0.99
 _LEAK_MIN_ROWS = 20
 _SCORE_BINS = 64
@@ -213,7 +216,7 @@ def _profile_column(name: str, s: pd.Series) -> ColumnProfile:
 
 def _correlations(df: pd.DataFrame, columns: list[ColumnProfile]) -> list[tuple[str, str, float]]:
     names = [c.name for c in columns if c.kind == "numeric"]
-    if len(names) < 2:
+    if not 2 <= len(names) <= _CORR_MAX_COLUMNS:
         return []
     matrix = (
         pd.DataFrame({n: _as_float(df[n]) for n in names})
