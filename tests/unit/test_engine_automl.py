@@ -945,6 +945,20 @@ def test_a_too_wide_linear_view_leaves_those_families_out(monkeypatch):
     assert [m.spec.name for m in only.members] == ["Linear"]
 
 
+def test_a_too_wide_linear_view_says_that_a_late_family_was_left_out(monkeypatch):
+    monkeypatch.setattr(automl_module, "LINEAR_MAX_CELLS", 100)
+    monkeypatch.setattr(search, "TOP_TRIALS", 1)
+    df = _binary(600)
+    df["code"] = [f"k{i % 250}" for i in range(len(df))]  # many values: frequency encoded
+    events = []
+    model = _fit(df, events, families=["LightGBM", "LinearWide"], target="y", max_models=2)
+    assert [m.spec.name for m in model.members] == ["LightGBM"]
+    notices = [e.data for e in events if e.type == "notice"]
+    left_out = [n for n in notices if n.get("kind") == "families_left_out"]
+    assert [n["families"] for n in left_out] == [["LinearWide"]]
+    assert "too much memory" in left_out[0]["message"]
+
+
 def _bagging_data():
     return _binary(400, seed=3)
 

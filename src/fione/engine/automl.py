@@ -506,6 +506,14 @@ class AutoML:
         """The late families this data suits, whose models would not be too big, and whose view
         is not too wide (see ``_without_wide_linear_view``)."""
         if len(X) * prep.linear_width > LINEAR_MAX_CELLS:
+            left_out = [name for name in self.late if FAMILIES[name].applies(prep, X)]
+            if left_out:
+                self._notice(
+                    f"{', '.join(left_out)} left out: the one-hot encoded data "
+                    f"({len(X):,} rows x {prep.linear_width:,} columns) would take too much memory",
+                    kind="families_left_out",
+                    families=left_out,
+                )
             return []
         outputs = int(y.max()) + 1 if task == "classification" else 1
         outputs = 1 if outputs == 2 else outputs
