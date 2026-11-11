@@ -959,6 +959,52 @@ def test_a_too_wide_linear_view_says_that_a_late_family_was_left_out(monkeypatch
     assert "too much memory" in left_out[0]["message"]
 
 
+def test_rounded_qwk_on_a_regression_of_ratings_says_it_rounds_at_the_middles():
+    df = _binary(300)
+    df["y"] = df["y"] + (df["x0"] > 0)  # a rating 0..2
+    events = []
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        task="regression",
+        sort_metric="rounded_qwk",
+        max_models=1,
+    )
+    notices = [e.data for e in events if e.type == "notice"]
+    (advice,) = [n for n in notices if n.get("kind") == "ordinal_decision"]
+    assert "sort_metric qwk" in advice["message"] and "decision tuned" in advice["message"]
+    # the advised setting runs
+    _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        task="classification",
+        sort_metric="qwk",
+        decision="tuned",
+        max_models=1,
+    )
+    # a plain regression, and a rating range too wide for cut points, get no such advice
+    for extra, frame in (
+        ({}, df),
+        ({"sort_metric": "rounded_qwk"}, df.assign(y=(df["x1"] * 40).round())),
+    ):
+        events = []
+        _fit(
+            frame,
+            events,
+            families=["LightGBM"],
+            target="y",
+            task="regression",
+            max_models=1,
+            **extra,
+        )
+        assert not [
+            e for e in events if e.type == "notice" and e.data.get("kind") == "ordinal_decision"
+        ]
+
+
 def _bagging_data():
     return _binary(400, seed=3)
 
