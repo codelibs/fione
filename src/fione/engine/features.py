@@ -796,6 +796,8 @@ class _Gate:
         for repeat in repeats:
             if (labels, repeat) not in self._cache:
                 if view is None:
+                    if self.out_of_time():
+                        raise _OutOfTime
                     view = Prep().fit(self.X, groups).tree(self.X)
                 done = []
                 for train, valid in self.folds(repeat):

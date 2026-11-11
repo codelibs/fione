@@ -316,6 +316,14 @@ def test_correlation_value_and_sign():
     assert r == pytest.approx(-1.0, abs=1e-3)
 
 
+def test_correlations_are_left_out_of_a_table_with_very_many_numeric_columns(monkeypatch):
+    monkeypatch.setattr(profile_module, "_CORR_MAX_COLUMNS", 5)
+    base = RNG.normal(size=100)
+    df = pd.DataFrame({f"c{i}": base + RNG.normal(size=100) for i in range(6)})
+    assert profile_dataset(df).correlations == []
+    assert profile_dataset(df.iloc[:, :5]).correlations != []
+
+
 def test_correlation_skips_nan_pairs():
     df = pd.DataFrame({"x": np.arange(100.0), "y": [np.nan] * 100})
     assert profile_dataset(df).correlations == []
