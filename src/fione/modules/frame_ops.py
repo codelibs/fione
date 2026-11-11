@@ -234,11 +234,44 @@ def _day_numbers(values, name):
     return ((stamps - epoch) // pd.Timedelta(days=1)).astype("Int64")
 
 
+def _in_steps(values, step, name):
+    """The times as whole numbers of ``step`` from the earliest one: 0.0003 is 3 steps after
+    0.0 for a step of 0.0001, and a Monday is 1 step after the Monday before for a step of 7
+    days. A time that is not a whole number of steps from the others is refused: for whole
+    numbers exactly, for others within what the floats can tell apart."""
+    gap = ModuleError(
+        f"time column '{name}' has times that are not a whole number of steps ({step:g}) apart"
+    )
+    present = values.notna().to_numpy()
+    if not present.any():
+        return values.astype("Int64")
+    if pd.api.types.is_integer_dtype(values) and step == int(step) and step >= 1:
+        whole = values.to_numpy(dtype="int64", na_value=0)
+        count, left = np.divmod(whole - whole[present].min(), int(step))
+        if (left[present] != 0).any():
+            raise gap
+        return pd.Series(count, index=values.index).where(present).astype("Int64")
+    numbers = values.to_numpy(dtype="float64", na_value=np.nan)
+    away = numbers - numbers[present].min()
+    with np.errstate(all="ignore"):
+        scaled = np.round(away / step)
+    if not np.isfinite(scaled[present]).all() or scaled[present].max() > 2**53:
+        raise ModuleError(
+            f"time column '{name}' has too many steps ({step:g}) in it; use a larger step"
+        )
+    # the floats of the times are only as exact as their size: allow for that, not for more
+    noise = 4 * np.spacing(np.abs(numbers[present]).max()) + step * 1e-9
+    if (np.abs(away[present] - scaled[present] * step) > noise).any():
+        raise gap
+    return pd.Series(scaled, index=values.index).astype("Int64")
+
+
 def lag(df, params, ctx):
     """Add, for each row, the value of the ``columns`` at an earlier ``time`` of the same ``by``
     group: ``column_lag1`` is the value one step of ``time`` before, ``column_lag3`` three steps
     before. ``time`` holds whole numbers (a month number, a day number) or dates (the step is
-    then a day); the step is counted in them, not in rows, so a time with no row gives an empty
+    then a day), or numbers a ``step`` apart (0.0001 for readings every 0.0001; 7 for weekly dates);
+    the step is counted in them, not in rows, so a time with no row gives an empty
     value instead of the one before it. Rows of a group with the same time are first reduced to
     their ``how`` (mean or sum), so ``by`` can be coarser than a row: lagging the mean of an item
     over all shops. No row reads its own time or a later one."""
@@ -256,11 +289,19 @@ def lag(df, params, ctx):
     for column in columns:
         if not pd.api.types.is_numeric_dtype(df[column]):
             raise ModuleError(f"column '{column}' is not numeric")
+    step = params["step"]
+    if not step > 0:
+        raise ModuleError("step must be above 0")
     original_time = wide = df[time]
     if not pd.api.types.is_numeric_dtype(wide) or pd.api.types.is_bool_dtype(wide):
         wide = _day_numbers(wide, time)
-    elif not (wide.dropna() == wide.dropna().round()).all():
-        raise ModuleError(f"time column '{time}' must hold whole numbers or dates")
+    elif step == 1 and not (wide.dropna() == wide.dropna().round()).all():
+        raise ModuleError(
+            f"time column '{time}' must hold whole numbers or dates "
+            "(or set step to the gap between neighbouring times)"
+        )
+    if step != 1:
+        wide = _in_steps(wide, step, time)
     lags = _lags(params["lags"])
     check_cells(len(df), len(df.columns) + len(columns) * len(lags))
     # a narrow integer (a byte of days) would wrap round when a lag is added: work on a wide one
@@ -340,10 +381,49 @@ class _Rows(BaseIndexer):
         return self.start, self.end
 
 
-def _window_rows(groups, order, window, around):
+def _is_date(key):
+    return pd.api.types.is_datetime64_any_dtype(key)
+
+
+def _order_numbers(key):
+    """The order column as floats: numbers as they are, dates as days from the earliest."""
+    if _is_date(key):
+        return ((key - key.min()) / pd.Timedelta(days=1)).to_numpy(dtype="float64", na_value=np.nan)
+    return key.to_numpy(dtype="float64", na_value=np.nan)
+
+
+def _span_rows(run, order, span, around):
+    """The first row and the row after the last of each window of a range of the order, for rows
+    sorted by group and order: the rows whose order is within ``span`` before the row's (the row's
+    own order and later ones are left out), or within half of ``span`` either side of it (itself
+    and the rows of its own order included). A group is a ``run``; the order values are replaced
+    by their ranks so that a group and an order make one sorted whole number to search."""
+    # for 0.3 - 0.1 not being 0.2: a row on the edge of the range is in. The floats of large
+    # orders are coarse (1.7e9 has gaps of 2.4e-7), so allow for their size too.
+    finite = order[np.isfinite(order)]
+    slack = max(span * 1e-6, 4 * np.spacing(np.abs(finite).max()) if len(finite) else 0.0)
+    reach = span / 2 if around else span
+    low = order - reach - slack
+    high = order + reach + slack
+    ranked = np.unique(np.concatenate([order, low, high] if around else [order, low]))
+    width = len(ranked) + 1
+
+    def key(values):
+        return run * width + np.searchsorted(ranked, values)
+
+    rows = key(order)
+    start = np.searchsorted(rows, key(low), side="left")
+    if around:
+        return start, np.searchsorted(rows, key(high), side="right")
+    return start, np.searchsorted(rows, rows, side="left")  # before the rows of its own order
+
+
+def _window_rows(groups, order, same, window, span, around):
     """The first row and the row after the last of each window, for rows sorted by group and
-    order: the ``window`` rows centred on the row (itself included), or the ``window`` rows
-    whose order is earlier than the row's; neither goes over the edge of the group."""
+    order: ``window`` rows centred on the row (itself included), or the ``window`` rows whose
+    order is earlier than the row's; or, for a ``span``, the rows within a range of the order.
+    No window goes over the edge of its group. ``same`` holds the order as it is, to tell rows of
+    one order from the others."""
     n = len(groups)
     rows = np.arange(n)
     group_new = np.ones(n, dtype=bool)
@@ -351,13 +431,15 @@ def _window_rows(groups, order, window, around):
     first = np.flatnonzero(group_new)
     last = np.append(first[1:], n)
     run = np.cumsum(group_new) - 1
+    if span:
+        return _span_rows(run, order, span, around)
     group_start, group_end = first[run], last[run]
     if around:
         reach = window // 2
         return np.maximum(rows - reach, group_start), np.minimum(rows + reach + 1, group_end)
     # the first row of the rows that share the row's order: the window ends before it
     tie_new = group_new.copy()
-    tie_new[1:] |= order[1:] != order[:-1]
+    tie_new[1:] |= same[1:] != same[:-1]
     tie_start = np.flatnonzero(tie_new)[np.cumsum(tie_new) - 1]
     return np.maximum(tie_start - window, group_start), tie_start
 
@@ -385,9 +467,11 @@ def rolling(df, params, ctx):
         if not pd.api.types.is_numeric_dtype(df[column]):
             raise ModuleError(f"column '{column}' is not numeric")
     key = _order_values(df[order], order).reset_index(drop=True)
-    window, side = params["window"], params["side"]
+    window, span, side = params["window"], params["span"], params["side"]
     around = side == "around"
-    if around and window % 2 == 0:
+    if (window > 0) == (span > 0):
+        raise ModuleError("name a window (a number of rows) or a span (a range of the order)")
+    if around and window > 0 and window % 2 == 0:
         raise ModuleError("an around window must have an odd number of rows")
     stats = _window_stats(params["stats"])
     check_cells(len(df), len(df.columns) + len(columns) * len(stats))
@@ -400,11 +484,15 @@ def rolling(df, params, ctx):
     else:
         groups = np.zeros(len(ordered), dtype=np.int64)
     ordered_key = key.iloc[position]
-    start, end = _window_rows(groups, ordered_key.to_numpy(), window, around)
+    numbers = _order_numbers(ordered_key)
+    same = ordered_key.to_numpy() if _is_date(ordered_key) else numbers
+    start, end = _window_rows(groups, numbers, same, window, span, around)
+    label = (
+        f"{side}_span{np.format_float_positional(span, trim='-')}" if span else f"{side}{window}"
+    )
     usable = ordered_key.notna().to_numpy() & (groups >= 0)  # in the windows and given values
     names = unique_names(
-        [str(c) for c in df.columns]
-        + [f"{c}_{side}{window}_{stat}" for c in columns for stat in stats]
+        [str(c) for c in df.columns] + [f"{c}_{label}_{stat}" for c in columns for stat in stats]
     )[len(df.columns) :]
     out = df.copy()
     fresh = iter(names)
@@ -633,6 +721,7 @@ _op(
         "by": _NAMES,
         "columns": _NAMES,
         "lags": {"type": "string", "maxLength": 200, "default": "1"},
+        "step": {"type": "number", "minimum": 0, "default": 1},
         "how": {"type": "string", "enum": ["mean", "sum"], "default": "mean"},
     },
     ("time", "columns"),
@@ -664,7 +753,8 @@ _op(
         "order": _NAME,
         "by": _NAMES,
         "columns": _NAMES,
-        "window": {"type": "integer", "minimum": 1, "maximum": 1_000_000, "default": 3},
+        "window": {"type": "integer", "minimum": 0, "maximum": 1_000_000, "default": 0},
+        "span": {"type": "number", "minimum": 0, "default": 0},
         "side": {"type": "string", "enum": ["before", "around"], "default": "before"},
         "stats": {"type": "string", "maxLength": 100, "default": "mean"},
     },
