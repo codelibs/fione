@@ -14,15 +14,17 @@ spec 5.1/5.7) and spends it in phases:
    family leaves unused flows to the next ones. The search scores trials with log loss / RMSE.
    Each family hands on its ``TOP_TRIALS`` best trials, as candidates ``Family``,
    ``Family#2`` and ``Family#3``.
-   After them come the *late* families (``LATE_ORDER``: variants of TextLinear, for data with
+   After them come the *late* families (``LATE_ORDER``: LinearWide, for data with categorical
+   columns that the linear view cuts short, and the variants of TextLinear, for data with
    prose). When any applies, ``LATE_SHARE`` of the search time is kept for them, taken from
    the base families' shares (scaled to 0.85) except TextLinear's, which is as without them.
    The late families get what is left of the search time (that and what the base families
    leave), never the time of the later phases:
    each one the search time still left times its ``LATE_WEIGHTS`` share among the late families
    not yet run, and only when its first trial is expected to fit in that share (``cost`` times
-   the first trial of TextLinear). A late family that does not apply to the data is not run and
-   changes nothing; one that does not improve the ensemble gets weight 0 from ``caruana``.
+   the first trial of its reference family: TextLinear, or Linear for LinearWide). A late
+   family that does not apply to the data is not run and changes nothing; one that does not
+   improve the ensemble gets weight 0 from ``caruana``.
    With few rows the folds are drawn again, with other seeds, ``repeats_for`` times (or
    ``cv_repeats``): a trial's score is the mean of the repeats' scores, each judged alone,
    which makes the search less likely to pick parameters that were only lucky on one split.
@@ -124,8 +126,13 @@ FAMILY_WEIGHTS = {
 }
 # Run after the others, in the search time they leave (see the module docstring); each only
 # when the data suits it (``FamilySpec.applies``) and a model of it would not be too big.
-LATE_ORDER = ("TextLinearChar", "TextLinearPlain", "TextLinearWide")
-LATE_WEIGHTS = {"TextLinearChar": 0.5, "TextLinearPlain": 0.25, "TextLinearWide": 0.25}
+LATE_ORDER = ("LinearWide", "TextLinearChar", "TextLinearPlain", "TextLinearWide")
+LATE_WEIGHTS = {
+    "LinearWide": 1 / 6,
+    "TextLinearChar": 5 / 12,
+    "TextLinearPlain": 5 / 24,
+    "TextLinearWide": 5 / 24,
+}
 LATE_SHARE = 0.15  # of the search time is kept for the late families, when any applies
 # The first trial of a base family may take up to this share of the search time left, if that is
 # more than the family's share. Two cases need it: a text model fits all its data in one unit and
@@ -517,7 +524,9 @@ class AutoML:
         # With no base family (an explicit list of late ones) they have all of it.
         keep = any(f in LATE_ORDER for f in families) and any(f not in LATE_ORDER for f in families)
         base = search.child((1 - LATE_SHARE) * search.remaining()) if keep else search
-        references = {FAMILIES[f].reference for f in families if f in LATE_ORDER}
+        references = {
+            FAMILIES[f].reference for f in families if f in LATE_ORDER and FAMILIES[f].keeps_share
+        }
         for i, name in enumerate(families):
             if self.should_stop():
                 reasons[name] = "cancelled"

@@ -61,7 +61,7 @@ from sklearn.neural_network import MLPClassifier, MLPRegressor
 from threadpoolctl import threadpool_limits
 
 from fione.engine.config import DeadlineExceeded
-from fione.engine.prep import Task
+from fione.engine.prep import LINEAR_LEVELS, MAX_LEVELS, Task
 
 MAX_ROUNDS = 2000
 EARLY_STOPPING_ROUNDS = 50
@@ -702,10 +702,33 @@ TEXT_CHAR_BUDGET = 5_000_000  # characters of text above which TextLinearChar is
 # spaces: a sentence is then one "word" and the character n-grams are far too many.
 TEXT_CHAR_TOKEN = 30
 TEXT_SUFFIX = "_t"  # ends the name of a text column of the text view
+LEVEL_SUFFIX = "_l"  # ends the name of a column of values read as levels (the levels view)
+MIN_LEVEL_ROWS = 2  # rows a value needs in training to get a column of its own (LinearWide)
 
 
 def is_text_column(name: str) -> bool:
-    return name.endswith(TEXT_SUFFIX)
+    """A column of the text or the levels view that a model reads as a whole (not a number)."""
+    return name.endswith((TEXT_SUFFIX, LEVEL_SUFFIX))
+
+
+class Levels:
+    """The values of one column as 0/1 columns, one for each value seen in training at least
+    ``MIN_LEVEL_ROWS`` times (the most frequent ``MAX_LEVELS``). A value not seen is all zeros.
+    It has the parts of a TF-IDF vectorizer that ``TextModel`` and the explanations use."""
+
+    def __init__(self, values: pd.Series):
+        counts = values.value_counts()
+        kept = counts[counts >= MIN_LEVEL_ROWS].index[:MAX_LEVELS]
+        self.vocabulary_ = {level: i for i, level in enumerate(kept)}
+        self._index = pd.Index(kept)
+
+    def transform(self, values: pd.Series):
+        found = self._index.get_indexer(values)
+        rows = np.flatnonzero(found >= 0)
+        return sparse.csr_matrix(
+            (np.ones(len(rows), dtype=np.float32), (rows, found[rows])),
+            shape=(len(values), len(self.vocabulary_)),
+        )
 
 
 class TextModel:
@@ -758,6 +781,7 @@ class TextLinear(FamilySpec):
     chars = 0  # character n-grams kept per text column
     cost = 1.0
     reference = "TextLinear"  # the family ``cost`` is relative to
+    keeps_share = True  # the reference family has its time as without the late families
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -833,6 +857,45 @@ class TextLinear(FamilySpec):
         return by_feature(weight, names)
 
 
+class LinearWide(TextLinear):
+    """Logistic (classification) or ridge (regression) regression on the standardised numbers and
+    on a 0/1 column for every value of the categorical columns: the linear view keeps only
+    ``LINEAR_LEVELS`` values per column and reads a column of many values (frequency encoded for
+    the other families) as its frequency only. The values are learned on each training fold.
+    ``C`` is the inverse regularisation strength; ridge uses ``alpha = 1/C``. A late candidate
+    for data where those columns lose values."""
+
+    name = "LinearWide"
+    view = "levels"
+    defaults = {"C": 0.1}
+    cost = 3.0
+    reference = "Linear"
+    keeps_share = False  # a family of its own: Linear runs in the base time like the others
+
+    @classmethod
+    def applies(cls, prep, X: pd.DataFrame) -> bool:
+        """Whether the linear view loses values: a column of more than ``LINEAR_LEVELS`` values
+        or a frequency encoded one."""
+        return any(
+            column in prep.frequencies or len(prep.categories.get(column, ())) > LINEAR_LEVELS
+            for column in prep._level_at.values()
+        )
+
+    @classmethod
+    def coef_bytes(cls, prep, outputs: int) -> int:
+        return (prep.level_width + prep.linear_width) * max(1, outputs) * 8 + 1024
+
+    def space(self, trial):
+        return {"C": trial.suggest_float("C", 1e-3, 1e2, log=True)}
+
+    def _vectorizers(self, texts: pd.Series) -> list[Levels]:
+        return [Levels(texts)]
+
+    def size_bytes(self, model) -> int:
+        levels = sum(len(v.vocabulary_) for v in model.vectorizers)
+        return model.model.coef_.size * 8 + levels * 100 + 1024
+
+
 def _tfidf(texts: pd.Series, **options) -> TfidfVectorizer:
     """TF-IDF of ``texts`` (a vocabulary of one empty word when they hold no words)."""
     for min_df in (2, 1):
@@ -903,5 +966,6 @@ FAMILIES: dict[str, type[FamilySpec]] = {
         TextLinearWide,
         TextLinearChar,
         TextLinearPlain,
+        LinearWide,
     )
 }

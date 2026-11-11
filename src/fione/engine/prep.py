@@ -25,6 +25,11 @@ SHORT_PROSE_WORDS = 3
 SHORT_PROSE_UNIQUE = 0.5  # share of different values in the column
 SHORT_PROSE_WORD_CHARS = 3  # mean letters of a word, so that a code such as C_ID_92a is no text
 MAX_PROSE = 3  # prose columns the text view reads (the first ones)
+FEW_LEVELS = (
+    30  # a whole-number column with at most this many different values is also read as levels
+)
+MIN_FEW_LEVELS = 3  # ... and with at least this many (two values are a flag already)
+MAX_LEVELS = 20_000  # values with a column of their own in the levels view, per input column
 _LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code has no words
 # ordinal: seconds since the Unix epoch; the hour is added for columns that carry a time of day
 _DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
@@ -38,6 +43,14 @@ def _is_categorical(s: pd.Series) -> bool:
 def _holds_dates(s: pd.Series) -> bool:
     """Whether ``s`` is an object column of dates (a date-only column read from Parquet)."""
     return s.dtype == object and pd.api.types.infer_dtype(s, skipna=True) in ("date", "datetime")
+
+
+def _has_few_levels(s: pd.Series, kind: str) -> bool:
+    """Whether a numeric column holds a few whole numbers (a day of the week, a month, a score)."""
+    if kind != "numeric" or pd.api.types.is_bool_dtype(s) or not pd.api.types.is_numeric_dtype(s):
+        return False
+    values = s.dropna()
+    return MIN_FEW_LEVELS <= values.nunique() <= FEW_LEVELS and bool((values % 1 == 0).all())
 
 
 def _as_str(s: pd.Series) -> pd.Series:
@@ -103,6 +116,7 @@ class Prep:
     timed: tuple = ()  # date columns that carry a time of day
     _unseen: dict = {}  # frequency column -> share given to a value not seen in training (old: 0)
     _no_trend: tuple = ()  # view columns the linear view leaves out (see ``_fit_no_trend``)
+    _level_at: dict = {}  # levels view column (``f3_l``) -> the input column it reads
 
     def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
@@ -151,9 +165,14 @@ class Prep:
         # The input columns behind each feature; a derived one may have several.
         self.sources: list[tuple[str, ...]] = []
         self._category_at: dict[str, str] = {}  # view column -> categorical source column
+        self._level_at = {}
         for column, kind in self._plan:
             if kind == "category":
                 self._category_at[f"f{len(self.feature_names)}"] = column
+            if column not in self.prose and (
+                kind in ("category", "frequency") or _has_few_levels(X[column], kind)
+            ):
+                self._level_at[f"f{len(self.feature_names)}_l"] = column
             if kind == "datetime":
                 parts = _DATE_PARTS + (("hour",) if column in self.timed else ())
                 self.feature_names += [f"{column}__{part}" for part in parts]
@@ -315,6 +334,42 @@ class Prep:
         out = self.text(df)
         base = len(self.feature_names) - sum(len(group.names) for group in self.groups)
         return out[[c for c in out.columns if int(c[1:].split("_")[0]) < base]]
+
+    def levels(self, df: pd.DataFrame) -> pd.DataFrame:
+        """The linear view with the categoricals' one-hot columns replaced by their values as text
+        (``f3_l``; missing is its own value), for a model that one-hot encodes every level seen in
+        training. Columns that are frequencies keep the frequency beside the text, and a column of
+        a few whole numbers is read as levels beside its number."""
+        out = self.linear(df)
+        read = set(self._level_at.values())  # prose is not read as levels: it keeps its one-hots
+        drop = [
+            c
+            for c in out.columns
+            if self._category_at.get(c.split("_")[0]) in read and not c.endswith("_na")
+        ]
+        out = out.drop(columns=drop)
+        for name, column in self._level_at.items():
+            values = df[column]
+            if (
+                self.kind_of(column) == "numeric"
+            ):  # a few whole numbers: infinite or huge is missing
+                values = pd.to_numeric(values, errors="coerce")
+                values = values.where(values.abs() < 2**53).round().astype("Int64")
+            out[name] = values.astype(str).where(values.notna(), "__na__")
+        return out
+
+    @property
+    def level_width(self) -> int:
+        """The most columns the levels view can hold: every level of the columns it reads."""
+        width = 0
+        for column in self._level_at.values():
+            if column in self.frequencies:
+                width += min(len(self.frequencies[column]), MAX_LEVELS)
+            elif column in self.categories:
+                width += len(self.categories[column]) + 1
+            else:
+                width += FEW_LEVELS + 1
+        return width
 
     @property
     def linear_width(self) -> int:
