@@ -327,7 +327,7 @@ def lag(df, params, ctx):
     return out
 
 
-_WINDOW_STATS = ("mean", "std", "min", "max")
+_WINDOW_STATS = ("mean", "std", "min", "max", "sum", "count")
 
 
 def _window_stats(text: str) -> list[str]:

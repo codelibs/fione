@@ -239,7 +239,7 @@ values** module (`rolling`) adds them: name the `order` column (numbers, or date
 `2015-07-01`; text must be a date written year-month-day), the columns to read (`columns`),
 the group each row belongs to (`by`, such as a machine), the `window` (a number of rows) or the `span`
 (a range of the order, such as 0.0005, or a number of days for dates; name one of the two) and
-the statistics (`stats`: `mean`, `std`, `min`, `max`, separated by commas). A `span` makes a row
+the statistics (`stats`: `mean`, `std`, `min`, `max`, `sum`, `count`, separated by commas). A `span` makes a row
 read the rows within that range, so a gap in the readings gives a shorter window instead of
 one that reaches further back. The rows are taken
 in the order of the `order` column, whatever order they are in the file. With `side` set to
@@ -252,7 +252,10 @@ are also known when the model is used, never on the target. With a `span`, `befo
 rows within the span before the row and `around` the rows within half of the span either side of
 it, itself included. A window at the edge of a group is shorter, a `std` needs at least two
 values, and an infinite value counts as missing. A row with no `order` or no `by` value gets
-empty values and is left out of the windows of the others.
+empty values and is left out of the windows of the others. A `window` wider than any group
+(up to 1,000,000 rows) makes `before` read every earlier row of the group, so `sum` gives a
+running total (`signal_before1000000_sum`) and `count` the number of earlier rows that hold a
+value; a row with no earlier row, or none that holds a value, stays empty.
 
 ## Learning a skewed target
 
