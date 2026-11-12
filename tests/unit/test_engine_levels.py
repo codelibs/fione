@@ -158,7 +158,12 @@ def test_it_fits_predicts_pickles_and_explains():
 
 def test_it_joins_the_search_of_such_data_and_scores_with_the_best_where_the_values_decide():
     df = _data(3000, seed=4, values=150)
-    model = AutoML(TrainConfig(target="y", max_runtime_secs=90)).fit(df)
+    # Each family ends by itself (nothing improves by half), so a loaded machine cannot cut the
+    # search short before the late family has had its trials
+    config = TrainConfig(
+        target="y", max_runtime_secs=600, stopping_rounds=1, stopping_tolerance=0.5
+    )
+    model = AutoML(config, families=["LightGBM", "LinearWide"]).fit(df)
     assert "LinearWide" in set(model.leaderboard["family"])
     ensemble = model.leaderboard.set_index("model")
     wide = ensemble[ensemble["family"] == "LinearWide"]["cv_score"].min()
