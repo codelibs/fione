@@ -1364,6 +1364,22 @@ def test_a_time_column_validates_on_later_rows_and_is_stricter_than_shuffled_fol
     assert ordered.predict(df).shape == (len(df),)  # a model is still fitted on every row
 
 
+def test_a_date_column_without_a_time_column_is_pointed_out_once_and_not_with_one():
+    df = _trend(400)
+    df["when"] = (pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")).dt.strftime(
+        "%Y-%m-%d"
+    )
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    events = []
+    _fit(df, events, feature_engineering=False, **options)
+    (hint,) = [e for e in events if e.data.get("kind") == "time_hint"]
+    assert hint.data["columns"] == ["when"]
+    assert "time_column" in hint.data["message"]
+    events = []
+    _fit(df, events, time_column="when", **options)
+    assert not [e for e in events if e.data.get("kind") == "time_hint"]
+
+
 def test_the_time_column_may_be_ignored_as_a_feature_and_may_hold_dates():
     df = _trend(400)
     df["when"] = (pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")).dt.strftime(

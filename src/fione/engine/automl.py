@@ -308,6 +308,16 @@ class AutoML:
                 self._notice("derived features are not tried with a time column")
         prep = Prep().fit(X, groups)
         if c.time_column is None:
+            dates = [column for column in prep.columns if prep.kind_of(column) == "datetime"]
+            if dates and row_groups is None:
+                self._notice(
+                    f"{', '.join(repr(d) for d in dates[:3])} holds dates, and no time_column is "
+                    "given, so the validation shuffles the rows. If the model will predict rows "
+                    "later than the ones it learns from, the score is probably better than it "
+                    "will be; name that column as time_column to validate on later parts",
+                    kind="time_hint",
+                    columns=dates[:3],
+                )
             folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
             first_run = folds[:nfolds]  # reported: the other repeats only judge the search
             if row_groups is not None and task == "classification":
