@@ -211,6 +211,16 @@ a first trial in its share is skipped. A late candidate stays in the model
 only when its cross-validation scores improve the ensemble; otherwise it gets weight 0 and is
 dropped. They are not run for data without a text column.
 
+## Data with one column per time
+
+Sales kept as one column per day (`d_1`, `d_2`, ...) have a column for every time and no column
+for the time itself. The built-in **Unpivot columns into rows** module (`unpivot`) turns them into
+rows: name the columns to keep as they are (`keep`, such as the item and the shop), and every
+other column (or only those named in `columns`, when it is not all of them) becomes one row per
+original row, with the column's name in the new column that `name` names (`variable` by default) and its
+value in the one that `value` names (`value` by default). Add the time of each day with **Join datasets by key columns**
+before using **Add values from earlier times**.
+
 ## Values from earlier times
 
 For data over time, the value of a column at an earlier time is often the best feature (last
