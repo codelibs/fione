@@ -902,3 +902,10 @@ def test_the_run_time_need_counts_the_text_of_the_data():
     assert builtin._runtime_secs(dataset, profile) == 60 * math.ceil(
         100_000 * 400 * builtin.SECS_PER_TEXT_CHAR / 60
     )
+
+
+def test_an_uploaded_module_cannot_declare_an_object_parameter():
+    from fione.schema import check_schema
+
+    with pytest.raises(ValueError, match="unsupported type"):
+        check_schema({"properties": {"x": {"type": "object"}}})

@@ -64,6 +64,7 @@ def test_compose_defaults_to_the_host_ollama():
     assert env["FIONE_LLM_MODEL"] == "${FIONE_LLM_MODEL:-}"
     assert env["FIONE_LLM_AUTO_PULL"] == "${FIONE_LLM_AUTO_PULL:-false}"
     assert env["FIONE_MCP_ENABLED"] == "${FIONE_MCP_ENABLED:-false}"
+    assert env["FIONE_MCP_WRITE_ENABLED"] == "${FIONE_MCP_WRITE_ENABLED:-false}"
 
 
 def test_env_example_offers_the_ollama_profile():
@@ -77,6 +78,7 @@ def test_env_example_offers_the_ollama_profile():
     for line in block:  # commented out: the default is the host's Ollama
         assert line in lines
     assert "# FIONE_LLM_API_KEY=" in lines and "# FIONE_MCP_ENABLED=true" in lines
+    assert "# FIONE_MCP_WRITE_ENABLED=true" in lines
     assert not [line for line in lines if re.match(r"(COMPOSE_PROFILES|FIONE_LLM|FIONE_MCP)", line)]
 
 
@@ -94,4 +96,5 @@ def test_e2e_uses_the_fake_llm():
     real = SERVICES["fione"]["environment"]
     assert real["FIONE_LLM_AUTO_PULL"].endswith(":-false}")
     assert real["FIONE_MCP_ENABLED"].endswith(":-false}")
+    assert real["FIONE_MCP_WRITE_ENABLED"].endswith(":-false}")
     assert "COMPOSE_PROFILES" not in (ROOT / "docker" / "e2e.env").read_text()

@@ -43,7 +43,8 @@ Read by the `fione` container at start. Booleans accept `true` / `false`.
 | `FIONE_LLM_MAX_TOOL_ROUNDS` | `6` | How many times one answer may call tools before it is stopped as "too many steps". From 1 to 20. | For questions that need more lookups. |
 | `FIONE_LLM_TURN_TIMEOUT_SECS` | `180` | How long one answer may take, all its tool rounds included, before it ends as timed out. From 10 to 1800. | For slow models or hardware. |
 | `FIONE_LLM_MAX_CONCURRENT_TURNS` | `2` | How many answers are written at once, across all users; more wait in a queue. From 1 to 16. | For a server that handles parallel requests. |
-| `FIONE_MCP_ENABLED` | `false` | Serves the assistant's read-only tools over MCP at `/mcp` on Fione's own port (Streamable HTTP, JSON-RPC over POST, stateless). A client needs an API token as `Authorization: Bearer`; session cookies are refused. It can list and call the read-only tools of the projects the token's user can read, and never receives example values from a dataset. It cannot start, change or delete anything. | Set `true` to let an MCP client read your projects. |
+| `FIONE_MCP_ENABLED` | `false` | Serves the assistant's read-only tools over MCP at `/mcp` on Fione's own port (Streamable HTTP, JSON-RPC over POST, stateless). A client needs an API token as `Authorization: Bearer`; session cookies are refused. It can list and call the read-only tools of the projects the token's user can read, and never receives example values from a dataset. On its own it cannot start, change or delete anything. | Set `true` to let an MCP client read your projects. |
+| `FIONE_MCP_WRITE_ENABLED` | `false` | With `FIONE_MCP_ENABLED`, also gives MCP clients the tools that queue a training (`start_training`), a prediction (`start_batch_predict`) and a module run (`run_module`), and `list_modules`. They run as the token's user and need write access to the project, as the REST API does. They delete nothing. | Set `true` to let an MCP client such as Claude Code start jobs. |
 
 Fixed limits that are not settings: a model import file can be up to 512 MiB, an uploaded
 Python module up to 256 KiB.
@@ -68,6 +69,7 @@ Used by `docker/compose.yaml` (see `docker/.env.example`).
 | `FIONE_LLM_API_KEY` | with `claude` | Passed to Fione (see above). |
 | `FIONE_LLM_AUTO_PULL` | no | Passed to Fione (default `false`; `true` with the `ollama` profile, which has no one to click the button). |
 | `FIONE_MCP_ENABLED` | no | Passed to Fione (default `false`, see above). |
+| `FIONE_MCP_WRITE_ENABLED` | no | Passed to Fione (default `false`, see above). |
 
 Compose refuses to start while `FIONE_S3_ACCESS_KEY` or `FIONE_S3_SECRET_KEY` is empty. The
 two S3 values may only use `A-Z a-z 0-9 / + = . _ -`; SeaweedFS refuses to start otherwise.

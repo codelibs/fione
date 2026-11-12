@@ -92,6 +92,8 @@ class Settings(BaseSettings):
     llm_auto_pull: bool = False
     # The read-only tools over MCP at /mcp, for an API token; off unless set.
     mcp_enabled: bool = False
+    # Also the tools that start training, prediction and module jobs over MCP; needs mcp_enabled.
+    mcp_write_enabled: bool = False
     # Unset: the provider's default (_LLM_DEFAULT_TOKENS).
     llm_max_tokens: int = Field(1024, ge=64, le=64000)  # per completion
     llm_context_tokens: int = Field(16384, le=262144)  # the budget of one request

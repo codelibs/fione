@@ -4,7 +4,8 @@ The assistant answers questions about a project's datasets and models in plain l
 suggest a training run that a person then confirms. It also exposes the same read-only tools
 to other programs over MCP.
 
-The assistant reads, and only reads. It cannot start a training, change a dataset or delete
+The assistant reads, and only reads. (MCP clients can also start jobs when the administrator
+allows it; see MCP.) It cannot start a training, change a dataset or delete
 anything; a training it suggests starts only when someone who can edit the project presses
 the button on the suggestion.
 
@@ -257,7 +258,8 @@ acknowledged to it in a few lines; the card has the settings.
 ## MCP
 
 Fione can serve the same read-only tools to MCP clients (an AI assistant or an editor that
-speaks MCP). It is **off by default**; set `FIONE_MCP_ENABLED=true` (in `docker/.env` for
+speaks MCP), and, with a second switch, tools that start jobs (see below). It is **off by
+default**; set `FIONE_MCP_ENABLED=true` (in `docker/.env` for
 Compose). The endpoint is `/mcp` on Fione's own port, for example `http://127.0.0.1:8080/mcp`.
 
 1. Create an API token on the **Account** page.
@@ -271,10 +273,32 @@ Compose). The endpoint is `/mcp` on Fione's own port, for example `http://127.0.
 
 The client acts as the token's owner and sees the projects that person can read: it can list
 projects, datasets and models and read their descriptions, results and explanations, and it can
-get a proposed training configuration or Join back, which is not saved. It cannot start or change
-anything, and it never receives example values. A token has the same rights as you, so keep it secret.
+get a proposed training configuration or Join back, which is not saved. With the first switch alone
+it cannot start or change anything. It never receives example values. A token has the same rights as
+you, so keep it secret.
 Behind a reverse proxy, block `/mcp` unless you want MCP clients outside your network. At most
 two tool calls run at once.
+
+### Claude Code
+
+Claude Code takes the same URL and header:
+
+```
+claude mcp add --transport http fione http://127.0.0.1:8080/mcp \
+  --header "Authorization: Bearer <your token>"
+```
+
+### Starting jobs from an MCP client
+
+With `FIONE_MCP_WRITE_ENABLED=true` as well, the client also gets `start_training`,
+`start_batch_predict` and `run_module`, each of which queues a job in a project the token's user
+can write to (an owner or editor of the project, as for the REST API) and returns its `job_id`, and
+`list_modules`, which gives each module's parameters. Follow a job with `get_training_events`.
+They delete nothing, and no tool returns example values. Fione cannot ask a person to confirm, so the
+client's own approval step is the only one: the tools are marked as changing things so that a
+client asks. A token has the rights of its user; for a client that must not start jobs, use the
+token of a user who can only read. Uploading a dataset is not an MCP tool: use the REST API or
+the Python SDK.
 
 The result of `propose_join` has the keys `proposal` (`true`), `kind` (`join`), `config` (the
 parameters of the Join module), `warnings` and `rationale`, with the warnings as below.
