@@ -1123,14 +1123,12 @@ def _posts(n=300, seed=0):
 def test_text_linear_runs_only_for_data_with_prose_and_reads_the_words():
     df = _posts()
     events = []
-    model = _fit(
-        df, events, families=["LightGBM", "TextLinear"], target="topic", max_runtime_secs=30
-    )
+    model = _fit(df, events, families=["LightGBM", "TextLinear"], target="topic", max_models=2)
     assert "TextLinear" in set(model.leaderboard["family"])
     pred = model.predict(df.drop(columns=["topic"]))
     assert (pred.to_numpy() == df["topic"].to_numpy()).mean() > 0.9
     plain = df.assign(post=df["post"].str.split().str[0])  # one word: not prose
-    model = _fit(plain, families=["LightGBM", "TextLinear"], target="topic", max_runtime_secs=30)
+    model = _fit(plain, families=["LightGBM", "TextLinear"], target="topic", max_models=2)
     assert "TextLinear" not in set(model.leaderboard["family"])
 
 
