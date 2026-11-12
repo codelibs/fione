@@ -41,6 +41,34 @@ def _is_categorical(s: pd.Series) -> bool:
     return pd.api.types.is_bool_dtype(s.dtype) or not pd.api.types.is_numeric_dtype(s.dtype)
 
 
+INTEGER_DATE_FORMATS = (("%Y%m%d", 8), ("%y%m%d%H", 8), ("%Y%m%d%H", 10))
+INTEGER_DATE_MIN_VALUES = 10  # different values; a few are codes, not a clock
+INTEGER_DATE_SAMPLE = 2_000
+
+
+def integer_date_format(s: pd.Series) -> str | None:
+    """The format (``%Y%m%d``, ``%y%m%d%H``, ``%Y%m%d%H``) when ``s`` holds whole numbers that
+    all read as dates in it, such as 20141021 or 14102100; ``None`` when it does not."""
+    if not (pd.api.types.is_integer_dtype(s.dtype) and not pd.api.types.is_bool_dtype(s.dtype)):
+        return None
+    values = s.dropna().astype("int64")
+    if not len(values) or values.min() < 10_000_000 or values.max() >= 10_000_000_000:
+        return None  # 8 to 10 digits; most integer columns end here, at the cost of two scans
+    if len(values) > INTEGER_DATE_SAMPLE:
+        values = values.sample(INTEGER_DATE_SAMPLE, random_state=0)
+    if values.nunique() < INTEGER_DATE_MIN_VALUES:
+        return None
+    text = values.astype(str)
+    for fmt, digits in INTEGER_DATE_FORMATS:
+        if (text.str.len() == digits).all() and pd.to_datetime(
+            text, format=fmt, errors="coerce"
+        ).notna().all():
+            if fmt == "%Y%m%d" and not values.between(19000101, 21001231).all():
+                continue
+            return fmt
+    return None
+
+
 def _holds_dates(s: pd.Series) -> bool:
     """Whether ``s`` is an object column of dates (a date-only column read from Parquet)."""
     return s.dtype == object and pd.api.types.infer_dtype(s, skipna=True) in ("date", "datetime")

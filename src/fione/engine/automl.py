@@ -92,7 +92,7 @@ from fione.engine.events import Event, EventSink, jsonable
 from fione.engine.families import FAMILIES, MAX_ROUNDS, FamilySpec
 from fione.engine.features import select_groups
 from fione.engine.model import Member, TrainedModel, feature_importance
-from fione.engine.prep import Prep, Task, infer_task, validate_target
+from fione.engine.prep import Prep, Task, infer_task, integer_date_format, validate_target
 from fione.engine.search import (
     Clock,
     FamilyResult,
@@ -303,6 +303,12 @@ class AutoML:
         prep = Prep().fit(X, groups)
         if c.time_column is None:
             dates = [column for column in prep.columns if prep.kind_of(column) == "datetime"]
+            # whole numbers that are dates (20141021, 14102100) order the rows by time as well
+            dates += [
+                column
+                for column in prep.columns
+                if prep.kind_of(column) == "numeric" and integer_date_format(X[column])
+            ]
             if dates and row_groups is None:
                 self._notice(
                     f"{', '.join(repr(d) for d in dates[:3])} holds dates, and no time_column is "
