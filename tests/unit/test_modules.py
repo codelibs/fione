@@ -343,6 +343,37 @@ def test_join_adds_the_columns_of_the_row_with_the_same_key():
     assert list(out["n"].fillna(-1)) == [30, 10, 20, -1]
 
 
+def test_join_notes_the_rows_without_a_match_and_asks_to_check_the_keys_when_none_match():
+    df = pd.DataFrame({"id": ["a", "b", "c"]})
+    some = get_builtin("join").run(
+        df,
+        validate_args(get_builtin("join").params, {"other_dataset_id": 1, "key": "id"}),
+        ModuleContext(pd.DataFrame({"id": ["a", "b"], "v": [1, 2]}), None),
+    )
+    assert some.notes == (
+        {
+            "message": "1 of 3 rows (33.3%) have no row with the same key in the other dataset; "
+            "their new columns are empty.",
+            "kind": "join_unmatched",
+            "rows_unmatched": 1,
+            "rows": 3,
+        },
+    )
+    none = get_builtin("join").run(
+        df,
+        validate_args(get_builtin("join").params, {"other_dataset_id": 1, "key": "id"}),
+        ModuleContext(pd.DataFrame({"id": ["x"], "v": [1]}), None),
+    )
+    assert "3 of 3 rows (100.0%)" in none.notes[0]["message"]
+    assert "Check that the key columns hold the same kind of values" in none.notes[0]["message"]
+    full = get_builtin("join").run(
+        df,
+        validate_args(get_builtin("join").params, {"other_dataset_id": 1, "key": "id"}),
+        ModuleContext(pd.DataFrame({"id": ["a", "b", "c"], "v": [1, 2, 3]}), None),
+    )
+    assert full.notes == ()
+
+
 def test_join_by_keys_with_other_names_and_missing_keys():
     df = pd.DataFrame({"user": ["a", "b", None], "id": [1, 2, 3]})
     other = pd.DataFrame({"name": ["a", "b", None], "v": [1, 2, 3]})

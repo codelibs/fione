@@ -322,6 +322,22 @@ def test_join_summarizes_a_second_dataset_by_its_key(
     assert out["amount_sum"].fillna(-1).tolist() == [40.0, 5.0, -1.0]
 
 
+def test_join_tells_how_many_rows_found_no_match(conn, run_job, owner, project, storage):
+    base = add_dataset(
+        conn, storage, project, pd.DataFrame({"id": [1, 2, 3, 4], "y": [0, 1, 0, 1]})
+    )
+    extra = add_dataset(
+        conn, storage, project, pd.DataFrame({"id": [1, 2, 3], "v": [5, 6, 7]}), "o"
+    )
+    done = run_job(
+        submit(conn, owner, project, base, "join", {"other_dataset_id": extra.id, "key": "id"})
+    )
+    assert done.status is JobStatus.DONE, done.message
+    (notice,) = [e.data for e in event_list(conn, done.id) if e.type == "notice"]
+    assert "1 of 4 rows (25.0%) have no row with the same key" in notice["message"]
+    assert (notice["kind"], notice["rows_unmatched"], notice["rows"]) == ("join_unmatched", 1, 4)
+
+
 def test_the_module_sees_the_same_integers_with_gaps(conn, run_job, owner, project, storage):
     ids = pd.array([2**60 + 1, None, 3], dtype="Int64")
     data = add_dataset(conn, storage, project, pd.DataFrame({"id": ids, "v": [1.0, 2.0, 3.0]}))

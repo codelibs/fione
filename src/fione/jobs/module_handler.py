@@ -220,6 +220,8 @@ def module(ctx: JobContext) -> None:
                 raise JobUserError(str(e)) from e
             if ctx.should_stop(force=True):  # nothing stored yet
                 return
+            for note in output.notes:
+                ctx.emit(Event("notice", data=note))
             name = payload.get("name") or f"{mod.id}_{dataset.name}"
             kind = DatasetType.PREDICT if mod.kind == "predict" else DatasetType.TRAIN
             try:
