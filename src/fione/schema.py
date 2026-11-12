@@ -1,7 +1,8 @@
 """The flat JSON-schema argument validator shared by the assistant tools and the modules.
 
 A schema is ``{"type": "object", "properties": {...}, "required": [...]}`` whose properties are
-scalars (``string``, ``integer``, ``number``, ``boolean``) or an ``array`` of strings. Nothing is
+scalars (``string``, ``integer``, ``number``, ``boolean``), an ``array`` of strings or, for tools
+only, an ``object``. Nothing is
 evaluated and no ``$ref`` is followed: a property is checked against its own keywords only.
 """
 
@@ -17,6 +18,7 @@ _TYPES = {
     "number": lambda v: isinstance(v, int | float) and not isinstance(v, bool) and math.isfinite(v),
     "boolean": lambda v: isinstance(v, bool),
     "array": lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v),
+    "object": lambda v: isinstance(v, dict),  # tools only: check_schema refuses it in modules
 }
 _KEYWORDS = frozenset(
     {
@@ -89,7 +91,7 @@ def check_schema(schema) -> dict:
     for name, spec in schema["properties"].items():
         if not isinstance(name, str) or not isinstance(spec, dict):
             raise ValueError("every parameter must be an object")
-        if spec.get("type") not in _TYPES:
+        if spec.get("type") not in _TYPES or spec["type"] == "object":
             raise ValueError(f"parameter '{clean_text(name, 40)}' has an unsupported type")
         if not _KEYWORDS.issuperset(spec):
             raise ValueError(f"parameter '{clean_text(name, 40)}' uses an unsupported keyword")

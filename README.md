@@ -59,7 +59,8 @@ that a person confirms; it only reads. It needs a language model: the Ollama app
 your Mac by default (`gemma4:12b-mlx`), an Ollama in Compose (profile `ollama`) on Linux, or
 Claude through the Anthropic API (`FIONE_LLM_PROVIDER=claude` and an API key). A server outside
 this machine needs an administrator's one-time consent. The same read-only tools are available
-to MCP clients, off by default. See [The assistant](docs/assistant.md).
+to MCP clients such as Claude Code, off by default, and a second switch lets them also queue
+training, prediction and module jobs. See [The assistant](docs/assistant.md).
 
 ## Documentation
 
@@ -73,7 +74,7 @@ to MCP clients, off by default. See [The assistant](docs/assistant.md).
 ## Status
 
 This release covers the core: data, analysis, AutoML, models and their explanations,
-predictions, serving, jobs, users and sharing, a Python SDK, and an LLM assistant with an optional read-only MCP server.
+predictions, serving, jobs, users and sharing, a Python SDK, and an LLM assistant with an optional MCP server.
 **Planned, not in this release**: ONNX export. No images are published yet;
 you build them from the repository (a version tag publishes the `fione` and `fione-serving`
 images).

@@ -1,6 +1,7 @@
 """The tool registry behind the LLM assistant (spec section 9).
 
-A tool is a typed, read-only operation. The model sees schema and statistics only: results are
+A tool is a typed operation: read-only for the assistant, or an action that queues a job (MCP
+only). The model sees schema and statistics only: results are
 JSON-strict, size-capped, and every user-controlled string in them is passed through
 ``clean_text``. ``call_tool`` is the single entry point; it validates the arguments, runs the
 tool, hides whether an object exists to a caller who may not see it, and logs the call (never
@@ -43,7 +44,7 @@ class ToolError(Exception):
 class Tool:
     name: str
     description: str
-    parameters: dict  # flat JSON Schema: an object of scalar properties
+    parameters: dict  # flat JSON Schema: an object of scalar, array or object properties
     read_only: bool
     fn: Callable[["ToolContext", dict], dict]
 
@@ -63,19 +64,33 @@ class ToolContext:
 
 
 _TOOLS: dict[str, Tool] = {}
+# Tools that start work, for MCP clients only (``FIONE_MCP_WRITE_ENABLED``): never in the chat.
+_ACTIONS: dict[str, Tool] = {}
 
 
 def register(tool: Tool) -> Tool:
     if not tool.read_only:
         raise ValueError(f"tool {tool.name!r} is not read-only; the assistant may only read")
-    if tool.name in _TOOLS:
+    if tool.name in _TOOLS or tool.name in _ACTIONS:
         raise ValueError(f"tool {tool.name!r} is already registered")
     _TOOLS[tool.name] = tool
     return tool
 
 
-def list_tools() -> list[dict]:
-    """The tools in the OpenAI ``tools`` format, in registration order."""
+def register_action(tool: Tool) -> Tool:
+    """Register a tool for MCP clients that may start work; the chat never lists or calls it."""
+    if tool.name in _TOOLS or tool.name in _ACTIONS:
+        raise ValueError(f"tool {tool.name!r} is already registered")
+    _ACTIONS[tool.name] = tool
+    return tool
+
+
+def list_actions() -> list[Tool]:
+    """The action tools, in registration order."""
+    return list(_ACTIONS.values())
+
+
+def _listing(tools) -> list[dict]:
     return [
         {
             "type": "function",
@@ -85,8 +100,13 @@ def list_tools() -> list[dict]:
                 "parameters": copy.deepcopy(t.parameters),
             },
         }
-        for t in _TOOLS.values()
+        for t in tools
     ]
+
+
+def list_tools() -> list[dict]:
+    """The tools in the OpenAI ``tools`` format, in registration order."""
+    return _listing(_TOOLS.values())
 
 
 def _validate(schema: dict, args) -> dict:
@@ -170,13 +190,18 @@ def _log_args(args) -> dict:
     }
 
 
-def call_tool(name: str, args: dict, ctx: ToolContext) -> dict:
-    """Run the tool ``name``; every failure surfaces as a ``ToolError`` safe to show."""
+def call_tool(name: str, args: dict, ctx: ToolContext, *, actions: bool = False) -> dict:
+    """Run the tool ``name``; every failure surfaces as a ``ToolError`` safe to show. With
+    ``actions``, the action tools can be called too (only MCP, when it allows them)."""
     start = time.monotonic()
     outcome = "ok"
     try:
         tool = _TOOLS.get(name) if isinstance(name, str) else None
-        if tool is None or not tool.read_only:
+        if tool is not None and not tool.read_only:  # register() refuses it; belt and braces
+            tool = None
+        elif tool is None and actions and isinstance(name, str):
+            tool = _ACTIONS.get(name)
+        if tool is None:
             outcome = "unknown_tool"
             raise ToolError("unknown tool")
         try:
