@@ -723,7 +723,7 @@
   "metric.spearman.explain": "How well the predictions put the rows in the right order: 1 is perfect, 0 is unrelated.",
   "metric.normalized_gini.explain": "How well the predictions order the rows by size, as a share of the best possible order: 1 is perfect, 0 is chance. Needs values of 0 or more.",
   "metric.poisson.explain": "For counts: the average deviance of the predictions from the answers, which counts a miss on a small count worse. Needs values of 0 or more. Lower is better.",
-  "metric.rounded_qwk.explain": "The predictions are rounded to the nearest whole rating and scored with kappa that counts a miss by more steps worse. Needs whole-number targets. Higher is better.",
+  "metric.rounded_qwk.explain": "The predictions are turned into whole ratings at cut points fitted to the order of the ratings (the nearest rating when there are too many or too few different ratings) and scored with kappa that counts a miss by more steps worse. Needs whole-number targets. Higher is better.",
   "models.title": "Models",
   "models.lead": "Every model trained or imported in this project.",
   "models.details": "Details",

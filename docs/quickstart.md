@@ -161,6 +161,15 @@ order, so `qwk` suits ratings. RMSLE, Poisson deviance and normalized Gini need 
 0 or more, MAPE needs values other than 0, `rounded_qwk` needs whole numbers, and top-3 accuracy
 needs more than three classes and MAP@3 three or more; training stops with an error when the target does not fit.
 
+With `rounded_qwk` on whole-number ratings (three to fifty different ones), the cut points that
+turn a prediction into a rating are fitted to the order of the ratings, on the final blend's
+out-of-fold predictions, instead of rounding at the middles between whole numbers: a model that
+predicts the middle ratings too often gets its rare high ratings back. The reported value counts
+the ratings at those cut points (it is a little optimistic, as the cut points were fitted on the
+same predictions), and `predict` returns the rating they give, not the fraction. The cut points
+are part of the model: do not apply them again to its predictions. `keep_cv_predictions` keeps the
+blend's fractions, before the cut points.
+
 ## Choosing the predicted class
 
 A classification model predicts the class with the largest probability. When one class is much

@@ -12,7 +12,7 @@ import pandas as pd
 
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.families import FamilySpec, pad_features
-from fione.engine.metrics import choose
+from fione.engine.metrics import Cuts, choose
 from fione.engine.prep import Prep, Task
 
 
@@ -80,6 +80,8 @@ class TrainedModel:
         if self.task == "regression":
             if self.config.target_transform == "log1p":
                 raw = np.expm1(raw)
+            if isinstance(self.class_prior, Cuts):  # rounded_qwk: the rating its cut points give
+                raw = self.class_prior[0] + np.searchsorted(np.asarray(self.class_prior[1:]), raw)
             return pd.Series(raw, index=df.index, name=self.target, dtype=float)
         labels = np.asarray(self.classes_, dtype=object)[self.choose(raw)]
         return pd.Series(labels, index=df.index, name=self.target).astype(self.label_dtype)

@@ -120,7 +120,8 @@ training (so its probabilities differ from the example above):
 - `bias` plus the values in `columns` adds up to the output explained:
   - two classes: the probability of the second class, `class_probabilities[1]`;
   - more classes: the probability of the predicted class, `class_probabilities[index]`;
-  - regression: `value`.
+  - regression: `value`, or, for a model trained with `rounded_qwk` (whose `value` is a whole rating),
+    the prediction before it is turned into a rating.
 - `columns` has one entry per input column, in the order of `GET /model`'s `names`. The bias is
   kept outside it, so an input column named `bias` cannot clash with it.
 - The values are in probability (or target) units, not log-odds. They come from the libraries'
