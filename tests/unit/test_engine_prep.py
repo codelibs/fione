@@ -452,6 +452,21 @@ def test_a_label_with_hundreds_of_levels_is_not_prose_though_its_first_rows_look
     assert Prep().fit(frame).prose == ()
 
 
+def test_a_search_query_that_repeats_is_prose_and_still_read_as_levels():
+    n = 6000
+    rng = np.random.default_rng(3)
+    words = [f"tool{w}" for w in "abcdefghijklmnopqrstuvwxyz"]
+    pool = [" ".join(rng.choice(words, 3)) for _ in range(1500)]  # 1,500 queries, each repeated
+    frame = pd.DataFrame({"query": rng.choice(pool, n), "num": rng.normal(size=n)})
+    assert frame["query"].nunique() < 0.5 * n
+    prep = Prep().fit(frame)
+    assert prep.prose == ("query",)
+    assert "query" in prep._level_at.values()  # the whole query is a level too
+    # a label that repeats with a few hundred levels stays a label
+    few = pd.DataFrame({"label": rng.choice(pool[:300], n), "num": rng.normal(size=n)})
+    assert Prep().fit(few).prose == ()
+
+
 def test_a_name_of_three_words_that_is_different_in_every_row_is_prose():
     n = 300
     surnames = ["Braund", "Cumings", "Heikkinen", "Futrelle", "Allen", "Moran", "McCarthy"]

@@ -148,6 +148,14 @@ def test_very_high_cardinality_short_strings_are_text():
     assert _kind(pd.Series(values)) == "text"
 
 
+def test_a_short_text_that_repeats_with_many_values_is_text_and_one_with_few_is_categorical():
+    rng = np.random.default_rng(0)
+    words = [f"tool{w}" for w in "abcdefghijklmnopqrstuvwxyz"]
+    pool = [" ".join(rng.choice(words, 3)) for _ in range(1500)]  # queries, each one repeated
+    assert _kind(pd.Series(rng.choice(pool, 6000))) == "text"
+    assert _kind(pd.Series(rng.choice(pool[:300], 6000))) == "categorical"
+
+
 def test_category_dtype_is_categorical():
     assert _kind(pd.Series(["a", "b", "c", "a"] * 10, dtype="category")) == "categorical"
 

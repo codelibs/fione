@@ -203,7 +203,7 @@ them.
 
 ## Text columns
 
-A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product) is read in two ways. Its
+A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product, or that take a thousand different values or more, such as a search query) is read in two ways. Its
 topics are derived features (see below). A model family called TextLinear also reads its words:
 a logistic (or ridge) regression on the TF-IDF weights of words and word pairs, with the other
 columns beside them, learned again on each training fold. It joins the search and the ensemble
