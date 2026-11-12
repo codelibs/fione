@@ -530,7 +530,8 @@ def test_a_base_family_without_a_model_for_lack_of_time_is_reported(monkeypatch)
     assert [n["family"] for n in notices] == ["TextLinear"]
     message = notices[0]["message"]
     # Its first trial could have half of the 100 s (more than its share, about 24 s).
-    assert "estimated to need about 40 s but the search time it could have was 50 s" in message
+    assert "did not finish in the search time it could have (50 s)" in message
+    assert "its folds need at least about 40 s" in message
 
 
 def test_a_first_trial_may_take_half_of_the_time_left_but_a_late_family_gets_its_share(
