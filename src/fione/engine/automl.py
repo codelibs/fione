@@ -62,8 +62,9 @@ when that is more than the family's share: the families come in order of priorit
 ones finish a trial (on a large table one takes minutes, and a trial cut short by a small
 share scores worse), and those after them get what remains. Later trials stay within the
 share. A family whose first trial does not fit even then (a text model fits all its data in one
-unit and cannot be cut short) has no model; a ``notice`` says what the trial needed. The late
-families that are not run for lack of time are named in one ``notice``.
+unit and cannot be cut short) has no model; a ``notice`` says that the trial did not finish and
+the least its folds need. The late families that are not run for lack of time are named in one
+``notice``.
 
 A family that raises (a library failure) is skipped with a ``notice`` of kind ``family_error``,
 keeping its best trial so far; a refit that raises falls back to the fold models with a
@@ -815,13 +816,15 @@ def _late_fits(
 
 
 def _no_time_message(name: str, allowed: float, needed: float | None) -> str:
-    """Why a family has no model: its first trial did not fit in the ``allowed`` seconds of the
-    search time (it is estimated to need ``needed``, when known)."""
+    """Why a family has no model: its first trial did not finish in the ``allowed`` seconds of
+    the search time. ``needed`` (when known) is the least its folds take, so the trial itself
+    can take longer than that and still be cut short."""
     if needed is None:
         return f"{name}: no model, the search time it could have ({allowed:.0f} s) was too short"
     return (
-        f"{name}: no model, one trial is estimated to need about {needed:.0f} s but the search "
-        f"time it could have was {allowed:.0f} s; a longer max_runtime_secs would let it run"
+        f"{name}: no model, the first trial did not finish in the search time it could have "
+        f"({allowed:.0f} s); its folds need at least about {needed:.0f} s, and a longer "
+        "max_runtime_secs would let it run"
     )
 
 
