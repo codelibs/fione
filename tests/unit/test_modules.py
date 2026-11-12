@@ -61,7 +61,7 @@ def test_the_built_in_ids_and_kinds():
     ids = [m.id for m in modules]
     frame_ops = (
         "cbind concat cor cslice fillna floor join lag pivot rbind replace rolling rslice sort"
-        " split tokenize"
+        " split tokenize unpivot"
     )
     assert ids == sorted(frame_ops.split()) + [
         "kmeans_predict",
@@ -182,6 +182,21 @@ CASES = [
         None,
         expect(k=[1, 2], c=[7, 8], v=[1.0, 2.0]),
         expect(k=[1, 2], **{"7": [1.0, np.nan], "8": [np.nan, 2.0]}),
+    ),
+    # unpivot: the kept columns repeat once per unpivoted column, in column order
+    (
+        "unpivot",
+        {"keep": ["id"], "name": "day", "value": "sales"},
+        None,
+        expect(id=["a", "b"], d1=[1, 2], d2=[3, 4]),
+        expect(id=["a", "b", "a", "b"], day=["d1", "d1", "d2", "d2"], sales=[1, 2, 3, 4]),
+    ),
+    (
+        "unpivot",
+        {"keep": ["id"], "columns": ["d2"]},
+        None,
+        expect(id=["a", "b"], d1=[1, 2], d2=[3, 4]),
+        expect(id=["a", "b"], variable=["d2", "d2"], value=[3, 4]),
     ),
     # frame_replace.py: set the column where the row conditions hold; the value takes the type
     (
@@ -1214,6 +1229,16 @@ def test_tokenize_is_linear_on_hostile_text(params):
 
 
 # --- the output-size estimate runs before the result is built --------------------------------
+
+
+def test_unpivot_refuses_a_column_kept_and_unpivoted_or_nothing_to_unpivot():
+    df = pd.DataFrame({"id": [1], "a": [2]})
+    with pytest.raises(ModuleError, match="both kept and unpivoted"):
+        run_op("unpivot", df, {"keep": ["id"], "columns": ["id", "a"]})
+    with pytest.raises(ModuleError, match="no column is left"):
+        run_op("unpivot", df, {"keep": ["id", "a"]})
+    with pytest.raises(ModuleError, match="all be different"):
+        run_op("unpivot", df, {"keep": ["id"], "name": "id"})
 
 
 def test_pivot_is_refused_before_it_is_built():

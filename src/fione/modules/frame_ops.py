@@ -566,6 +566,22 @@ def pivot(df, params, ctx):
     return table.reset_index()
 
 
+def unpivot(df, params, ctx):
+    keep = pick_columns(df, params["keep"]) if params["keep"] else []
+    melted = pick_columns(df, params["columns"]) if params["columns"] else None
+    if melted is None:  # every column that is not kept
+        melted = [str(c) for c in df.columns if c not in keep]
+    elif set(melted) & set(keep):
+        raise ModuleError("a column cannot be both kept and unpivoted")
+    if not melted:
+        raise ModuleError("no column is left to unpivot")
+    name, value = params["name"], params["value"]
+    if len({name, value, *keep}) != len(keep) + 2:
+        raise ModuleError("name, value and the kept columns must all be different")
+    check_cells(len(df) * len(melted), len(keep) + 2)
+    return df.melt(id_vars=keep, value_vars=melted, var_name=name, value_name=value)
+
+
 def _typed(series: pd.Series, column: str, text: str):
     """``text`` converted to what a comparison with (or assignment to) the column needs."""
     dtype = series.dtype
@@ -749,6 +765,18 @@ _op(
     {"index": _NAME, "column": _NAME, "value": _NAME},
     ("index", "column", "value"),
     pivot,
+)
+_op(
+    "unpivot",
+    "Unpivot columns into rows",
+    {
+        "keep": _NAMES,
+        "columns": _NAMES,
+        "name": {**_NAME, "default": "variable"},
+        "value": {**_NAME, "default": "value"},
+    },
+    (),
+    unpivot,
 )
 _op("rbind", "Combine rows", {"other_dataset_id": _OTHER}, ("other_dataset_id",), rbind)
 _op(
