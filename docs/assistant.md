@@ -194,7 +194,8 @@ added to the one with the column to predict by the **Join** module: the key, and
 which gives each key one row (the number of rows, and the mean, minimum, maximum and sum of each
 number). Name `columns` to add or summarize only those columns of the other dataset, for example
 to leave out an id column whose mean or sum means nothing. When both repeat, summarize the one
-that is not the base first.
+that is not the base first. The job says how many rows found no row with their key in the other
+dataset (a notice), and asks to check how the keys are written when none did.
 
 When a person asks how to combine the datasets and says which column to predict, the assistant
 calls `propose_first_join` with it (when they have not said, it asks first), and Fione chooses the

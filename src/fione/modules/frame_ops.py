@@ -52,7 +52,8 @@ def _schema(properties: dict, required: tuple[str, ...] = ()) -> dict:
 
 def _op(module_id: str, name: str, properties: dict, required: tuple[str, ...], run) -> None:
     def wrapped(df, params, ctx):
-        return ModuleOutput(run(df, params, ctx))
+        out = run(df, params, ctx)
+        return out if isinstance(out, ModuleOutput) else ModuleOutput(out)
 
     register(Module(module_id, name, "frame", _schema(properties, required), wrapped))
 
@@ -96,6 +97,7 @@ def concat(df, params, ctx):
 
 _SUMMARIES = ("mean", "min", "max", "sum")
 _JOIN_KEY = "\0join_key"  # a name no column has
+_JOIN_MATCH = "\0join_match"
 
 
 def _summary(other: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
@@ -182,10 +184,24 @@ def join(df, params, ctx):
             right = right.assign(**{part: _as_text(right[part])})
     check_cells(len(df), len(df.columns) + len(added))
     try:
-        merged = left.merge(right, how="left", on=parts)
+        merged = left.merge(right, how="left", on=parts, indicator=_JOIN_MATCH)
     except ValueError as e:
         raise ModuleError(f"the keys cannot be compared: {e}") from None
-    return merged.drop(columns=parts)
+    missed = int((merged.pop(_JOIN_MATCH) == "left_only").sum())
+    return ModuleOutput(merged.drop(columns=parts), notes=_join_notes(missed, len(merged)))
+
+
+def _join_notes(missed: int, rows: int) -> tuple[dict, ...]:
+    """What to tell about the rows that found no row with their key in the other dataset."""
+    if not missed:
+        return ()
+    note = (
+        f"{missed} of {rows} rows ({missed / rows:.1%}) have no row with the same key in the "
+        "other dataset; their new columns are empty."
+    )
+    if missed == rows:
+        note += " Check that the key columns hold the same kind of values, written the same way."
+    return ({"message": note, "kind": "join_unmatched", "rows_unmatched": missed, "rows": rows},)
 
 
 def _lags(text: str) -> list[int]:

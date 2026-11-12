@@ -39,6 +39,7 @@ class ModuleContext:
 class ModuleOutput:
     df: pd.DataFrame
     state: dict | None = None
+    notes: tuple[dict, ...] = ()  # what to tell about the result: the data of a job notice
 
 
 @dataclass(frozen=True)
