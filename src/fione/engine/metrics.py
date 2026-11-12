@@ -41,7 +41,8 @@ class Metric:
 class Cuts(np.ndarray):
     """The decision of a tuned ordinal target: ``k - 1`` increasing cut points on the expected
     class (the probabilities times the class numbers); a row is the class its expected value
-    falls in. It is given to ``choose`` where a prior would be."""
+    falls in. It is given to ``choose`` where a prior would be. For a regression of ratings
+    (``rounded_qwk``) it holds the lowest rating first, then the cut points on the prediction."""
 
 
 def choose(pred: np.ndarray, prior: np.ndarray | None = None) -> np.ndarray:
@@ -292,7 +293,11 @@ def _whole_ratings(y, classes) -> bool:
 
 def _rounded_qwk(y, pred, prior):
     low, high = int(y.min()), int(y.max())
-    picked = np.clip(np.round(pred), low, high).astype(int) - low
+    if isinstance(prior, Cuts):  # fitted cut points; the lowest rating comes first
+        picked = int(prior[0]) + np.searchsorted(np.asarray(prior[1:]), pred)
+    else:
+        picked = np.round(pred)
+    picked = np.clip(picked, low, high).astype(int) - low
     return _kappa_of(_confusion(y.astype(int) - low, picked, high - low + 1), quadratic=True)
 
 
@@ -462,9 +467,21 @@ def tune_cuts(y: np.ndarray, pred: np.ndarray) -> Cuts:
     a few passes from the middles between the class numbers. The rows are sorted by expected
     class once and the answers counted up to each place, so that a confusion table is read off
     the counts at the cut points, whatever the number of rows."""
-    k = pred.shape[1]
+    return _fit_cuts(y, pred @ np.arange(pred.shape[1]), pred.shape[1])
+
+
+def tune_rating_cuts(y: np.ndarray, pred: np.ndarray) -> Cuts:
+    """The cut points on a regression ``pred`` of whole ratings ``y`` that give the best quadratic
+    weighted kappa (``tune_cuts`` with the rating as the expected class), after the lowest
+    rating."""
+    low = int(y.min())
+    cuts = _fit_cuts(y.astype(int) - low, pred - low, int(y.max()) - low + 1)
+    return np.concatenate([[low], np.asarray(cuts) + low]).view(Cuts)
+
+
+def _fit_cuts(y: np.ndarray, expected: np.ndarray, k: int) -> Cuts:
+    """``tune_cuts`` for the expected class numbers of ``k`` classes."""
     n = len(y)
-    expected = pred @ np.arange(k)
     order = np.argsort(expected, kind="stable")
     ranked = expected[order]
     counts = np.zeros((k, n + 1), dtype=np.int64)  # counts[c, i]: answers c among the i lowest
@@ -502,6 +519,8 @@ def tune_prior(name: str, y: np.ndarray, pred: np.ndarray) -> np.ndarray:
     are the midpoints between neighbouring probabilities (so no row sits on the threshold),
     all judged from one sort. Of equal values the one nearest to 0.5 wins. For ``qwk`` with more
     than two classes it is the ``Cuts`` of ``tune_cuts``."""
+    if pred.ndim == 1:  # a regression of ratings (rounded_qwk)
+        return tune_rating_cuts(y, pred)
     if pred.shape[1] > 2:
         return tune_cuts(y, pred)
     p1 = pred[:, 1]

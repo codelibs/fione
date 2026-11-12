@@ -289,18 +289,11 @@ class AutoML:
                 "with cut points fitted to the order of the classes: set decision to tuned",
                 kind="ordinal_decision",
             )
-        if task == "regression" and sort_metric == "rounded_qwk":
-            ratings = np.unique(y_seen)
-            if (
-                3 <= len(ratings) <= metrics.MAX_ORDINAL_CLASSES
-                and (ratings == ratings.round()).all()
-            ):
-                self._notice(
-                    "rounded_qwk rounds the prediction at the middles between whole numbers; "
-                    "as a classification with sort_metric qwk and decision tuned, cut points are "
-                    "fitted to the order of the classes",
-                    kind="ordinal_decision",
-                )
+        # whole ratings: the cut points of rounded_qwk are fitted on the final blend
+        ratings = np.unique(y_seen) if task == "regression" and sort_metric == "rounded_qwk" else ()
+        rating_cuts = 3 <= len(ratings) <= metrics.MAX_ORDINAL_CLASSES and bool(
+            (ratings == np.round(ratings)).all()
+        )
         if c.time_column is None:
             groups, tried = self._engineer(X, y, task, nfolds, deadline, row_groups)
         else:  # the gate judges a feature on shuffled folds, which look at the future
@@ -404,7 +397,7 @@ class AutoML:
             stop_reason = "cancelled"
         final = {member.key: member.weight for member in members}
         blended = original(_blend(oof, final))
-        if tuned:
+        if tuned or rating_cuts:
             prior = metrics.tune_prior(sort_metric, y_seen[rows], blended)
         try:
             found = diagnostics(task, y_seen[rows], blended, classes, seed=c.seed, prior=prior)
@@ -428,7 +421,7 @@ class AutoML:
             original,
             prior,
             rows,
-            tuned,
+            tuned or rating_cuts,
         )
         assignment = np.full(len(y), -1, dtype=np.int64)  # -1: never validated
         for i, (_, valid) in enumerate(first_run):

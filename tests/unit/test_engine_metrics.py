@@ -168,6 +168,22 @@ def test_normalized_gini_is_one_for_the_right_order_and_zero_for_a_constant():
     assert metrics.value("normalized_gini", y, -y) < 0
 
 
+def test_rating_cuts_serve_rounded_qwk_where_the_predictions_are_squeezed():
+    rng = np.random.default_rng(0)
+    y = rng.integers(0, 4, 600).astype(float)
+    pred = 0.4 * y + 0.5 + rng.normal(0, 0.12, 600)  # 0.5..1.7: rounding never reaches 3
+    cuts = metrics.tune_rating_cuts(y, pred)
+    assert isinstance(cuts, metrics.Cuts) and len(cuts) == 4 and cuts[0] == 0  # low + 3 cuts
+    assert list(cuts[1:]) == sorted(cuts[1:])
+    plain = metrics.value("rounded_qwk", y, pred)
+    fitted = metrics.value("rounded_qwk", y, pred, cuts)
+    assert fitted > plain + 0.3
+    assert metrics.tune_prior("rounded_qwk", y, pred)[0] == 0  # tune_prior serves a regression
+    # a subset without the lowest rating still counts its ratings by the same cut points
+    kept = y > 0
+    assert np.isfinite(metrics.value("rounded_qwk", y[kept], pred[kept], cuts))
+
+
 def test_rounded_qwk_rounds_inside_the_range_of_the_ratings():
     y = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 3.0])
     assert metrics.value("rounded_qwk", y, y + 0.2) == pytest.approx(1.0)
