@@ -1010,12 +1010,19 @@ def prediction_result(request: Request, conn: Conn, pid: str, jid: str) -> Respo
             "total": len(found),
             "more": len(found) - len(shown),
         }
+    admin = _admin(ctx)
+    warnings = [
+        event_out(event_id, event, admin=admin)["data"]["message"]
+        for event_id, event in store.events_since(conn, job.id)
+        if event.type == "notice" and event.data.get("kind") == "columns_emptier"
+    ]
     return _view(
         request,
         "result.html",
         ctx,
         job=job,
         dataset=dataset,
+        warnings=warnings,
         preview=_preview(request, dataset, RESULT_PREVIEW_ROWS, names),
         contributions=contributions,
         model_id=job.payload.get("model_id"),

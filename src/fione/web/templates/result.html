@@ -11,6 +11,9 @@
     <p class="page-header__lead text-muted">{{ t('result.lead', rows="{:,}".format(dataset.n_rows), cols="{:,}".format(dataset.n_cols)) }}</p>
   </header>
   {{ guide(t, t('result.guide')) }}
+  {% for warning in warnings %}
+  <div class="alert alert-warning" role="note" data-prediction-warning>{{ icon("alert") }}<span>{{ warning }}</span></div>
+  {% endfor %}
   <div class="cluster">
     <a class="btn btn-primary btn-lg" href="/api/v1/projects/{{ pid }}/datasets/{{ dataset.id }}/download" download>{{ icon("download") }}{{ t('result.download', name=dataset.name ~ ".csv") }}</a>
     {% if model_id and ctx.can_write %}
