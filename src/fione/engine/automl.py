@@ -200,6 +200,32 @@ class AutoML:
     def _event(self, type: str, **data) -> None:
         self.emit(Event(type, data=jsonable(data)))
 
+    def _target_scale_notices(self, y: np.ndarray, sort_metric: str) -> None:
+        """Say when the target's scale and the ranking metric do not go together: a log target
+        ranked in the original units, or a skewed one that is learned and ranked as it is."""
+        if sort_metric not in metrics.ORIGINAL_UNITS:
+            return
+        if self.config.target_transform == "log1p":
+            self._notice(
+                f"the models learn the target as log1p, but sort_metric '{sort_metric}' ranks "
+                "them in the target's own units; to rank on the log scale, set sort_metric to "
+                "'rmsle'",
+                kind="log_target_metric",
+            )
+        elif (
+            len(y) > 2
+            and y.min() >= 0
+            and (skew := float(pd.Series(y).skew())) > metrics.TARGET_SKEW
+        ):
+            self._notice(
+                f"the target is 0 or more and skewed (skewness {skew:.1f}), and a model that "
+                "learns and is ranked on it as it is gives the many small values predictions far "
+                "from them; if the score you care about is a relative or logarithmic error "
+                "(such as RMSLE), set target_transform to 'log1p' and sort_metric to 'rmsle'",
+                kind="skewed_target",
+                skewness=skew,
+            )
+
     def _notice(self, message: str, **data) -> None:
         self._event("notice", message=message, **data)
 
@@ -278,6 +304,8 @@ class AutoML:
             if (y <= -1).any():
                 raise ConfigError("target_transform 'log1p' needs target values above -1")
             y = np.log1p(y)
+        if task == "regression":
+            self._target_scale_notices(y_seen, sort_metric)
         # What is reported and ranked is in the target's own units.
         original = np.expm1 if y is not y_seen else _same
         for field, name in (("sort_metric", sort_metric), ("stopping_metric", stopping_metric)):
