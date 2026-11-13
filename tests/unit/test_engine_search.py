@@ -486,7 +486,14 @@ def test_time_limit_ends_search_with_time_reason():
 def _cap_limit(events, folds, result, max_trial_secs):
     """The largest per-trial cap the search applied. The single notice reports the cap when it
     was first raised, but the cap keeps rising as the measured unit time does."""
-    noticed = max([e.data["max_trial_secs"] for e in events if e.type == "notice"], default=0)
+    noticed = max(
+        [
+            e.data["max_trial_secs"]
+            for e in events
+            if e.type == "notice" and "max_trial_secs" in e.data
+        ],
+        default=0,
+    )
     final = CAP_MARGIN * len(folds) * UNIT_SAFETY * (result.spec.unit_secs or 0)
     return max(max_trial_secs, noticed, final)
 
@@ -1113,3 +1120,34 @@ def test_time_folds_refuse_later_parts_with_a_single_class():
     y = np.array([0, 1] * 10 + [0] * 40)  # both classes early, only one in the parts to predict
     with pytest.raises(ConfigError, match="single class"):
         search.make_time_folds(order, y, "classification", 2)
+
+
+def _fit_cut_notices(name, family, monkeypatch, deadline_secs, **kwargs):
+    monkeypatch.setitem(FAMILIES, name, family)
+    X, y = _classification(40, 4)
+    prep, y, folds = _setup(X, y, nfolds=2)
+    events = []
+    run_family(
+        name,
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(deadline_secs),
+        events.append,
+        lambda: False,
+        **kwargs,
+    )
+    return [e.data for e in events if e.type == "notice" and e.data.get("kind") == "fit_cut"]
+
+
+def test_a_family_whose_fits_the_deadline_cut_short_says_so(monkeypatch):
+    notices = _fit_cut_notices("Boosting", _BoostingFamily, monkeypatch, 1.0, max_trials=1)
+    assert len(notices) == 1
+    assert notices[0]["family"] == "Boosting"
+    assert notices[0]["fits_cut"] == notices[0]["fits"] > 0
+
+
+def test_a_family_that_stops_by_itself_gets_no_cut_notice(monkeypatch):
+    assert _fit_cut_notices("Slow", _SlowFamily, monkeypatch, 30, max_trials=2) == []

@@ -102,6 +102,8 @@ class FamilySpec:
         self.unit_secs: float | None = None  # see the module docstring
         self._unit_rows = 0  # the training rows unit_secs applies to
         self._measured = False  # unit_secs comes from a real fit, not the probe
+        self.fits = 0  # early-stopped fits so far, and how many of them the deadline cut short
+        self.cut_fits = 0
 
     @property
     def classification(self) -> bool:
@@ -129,6 +131,8 @@ class FamilySpec:
         timer = _UnitTimer(deadline)
         model = self._fit(params, X_tr, y_tr, X_va, y_va, timer, sample_weight)
         self._note_unit(timer, len(X_tr))
+        self.fits += 1
+        self.cut_fits += timer.cut
         return model
 
     def fit_full(
@@ -244,6 +248,7 @@ class _UnitTimer:
         self.deadline = deadline
         self.start = time.monotonic()
         self.unit: float | None = None
+        self.cut = False  # the fit asked whether the deadline had passed, and it had
 
     def _note(self) -> None:
         if self.unit is None:
@@ -251,7 +256,8 @@ class _UnitTimer:
 
     def expired(self) -> bool:
         self._note()
-        return self.deadline.expired()
+        self.cut = self.deadline.expired() or self.cut
+        return self.cut
 
     def remaining(self) -> float:
         self._note()
@@ -565,7 +571,7 @@ class Linear(FamilySpec):
         else:
             model = Ridge(alpha=1.0 / params["C"])
         model.fit(X_tr, y_tr, sample_weight=sample_weight)
-        deadline.expired()  # consulted once, so that the unit time is measured (see ``fit``)
+        deadline.remaining()  # consulted once, so that the unit time is measured (see ``fit``)
         model.baseline_ = X_tr.to_numpy(np.float64).mean(axis=0)
         return model
 
@@ -836,7 +842,7 @@ class TextLinear(FamilySpec):
         # 0.05 s on 6,000 posts with 16), whatever the number of rows.
         with threadpool_limits(limits=SMALL_DATA_THREADS, user_api="blas"):
             model.fit(M, y_tr, sample_weight=sample_weight)
-        deadline.expired()  # consulted once, so that the unit time is measured (see ``fit``)
+        deadline.remaining()  # consulted once, so that the unit time is measured (see ``fit``)
         return TextModel(dense, texts, vectorizers, model, np.asarray(M.mean(axis=0)).ravel())
 
     def _full_rounds(self, rounds: int) -> int:
