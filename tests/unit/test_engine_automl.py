@@ -1436,6 +1436,23 @@ def test_a_date_column_without_a_time_column_is_pointed_out_once_and_not_with_on
     assert not [e for e in events if e.data.get("kind") == "time_hint"]
 
 
+def test_dates_written_as_whole_numbers_are_pointed_out_too():
+    df = _trend(400)
+    df["hour"] = (
+        (pd.Timestamp("2014-10-21") + pd.to_timedelta(df["day"] * 6, unit="h"))
+        .dt.strftime("%y%m%d%H")
+        .astype("int64")
+    )
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    events = []
+    _fit(df, events, feature_engineering=False, **options)
+    (hint,) = [e for e in events if e.data.get("kind") == "time_hint"]
+    assert hint.data["columns"] == ["hour"]
+    events = []
+    _fit(df, events, time_column="hour", **options)
+    assert not [e for e in events if e.data.get("kind") == "time_hint"]
+
+
 def test_the_time_column_may_be_ignored_as_a_feature_and_may_hold_dates():
     df = _trend(400)
     df["when"] = (pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")).dt.strftime(
