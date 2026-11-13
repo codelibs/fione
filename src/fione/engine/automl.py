@@ -384,7 +384,7 @@ class AutoML:
         stacked = {name: result.stacked(rows) for name, result in results.items()}
         blend_metric = None
         if task == "regression" and sort_metric in metrics.BLEND_ON_METRIC:
-            blend_metric = lambda y, p: metrics.value(sort_metric, original(y), original(p))  # noqa: E731
+            blend_metric = lambda y, p: metrics.loss(sort_metric, original(y), original(p))  # noqa: E731
         weights = caruana(stacked, np.tile(y_valid, repeats), task, metric=blend_metric)
         scores = {
             name: metrics.value(sort_metric, y_seen[rows], original(p), prior)
