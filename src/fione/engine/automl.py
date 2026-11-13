@@ -661,11 +661,14 @@ class AutoML:
             return [], None
         tried = [v.to_dict() for v in verdicts]
         adopted = [v["group"] for v in tried if v["adopted"]]
-        self._notice(
-            "derived features: " + (", ".join(adopted) if adopted else "none added"),
-            kind="features",
-            groups=tried,
-        )
+        unjudged = [v["group"] for v in tried if not v["adopted"] and v.get("reason") == "time"]
+        message = "derived features: " + (", ".join(adopted) if adopted else "none added")
+        if unjudged:
+            message += (
+                f"; {len(unjudged)} of {len(tried)} groups were not judged for lack of time "
+                "(a longer max_runtime_secs lets the search judge them)"
+            )
+        self._notice(message, kind="features", groups=tried, unjudged=len(unjudged))
         return kept, tried
 
     def _without_wide_linear_view(self, prep: Prep, n_rows: int) -> list[str]:

@@ -1858,3 +1858,22 @@ def test_no_skill_notice_is_not_sent_for_a_target_ranked_off_its_own_scale(optio
     df = _skill_frame("noise").assign(y=lambda d: np.exp(d["y"]))
     _fit(df, events, families=["LightGBM"], target="y", max_models=1, **options)
     assert "no_skill" not in [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+def test_the_derived_features_notice_counts_the_groups_that_ran_out_of_time(monkeypatch):
+    from fione.engine.features import Verdict
+
+    def fake(X, y, task, nfolds, seed, deadline, should_stop, row_groups=None):
+        return [], [
+            Verdict("pairs", 3, False, 0.0001, "too small a gain"),
+            Verdict("topics", 0, False, 0.0, "time"),
+            Verdict("tokens", 0, False, 0.0, "time"),
+        ]
+
+    monkeypatch.setattr(automl_module, "select_groups", fake)
+    events = []
+    _fit(_binary(300), events, families=["LightGBM"], target="y", max_models=1)
+    notice = next(e.data for e in events if e.data.get("kind") == "features")
+    assert "none added" in notice["message"]
+    assert "2 of 3 groups were not judged for lack of time" in notice["message"]
+    assert notice["unjudged"] == 2
