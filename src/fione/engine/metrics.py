@@ -179,6 +179,24 @@ def _qwk(y, pred, prior):
     return _kappa_of(_confusion(y, choose(pred, prior), pred.shape[1]), quadratic=True)
 
 
+def shift_to_equal_priors(pred: np.ndarray, shares: np.ndarray) -> np.ndarray:
+    """``pred`` with each class's probability divided by the class's share of the training data
+    and the rows renormalised: the probabilities as they would be if every class were as common
+    as the others. A class with no share keeps its probability."""
+    shifted = pred / np.where(shares > 0, shares, 1.0)
+    return shifted / shifted.sum(axis=1, keepdims=True)
+
+
+def _balanced_logloss(y, pred, prior):
+    """The mean over the classes of each class's mean log loss: the log loss of a task whose
+    classes count alike, however rare one is. A class that does not occur in ``y`` is left
+    out. (A model ranked by it delivers probabilities shifted to equal class priors, which are
+    what this is computed on.)"""
+    picked = np.clip(pred[np.arange(len(y)), y], 1e-15, 1.0)
+    losses = -np.log(picked)
+    return float(np.mean([losses[y == k].mean() for k in range(pred.shape[1]) if (y == k).any()]))
+
+
 def _brier(y, pred, prior):
     """The mean squared distance of the probabilities from the answer: for two classes the
     usual squared error of the second class's probability, for more the sum over the classes."""
@@ -328,6 +346,7 @@ def _metrics() -> dict[str, Metric]:
         Metric("kappa", c, True, _kappa),
         Metric("qwk", c, True, _qwk),
         Metric("brier", c, False, _brier),
+        Metric("balanced_logloss", c, False, _balanced_logloss),
         Metric("top3_accuracy", c, True, _top_k_accuracy, over, why=f"needs over {TOP_K} classes"),
         Metric("map3", c, True, _map_at_k, from_k, why=f"needs {TOP_K} classes or more"),
         Metric("rmse", r, False, _rmse),

@@ -59,6 +59,7 @@ _METRICS = frozenset(
         "kappa",
         "qwk",
         "brier",
+        "balanced_logloss",
         "top3_accuracy",
         "map3",
         "rmse",

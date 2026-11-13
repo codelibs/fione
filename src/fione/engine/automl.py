@@ -324,6 +324,21 @@ class AutoML:
                 "with cut points fitted to the order of the classes: set decision to tuned",
                 kind="ordinal_decision",
             )
+        # balanced_logloss ranks the probabilities as if every class were as common as the others:
+        # the model delivers them so (the label is then the largest of them)
+        shift = None
+        if task == "classification" and sort_metric == "balanced_logloss":
+            shift = np.bincount(y, minlength=len(classes)) / len(y)
+            # every score, the blend's, the diagnostics and the OOF predictions are of the
+            # probabilities as delivered
+            original = lambda p: metrics.shift_to_equal_priors(p, shift)  # noqa: E731
+            if prior is not None:
+                self._notice(
+                    "decision is ignored: the probabilities are shifted to equal class "
+                    "priors, which is the balanced decision",
+                    kind="decision_ignored",
+                )
+                prior = None
         # whole ratings: the cut points of rounded_qwk are fitted on the final blend
         ratings = np.unique(y_seen) if task == "regression" and sort_metric == "rounded_qwk" else ()
         rating_cuts = 3 <= len(ratings) <= metrics.MAX_ORDINAL_CLASSES and bool(
@@ -492,6 +507,7 @@ class AutoML:
             diagnostics=found,
             features=tried,
             class_prior=prior,
+            proba_shift=shift,
         )
         self._event(
             "finished",

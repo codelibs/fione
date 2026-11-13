@@ -149,11 +149,17 @@ small targets as closely as the large ones.
 - Classification: log loss, AUC, accuracy, average precision (`aucpr`), Gini, lift of the top 10%
   (`lift_top_group`), balanced accuracy, error rate (`misclassification`), mean error per class
   (`mean_per_class_error`), F1, precision, recall, MCC, kappa, quadratic weighted kappa (`qwk`),
-  Brier score, top-3 accuracy (`top3_accuracy`) and MAP@3 (`map3`).
+  Brier score, balanced log loss (`balanced_logloss`), top-3 accuracy (`top3_accuracy`) and MAP@3
+  (`map3`).
 - Regression: RMSE, MAE, R², MSE, RMSLE, MAPE, RMSPE, SMAPE, median absolute error (`medae`), explained
   variance, correlation (`pearson`), rank correlation (`spearman`), normalized Gini
   (`normalized_gini`), Poisson deviance (`poisson`) and quadratic weighted kappa of the rounded
   predictions (`rounded_qwk`).
+
+`balanced_logloss` is the log loss of a task whose classes count alike, however rare one is: each
+class's mean log loss, averaged. It is measured on the probabilities shifted so that every class
+is as common as the others, and a model ranked by it delivers those probabilities (and the label
+that is the largest of them), so the score on its page is the score of what it predicts.
 
 When you name no metric, EasyML and the assistant's proposal rank by average precision (`aucpr`)
 for two classes with a rare one (under 10% of the rows), and the engine's *Automatic* is log loss

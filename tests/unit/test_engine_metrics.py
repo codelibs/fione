@@ -388,3 +388,21 @@ def test_relative_weights_have_mean_one_and_cap_the_targets_near_zero():
         ratio = weight[500] / weight[998]
         assert ratio == pytest.approx((y[998] / y[500]) ** power)  # a row weighs 1 / y ** power
         assert weight[999] == weight.max() < 100  # capped, not 1e18
+
+
+def test_balanced_logloss_averages_each_class_s_log_loss():
+    y = np.array([0] * 8 + [1] * 2)
+    pred = np.where(y[:, None] == [0, 1], 0.9, 0.1)
+    assert metrics.value("balanced_logloss", y, pred) == pytest.approx(-np.log(0.9))
+    at_the_shares = np.tile([0.8, 0.2], (10, 1))  # right on average, wrong for the rare class
+    assert metrics.value("balanced_logloss", y, at_the_shares) == pytest.approx(
+        (-np.log(0.8) - np.log(0.2)) / 2
+    )
+    shifted = metrics.shift_to_equal_priors(at_the_shares, np.array([0.8, 0.2]))
+    assert metrics.value("balanced_logloss", y, shifted) == pytest.approx(np.log(2))
+
+
+def test_balanced_logloss_leaves_out_a_class_that_does_not_occur():
+    y = np.array([0, 0, 1, 1])
+    pred = np.array([[0.9, 0.05, 0.05]] * 2 + [[0.1, 0.8, 0.1]] * 2)
+    assert np.isfinite(metrics.value("balanced_logloss", y, pred))

@@ -1718,3 +1718,54 @@ def test_a_model_on_durations_written_as_text_predicts_explains_and_profiles_the
     assert c.values.shape == (2, 1, 1)
     curve = explain.partial_dependence(model, df, "age")
     assert len(curve.grid) >= 3
+
+
+def test_balanced_logloss_makes_the_model_deliver_probabilities_shifted_to_equal_priors():
+    df = _binary(600, weights=[0.9, 0.1])
+    plain = _fit(df, families=["LightGBM"], target="y", max_models=1)
+    shifted = _fit(
+        df, families=["LightGBM"], target="y", max_models=1, sort_metric="balanced_logloss"
+    )
+    assert plain.proba_shift is None
+    assert shifted.proba_shift == pytest.approx(np.bincount(df["y"]) / len(df))
+    p_plain = plain.predict_proba(df)[1]
+    p_shifted = shifted.predict_proba(df)[1]
+    assert p_shifted.mean() > 1.5 * p_plain.mean()  # the rare class is no longer the unlikely one
+    assert np.allclose(shifted.predict_proba(df).sum(axis=1), 1.0)
+    labels = shifted.predict(df)
+    assert (labels == (p_shifted > 0.5).astype(int)).all()
+    assert "balanced_logloss" in shifted.metrics
+
+
+def test_everything_reported_for_balanced_logloss_is_of_the_delivered_probabilities():
+    df = _binary(600, weights=[0.9, 0.1])
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        sort_metric="balanced_logloss",
+        keep_cv_predictions=True,
+    )
+    oof = model.cv_predictions
+    assert np.allclose(oof.sum(axis=1), 1.0)
+    own = metrics.value("balanced_logloss", df["y"].to_numpy(), oof)
+    assert model.metrics["balanced_logloss"] == pytest.approx(own)
+    board = model.leaderboard.set_index("model")["cv_score"]
+    assert board["Ensemble"] == pytest.approx(own)
+
+
+def test_balanced_logloss_ignores_a_balanced_decision_and_says_so():
+    events = []
+    model = _fit(
+        _binary(400, weights=[0.9, 0.1]),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        sort_metric="balanced_logloss",
+        decision="balanced",
+    )
+    assert model.class_prior is None and model.proba_shift is not None
+    kinds = [e.data.get("kind") for e in events if e.type == "notice"]
+    assert "decision_ignored" in kinds
