@@ -329,6 +329,9 @@ class AutoML:
         shift = None
         if task == "classification" and sort_metric == "balanced_logloss":
             shift = np.bincount(y, minlength=len(classes)) / len(y)
+            # every score, the blend's, the diagnostics and the OOF predictions are of the
+            # probabilities as delivered
+            original = lambda p: metrics.shift_to_equal_priors(p, shift)  # noqa: E731
             if prior is not None:
                 self._notice(
                     "decision is ignored: the probabilities are shifted to equal class "

@@ -1737,6 +1737,24 @@ def test_balanced_logloss_makes_the_model_deliver_probabilities_shifted_to_equal
     assert "balanced_logloss" in shifted.metrics
 
 
+def test_everything_reported_for_balanced_logloss_is_of_the_delivered_probabilities():
+    df = _binary(600, weights=[0.9, 0.1])
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        sort_metric="balanced_logloss",
+        keep_cv_predictions=True,
+    )
+    oof = model.cv_predictions
+    assert np.allclose(oof.sum(axis=1), 1.0)
+    own = metrics.value("balanced_logloss", df["y"].to_numpy(), oof)
+    assert model.metrics["balanced_logloss"] == pytest.approx(own)
+    board = model.leaderboard.set_index("model")["cv_score"]
+    assert board["Ensemble"] == pytest.approx(own)
+
+
 def test_balanced_logloss_ignores_a_balanced_decision_and_says_so():
     events = []
     model = _fit(

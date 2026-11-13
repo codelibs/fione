@@ -390,18 +390,16 @@ def test_relative_weights_have_mean_one_and_cap_the_targets_near_zero():
         assert weight[999] == weight.max() < 100  # capped, not 1e18
 
 
-def test_balanced_logloss_counts_each_class_alike_after_shifting_to_equal_priors():
+def test_balanced_logloss_averages_each_class_s_log_loss():
     y = np.array([0] * 8 + [1] * 2)
-    shares = np.array([0.8, 0.2])
-    at_the_prior = np.tile(shares, (10, 1))  # says nothing beyond the base rate
-    assert metrics.value("balanced_logloss", y, at_the_prior) == pytest.approx(np.log(2))
-    sure = np.where(y[:, None] == [0, 1], 0.9, 0.1)
-    by_hand = -np.log(0.9)  # shifted the 0.9s move, but each class is then wrong by the same amount
-    shifted = sure / shares
-    shifted /= shifted.sum(axis=1, keepdims=True)
-    per_class = [-np.log(shifted[y == k, k]).mean() for k in (0, 1)]
-    assert metrics.value("balanced_logloss", y, sure) == pytest.approx(np.mean(per_class))
-    assert by_hand != pytest.approx(np.mean(per_class))
+    pred = np.where(y[:, None] == [0, 1], 0.9, 0.1)
+    assert metrics.value("balanced_logloss", y, pred) == pytest.approx(-np.log(0.9))
+    at_the_shares = np.tile([0.8, 0.2], (10, 1))  # right on average, wrong for the rare class
+    assert metrics.value("balanced_logloss", y, at_the_shares) == pytest.approx(
+        (-np.log(0.8) - np.log(0.2)) / 2
+    )
+    shifted = metrics.shift_to_equal_priors(at_the_shares, np.array([0.8, 0.2]))
+    assert metrics.value("balanced_logloss", y, shifted) == pytest.approx(np.log(2))
 
 
 def test_balanced_logloss_leaves_out_a_class_that_does_not_occur():

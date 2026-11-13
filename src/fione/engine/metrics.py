@@ -188,12 +188,11 @@ def shift_to_equal_priors(pred: np.ndarray, shares: np.ndarray) -> np.ndarray:
 
 
 def _balanced_logloss(y, pred, prior):
-    """The mean over the classes of each class's mean log loss, of the probabilities shifted to
-    equal class priors (the shares of ``y`` stand for the training data's): the log loss of a
-    task whose classes count alike, however rare one is. A class that does not occur in ``y``
-    is left out."""
-    shares = np.bincount(y, minlength=pred.shape[1]) / len(y)
-    picked = np.clip(shift_to_equal_priors(pred, shares)[np.arange(len(y)), y], 1e-15, 1.0)
+    """The mean over the classes of each class's mean log loss: the log loss of a task whose
+    classes count alike, however rare one is. A class that does not occur in ``y`` is left
+    out. (A model ranked by it delivers probabilities shifted to equal class priors, which are
+    what this is computed on.)"""
+    picked = np.clip(pred[np.arange(len(y)), y], 1e-15, 1.0)
     losses = -np.log(picked)
     return float(np.mean([losses[y == k].mean() for k in range(pred.shape[1]) if (y == k).any()]))
 
