@@ -157,6 +157,12 @@ REPEATED_ROWS = 20
 REPEATED_SHARED = 0.8  # of the other columns, constant within a value, for the rows to look alike
 REPEATED_SAMPLE_ROWS = 50_000
 REPEATED_COLUMNS = 40  # other columns looked at
+
+# A validated fit this good (or this poor) gets a notice: R-squared, or AUC for two classes.
+NEAR_PERFECT_R2 = 0.999
+NO_SKILL_R2 = 0.02
+NEAR_PERFECT_AUC = 0.9995
+NO_SKILL_AUC = 0.55
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -256,6 +262,49 @@ class AutoML:
             columns=[column],
             shared=round(shared[column], 2),
         )
+
+    def _fit_quality_notices(self, task: Task, model: TrainedModel) -> None:
+        """Say when the validated fit is suspiciously good or no better than the average: a
+        column may give the answer away, or the features may not hold it."""
+        scores = model.metrics
+        if task == "regression":
+            skill, low, high = scores.get("r2"), NO_SKILL_R2, NEAR_PERFECT_R2
+            name = "r2"
+        elif len(model.classes_ or []) == 2:
+            skill, low, high = scores.get("auc"), NO_SKILL_AUC, NEAR_PERFECT_AUC
+            name = "auc"
+        else:
+            return
+        if skill is None or not np.isfinite(skill):
+            return
+        if skill >= high:
+            top = model.feature_importance.index[0]
+            self._notice(
+                f"the validation {name} is {skill:.4f}, as good as it gets: a column may give the "
+                f"answer away (the most used one is {top!r}) and not be known when the model is "
+                "used; check that every input is known at that time",
+                kind="near_perfect_fit",
+                column=top,
+                score=float(skill),
+            )
+        elif skill <= low and not self._ranked_off_scale(task, model):
+            self._notice(
+                f"the validation {name} is {skill:.3f}: the model is hardly better than "
+                "predicting the average, so the inputs may not hold what the target needs, or "
+                "the target is mostly noise; a score this weak can swing by chance between "
+                "runs",
+                kind="no_skill",
+                score=float(skill),
+            )
+
+    @staticmethod
+    def _ranked_off_scale(task: Task, model: TrainedModel) -> bool:
+        """Whether the models were ranked on another scale than the target's own units (a log
+        target, or a relative error), where an R-squared near 0 in those units says little."""
+        if task != "regression":
+            return False
+        ranked = metrics.resolve(model.config.sort_metric, task, "sort_metric")
+        return model.config.target_transform == "log1p" or ranked not in metrics.ORIGINAL_UNITS
 
     def _target_scale_notices(self, y: np.ndarray, sort_metric: str) -> None:
         """Say when the target's scale and the ranking metric do not go together: a log target
@@ -568,6 +617,7 @@ class AutoML:
             class_prior=prior,
             proba_shift=shift,
         )
+        self._fit_quality_notices(task, model)
         self._event(
             "finished",
             stop_reason=stop_reason,
