@@ -398,7 +398,8 @@ strings (`25-12-2024 09:00`, `Mar 5, 2024`) is recognised when a model is traine
 dates are read with the day first when some first field is above 12 and no second field is
 (`02-10-2012` is then the 2nd of October), otherwise with the month first. Independently of
 this option, the linear model and the neural network log-transform non-negative numbers
-that are strongly skewed. A text column in which nearly every value is a number and a unit of
+that are strongly skewed. A training run names the columns it leaves out because they hold one value, or none, on every
+training row. A text column in which nearly every value is a number and a unit of
 time (`2 years`, `3 weeks`, `10 days`, with at least three different values) is read by the
 models as a number of days.
 
