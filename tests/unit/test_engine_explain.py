@@ -741,3 +741,22 @@ def test_global_importance_orders_by_mean_abs():
     real = global_importance(contributions(fit, _features()))
     assert sorted(real.index) == sorted(fit.columns)
     assert (np.diff(real.to_numpy()) <= 0).all()
+
+
+def test_catboost_contributions_are_additive_with_a_frequency_column_read_as_strings():
+    rng = np.random.default_rng(3)
+    n = 600
+    frame = pd.DataFrame(
+        {"site": [f"s{i}" for i in rng.integers(0, 250, n)], "x": rng.normal(size=n)}
+    )
+    y = (rng.random(n) < 0.3 + 0.4 * frame["site"].isin([f"s{i}" for i in range(40)])).astype(int)
+    prep = Prep().fit(frame)
+    assert prep.kind_of("site") == "frequency"
+    view = prep.catboost(frame)
+    assert view["f0"].dtype == object
+    spec = FAMILIES["CatBoost"]("classification", 2)
+    model = spec.fit(spec.defaults, view, y.to_numpy(), None, None, Deadline(60))
+    phi, bias = explain.native_contributions(spec, model, view)
+    assert phi.shape == (n, 1, 2)
+    margin = model.predict(view, prediction_type="RawFormulaVal", thread_count=1)
+    assert_allclose(phi[:, 0].sum(-1) + bias[:, 0], margin, atol=1e-6)

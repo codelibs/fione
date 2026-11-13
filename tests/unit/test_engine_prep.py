@@ -85,6 +85,25 @@ def test_catboost_view_uses_object_strings_with_na_marker():
     assert view["f0"].tolist() == ["a", "__na__", "b"]
 
 
+def test_catboost_view_reads_a_frequency_column_as_strings_unless_no_value_repeats():
+    n = 1000
+    df = pd.DataFrame(
+        {
+            "device": [f"d{i % 400}" for i in range(n)],
+            "row_id": [f"r{i}" for i in range(n)],
+            "n": np.arange(n, dtype=float),
+        }
+    )
+    prep = Prep().fit(df)
+    assert prep.kind_of("device") == prep.kind_of("row_id") == "frequency"
+    view = prep.catboost(df.assign(device=[None] + ["new"] + df["device"][2:].tolist()))
+    assert view["f0"].dtype == object
+    assert view["f0"].tolist()[:3] == ["__na__", "new", "d2"]
+    assert view["f1"].dtype == float  # every id is different: its frequency is constant
+    assert prep.tree(df)["f0"].dtype == float  # the other views keep the frequency
+    assert prep.catboost(df).index.equals(df.index)
+
+
 def test_dense_view_codes_categories_and_imputes_medians():
     df = pd.DataFrame({"c": ["a", None, "b", "a"], "n": [1.0, np.nan, 3.0, 5.0]})
     view = Prep().fit(df).dense(df)
