@@ -287,7 +287,7 @@ class AutoML:
                 column=top,
                 score=float(skill),
             )
-        elif skill <= low:
+        elif skill <= low and not self._ranked_off_scale(task, model):
             self._notice(
                 f"the validation {name} is {skill:.3f}: the model is hardly better than "
                 "predicting the average, so the inputs may not hold what the target needs, or "
@@ -296,6 +296,15 @@ class AutoML:
                 kind="no_skill",
                 score=float(skill),
             )
+
+    @staticmethod
+    def _ranked_off_scale(task: Task, model: TrainedModel) -> bool:
+        """Whether the models were ranked on another scale than the target's own units (a log
+        target, or a relative error), where an R-squared near 0 in those units says little."""
+        if task != "regression":
+            return False
+        ranked = metrics.resolve(model.config.sort_metric, task, "sort_metric")
+        return model.config.target_transform == "log1p" or ranked not in metrics.ORIGINAL_UNITS
 
     def _target_scale_notices(self, y: np.ndarray, sort_metric: str) -> None:
         """Say when the target's scale and the ranking metric do not go together: a log target

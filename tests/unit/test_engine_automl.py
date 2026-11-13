@@ -1850,3 +1850,11 @@ def test_a_binary_fit_with_no_ranking_skill_says_so():
 
 
 KIND_QUALITY = ("no_skill", "near_perfect_fit")
+
+
+@pytest.mark.parametrize("options", [{"target_transform": "log1p"}, {"sort_metric": "rmsle"}])
+def test_no_skill_notice_is_not_sent_for_a_target_ranked_off_its_own_scale(options):
+    events = []
+    df = _skill_frame("noise").assign(y=lambda d: np.exp(d["y"]))
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1, **options)
+    assert "no_skill" not in [e.data.get("kind") for e in events if e.type == "notice"]
