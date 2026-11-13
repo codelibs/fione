@@ -150,6 +150,13 @@ FEATURE_MAX_SHARE = 0.30
 # leaves nothing to judge a candidate with (a hundred rows: about 2 s per 1,000 columns for each
 # of the folds' fits, and the candidates' own fit grows faster than the columns).
 FEATURE_MAX_COLUMNS = 5_000
+# A text column of at least this many different values, each on this many rows or more on
+# average, may name rows that belong together (see ``AutoML._notice_repeated_values``).
+REPEATED_LEVELS = 100
+REPEATED_ROWS = 20
+REPEATED_SHARED = 0.8  # of the other columns, constant within a value, for the rows to look alike
+REPEATED_SAMPLE_ROWS = 50_000
+REPEATED_COLUMNS = 40  # other columns looked at
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -178,6 +185,19 @@ def _never() -> bool:
     return False
 
 
+def _shared_values(X: pd.DataFrame, column: str) -> float:
+    """The share of the other columns (those that vary, at most ``REPEATED_COLUMNS`` of them)
+    that hold one value within every value of ``column``: 1 when rows with the same value are
+    identical elsewhere, near 0 when they differ in everything."""
+    others = [c for c in X.columns if c != column and X[c].nunique(dropna=False) > 1]
+    others = others[:REPEATED_COLUMNS]
+    if not others:
+        return 0.0
+    groups = X.groupby(column, sort=False, dropna=False)
+    constant = [(groups[c].nunique(dropna=False) <= 1).mean() for c in others]
+    return float(np.mean(constant))
+
+
 class AutoML:
     def __init__(
         self,
@@ -199,6 +219,43 @@ class AutoML:
 
     def _event(self, type: str, **data) -> None:
         self.emit(Event(type, data=jsonable(data)))
+
+    def _notice_repeated_values(self, prep: Prep, X: pd.DataFrame) -> None:
+        """Say when rows seem to belong together while the validation shuffles them: a text
+        column of many different values that each come back on many rows, whose rows also share
+        the values of most other columns (the rows of one game, one patient, one store look
+        alike). Rows of one value then sit on both sides of every split, and the score is better
+        than the model will do on rows of other values."""
+        n_rows = len(X)
+        levels = {**prep.categories, **prep.frequencies}  # the values of each text column
+        found = [
+            (column, len(values))
+            for column, values in levels.items()
+            if len(values) >= REPEATED_LEVELS and n_rows / len(values) >= REPEATED_ROWS
+        ]
+        if not found:
+            return
+        sample = (
+            X if n_rows <= REPEATED_SAMPLE_ROWS else X.sample(REPEATED_SAMPLE_ROWS, random_state=0)
+        )
+        shared = {column: _shared_values(sample, column) for column, _ in found}
+        column, levels_n = max(
+            ((c, k) for c, k in found if shared[c] >= REPEATED_SHARED),
+            key=lambda ck: shared[ck[0]],
+            default=(None, 0),
+        )
+        if column is None:
+            return
+        self._notice(
+            f"{column!r} has {levels_n:,} different values, each on about {n_rows / levels_n:.0f} "
+            "rows, and the rows of one value look alike in most other columns. The validation "
+            "shuffles the rows, so rows of one value sit on both sides of a split. If the rows "
+            "you will predict have other values, the score is probably better than it will be; "
+            "name that column as cv_group_column to validate on values the model has not seen",
+            kind="repeated_values",
+            columns=[column],
+            shared=round(shared[column], 2),
+        )
 
     def _target_scale_notices(self, y: np.ndarray, sort_metric: str) -> None:
         """Say when the target's scale and the ranking metric do not go together: a log target
@@ -368,6 +425,8 @@ class AutoML:
                     kind="time_hint",
                     columns=dates[:3],
                 )
+            if row_groups is None:
+                self._notice_repeated_values(prep, X)
             folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
             first_run = folds[:nfolds]  # reported: the other repeats only judge the search
             if row_groups is not None and task == "classification":

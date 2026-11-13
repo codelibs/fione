@@ -1769,3 +1769,48 @@ def test_balanced_logloss_ignores_a_balanced_decision_and_says_so():
     assert model.class_prior is None and model.proba_shift is not None
     kinds = [e.data.get("kind") for e in events if e.type == "notice"]
     assert "decision_ignored" in kinds
+
+
+def _repeating(n_groups=250, per_group=25, seed=0):
+    """Rows of one game share the game's attributes and differ in the agent's."""
+    rng = np.random.default_rng(seed)
+    game = np.repeat([f"g{i}" for i in range(n_groups)], per_group)
+    attributes = rng.normal(size=(n_groups, 10)).repeat(per_group, axis=0)
+    df = pd.DataFrame(attributes, columns=[f"rule{i}" for i in range(10)])
+    df.insert(0, "game", game)
+    df["x"] = rng.normal(size=len(df))
+    df["y"] = attributes[:, 0] + 0.1 * df["x"] + 0.05 * rng.normal(size=len(df))
+    return df
+
+
+def _kinds(events):
+    return [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+def test_a_text_column_whose_many_values_repeat_is_offered_as_the_validation_group():
+    events = []
+    _fit(_repeating(), events, families=["LightGBM"], target="y", max_models=1)
+    notice = next(e.data for e in events if e.data.get("kind") == "repeated_values")
+    assert notice["columns"] == ["game"] and "cv_group_column" in notice["message"]
+
+
+def test_no_repeated_values_notice_with_a_group_column_or_for_values_that_do_not_repeat():
+    events = []
+    _fit(
+        _repeating(),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        cv_group_column="game",
+    )
+    assert "repeated_values" not in _kinds(events)
+    events = []
+    _fit(_repeating(per_group=3), events, families=["LightGBM"], target="y", max_models=1)
+    assert "repeated_values" not in _kinds(events)
+    events = []  # many rows per value, but the rows of one value do not look alike
+    alike = _repeating().assign(
+        **{f"rule{i}": np.random.default_rng(i).normal(size=6250) for i in range(10)}
+    )
+    _fit(alike, events, families=["LightGBM"], target="y", max_models=1)
+    assert "repeated_values" not in _kinds(events)
