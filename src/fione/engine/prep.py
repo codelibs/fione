@@ -15,6 +15,8 @@ Task = Literal["classification", "regression"]
 
 HIGH_CARDINALITY = 200  # categorical columns with more categories are frequency encoded
 MIN_ROWS = 10
+FILLED_SHARE = 0.8  # a column the model learned from filled in at least this share of rows ...
+EMPTIED_BY = 0.5  # ... that is this much less filled in the rows to predict, is reported
 LINEAR_LEVELS = 15  # categories one-hot encoded per column in the linear view (the most frequent)
 LINEAR_CLIP = 5.0  # standardised numbers are clipped to +-this many standard deviations
 LINEAR_SKEW = 2.0  # non-negative numbers more skewed than this are log-transformed in that view
@@ -158,6 +160,7 @@ class Prep:
     _no_trend: tuple = ()  # view columns the linear view leaves out (see ``_fit_no_trend``)
     _level_at: dict = {}  # levels view column (``f3_l``) -> the input column it reads
     _native_at: dict = {}  # catboost view column (``f3``) -> frequency column it reads as text
+    fill: dict = {}  # input column -> share of the training rows that have a value (old: none)
 
     def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
@@ -197,6 +200,7 @@ class Prep:
                 self._plan.append((column, "numeric"))
         if not self._plan:
             raise ConfigError("no usable feature columns: every column is empty or constant")
+        self.fill = {column: float(X[column].notna().mean()) for column, _ in self._plan}
         self.prose = tuple(
             [c for c, kind in self._plan if kind in ("category", "frequency") and is_prose(X[c])][
                 :MAX_PROSE
@@ -290,6 +294,22 @@ class Prep:
             counts = base[position].value_counts()
             ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
             self._levels[position] = [level for level, _ in ranked[:LINEAR_LEVELS]]
+
+    def emptier(self, df: pd.DataFrame) -> list[tuple[str, float, float]]:
+        """The input columns that are much emptier in ``df`` than in the training rows, as
+        (column, share of training rows with a value, share of ``df``'s rows with one), emptiest
+        first: a column the model learned from that the rows to predict mostly lack (a lag of the
+        target for rows that lie beyond the end of the history). Nothing for fewer than
+        ``MIN_ROWS`` rows, or for a model that does not know its training fill."""
+        if len(df) < MIN_ROWS:
+            return []
+        found = []
+        for column, trained in self.fill.items():
+            if column in df.columns and trained >= FILLED_SHARE:
+                now = float(df[column].notna().mean())
+                if trained - now >= EMPTIED_BY:
+                    found.append((column, trained, now))
+        return sorted(found, key=lambda item: item[2] - item[1])
 
     @property
     def columns(self) -> list[str]:

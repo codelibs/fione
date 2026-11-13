@@ -288,6 +288,20 @@ def test_progress_is_reported_per_chunk(conn, run_job, job, monkeypatch):
     assert finished[0].data["n_rows"] == 40
 
 
+def test_a_column_the_model_learned_from_but_the_rows_mostly_lack_is_reported(
+    conn, run_job, owner, project, record, storage, frame
+):
+    holes = frame.assign(x=[v if i < 4 else np.nan for i, v in enumerate(frame["x"])])
+    job = submit(conn, owner, project, record, add_dataset(conn, storage, project, holes))
+    done = run_job(job)
+    assert done.status is JobStatus.DONE, done.message
+    notices = [e.data for _, e in store.events_since(conn, job.id) if e.type == "notice"]
+    reported = [n for n in notices if n.get("kind") == "columns_emptier"]
+    assert len(reported) == 1
+    assert [c["column"] for c in reported[0]["columns"]] == ["x"]
+    assert "x (100% of the training rows, 10% here)" in reported[0]["message"]
+
+
 def test_an_input_column_empty_in_the_first_chunk_keeps_its_type(
     conn, run_job, owner, project, record, storage, frame, monkeypatch
 ):

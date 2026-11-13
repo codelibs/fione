@@ -105,6 +105,9 @@ def batch_predict(ctx: JobContext) -> None:
                 data={"model_id": record.id, "dataset_id": dataset.id, "n_rows": len(frame)},
             )
         )
+        emptier = batch.emptier_notice(model, frame)
+        if emptier is not None:
+            ctx.emit(Event("notice", data=emptier))
         created = ingest.ingest_batches(
             ctx.storage,
             ctx.conn,
