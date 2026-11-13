@@ -136,9 +136,12 @@ questions about your data and models in plain language, use [the assistant](assi
 "Ranking metric" orders the leaderboard; "Stopping metric" decides whether a try improved
 (`sort_metric` and `stopping_metric` in the API; *Automatic* is log loss for classification and
 RMSE for regression). The models are trained on log loss or squared error, and so are the
-weights of the final blend: the metric ranks the models, stops the search and is reported, and
+weights of the final blend, except that for a regression ranking metric of `mae`, `medae`,
+`smape`, `rmsle`, `poisson` or a relative error the blend picks its weights by that metric,
+in the target's own units, so that the ensemble is never worse on it than its best model. The
+metric ranks the models, stops the search and is reported, and
 every metric that fits the data is listed on the model's Metrics tab, in the target's own units.
-The one exception is a relative error (`mape`, `rmspe`): each row then counts by its share of
+A relative error (`mape`, `rmspe`) goes further: each row then counts by its share of
 that error (weight 1 / |y| or 1 / y², capped at the 99th percentile; with `target_transform`
 `log1p`, the weight allows for the log), in the training and in the blend, so the models fit the
 small targets as closely as the large ones.

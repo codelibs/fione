@@ -421,6 +421,11 @@ def value(name: str, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None =
 # a few targets close to 0 do not decide the fit.
 RELATIVE_ERRORS = {"mape": 1, "rmspe": 2}
 RELATIVE_WEIGHT_CAP = 0.99
+# The regression metrics whose best average of predictions is not the one of squared error: the
+# blend is chosen on them (the relative errors also weight the rows, see above). The others are
+# squared error or a correlation, which the average of well-fitted models serves as well, or
+# (rounded_qwk) are decided after the blend.
+BLEND_ON_METRIC = frozenset({"mae", "medae", "smape", "rmsle", "poisson", *RELATIVE_ERRORS})
 
 
 def relative_weight(y: np.ndarray, name: str, log1p: bool = False) -> np.ndarray:
