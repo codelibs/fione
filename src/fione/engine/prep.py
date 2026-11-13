@@ -34,6 +34,8 @@ FEW_LEVELS = (
 )
 MIN_FEW_LEVELS = 3  # ... and with at least this many (two values are a flag already)
 MAX_LEVELS = 20_000  # values with a column of their own in the levels view, per input column
+MAX_NATIVE_LEVELS = 1_000_000  # a frequency column with more values is no categorical to CatBoost
+NATIVE_REPEAT = 0.9  # ... nor one with more values than this share of its rows (an id)
 _LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code has no words
 # ordinal: seconds since the Unix epoch; the hour is added for columns that carry a time of day
 _DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
@@ -155,6 +157,7 @@ class Prep:
     _unseen: dict = {}  # frequency column -> share given to a value not seen in training (old: 0)
     _no_trend: tuple = ()  # view columns the linear view leaves out (see ``_fit_no_trend``)
     _level_at: dict = {}  # levels view column (``f3_l``) -> the input column it reads
+    _native_at: dict = {}  # catboost view column (``f3``) -> frequency column it reads as text
 
     def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
@@ -204,9 +207,17 @@ class Prep:
         self.sources: list[tuple[str, ...]] = []
         self._category_at: dict[str, str] = {}  # view column -> categorical source column
         self._level_at = {}
+        self._native_at = {}
         for column, kind in self._plan:
             if kind == "category":
                 self._category_at[f"f{len(self.feature_names)}"] = column
+            elif (
+                kind == "frequency"
+                and (column not in self.prose or _repeats(X[column]))
+                and len(self.frequencies[column]) <= MAX_NATIVE_LEVELS
+                and len(self.frequencies[column]) < NATIVE_REPEAT * X[column].notna().sum()
+            ):
+                self._native_at[f"f{len(self.feature_names)}"] = column
             if (column not in self.prose or _repeats(X[column])) and (
                 kind in ("category", "frequency") or _has_few_levels(X[column], kind)
             ):
@@ -350,10 +361,14 @@ class Prep:
         return base
 
     def catboost(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Categoricals as object strings with ``"__na__"`` for missing values, for CatBoost."""
+        """Categoricals as object strings with ``"__na__"`` for missing values, for CatBoost. A
+        column of frequencies (many values) is its values as strings too, which CatBoost counts
+        and averages the target over by itself; a nearly unique one (an id) stays a frequency."""
         base = self._base(df)
         for position in self._category_at:
             base[position] = base[position].fillna("__na__").astype(object)
+        for position, column in self._native_at.items():
+            base[position] = _as_str(df[column]).fillna("__na__").astype(object)
         return base
 
     def dense(self, df: pd.DataFrame) -> pd.DataFrame:
