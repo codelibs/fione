@@ -248,7 +248,7 @@ class _UnitTimer:
         self.deadline = deadline
         self.start = time.monotonic()
         self.unit: float | None = None
-        self.cut = False  # the deadline said stop
+        self.cut = False  # the fit asked whether the deadline had passed, and it had
 
     def _note(self) -> None:
         if self.unit is None:
@@ -571,7 +571,7 @@ class Linear(FamilySpec):
         else:
             model = Ridge(alpha=1.0 / params["C"])
         model.fit(X_tr, y_tr, sample_weight=sample_weight)
-        deadline.expired()  # consulted once, so that the unit time is measured (see ``fit``)
+        deadline.remaining()  # consulted once, so that the unit time is measured (see ``fit``)
         model.baseline_ = X_tr.to_numpy(np.float64).mean(axis=0)
         return model
 
@@ -842,7 +842,7 @@ class TextLinear(FamilySpec):
         # 0.05 s on 6,000 posts with 16), whatever the number of rows.
         with threadpool_limits(limits=SMALL_DATA_THREADS, user_api="blas"):
             model.fit(M, y_tr, sample_weight=sample_weight)
-        deadline.expired()  # consulted once, so that the unit time is measured (see ``fit``)
+        deadline.remaining()  # consulted once, so that the unit time is measured (see ``fit``)
         return TextModel(dense, texts, vectorizers, model, np.asarray(M.mean(axis=0)).ravel())
 
     def _full_rounds(self, rounds: int) -> int:

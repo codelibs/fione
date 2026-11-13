@@ -448,8 +448,9 @@ def run_family(
                 data={
                     "message": (
                         f"{name}: {spec.cut_fits} of {spec.fits} fits were stopped by their time "
-                        "limit before early stopping, so the model is less trained than it "
-                        "could be: a longer max_runtime_secs lets it train further"
+                        "limit before they would have stopped by themselves, so the model is "
+                        "less trained than it could be: a longer max_runtime_secs lets it train "
+                        "further"
                     ),
                     "kind": "fit_cut",
                     "family": name,
