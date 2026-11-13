@@ -35,6 +35,7 @@ FEW_LEVELS = (
 MIN_FEW_LEVELS = 3  # ... and with at least this many (two values are a flag already)
 MAX_LEVELS = 20_000  # values with a column of their own in the levels view, per input column
 MAX_NATIVE_LEVELS = 1_000_000  # a frequency column with more values is no categorical to CatBoost
+NATIVE_REPEAT = 0.9  # ... nor one with more values than this share of its rows (an id)
 _LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code has no words
 # ordinal: seconds since the Unix epoch; the hour is added for columns that carry a time of day
 _DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
@@ -213,8 +214,8 @@ class Prep:
             elif (
                 kind == "frequency"
                 and (column not in self.prose or _repeats(X[column]))
-                and max(self.frequencies[column].values()) * len(X) > 1.5
                 and len(self.frequencies[column]) <= MAX_NATIVE_LEVELS
+                and len(self.frequencies[column]) < NATIVE_REPEAT * X[column].notna().sum()
             ):
                 self._native_at[f"f{len(self.feature_names)}"] = column
             if (column not in self.prose or _repeats(X[column])) and (
@@ -362,7 +363,7 @@ class Prep:
     def catboost(self, df: pd.DataFrame) -> pd.DataFrame:
         """Categoricals as object strings with ``"__na__"`` for missing values, for CatBoost. A
         column of frequencies (many values) is its values as strings too, which CatBoost counts
-        and averages the target over by itself; one in which no value repeats stays a frequency."""
+        and averages the target over by itself; a nearly unique one (an id) stays a frequency."""
         base = self._base(df)
         for position in self._category_at:
             base[position] = base[position].fillna("__na__").astype(object)
