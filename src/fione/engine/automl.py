@@ -150,6 +150,7 @@ FEATURE_MAX_SHARE = 0.30
 # leaves nothing to judge a candidate with (a hundred rows: about 2 s per 1,000 columns for each
 # of the folds' fits, and the candidates' own fit grows faster than the columns).
 FEATURE_MAX_COLUMNS = 5_000
+DROPPED_SHOWN = 5  # names of left-out columns in the notice
 # A text column of at least this many different values, each on this many rows or more on
 # average, may name rows that belong together (see ``AutoML._notice_repeated_values``).
 REPEATED_LEVELS = 100
@@ -306,6 +307,22 @@ class AutoML:
         ranked = metrics.resolve(model.config.sort_metric, task, "sort_metric")
         return model.config.target_transform == "log1p" or ranked not in metrics.ORIGINAL_UNITS
 
+    def _notice_dropped_columns(self, prep: Prep, X: pd.DataFrame) -> None:
+        """Name the input columns the models cannot use: no value, or the same one on every row
+        of the rows they learn from (whatever the rows to predict hold in them)."""
+        if not prep.dropped:
+            return
+        empty = [c for c in prep.dropped if X[c].isna().all()]
+        shown = ", ".join(repr(c) for c in prep.dropped[:DROPPED_SHOWN])
+        more = len(prep.dropped) - DROPPED_SHOWN
+        self._notice(
+            f"{len(prep.dropped)} columns have one value or none on every row of the training "
+            f"data and are left out: {shown}" + (f" and {more} more" if more > 0 else ""),
+            kind="columns_left_out",
+            columns=prep.dropped[:DROPPED_SHOWN],
+            empty=len(empty),
+        )
+
     def _target_scale_notices(self, y: np.ndarray, sort_metric: str) -> None:
         """Say when the target's scale and the ranking metric do not go together: a log target
         ranked in the original units, or a skewed one that is learned and ranked as it is."""
@@ -457,6 +474,7 @@ class AutoML:
             if c.feature_engineering:
                 self._notice("derived features are not tried with a time column")
         prep = Prep().fit(X, groups)
+        self._notice_dropped_columns(prep, X)
         if c.time_column is None:
             dates = [column for column in prep.columns if prep.kind_of(column) == "datetime"]
             # whole numbers that are dates (20141021, 14102100) order the rows by time as well

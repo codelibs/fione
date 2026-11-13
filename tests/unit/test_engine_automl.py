@@ -1877,3 +1877,15 @@ def test_the_derived_features_notice_counts_the_groups_that_ran_out_of_time(monk
     assert "none added" in notice["message"]
     assert "2 of 3 groups were not judged for lack of time" in notice["message"]
     assert notice["unjudged"] == 2
+
+
+def test_columns_with_one_value_or_none_are_named_when_they_are_left_out():
+    events = []
+    df = _binary(300).assign(const=5.0, empty=np.nan, flag="a")
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1)
+    notice = next(e.data for e in events if e.data.get("kind") == "columns_left_out")
+    assert set(notice["columns"]) == {"const", "empty", "flag"} and notice["empty"] == 1
+    assert "3 columns" in notice["message"]
+    events = []
+    _fit(_binary(300), events, families=["LightGBM"], target="y", max_models=1)
+    assert "columns_left_out" not in [e.data.get("kind") for e in events if e.type == "notice"]
