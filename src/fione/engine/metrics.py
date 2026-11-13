@@ -3,7 +3,8 @@
 Classification predictions are class probabilities of shape (n, k) for labels 0..k-1;
 regression predictions are values of shape (n,). Every metric is one entry of ``REGISTRY``.
 A metric that counts right answers (accuracy, F1, kappa, ...) uses the class ``choose`` picks.
-The models are trained on log loss or squared error whatever the metric: the metric ranks the
+The models are trained on log loss or squared error whatever the metric, except that a relative
+error (``RELATIVE_ERRORS``) weights each row by ``relative_weight``: the metric ranks the
 models, stops the search and is reported.
 """
 
@@ -243,6 +244,10 @@ def _mape(y, pred, prior):
     return float(np.mean(np.abs(y - pred) / np.abs(y)))
 
 
+def _rmspe(y, pred, prior):
+    return float(np.sqrt(np.mean(((y - pred) / y) ** 2)))
+
+
 def _smape(y, pred, prior):
     size = np.abs(y) + np.abs(pred)
     return float(
@@ -338,6 +343,14 @@ def _metrics() -> dict[str, Metric]:
             lambda y, k: bool((y != 0).all()),
             why="needs target values other than 0",
         ),
+        Metric(
+            "rmspe",
+            r,
+            False,
+            _rmspe,
+            lambda y, k: bool((y != 0).all()),
+            why="needs target values other than 0",
+        ),
         Metric("smape", r, False, _smape),
         Metric("medae", r, False, _medae),
         Metric("explained_variance", r, True, _explained_variance),
@@ -401,6 +414,23 @@ def value(name: str, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None =
         raise ValueError(f"unknown metric {name!r}")
     with np.errstate(all="ignore"):
         return REGISTRY[name].compute(y, pred, prior)
+
+
+# The relative errors, with the power of the target that scales a row's squared error to its share
+# of the metric: a row weighs 1 / |y| ** power. Their weights are capped at this quantile so that
+# a few targets close to 0 do not decide the fit.
+RELATIVE_ERRORS = {"mape": 1, "rmspe": 2}
+RELATIVE_WEIGHT_CAP = 0.99
+
+
+def relative_weight(y: np.ndarray, name: str, log1p: bool = False) -> np.ndarray:
+    """Row weights of mean 1 that make squared error count as the relative error ``name`` does;
+    with ``log1p`` the error is on log1p(y), which already shrinks it by 1 + y."""
+    weight = 1.0 / np.abs(y) ** RELATIVE_ERRORS[name]
+    if log1p:
+        weight *= (1.0 + y) ** RELATIVE_ERRORS[name]
+    weight = np.minimum(weight, np.quantile(weight, RELATIVE_WEIGHT_CAP))
+    return weight / weight.mean()
 
 
 # The metrics a decision can be tuned for. Precision and recall are left out: either one is
