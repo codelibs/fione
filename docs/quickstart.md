@@ -351,6 +351,9 @@ counts as one group, and with fewer groups than folds the number of folds is low
 number of groups (at least two groups are needed). A class that occurs in so few groups that
 some fold's training rows lack it is refused, with the column named. The analysis page and the
 assistant suggest this when a column named like an ID (`user_id`, `顧客ID`) repeats its values over rows.
+A training run also says so when no group column is given and a text column of 100 or more
+values has about 20 rows or more for each value, and the rows of one value share the value of
+most other columns (rows of one game or patient look alike).
 
 A group column and a time column cannot be used together.
 
