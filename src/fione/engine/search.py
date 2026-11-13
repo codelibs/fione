@@ -441,6 +441,23 @@ def run_family(
         needed = len(folds) * UNIT_SAFETY * spec.unit_secs if spec.unit_secs else None
         raise NoModelError("time budget too small to train any model", needed)
     elapsed = time.monotonic() - start
+    if spec.cut_fits * 2 >= spec.fits > 0:
+        emit(
+            Event(
+                "notice",
+                data={
+                    "message": (
+                        f"{name}: {spec.cut_fits} of {spec.fits} fits were stopped by their time "
+                        "limit before early stopping, so the model is less trained than it "
+                        "could be: a longer max_runtime_secs lets it train further"
+                    ),
+                    "kind": "fit_cut",
+                    "family": name,
+                    "fits": spec.fits,
+                    "fits_cut": spec.cut_fits,
+                },
+            )
+        )
     emit(
         Event(
             "family_done",
