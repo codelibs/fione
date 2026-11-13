@@ -1658,3 +1658,40 @@ def test_derived_features_are_not_tried_on_a_table_wider_than_the_limit(monkeypa
     monkeypatch.setattr(automl_module, "FEATURE_MAX_COLUMNS", 50)
     _fit(_binary(300), target="y", families=["LightGBM"], max_models=1)
     assert chosen
+
+
+@pytest.mark.parametrize(
+    ("transform", "metric", "kind"),
+    [
+        ("none", "rmse", "skewed_target"),
+        ("none", "rmsle", None),
+        ("none", "mape", None),
+        ("log1p", "rmse", "log_target_metric"),
+        ("log1p", "mae", "log_target_metric"),
+        ("log1p", "rmsle", None),
+    ],
+)
+def test_a_skewed_target_and_a_log_target_are_pointed_at_the_metric_that_fits(
+    transform, metric, kind
+):
+    events = []
+    _fit(
+        _positive(),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        target_transform=transform,
+        sort_metric=metric,
+    )
+    kinds = [e.data.get("kind") for e in events if e.type == "notice"]
+    scale = [k for k in kinds if k in ("skewed_target", "log_target_metric")]
+    assert scale == ([kind] if kind else [])
+
+
+def test_a_target_that_is_not_skewed_gets_no_scale_notice():
+    events = []
+    df = _positive().assign(y=lambda d: d["a"] + 0.1 * d["b"])
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1)
+    kinds = [e.data.get("kind") for e in events if e.type == "notice"]
+    assert "skewed_target" not in kinds

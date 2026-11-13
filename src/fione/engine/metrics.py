@@ -420,6 +420,12 @@ def value(name: str, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None =
 # of the metric: a row weighs 1 / |y| ** power. Their weights are capped at this quantile so that
 # a few targets close to 0 do not decide the fit.
 RELATIVE_ERRORS = {"mape": 1, "rmspe": 2}
+# The regression metrics that measure an error in the target's own units, as it is given: a model
+# that learns log1p(y) is still ranked on them in those units.
+ORIGINAL_UNITS = frozenset({"rmse", "mse", "mae", "medae", "r2", "explained_variance"})
+# A non-negative target skewed more than this may be learned better as log1p (see the tip in
+# ``fione.tools.builtin`` for the evidence behind the value).
+TARGET_SKEW = 1.0
 RELATIVE_WEIGHT_CAP = 0.99
 # The regression metrics whose best average of predictions is not the one of squared error: the
 # blend is chosen on them (the relative errors also weight the rows, see above). The others are

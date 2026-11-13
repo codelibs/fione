@@ -683,7 +683,7 @@ MIN_RUNTIME_SECS = 120
 # Skew above which a target of 0 or more is suggested for target_transform="log1p". On every
 # regression set measured with RMSLE that skewed 0.5 or more, the logarithm helped or held; 1.0
 # keeps the tip off targets that are nearly symmetric.
-TARGET_SKEW = 1.0
+TARGET_SKEW = metrics.TARGET_SKEW
 RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balanced"
 # A column named like an identifier (id, user_id, userId, 顧客ID, 番号) or like whom the rows are
 # about (subject, patient, customer, query, ... alone) that holds each value in several rows, at
