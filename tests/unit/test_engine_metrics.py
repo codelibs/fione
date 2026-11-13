@@ -388,3 +388,23 @@ def test_relative_weights_have_mean_one_and_cap_the_targets_near_zero():
         ratio = weight[500] / weight[998]
         assert ratio == pytest.approx((y[998] / y[500]) ** power)  # a row weighs 1 / y ** power
         assert weight[999] == weight.max() < 100  # capped, not 1e18
+
+
+def test_balanced_logloss_counts_each_class_alike_after_shifting_to_equal_priors():
+    y = np.array([0] * 8 + [1] * 2)
+    shares = np.array([0.8, 0.2])
+    at_the_prior = np.tile(shares, (10, 1))  # says nothing beyond the base rate
+    assert metrics.value("balanced_logloss", y, at_the_prior) == pytest.approx(np.log(2))
+    sure = np.where(y[:, None] == [0, 1], 0.9, 0.1)
+    by_hand = -np.log(0.9)  # shifted the 0.9s move, but each class is then wrong by the same amount
+    shifted = sure / shares
+    shifted /= shifted.sum(axis=1, keepdims=True)
+    per_class = [-np.log(shifted[y == k, k]).mean() for k in (0, 1)]
+    assert metrics.value("balanced_logloss", y, sure) == pytest.approx(np.mean(per_class))
+    assert by_hand != pytest.approx(np.mean(per_class))
+
+
+def test_balanced_logloss_leaves_out_a_class_that_does_not_occur():
+    y = np.array([0, 0, 1, 1])
+    pred = np.array([[0.9, 0.05, 0.05]] * 2 + [[0.1, 0.8, 0.1]] * 2)
+    assert np.isfinite(metrics.value("balanced_logloss", y, pred))

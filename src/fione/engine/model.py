@@ -12,7 +12,7 @@ import pandas as pd
 
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.families import FamilySpec, pad_features
-from fione.engine.metrics import Cuts, choose
+from fione.engine.metrics import Cuts, choose, shift_to_equal_priors
 from fione.engine.prep import Prep, Task
 
 
@@ -48,6 +48,9 @@ class TrainedModel:
     features: list[dict] | None = None  # derived-feature groups tried, and why (engine.features)
     # The classes' shares (decision="balanced"), or (1 - t, t) for the threshold t ("tuned").
     class_prior: np.ndarray | None = None
+    # The classes' shares of the training data when the probabilities are delivered shifted to
+    # equal class priors (sort_metric="balanced_logloss"); older models have none.
+    proba_shift: np.ndarray | None = None
 
     def choose(self, proba: np.ndarray) -> np.ndarray:
         """The class index per row of ``proba`` under the model's decision rule."""
@@ -72,6 +75,8 @@ class TrainedModel:
             raise ConfigError("predict_proba needs a classification model")
         proba = self._predict(df)
         proba = proba / proba.sum(axis=1, keepdims=True)
+        if self.proba_shift is not None and len(proba):
+            proba = shift_to_equal_priors(proba, self.proba_shift)
         return pd.DataFrame(proba, index=df.index, columns=self.classes_)
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
@@ -83,6 +88,8 @@ class TrainedModel:
             if isinstance(self.class_prior, Cuts):  # rounded_qwk: the rating its cut points give
                 raw = self.class_prior[0] + np.searchsorted(np.asarray(self.class_prior[1:]), raw)
             return pd.Series(raw, index=df.index, name=self.target, dtype=float)
+        if self.proba_shift is not None and len(raw):
+            raw = shift_to_equal_priors(raw, self.proba_shift)
         labels = np.asarray(self.classes_, dtype=object)[self.choose(raw)]
         return pd.Series(labels, index=df.index, name=self.target).astype(self.label_dtype)
 

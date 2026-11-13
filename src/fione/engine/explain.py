@@ -419,7 +419,12 @@ def contributions(model: TrainedModel, df: pd.DataFrame) -> Contributions:
     if model.task == "regression" and model.config.target_transform == "log1p":
         values, bias = _in_target_units(values, bias)
     return Contributions(
-        list(model.columns), outputs, values, bias, values.sum(-1) + bias, model.class_prior
+        list(model.columns),
+        outputs,
+        values,
+        bias,
+        values.sum(-1) + bias,
+        model.class_prior if model.class_prior is not None else model.proba_shift,
     )
 
 
