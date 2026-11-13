@@ -73,10 +73,15 @@ MIN_DURATIONS = 3  # different values at least
 
 def _holds_durations(s: pd.Series) -> bool:
     """Whether ``s`` is a text column of durations such as ``2 years`` or ``3 weeks``: at least
-    ``MIN_DURATIONS`` different values, and ``DURATION_SHARE`` of the rows read as one."""
+    ``MIN_DURATIONS`` different values, and ``DURATION_SHARE`` of the non-missing values read as
+    one."""
     if not (s.dtype == object or pd.api.types.is_string_dtype(s.dtype)):
         return False
-    counts = s.dropna().astype(str).value_counts()
+    values = s.dropna().astype(str)
+    sample = values.iloc[:200]
+    if len(sample) and sum(bool(_DURATION.match(v)) for v in sample) < 0.8 * len(sample):
+        return False  # most of a text column fails on its first rows: skip the full count
+    counts = values.value_counts()
     if len(counts) < MIN_DURATIONS or len(counts) > MAX_DURATION_LEVELS:
         return False
     fits = counts[[bool(_DURATION.match(v)) for v in counts.index]]
@@ -365,6 +370,11 @@ class Prep:
         """How the model reads ``column``; ``KeyError`` for a column it does not use."""
         kind = dict(self._plan)[column]
         return "category" if kind == "duration" else kind  # a text, as the data holds it
+
+    @property
+    def duration_columns(self) -> list[str]:
+        """The input columns that are text of durations, which the models read as days."""
+        return [column for column, kind in self._plan if kind == "duration"]
 
     @property
     def numeric_columns(self) -> list[str]:

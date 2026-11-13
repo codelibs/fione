@@ -691,9 +691,10 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
         return sorted(cs, key=lambda c: order.get(c, len(order)))
 
     kinds = {c: prep.kind_of(c) for c in columns}
-    strings = [c for c in columns if kinds[c] in ("category", "frequency")]
+    durations = set(prep.duration_columns)  # the models read their days, not their words
+    strings = [c for c in columns if kinds[c] in ("category", "frequency") and c not in durations]
     text = [c for c in strings if _structured(X[c])]
-    categories = by_rank(c for c in columns if kinds[c] == "category")
+    categories = by_rank(c for c in columns if kinds[c] == "category" and c not in durations)
     small = [c for c in categories if X[c].nunique() <= MAX_GROUP_CATEGORIES]
     numbers = by_rank(prep.numeric_columns)[:MAX_PAIR_COLUMNS]
     dates = by_rank(c for c in columns if kinds[c] == "datetime")
