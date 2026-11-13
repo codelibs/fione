@@ -658,3 +658,25 @@ def test_whole_numbers_that_all_read_as_dates_are_found_and_other_numbers_are_no
     assert integer_date_format(pd.Series(rng.integers(0, 50, 500))) is None  # small numbers
     assert integer_date_format(pd.Series(ymd[:5].repeat(100))) is None  # five values: codes
     assert integer_date_format(pd.Series(ymd.astype(float))) is None  # only integer columns
+
+
+def test_emptier_reports_a_column_filled_in_training_and_mostly_empty_in_new_rows():
+    rng = np.random.default_rng(0)
+    n = 200
+    df = pd.DataFrame(
+        {
+            "lag": rng.normal(size=n),
+            "sparse": np.where(rng.random(n) < 0.3, 1.0, np.nan),
+            "c": rng.choice(["a", "b"], n),
+            "n": rng.normal(size=n),
+        }
+    )
+    prep = Prep().fit(df)
+    assert prep.fill["lag"] == 1.0 and 0.1 < prep.fill["sparse"] < 0.5
+    new = df.head(50).assign(lag=np.nan, sparse=np.nan, c=None)
+    found = prep.emptier(new)
+    # "sparse" was never well filled; the others lost everything
+    assert [column for column, _, _ in found] == ["lag", "c"]
+    assert all(trained == 1.0 and now == 0.0 for _, trained, now in found)
+    assert prep.emptier(df.head(9).assign(lag=np.nan)) == []  # too few rows to say
+    assert prep.emptier(df) == []

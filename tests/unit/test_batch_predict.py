@@ -391,3 +391,24 @@ def test_an_empty_frame_with_contributions_has_the_columns(cls):
     out = batch_predict(cls, df, contributions=True)
     assert len(out) == 0
     assert list(out.columns) == ["predict", *PROBA, *batch.contribution_columns(cls), *df.columns]
+
+
+def test_columns_the_rows_to_predict_mostly_lack_are_reported(reg):
+    df = features(40).assign(x=np.nan)
+    notice = batch.emptier_notice(reg, df)
+    assert notice["kind"] == "columns_emptier"
+    assert [c["column"] for c in notice["columns"]] == ["x"]
+    assert notice["columns"][0]["trained"] == 1.0 and notice["columns"][0]["now"] == 0.0
+    assert "x (100% of the training rows, 0% here)" in notice["message"]
+
+
+def test_no_notice_when_the_columns_are_as_filled_as_in_training(reg):
+    assert batch.emptier_notice(reg, features(40)) is None
+
+
+def test_no_notice_for_a_handful_of_rows_or_a_model_without_the_training_fill(reg):
+    assert batch.emptier_notice(reg, features(5).assign(x=np.nan)) is None
+    old = copy.copy(reg)
+    old.prep = copy.copy(reg.prep)
+    del old.prep.fill  # a model pickled before the fill was kept: the class default, nothing known
+    assert batch.emptier_notice(old, features(40).assign(x=np.nan)) is None

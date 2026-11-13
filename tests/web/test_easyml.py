@@ -1176,6 +1176,23 @@ def test_an_editor_member_gets_the_write_controls(make_client):
     assert "Sharing" not in dashboard  # only owners see members
 
 
+def test_the_result_page_warns_of_columns_the_rows_mostly_lacked(make_client):
+    from fione.engine.events import Event
+
+    world = make_world(make_client())
+    world.login("ed")
+    url = world.path("/projects/{p}/jobs/{predict_job}/result")
+    assert "data-prediction-warning" not in world.client.get(url).text
+    note = {
+        "message": "columns that the model learned from are mostly empty: x",
+        "kind": "columns_emptier",
+    }
+    with closing(connect(world.client)) as conn:
+        store.append_event(conn, world.ids[world.p]["predict_job"], Event("notice", data=note))
+    page = world.client.get(url).text
+    assert "data-prediction-warning" in page and escape(note["message"]) in page
+
+
 def test_the_result_of_a_training_job_is_404(make_client):
     world = make_world(make_client())
     world.login("ed")

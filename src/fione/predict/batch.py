@@ -14,6 +14,7 @@ CHUNK_ROWS = 50_000
 MAX_CONTRIBUTION_ROWS = 100_000  # contributions cost 30-300x a prediction
 CONTRIBUTION_CHUNK_ROWS = 5_000
 _SHOWN_VALUES = 3
+_SHOWN_COLUMNS = 5
 
 
 class PredictInputError(ValueError):
@@ -137,6 +138,30 @@ def check_inputs(model: TrainedModel, df: pd.DataFrame) -> None:
             raise PredictInputError(
                 f"column {column!r} must hold numbers, but has values such as {shown}"
             )
+
+
+def emptier_notice(model: TrainedModel, df: pd.DataFrame) -> dict | None:
+    """The data of a notice for the columns the rows to predict mostly lack although the model
+    learned from them filled in, or None. Predictions do not stop: the model reads a missing
+    value like any other, but one that leans on such a column cannot be trusted."""
+    found = model.prep.emptier(df)
+    if not found:
+        return None
+    shown = ", ".join(
+        f"{column} ({trained:.0%} of the training rows, {now:.0%} here)"
+        for column, trained, now in found[:_SHOWN_COLUMNS]
+    )
+    more = len(found) - _SHOWN_COLUMNS
+    if more > 0:
+        shown += f" and {more} more"
+    message = (
+        f"columns that the model learned from are mostly empty in the rows to predict: {shown}. "
+        "Predictions that lean on them are unreliable: check that these rows get the same "
+        "columns filled in as the training rows (a lag or a rolling statistic of the target, "
+        "for example, cannot reach beyond the end of the history)"
+    )
+    columns = [{"column": c, "trained": t, "now": n} for c, t, n in found]
+    return {"message": message, "kind": "columns_emptier", "columns": columns}
 
 
 def predict_chunks(
