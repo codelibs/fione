@@ -17,6 +17,7 @@ HIGH_CARDINALITY = 200  # categorical columns with more categories are frequency
 MIN_ROWS = 10
 FILLED_SHARE = 0.8  # a column the model learned from filled in at least this share of rows ...
 EMPTIED_BY = 0.5  # ... that is this much less filled in the rows to predict, is reported
+MAX_DURATION_LEVELS = 5_000  # more different values than this are not durations
 LINEAR_LEVELS = 15  # categories one-hot encoded per column in the linear view (the most frequent)
 LINEAR_CLIP = 5.0  # standardised numbers are clipped to +-this many standard deviations
 LINEAR_SKEW = 2.0  # non-negative numbers more skewed than this are log-transformed in that view
@@ -47,6 +48,47 @@ _EPOCH = pd.Timestamp("1970-01-01")
 def _repeats(s: pd.Series) -> bool:
     """Whether the values of ``s`` come back (a search query), so that each is a level."""
     return s.nunique() < SHORT_PROSE_UNIQUE * s.notna().sum()
+
+
+# A duration written as a number and a unit ("2 years", "3 weeks"), the unit's length in days.
+_DURATION_DAYS = {
+    "second": 1 / 86_400,
+    "sec": 1 / 86_400,
+    "minute": 1 / 1_440,
+    "min": 1 / 1_440,
+    "hour": 1 / 24,
+    "hr": 1 / 24,
+    "day": 1.0,
+    "week": 7.0,
+    "month": 30.4375,
+    "year": 365.25,
+    "yr": 365.25,
+}
+_DURATION = re.compile(
+    r"^\s*(\d+(?:\.\d+)?)\s*(" + "|".join(_DURATION_DAYS) + r")s?\s*$", re.IGNORECASE
+)
+DURATION_SHARE = 0.95  # of the values, for a text column to be read as durations
+MIN_DURATIONS = 3  # different values at least
+
+
+def _holds_durations(s: pd.Series) -> bool:
+    """Whether ``s`` is a text column of durations such as ``2 years`` or ``3 weeks``: at least
+    ``MIN_DURATIONS`` different values, and ``DURATION_SHARE`` of the rows read as one."""
+    if not (s.dtype == object or pd.api.types.is_string_dtype(s.dtype)):
+        return False
+    counts = s.dropna().astype(str).value_counts()
+    if len(counts) < MIN_DURATIONS or len(counts) > MAX_DURATION_LEVELS:
+        return False
+    fits = counts[[bool(_DURATION.match(v)) for v in counts.index]]
+    return len(fits) >= MIN_DURATIONS and fits.sum() >= DURATION_SHARE * counts.sum()
+
+
+def _duration_days(s: pd.Series) -> pd.Series:
+    """``s`` as a number of days (missing where a value is not a duration)."""
+    found = _as_str(s).str.extract(_DURATION)
+    unit = found[1].str.lower().map(_DURATION_DAYS)
+    days = pd.to_numeric(found[0], errors="coerce") * unit.astype(float)
+    return days.astype(float)
 
 
 def _is_categorical(s: pd.Series) -> bool:
@@ -142,7 +184,8 @@ class Prep:
     """Turns raw feature frames into the inputs of each model family.
 
     ``fit`` decides per column: constant and all-null columns are dropped; datetime and date
-    columns are expanded into numeric parts; bool and non-numeric columns become categoricals, or
+    columns are expanded into numeric parts; a text column of durations (``2 years``) becomes a
+    number of days; bool and non-numeric columns become categoricals, or
     frequency encodings above ``HIGH_CARDINALITY`` categories (the share of the training rows
     with the value; a value not seen in training gets the share of the rarest one); everything
     else is numeric. The views put the features in ``feature_names`` order under positional
@@ -168,7 +211,7 @@ class Prep:
         self.timed = ()
         self._plan: list[
             tuple[str, str]
-        ] = []  # (column, kind), kind: numeric/datetime/frequency/category
+        ] = []  # (column, kind), kind: numeric/datetime/frequency/category/duration
         self.categories: dict[str, list[str]] = {}
         self.frequencies: dict[str, dict[str, float]] = {}
         self._unseen = {}
@@ -187,6 +230,8 @@ class Prep:
                 when = _datetimes(s, column in self.dayfirst)
                 if (when.notna() & (when != when.dt.normalize())).any():
                     self.timed += (column,)
+            elif _holds_durations(s):
+                self._plan.append((column, "duration"))
             elif _is_categorical(s):
                 counts = _as_str(s).value_counts()
                 if len(counts) > HIGH_CARDINALITY:
@@ -318,7 +363,8 @@ class Prep:
 
     def kind_of(self, column: str) -> Literal["numeric", "datetime", "category", "frequency"]:
         """How the model reads ``column``; ``KeyError`` for a column it does not use."""
-        return dict(self._plan)[column]
+        kind = dict(self._plan)[column]
+        return "category" if kind == "duration" else kind  # a text, as the data holds it
 
     @property
     def numeric_columns(self) -> list[str]:
@@ -336,6 +382,8 @@ class Prep:
             if kind == "numeric":
                 values = pd.to_numeric(s, errors="coerce").astype(float)
                 out.append(values.replace([np.inf, -np.inf], np.nan))
+            elif kind == "duration":
+                out.append(_duration_days(s))
             elif kind == "datetime":
                 when = _datetimes(s, column in self.dayfirst)
                 out += [when.dt.year, when.dt.month, when.dt.day, when.dt.day_of_week]

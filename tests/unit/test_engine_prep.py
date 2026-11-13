@@ -680,3 +680,49 @@ def test_emptier_reports_a_column_filled_in_training_and_mostly_empty_in_new_row
     assert all(trained == 1.0 and now == 0.0 for _, trained, now in found)
     assert prep.emptier(df.head(9).assign(lag=np.nan)) == []  # too few rows to say
     assert prep.emptier(df) == []
+
+
+def _ages(n=300, seed=0):
+    rng = np.random.default_rng(seed)
+    ages = ["3 weeks", "2 months", "1 year", "2 years", "10 years", "5 days", "1 month", "4 years"]
+    return pd.DataFrame(
+        {
+            "age": rng.choice(ages + [None], n),
+            "n": rng.normal(size=n),
+            "c": rng.choice(["a", "b"], n),
+        }
+    )
+
+
+def test_a_text_column_of_durations_is_read_as_a_number_of_days():
+    df = _ages()
+    prep = Prep().fit(df)
+    assert dict(prep._plan)["age"] == "duration"
+    assert prep.kind_of("age") == "category"  # as far as the rest of the engine can tell, a text
+    assert "age" not in prep.numeric_columns
+    days = prep.tree(df)["f0"]
+    expected = {"3 weeks": 21, "2 months": 60.875, "1 year": 365.25, "2 years": 730.5}
+    for text, value in expected.items():
+        assert days[df["age"] == text].iloc[0] == pytest.approx(value)
+    assert days[df["age"].isna()].isna().all()
+    for view in (prep.tree(df), prep.dense(df), prep.catboost(df)):
+        assert list(view.columns) == list(prep.tree(df).columns)
+    assert prep.linear(df).shape[0] == len(df)
+
+
+def test_durations_in_new_rows_are_read_the_same_and_odd_values_are_missing():
+    prep = Prep().fit(_ages())
+    new = pd.DataFrame({"age": ["2 YEARS", " 1 year ", "soon", None], "n": 0.0, "c": "a"})
+    assert prep.tree(new)["f0"].tolist()[:2] == pytest.approx([730.5, 365.25])
+    assert prep.tree(new)["f0"].isna().tolist()[2:] == [True, True]
+
+
+def test_a_text_column_is_not_durations_unless_nearly_all_of_it_is():
+    rng = np.random.default_rng(1)
+    mostly = rng.choice(["1 year", "2 years", "3 years", "unknown", "a long free text here"], 200)
+    assert (
+        Prep().fit(pd.DataFrame({"age": mostly, "n": rng.normal(size=200)}))._plan[0][1]
+        != "duration"
+    )
+    few = pd.DataFrame({"age": rng.choice(["1 year", "2 years"], 200), "n": rng.normal(size=200)})
+    assert dict(Prep().fit(few)._plan)["age"] != "duration"  # two values are a flag already
