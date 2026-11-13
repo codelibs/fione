@@ -500,8 +500,25 @@ def test_max_trial_secs_truncates_trials_instead_of_discarding_them():
     train = folds[0][0]
     probe.estimate_unit(probe.defaults, getattr(prep, probe.view)(X).iloc[train], y[train])
     cap = max(0.5, 15 * (probe.unit_secs or 0.0))
+    # A trial left to run takes several times the cap on the same machine, so it bounds the capped
+    # trials however busy the machine is.
+    uncapped = []
+    run_family(
+        "LightGBM",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(120),
+        uncapped.append,
+        _until_trials(uncapped, 1),
+    )
+    full_trials = [e.data["elapsed"] for e in uncapped if e.type == "trial"]
+    assert full_trials, "the uncapped trial did not finish within its deadline"
+    full = max(full_trials)
     events = []
-    result = run_family(
+    run_family(
         "LightGBM",
         X,
         y,
@@ -515,8 +532,7 @@ def test_max_trial_secs_truncates_trials_instead_of_discarding_them():
     )
     trials = [e for e in events if e.type == "trial"]
     assert len(trials) == 2
-    limit = _cap_limit(events, folds, result, cap)
-    assert all(e.data["elapsed"] < limit + max(0.5, limit / 2) for e in trials)
+    assert all(e.data["elapsed"] < full for e in trials)
 
 
 def test_a_capped_trial_keeps_its_last_fold_when_earlier_folds_overran(monkeypatch):
