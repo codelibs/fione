@@ -1695,3 +1695,26 @@ def test_a_target_that_is_not_skewed_gets_no_scale_notice():
     _fit(df, events, families=["LightGBM"], target="y", max_models=1)
     kinds = [e.data.get("kind") for e in events if e.type == "notice"]
     assert "skewed_target" not in kinds
+
+
+def test_a_model_on_durations_written_as_text_predicts_explains_and_profiles_them():
+    from fione.engine import explain
+
+    rng = np.random.default_rng(0)
+    n = 600
+    units = {"week": 7, "month": 30, "year": 365}
+    unit = rng.choice(list(units), n)
+    count = rng.integers(1, 6, n)
+    df = pd.DataFrame(
+        {"age": [f"{c} {u}{'s' if c > 1 else ''}" for c, u in zip(count, unit, strict=True)]}
+    )
+    df["y"] = np.log(count * np.array([units[u] for u in unit])) + rng.normal(scale=0.1, size=n)
+    model = _fit(df, families=["LightGBM"], target="y", max_models=1)
+    assert dict(model.prep._plan)["age"] == "duration"
+    new = pd.DataFrame({"age": ["1 week", "3 years"]})
+    low, high = model.predict(new).to_numpy()
+    assert high > low + 2  # years of life are more than a week, though no row says so in the text
+    c = explain.contributions(model, new)
+    assert c.values.shape == (2, 1, 1)
+    curve = explain.partial_dependence(model, df, "age")
+    assert len(curve.grid) >= 3
