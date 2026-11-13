@@ -1814,3 +1814,39 @@ def test_no_repeated_values_notice_with_a_group_column_or_for_values_that_do_not
     )
     _fit(alike, events, families=["LightGBM"], target="y", max_models=1)
     assert "repeated_values" not in _kinds(events)
+
+
+def _skill_frame(kind, n=600, seed=0):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    if kind == "noise":
+        df["y"] = rng.normal(size=n)
+    elif kind == "leak":
+        df["y"] = 3 * df["a"] + 0.001 * rng.normal(size=n)
+    else:
+        df["y"] = df["a"] + df["b"] ** 2 + 0.5 * rng.normal(size=n)
+    return df
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected"), [("noise", "no_skill"), ("leak", "near_perfect_fit"), ("good", None)]
+)
+def test_a_fit_that_is_near_perfect_or_no_better_than_the_average_says_so(kind, expected):
+    events = []
+    _fit(_skill_frame(kind), events, families=["LightGBM", "Linear"], target="y", max_models=2)
+    found = [e.data for e in events if e.type == "notice" and e.data.get("kind") in KIND_QUALITY]
+    assert [n["kind"] for n in found] == ([expected] if expected else [])
+    if expected == "near_perfect_fit":
+        assert found[0]["column"] == "a"
+
+
+def test_a_binary_fit_with_no_ranking_skill_says_so():
+    events = []
+    rng = np.random.default_rng(1)
+    df = pd.DataFrame({"a": rng.normal(size=600), "b": rng.normal(size=600)})
+    df["y"] = rng.integers(0, 2, 600)
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1)
+    assert "no_skill" in [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+KIND_QUALITY = ("no_skill", "near_perfect_fit")
