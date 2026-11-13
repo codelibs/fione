@@ -331,16 +331,47 @@ def lag(df, params, ctx):
     # a group and time whose values are all missing stays empty (a sum would give 0)
     reduced = (grouped.sum(min_count=1) if params["how"] == "sum" else grouped.mean()).reset_index()
     out = df
+    made: list[tuple[str, str, int]] = []  # (new column, source column, lag)
     for k in lags:
         earlier = reduced.copy()
         earlier[time] = earlier[time] + k  # the value at time t is read by the rows at t + k
         fresh = unique_names([str(c) for c in out.columns] + [f"{c}_lag{k}" for c in columns])[
             len(out.columns) :
         ]
+        made.extend(zip(fresh, columns, [k] * len(columns), strict=True))
         earlier = earlier.rename(columns=dict(zip(columns, fresh, strict=True)))
         out = out.merge(earlier, how="left", on=keys)
     out[time] = original_time.array  # the column as it came, not the wide copy
-    return out
+    return ModuleOutput(out, notes=_lag_notes(out, made, time, step))
+
+
+LAG_EMPTY_SHARE = 0.9  # a lag column empty on more of the rows than this is reported
+
+
+def _lag_notes(out, made: list[tuple[str, str, int]], time: str, step: float) -> tuple[dict, ...]:
+    """What to tell about a new lag column that is empty on nearly every row: almost no row has
+    a row exactly ``k`` steps of the time before it in its group."""
+    notes = []
+    for name, source, k in made:
+        if not len(out) or not out[source].notna().any():
+            continue
+        empty = float(out[name].isna().mean())
+        if empty >= LAG_EMPTY_SHARE:
+            notes.append(
+                {
+                    "message": (
+                        f"'{name}' is empty on {empty:.0%} of the rows: almost no row has a row "
+                        f"exactly {k * step:g} of '{time}' before it in its group. A likely cause "
+                        "is a time written as a date for something that comes once a month: a "
+                        "date counts in days, so give a month number that rises by one instead. "
+                        "Another is a group (by) that is nearly one row each"
+                    ),
+                    "kind": "lag_empty",
+                    "column": name,
+                    "empty": round(empty, 4),
+                }
+            )
+    return tuple(notes)
 
 
 _WINDOW_STATS = ("mean", "std", "min", "max", "sum", "count")

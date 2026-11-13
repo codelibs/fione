@@ -1802,3 +1802,29 @@ def test_lag_reads_dates_far_from_1970():
     old = pd.DataFrame({"t": ["1500-01-01", "1500-01-02"], "v": [1.0, 2.0]})
     out, _ = run_op("lag", old, {"time": "t", "columns": ["v"]})
     assert list(out["v_lag1"].fillna(-1)) == [-1, 1.0]
+
+
+def _lag_notes(df):
+    module = get_builtin("lag")
+    params = {"time": "month", "by": ["shop"], "columns": ["sales"], "lags": "1"}
+    return module.run(
+        df.copy(), validate_args(module.params, params), ModuleContext(None, None)
+    ).notes
+
+
+def test_lag_says_so_when_it_is_empty_nearly_everywhere():
+    months = pd.date_range("2023-01-01", periods=12, freq="MS").strftime("%Y-%m-%d")
+    df = pd.DataFrame({"shop": [1] * 12, "month": months, "sales": np.arange(12.0)})
+    notes = _lag_notes(df)
+    assert [n["kind"] for n in notes] == ["lag_empty"]
+    assert notes[0]["column"] == "sales_lag1" and "month number" in notes[0]["message"]
+    assert _lag_notes(df.assign(month=range(12))) == ()
+
+
+def test_lag_note_names_the_new_column_when_the_name_is_taken():
+    months = pd.date_range("2023-01-01", periods=12, freq="MS").strftime("%Y-%m-%d")
+    df = pd.DataFrame(
+        {"shop": [1] * 12, "month": months, "sales": np.arange(12.0), "sales_lag1": 0.0}
+    )
+    notes = _lag_notes(df)
+    assert [n["column"] for n in notes] == ["sales_lag1_2"]

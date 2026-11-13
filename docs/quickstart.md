@@ -261,7 +261,8 @@ read (`columns`), the group each row belongs to (`by`, such as a shop and an ite
 the steps back (`lags`, such as `1,2,3,12`). `sales_lag3` is the value of `sales` three steps of
 the time before, so a time with no row gives an empty value, never the row before. The rows of
 a group at one time are reduced to their mean (or sum, with `how`) first, so a coarser `by`
-gives, for example, the mean of an item over all its shops one month earlier. No row reads its
+gives, for example, the mean of an item over all its shops one month earlier. A lag that comes out empty on nearly every row is reported (months written as dates are not
+a step of one apart). No row reads its
 own time or a later one, but the module does not know which rows are to be predicted: to give
 the rows to predict their lags, put them in the same dataset (with the target empty) before
 adding the lags. Training refuses a target with missing values, so take the rows to learn from
