@@ -422,6 +422,25 @@ def test_a_relative_error_picks_the_blend_by_that_error(monkeypatch):
     assert chosen[0] is not None and chosen[1] is None
 
 
+@pytest.mark.parametrize(
+    ("metric", "by_metric"),
+    [("mae", True), ("smape", True), ("rmsle", True), ("r2", False), ("pearson", False)],
+)
+def test_a_regression_metric_that_differs_from_squared_error_picks_the_blend(
+    monkeypatch, metric, by_metric
+):
+    chosen = []
+    original = automl_module.caruana
+
+    def spy(oof, y, task, rounds=30, metric=None):
+        chosen.append(metric)
+        return original(oof, y, task, rounds, metric)
+
+    monkeypatch.setattr(automl_module, "caruana", spy)
+    _fit(_positive(), families=["LightGBM"], target="y", max_models=1, sort_metric=metric)
+    assert (chosen[0] is not None) is by_metric
+
+
 def test_a_relative_error_needs_a_target_without_zeros():
     df = _positive()
     df.loc[0, "y"] = 0.0

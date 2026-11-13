@@ -383,7 +383,7 @@ class AutoML:
         # The weights are chosen on every repeat's predictions, one below the other.
         stacked = {name: result.stacked(rows) for name, result in results.items()}
         blend_metric = None
-        if task == "regression" and sort_metric in metrics.RELATIVE_ERRORS:
+        if task == "regression" and sort_metric in metrics.BLEND_ON_METRIC:
             blend_metric = lambda y, p: metrics.value(sort_metric, original(y), original(p))  # noqa: E731
         weights = caruana(stacked, np.tile(y_valid, repeats), task, metric=blend_metric)
         scores = {
