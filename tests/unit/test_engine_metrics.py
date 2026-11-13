@@ -153,6 +153,7 @@ def test_qwk_orders_the_classes_by_their_numbers_not_their_text():
         ("spearman", lambda y, p: spearmanr(y, p).statistic),
         ("poisson", lambda y, p: sk.mean_poisson_deviance(y, p)),
         ("smape", lambda y, p: np.mean(2 * np.abs(y - p) / (np.abs(y) + np.abs(p)))),
+        ("rmspe", lambda y, p: np.sqrt(np.mean(((y - p) / y) ** 2))),
     ],
 )
 def test_regression_metrics_match_their_definitions(name, reference):
@@ -367,3 +368,23 @@ def test_check_tuned_allows_many_ordered_classes_for_qwk_only():
         metrics.check_tuned("qwk", metrics.MAX_ORDINAL_CLASSES + 1)
     with pytest.raises(ConfigError, match="two classes"):
         metrics.check_tuned("kappa", 5)
+
+
+def test_relative_weights_of_a_log1p_target_are_flat_where_the_target_is_large():
+    y = np.array([0.001, 0.01, 0.1, 1.0, 10.0, 1000.0, 5000.0, 20000.0])
+    plain = metrics.relative_weight(y, "rmspe")
+    logged = metrics.relative_weight(y, "rmspe", log1p=True)
+    assert plain[3] / plain[-1] > 1e6
+    assert logged[3] / logged[-1] < 10  # y = 1 against y = 20000: the log1p already did the rest
+    assert logged[0] > logged[-1]  # a target near 0 still weighs most
+    assert logged.mean() == pytest.approx(1.0)
+
+
+def test_relative_weights_have_mean_one_and_cap_the_targets_near_zero():
+    y = np.concatenate([np.linspace(1.0, 2.0, 999), [1e-9]])
+    for name, power in (("rmspe", 2), ("mape", 1)):
+        weight = metrics.relative_weight(y, name)
+        assert weight.mean() == pytest.approx(1.0)
+        ratio = weight[500] / weight[998]
+        assert ratio == pytest.approx((y[998] / y[500]) ** power)  # a row weighs 1 / y ** power
+        assert weight[999] == weight.max() < 100  # capped, not 1e18

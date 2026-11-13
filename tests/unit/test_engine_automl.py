@@ -364,6 +364,71 @@ def test_balance_classes_weights_every_fit_and_lifts_minority_recall(monkeypatch
         assert w[y_tr == 1].mean() > 5 * w[y_tr == 0].mean()
 
 
+def _positive(n=1_500, seed=0):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    df["y"] = np.exp(df["a"] + 0.2 * rng.normal(size=n)) * 0.004
+    return df
+
+
+@pytest.mark.parametrize("metric, weighted", [("rmspe", True), ("mape", True), ("rmse", False)])
+def test_a_relative_error_weights_every_fit_and_the_other_metrics_do_not(
+    monkeypatch, metric, weighted
+):
+    df = _positive()
+    seen = []
+    original = LightGBM._fit
+
+    def spy(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
+        seen.append((y_tr, sample_weight))
+        return original(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight, rounds)
+
+    monkeypatch.setattr(LightGBM, "_fit", spy)
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    events = []
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        sort_metric=metric,
+        cv_repeats=1,
+    )
+    assert len(seen) == 6  # five folds and the refit
+    notices = [e.data["message"] for e in events if e.type == "notice"]
+    if not weighted:
+        assert all(w is None for _, w in seen)
+        assert not any("weighted" in n for n in notices)
+        return
+    assert any(f"weighted by their share of {metric}" in n for n in notices)
+    for y_tr, w in seen:
+        assert w is not None and len(w) == len(y_tr)
+        small, large = y_tr < np.quantile(y_tr, 0.2), y_tr > np.quantile(y_tr, 0.8)
+        assert w[small].mean() > 3 * w[large].mean()
+
+
+def test_a_relative_error_picks_the_blend_by_that_error(monkeypatch):
+    chosen = []
+    original = automl_module.caruana
+
+    def spy(oof, y, task, rounds=30, metric=None):
+        chosen.append(metric)
+        return original(oof, y, task, rounds, metric)
+
+    monkeypatch.setattr(automl_module, "caruana", spy)
+    for metric in ("rmspe", "rmse"):
+        _fit(_positive(), families=["LightGBM"], target="y", max_models=1, sort_metric=metric)
+    assert chosen[0] is not None and chosen[1] is None
+
+
+def test_a_relative_error_needs_a_target_without_zeros():
+    df = _positive()
+    df.loc[0, "y"] = 0.0
+    with pytest.raises(ConfigError, match="sort_metric"):
+        _fit(df, target="y", sort_metric="rmspe")
+
+
 def test_balanced_decision_predicts_rare_classes_more_and_keeps_the_probabilities(monkeypatch):
     df = _binary(4_000, weights=[0.95], class_sep=0.6, flip_y=0.01)
     monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)

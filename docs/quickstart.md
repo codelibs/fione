@@ -135,15 +135,19 @@ questions about your data and models in plain language, use [the assistant](assi
 
 "Ranking metric" orders the leaderboard; "Stopping metric" decides whether a try improved
 (`sort_metric` and `stopping_metric` in the API; *Automatic* is log loss for classification and
-RMSE for regression). The models are always trained on log loss or squared error, and so are the
+RMSE for regression). The models are trained on log loss or squared error, and so are the
 weights of the final blend: the metric ranks the models, stops the search and is reported, and
 every metric that fits the data is listed on the model's Metrics tab, in the target's own units.
+The one exception is a relative error (`mape`, `rmspe`): each row then counts by its share of
+that error (weight 1 / |y| or 1 / y², capped at the 99th percentile; with `target_transform`
+`log1p`, the weight allows for the log), in the training and in the blend, so the models fit the
+small targets as closely as the large ones.
 
 - Classification: log loss, AUC, accuracy, average precision (`aucpr`), Gini, lift of the top 10%
   (`lift_top_group`), balanced accuracy, error rate (`misclassification`), mean error per class
   (`mean_per_class_error`), F1, precision, recall, MCC, kappa, quadratic weighted kappa (`qwk`),
   Brier score, top-3 accuracy (`top3_accuracy`) and MAP@3 (`map3`).
-- Regression: RMSE, MAE, R², MSE, RMSLE, MAPE, SMAPE, median absolute error (`medae`), explained
+- Regression: RMSE, MAE, R², MSE, RMSLE, MAPE, RMSPE, SMAPE, median absolute error (`medae`), explained
   variance, correlation (`pearson`), rank correlation (`spearman`), normalized Gini
   (`normalized_gini`), Poisson deviance (`poisson`) and quadratic weighted kappa of the rounded
   predictions (`rounded_qwk`).
@@ -158,7 +162,7 @@ below; with more than two classes precision, recall and F1 are the mean over the
 two classes they describe the class listed last. The ranking measures (AUC, average precision,
 Gini, lift) are reported for two classes only. Kappa and `qwk` take the classes in their sorted
 order, so `qwk` suits ratings. RMSLE, Poisson deviance and normalized Gini need target values of
-0 or more, MAPE needs values other than 0, `rounded_qwk` needs whole numbers, and top-3 accuracy
+0 or more, MAPE and RMSPE need values other than 0, `rounded_qwk` needs whole numbers, and top-3 accuracy
 needs more than three classes and MAP@3 three or more; training stops with an error when the target does not fit.
 
 With `rounded_qwk` on whole-number ratings (three to fifty different ones), the cut points that
@@ -203,7 +207,7 @@ them.
 
 ## Text columns
 
-A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product) is read in two ways. Its
+A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product, or that take a thousand different values or more, such as a search query) is read in two ways. Its
 topics are derived features (see below). A model family called TextLinear also reads its words:
 a logistic (or ridge) regression on the TF-IDF weights of words and word pairs, with the other
 columns beside them, learned again on each training fold. It joins the search and the ensemble

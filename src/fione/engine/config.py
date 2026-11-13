@@ -67,6 +67,7 @@ _METRICS = frozenset(
         "mse",
         "rmsle",
         "mape",
+        "rmspe",
         "smape",
         "medae",
         "explained_variance",

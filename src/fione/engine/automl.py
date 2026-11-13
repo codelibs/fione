@@ -264,6 +264,13 @@ class AutoML:
         elif c.balance_classes:
             counts = np.bincount(y)
             weight = (len(y) / (len(counts) * counts))[y]
+        if task == "regression" and sort_metric in metrics.RELATIVE_ERRORS:
+            metrics.check(sort_metric, y, len(classes), "sort_metric")
+            weight = metrics.relative_weight(y, sort_metric, c.target_transform == "log1p")
+            self._notice(
+                f"the rows are weighted by their share of {sort_metric}, in training "
+                "and in the blend"
+            )
         y_seen = y  # the target as the user gave it; ``y`` is what the models learn
         if c.target_transform == "log1p" and task == "classification":
             self._notice("target_transform is ignored for classification")
@@ -375,7 +382,10 @@ class AutoML:
         y_valid = y[rows]
         # The weights are chosen on every repeat's predictions, one below the other.
         stacked = {name: result.stacked(rows) for name, result in results.items()}
-        weights = caruana(stacked, np.tile(y_valid, repeats), task)
+        blend_metric = None
+        if task == "regression" and sort_metric in metrics.RELATIVE_ERRORS:
+            blend_metric = lambda y, p: metrics.value(sort_metric, original(y), original(p))  # noqa: E731
+        weights = caruana(stacked, np.tile(y_valid, repeats), task, metric=blend_metric)
         scores = {
             name: metrics.value(sort_metric, y_seen[rows], original(p), prior)
             for name, p in oof.items()

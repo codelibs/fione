@@ -24,6 +24,9 @@ PROSE_WORDS = 5  # a column whose median value has this many words is prose, not
 SHORT_PROSE_WORDS = 3
 SHORT_PROSE_UNIQUE = 0.5  # share of different values in the column
 SHORT_PROSE_WORD_CHARS = 3  # mean letters of a word, so that a code such as C_ID_92a is no text
+# ... and so is a short text that repeats (a search query) when it takes this many different
+# values: a label has a few hundred at most, and a query is read by its words, not as a whole.
+REPEATED_PROSE_VALUES = 1000
 MAX_PROSE = 3  # prose columns the text view reads (the first ones)
 CONSOLIDATE_COLUMNS = 2_000  # a view of more columns is joined into few blocks (see _base)
 FEW_LEVELS = (
@@ -35,6 +38,11 @@ _LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code
 # ordinal: seconds since the Unix epoch; the hour is added for columns that carry a time of day
 _DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
 _EPOCH = pd.Timestamp("1970-01-01")
+
+
+def _repeats(s: pd.Series) -> bool:
+    """Whether the values of ``s`` come back (a search query), so that each is a level."""
+    return s.nunique() < SHORT_PROSE_UNIQUE * s.notna().sum()
 
 
 def _is_categorical(s: pd.Series) -> bool:
@@ -90,8 +98,8 @@ def _as_str(s: pd.Series) -> pd.Series:
 def is_prose(s: pd.Series) -> bool:
     """Whether a string column holds text: the median value has ``PROSE_WORDS`` words (runs of
     letters, so a timestamp or a code is not prose), or ``SHORT_PROSE_WORDS`` words in values
-    that are mostly different (``SHORT_PROSE_UNIQUE``, of the whole column) and have longer
-    words than a code."""
+    that are mostly different (``SHORT_PROSE_UNIQUE``, of the whole column) or take
+    ``REPEATED_PROSE_VALUES`` different values, and have longer words than a code."""
     values = _as_str(s).dropna()
     first = values.head(1000)
     if not len(first):
@@ -106,7 +114,8 @@ def is_prose(s: pd.Series) -> bool:
     ):
         return False
     # a label with hundreds of levels looks all different in 1,000 rows: count them in all
-    return bool(values.nunique() >= SHORT_PROSE_UNIQUE * len(values))
+    different = values.nunique()
+    return bool(different >= SHORT_PROSE_UNIQUE * len(values) or different >= REPEATED_PROSE_VALUES)
 
 
 def _holds_date_strings(s: pd.Series) -> bool:
@@ -198,7 +207,7 @@ class Prep:
         for column, kind in self._plan:
             if kind == "category":
                 self._category_at[f"f{len(self.feature_names)}"] = column
-            if column not in self.prose and (
+            if (column not in self.prose or _repeats(X[column])) and (
                 kind in ("category", "frequency") or _has_few_levels(X[column], kind)
             ):
                 self._level_at[f"f{len(self.feature_names)}_l"] = column
@@ -379,7 +388,7 @@ class Prep:
         training. Columns that are frequencies keep the frequency beside the text, and a column of
         a few whole numbers is read as levels beside its number."""
         out = self.linear(df)
-        read = set(self._level_at.values())  # prose is not read as levels: it keeps its one-hots
+        read = set(self._level_at.values())  # a prose that does not repeat is not read as levels
         drop = [
             c
             for c in out.columns
