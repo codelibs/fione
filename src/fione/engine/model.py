@@ -51,6 +51,8 @@ class TrainedModel:
     # The classes' shares of the training data when the probabilities are delivered shifted to
     # equal class priors (sort_metric="balanced_logloss"); older models have none.
     proba_shift: np.ndarray | None = None
+    # 0.0 when no training target is below 0: a regression prediction is not delivered below it.
+    target_floor: float | None = None
 
     def choose(self, proba: np.ndarray) -> np.ndarray:
         """The class index per row of ``proba`` under the model's decision rule."""
@@ -85,6 +87,8 @@ class TrainedModel:
         if self.task == "regression":
             if self.config.target_transform == "log1p":
                 raw = np.expm1(raw)
+            if self.target_floor is not None:
+                raw = np.maximum(raw, self.target_floor)
             if isinstance(self.class_prior, Cuts):  # rounded_qwk: the rating its cut points give
                 raw = self.class_prior[0] + np.searchsorted(np.asarray(self.class_prior[1:]), raw)
             return pd.Series(raw, index=df.index, name=self.target, dtype=float)

@@ -309,6 +309,11 @@ change from the bias to the prediction in proportion to each column's effect on 
 which is an approximation. Only the scores of the search itself (the trial history) stay on the
 logarithm scale. Every value must be above -1, and the setting is ignored for classification.
 
+A regression target with no value below 0 (a price, a count) never gets a prediction below 0:
+`predict` and batch prediction raise such a prediction to 0, with or without the logarithm. The
+scores of the training are those of the predictions before this, and the explanation of a row
+shows the prediction it adds up to.
+
 ## Data that follows time
 
 When the rows to predict come after the rows to learn from (sales of next month, a later
