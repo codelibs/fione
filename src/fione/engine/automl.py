@@ -158,6 +158,10 @@ REPEATED_ROWS = 20
 REPEATED_SHARED = 0.8  # of the other columns, constant within a value, for the rows to look alike
 REPEATED_SAMPLE_ROWS = 50_000
 REPEATED_COLUMNS = 40  # other columns looked at
+# A regression target whose neighbouring rows are this alike (correlation of each value with the
+# next): see ``AutoML._notice_ordered_target``.
+ORDERED_MIN_ROWS = 200
+ORDERED_AUTOCORR = 0.8
 
 # A validated fit this good (or this poor) gets a notice: R-squared, or AUC for two classes.
 NEAR_PERFECT_R2 = 0.999
@@ -262,6 +266,28 @@ class AutoML:
             kind="repeated_values",
             columns=[column],
             shared=round(shared[column], 2),
+        )
+
+    def _notice_ordered_target(self, y: np.ndarray) -> None:
+        """Say when the target of a row is nearly that of the row before it: the rows are in
+        time order, or each has near copies beside it. The validation shuffles the rows, so the
+        neighbours of every validated row are learned from, and the score is far better than
+        the model will do on rows of other times. A table sorted by its target gets the notice
+        too: its rows look the same as a trend in time order, and the notice only asks."""
+        if len(y) < ORDERED_MIN_ROWS or np.ptp(y) == 0:
+            return
+        alike = np.corrcoef(y[:-1], y[1:])[0, 1]
+        if not alike >= ORDERED_AUTOCORR:
+            return
+        self._notice(
+            f"the target of a row is nearly that of the row before it (correlation "
+            f"{alike:.2f}), so the rows may be in time order or have near copies beside them. "
+            "The validation shuffles the rows: if the model will predict rows from other times or "
+            "other groups, the score is probably much better than it will be; name the column "
+            "that gives the order (add a row number if none does) as time_column, or the column "
+            "that ties related rows together as cv_group_column",
+            kind="ordered_target",
+            correlation=round(float(alike), 2),
         )
 
     def _fit_quality_notices(self, task: Task, model: TrainedModel) -> None:
@@ -494,6 +520,8 @@ class AutoML:
                 )
             if row_groups is None:
                 self._notice_repeated_values(prep, X)
+                if task == "regression" and not dates:
+                    self._notice_ordered_target(y_seen)
             folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
             first_run = folds[:nfolds]  # reported: the other repeats only judge the search
             if row_groups is not None and task == "classification":
