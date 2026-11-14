@@ -1,6 +1,7 @@
 """The MCP job tools: get, wait for, list and cancel a job, as the token's user with the
 access the REST job routes ask for."""
 
+import threading
 from contextlib import closing
 
 import pytest
@@ -79,6 +80,22 @@ def test_wait_for_job_returns_when_terminal(writes):  # noqa: F811
     job = out["structuredContent"]
     assert job["done"] is True and job["status"] == "done" and job["waited_secs"] < 1
     assert job["result"] == {"model_id": 3}
+
+
+def test_wait_for_job_notices_a_job_that_finishes_while_waiting(writes):  # noqa: F811
+    client, user = writes
+    project, dataset = iris_dataset(client, user)
+    headers = bearer(client, user)
+    job_id = queue(client, headers, project, dataset)
+    timer = threading.Timer(0.6, finish, args=(client, job_id), kwargs={"result": {"model_id": 5}})
+    timer.start()
+    try:
+        out = call(client, headers, "wait_for_job", {"job_id": job_id, "timeout_secs": 10})
+    finally:
+        timer.join()
+    job = out["structuredContent"]
+    assert job["done"] is True and job["status"] == "done" and job["result"] == {"model_id": 5}
+    assert 0.5 <= job["waited_secs"] < 5
 
 
 def test_wait_for_job_times_out_with_current_state(writes):  # noqa: F811
