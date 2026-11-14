@@ -1455,6 +1455,50 @@ def test_a_date_column_without_a_time_column_is_pointed_out_once_and_not_with_on
     assert not [e for e in events if e.data.get("kind") == "time_hint"]
 
 
+def _walk(n=400, seed=0):
+    """A target that drifts down the rows: the row before it is nearly the same."""
+    rng = np.random.default_rng(seed)
+    x = rng.normal(size=n)
+    y = np.cumsum(rng.normal(size=n))  # a random walk: neither sorted nor independent
+    return pd.DataFrame({"x": x, "y": y})
+
+
+def _ordered_hints(df, **config):
+    events = []
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    _fit(df, events, feature_engineering=False, **options, **config)
+    return [e for e in events if e.data.get("kind") == "ordered_target"]
+
+
+def test_a_target_that_follows_the_row_order_is_pointed_out_unless_the_order_is_given():
+    (hint,) = _ordered_hints(_walk())
+    assert hint.data["correlation"] > 0.8
+    assert "time_column" in hint.data["message"]
+    assert "cv_group_column" in hint.data["message"]
+    assert not _ordered_hints(_walk().assign(when=np.arange(400)), time_column="when")
+
+
+def test_a_target_of_independent_rows_is_not_pointed_out_and_a_trend_in_row_order_is():
+    rng = np.random.default_rng(1)
+    independent = pd.DataFrame({"x": rng.normal(size=400), "y": rng.normal(size=400)})
+    assert not _ordered_hints(independent)
+    trend = _trend(800).sort_values("day", kind="stable").reset_index(drop=True).drop(columns="day")
+    assert _ordered_hints(trend)  # in the order of its days, a trend is alike beside it
+
+
+def test_the_ordered_target_notice_waits_for_the_other_hints_and_for_a_group_column():
+    walk = _walk(800)
+    walk["group"] = np.arange(800) // 20
+    assert not _ordered_hints(walk, cv_group_column="group")
+    days = pd.Series(pd.Timestamp("2021-01-01") + pd.to_timedelta(np.arange(800), unit="D"))
+    walk["when"] = days.dt.strftime("%Y-%m-%d")
+    assert not _ordered_hints(walk.drop(columns="group"))  # the date column has its own notice
+
+
+def test_a_short_table_is_not_checked_for_an_ordered_target():
+    assert not _ordered_hints(_walk(100))
+
+
 def test_dates_written_as_whole_numbers_are_pointed_out_too():
     df = _trend(400)
     df["hour"] = (
