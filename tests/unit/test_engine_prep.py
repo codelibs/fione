@@ -465,6 +465,23 @@ def test_a_short_text_is_prose_only_when_its_values_are_mostly_different_words()
     assert Prep().fit(frame).prose == ("title",)
 
 
+def test_a_hex_id_is_not_prose_though_it_has_many_runs_of_letters():
+    n = 300
+    rng = np.random.default_rng(4)
+    ids = ["".join(rng.choice(list("0123456789abcdef"), 32)) for _ in range(n)]
+    sentences = [f"Spacious sunny apartment number {i} near the park and subway" for i in range(n)]
+    frame = pd.DataFrame(
+        {
+            "manager": ids,
+            "building": rng.choice(ids[:100], n),  # an id that repeats
+            "description": sentences,
+            "code": [f"C_ID_{i}a" for i in range(n)],
+        }
+    )
+    assert pd.Series(ids).str.findall(r"[a-f]+").str.len().median() >= 5  # looks like words
+    assert Prep().fit(frame).prose == ("description",)
+
+
 def test_a_label_with_hundreds_of_levels_is_not_prose_though_its_first_rows_look_different():
     n = 5000
     levels = [f"fraud_Shop{i}-Toy" for i in range(600)]  # three words each
