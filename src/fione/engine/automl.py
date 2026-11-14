@@ -162,6 +162,10 @@ REPEATED_COLUMNS = 40  # other columns looked at
 # next): see ``AutoML._notice_ordered_target``.
 ORDERED_MIN_ROWS = 200
 ORDERED_AUTOCORR = 0.8
+# A whole-number column that never decreases down the rows, of at least this many different
+# values each on this many rows or more on average: see ``AutoML._notice_sorted_column``.
+SORTED_VALUES = 20
+SORTED_ROWS = 20
 
 # A validated fit this good (or this poor) gets a notice: R-squared, or AUC for two classes.
 NEAR_PERFECT_R2 = 0.999
@@ -267,6 +271,34 @@ class AutoML:
             columns=[column],
             shared=round(shared[column], 2),
         )
+
+    def _notice_sorted_column(self, prep: Prep, X: pd.DataFrame) -> bool:
+        """Say when a whole-number column never decreases down the rows and each of its values
+        covers many rows (a day number, a period, a group number the file is sorted by): the
+        rows may be in time order, or the rows of a value belong together. The validation
+        shuffles them, so the rows of every value sit on both sides of a split."""
+        n_rows = len(X)
+        for column in prep.columns:
+            values = X[column]
+            if prep.kind_of(column) != "numeric" or not pd.api.types.is_integer_dtype(values):
+                continue
+            if not values.is_monotonic_increasing:
+                continue
+            distinct = values.nunique()
+            if SORTED_VALUES <= distinct <= n_rows / SORTED_ROWS:
+                self._notice(
+                    f"{column!r} never decreases down the rows and each of its {distinct:,} "
+                    f"values covers about {n_rows / distinct:.0f} rows, so the rows may be "
+                    "sorted by time, or the rows of one value may belong together. The "
+                    "validation shuffles the rows: if the model will predict rows from later "
+                    "times or other groups, the score is probably much better than it will be; "
+                    "name that column as time_column, or as cv_group_column if the rows of one "
+                    "value belong together",
+                    kind="sorted_column",
+                    columns=[column],
+                )
+                return True
+        return False
 
     def _notice_ordered_target(self, y: np.ndarray) -> None:
         """Say when the target of a row is nearly that of the row before it: the rows are in
@@ -520,8 +552,9 @@ class AutoML:
                 )
             if row_groups is None:
                 self._notice_repeated_values(prep, X)
-                if task == "regression" and not dates:
-                    self._notice_ordered_target(y_seen)
+                if not dates and not self._notice_sorted_column(prep, X):
+                    if task == "regression":
+                        self._notice_ordered_target(y_seen)
             folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
             first_run = folds[:nfolds]  # reported: the other repeats only judge the search
             if row_groups is not None and task == "classification":

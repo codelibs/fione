@@ -1495,6 +1495,38 @@ def test_the_ordered_target_notice_waits_for_the_other_hints_and_for_a_group_col
     assert not _ordered_hints(walk.drop(columns="group"))  # the date column has its own notice
 
 
+def _sorted_hints(df, **config):
+    events = []
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    _fit(df, events, feature_engineering=False, **options, **config)
+    return [e for e in events if e.data.get("kind") == "sorted_column"]
+
+
+def _panel(n=1_200, seed=0):
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame(
+        {"x": rng.normal(size=n), "day": np.arange(n) // 30, "y": rng.normal(size=n)}
+    )
+
+
+def test_a_whole_number_column_the_rows_are_sorted_by_is_pointed_out():
+    (hint,) = _sorted_hints(_panel())
+    assert hint.data["columns"] == ["day"]
+    assert "time_column" in hint.data["message"]
+    assert "cv_group_column" in hint.data["message"]
+    assert not _sorted_hints(_panel(), time_column="day")
+
+
+def test_a_column_that_is_not_sorted_or_has_few_or_unique_values_is_not_pointed_out():
+    df = _panel()
+    assert not _sorted_hints(df.assign(day=df["day"].sample(frac=1, random_state=0).to_numpy()))
+    assert not _sorted_hints(df.assign(day=np.arange(len(df)) // 100))  # 12 values
+    assert not _sorted_hints(df.assign(day=np.arange(len(df))))  # every row on its own
+    assert not _sorted_hints(df.assign(day=df["day"].astype(float)))
+    dated = df.assign(when=(pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")))
+    assert not _sorted_hints(dated.assign(when=dated["when"].dt.strftime("%Y-%m-%d")))
+
+
 def test_a_short_table_is_not_checked_for_an_ordered_target():
     assert not _ordered_hints(_walk(100))
 
