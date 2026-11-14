@@ -14,7 +14,8 @@ kept only when the loss drops over paired folds by more than ``GATE_Z`` standard
 and the kept groups together pass a last check on other folds of the same rows. A few more
 candidates cost little (a rejected group is dropped after one repeat of folds if it does not
 help at all), and the whole gate is bounded by a deadline: groups not yet confirmed by the last
-check when it runs out are not kept. The reference model does not sample columns, since that
+check when it runs out are not kept, so the search stops judging groups while the time left
+still covers that check. The reference model does not sample columns, since that
 would reward any added column. Groups, not single features, are judged, which limits the
 number of comparisons. The folds
 differ from the search's, but the rows are the same, so the cross-validation scores of the
@@ -27,6 +28,7 @@ with several sources splits its share equally among them.
 import copy
 import itertools
 import re
+import time
 import warnings
 from collections import Counter
 from dataclasses import dataclass
@@ -55,6 +57,8 @@ GATE_SEED_OFFSET = 1000  # the gate's folds differ from the search's
 GATE_SEED_SPACE = 2**31 - 1000  # keeps the folds' seeds (plus the repeat) valid for any seed
 THREAD_ROWS = 5000  # below this the reference model runs on one thread: faster on small data
 GATE_REPEATS = 3  # fold repeats a promising group is judged on
+FINAL_REPEATS = 2  # fold repeats of the last check, which no choice has seen
+FINAL_MARGIN = 1.5  # the time kept for the last check, over what its repeats took before
 DECISIVE_GAIN = 0.05  # share of the loss a group saves to be kept when time ends the last check
 MAX_CANDIDATES = 40
 CLUSTERS = 8
@@ -749,6 +753,18 @@ class _OutOfTime(Exception):
     """The gate's deadline passed (or the run was cancelled) in the middle of a comparison."""
 
 
+class _Fitted:
+    """A group of the gate's, whose fit on the gate's rows ``Prep.fit`` takes from the gate
+    instead of repeating it: the topics of a long text cost seconds to fit."""
+
+    def __init__(self, gate: "_Gate", group: Group):
+        self.gate, self.group = gate, group
+        self.label, self.columns = group.label, group.columns
+
+    def fit(self, X: pd.DataFrame) -> Group:
+        return self.gate.fitted(self.group)
+
+
 class _Gate:
     """Paired fold-wise losses of the reference model on a sample of the rows."""
 
@@ -758,6 +774,8 @@ class _Gate:
         self.X, self.y, self.task, self.seed, self.groups = X, y, task, seed, groups
         self.out_of_time = out_of_time
         self._cache: dict[tuple, np.ndarray] = {}
+        self._fitted: dict[str, Group] = {}
+        self._secs: dict[tuple, float] = {}  # seconds a repeat of the folds took, per set of groups
         self.nfolds = max(2, min(GATE_FOLDS, nfolds))
         if groups is not None:  # a sample may hold fewer groups than the run has
             self.nfolds = max(2, min(self.nfolds, len(np.unique(groups))))
@@ -788,18 +806,25 @@ class _Gate:
             verbose=-1,
         )
 
+    def fitted(self, group: Group) -> Group:
+        """``group`` fitted on the gate's rows, once however many views read it."""
+        if group.label not in self._fitted:
+            self._fitted[group.label] = copy.copy(group).fit(self.X)
+        return self._fitted[group.label]
+
     def losses(self, groups: list[Group], repeats: range) -> np.ndarray:
         """Fold losses with ``groups``, for each repeat of the folds; ``_OutOfTime`` when the
         deadline passes before they are all done. Results are kept per set of groups."""
         labels = tuple(g.label for g in groups)
         view = None
         out = []
+        started, computed = time.monotonic(), 0
         for repeat in repeats:
             if (labels, repeat) not in self._cache:
                 if view is None:
                     if self.out_of_time():
                         raise _OutOfTime
-                    view = Prep().fit(self.X, groups).tree(self.X)
+                    view = Prep().fit(self.X, [_Fitted(self, g) for g in groups]).tree(self.X)
                 done = []
                 for train, valid in self.folds(repeat):
                     if self.out_of_time():
@@ -812,8 +837,19 @@ class _Gate:
                         pred[:, model.classes_] = model.predict_proba(view.iloc[valid])
                     done.append(_loss(self.task, self.y[valid], pred, self.classes))
                 self._cache[labels, repeat] = np.asarray(done)
+                computed += 1
+                self._secs[labels] = (time.monotonic() - started) / computed
             out.append(self._cache[labels, repeat])
         return np.concatenate(out)
+
+    def secs(self, groups: list[Group]) -> float:
+        """What a repeat of the folds with ``groups`` takes: measured, or as long as the longest
+        measured so far."""
+        return self._secs.get(tuple(g.label for g in groups), max(self._secs.values(), default=0.0))
+
+    def last_check_secs(self, groups: list[Group]) -> float:
+        """What the last check of ``groups`` takes."""
+        return FINAL_REPEATS * (self.secs([]) + self.secs(groups))
 
     def ranked(self) -> list[str]:
         """Input columns by the gain of one reference fit on all sampled rows."""
@@ -886,12 +922,20 @@ def select_groups(
     )
     kept: list[Group] = []
     verdicts: list[Verdict] = []
+    pool: list[Group] = []
     try:
         pool = candidates(Prep().fit(X), X, gate.ranked())
         current = gate.losses([], range(1))
         for group in pool:
-            fitted = copy.copy(group).fit(X)
-            width = len(fitted.names)
+            # A group not kept for its gain alone must pass the last check, which time may not cut
+            # short: the search stops once what is left covers that and one more group that
+            # goes through all its repeats.
+            unconfirmed = any(v.adopted and v.gain < DECISIVE_GAIN for v in verdicts)
+            if unconfirmed and deadline.remaining() < (
+                FINAL_MARGIN * gate.last_check_secs(kept) + GATE_REPEATS * gate.secs(kept)
+            ):
+                break
+            width = len(gate.fitted(group).names)
             if not width:
                 verdicts.append(Verdict(group.label, 0, False, 0.0, "no varying feature"))
                 continue
@@ -911,7 +955,7 @@ def select_groups(
             else:
                 verdicts.append(Verdict(group.label, width, False, gain, "too small a gain"))
         if kept:
-            fresh = range(GATE_REPEATS, GATE_REPEATS + 2)  # folds no choice has seen
+            fresh = range(GATE_REPEATS, GATE_REPEATS + FINAL_REPEATS)  # folds no choice has seen
             if not passes(gate.losses([], fresh), gate.losses(kept, fresh)):
                 _drop_adopted(verdicts, "final check")
                 kept = []
@@ -923,8 +967,8 @@ def select_groups(
         for verdict in verdicts:
             if verdict.adopted and verdict.group not in decisive:
                 verdict.adopted, verdict.reason = False, "time"
-        judged = {v.group for v in verdicts}
-        verdicts += [Verdict(g.label, 0, False, 0.0, "time") for g in pool if g.label not in judged]
+    judged = {v.group for v in verdicts}
+    verdicts += [Verdict(g.label, 0, False, 0.0, "time") for g in pool if g.label not in judged]
     return kept, verdicts
 
 

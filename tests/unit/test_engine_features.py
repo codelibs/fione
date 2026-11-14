@@ -743,6 +743,77 @@ def test_a_decisive_group_is_kept_when_the_deadline_cuts_the_last_check(monkeypa
     assert adopted and {g.label for g in kept} == adopted
 
 
+def test_the_gate_fits_each_group_once_however_many_views_read_it(monkeypatch):
+    X, y = people()
+    fits = []
+    real = features.Group.fit
+
+    def counting(self, frame):
+        fits.append(self.label)
+        return real(self, frame)
+
+    monkeypatch.setattr(features.Group, "fit", counting)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    assert kept and len(fits) == len(set(fits))
+    assert {v.group for v in verdicts if v.features} <= set(fits)
+
+
+class _Clock:
+    """A deadline with this much time left that never expires, so only the choice of what to
+    judge can be told apart from the gate being cut off."""
+
+    def __init__(self, left):
+        self.left = left
+
+    def remaining(self):
+        return self.left
+
+    def expired(self):
+        return False
+
+
+def test_the_search_stops_for_the_last_check_when_time_is_short(monkeypatch):
+    X, y = people()
+    monkeypatch.setattr(features, "DECISIVE_GAIN", 2.0)  # no gain is that large
+    full_kept, full = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    monkeypatch.setattr(features._Gate, "last_check_secs", lambda self, groups: 10.0)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, _Clock(5.0))
+    adopted = [v.group for v in verdicts if v.adopted]
+    assert adopted and [g.label for g in kept] == adopted  # confirmed, not dropped for time
+    assert all(v.reason == "adopted" for v in verdicts if v.adopted)
+    left = [v for v in verdicts if v.reason == "time"]
+    assert left and len(verdicts) == len(full)  # every candidate has a verdict
+    assert len(left) > len([v for v in full if v.reason == "time"])
+
+
+def test_the_search_goes_on_while_the_time_left_covers_the_last_check(monkeypatch):
+    X, y = people()
+    monkeypatch.setattr(features, "DECISIVE_GAIN", 2.0)
+    monkeypatch.setattr(features._Gate, "last_check_secs", lambda self, groups: 1.0)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, _Clock(1e9))
+    assert not any(v.reason == "time" for v in verdicts)
+
+
+def test_a_decisive_group_needs_no_time_for_the_last_check(monkeypatch):
+    X, y = people()
+    monkeypatch.setattr(features, "DECISIVE_GAIN", 0.0)  # every adopted group counts
+    monkeypatch.setattr(features._Gate, "last_check_secs", lambda self, groups: 10.0)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, _Clock(5.0))
+    assert not any(v.reason == "time" for v in verdicts)
+
+
+def test_the_gate_estimates_the_last_check_from_the_repeats_it_has_run():
+    X, y = people()
+    gate = features._Gate(X, y, "classification", 5, 0)
+    group = features.TextTokens("name")
+    gate.losses([], range(1))
+    gate.losses([group], range(1))
+    assert gate.secs([group]) == gate._secs[(group.label,)] > 0
+    secs = gate.last_check_secs([group])
+    assert secs == features.FINAL_REPEATS * (gate.secs([]) + gate.secs([group])) > 0
+    assert gate.secs([features.TextShape("name")]) == max(gate._secs.values())  # not measured
+
+
 def test_the_deadline_is_polled_inside_the_comparisons():
     X, y = people()
     polls = []
