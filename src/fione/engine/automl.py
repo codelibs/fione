@@ -634,6 +634,9 @@ class AutoML:
             features=tried,
             class_prior=prior,
             proba_shift=shift,
+            target_floor=0.0
+            if task == "regression" and not rating_cuts and y_seen.min() >= 0
+            else None,
         )
         self._fit_quality_notices(task, model)
         self._event(

@@ -1889,3 +1889,18 @@ def test_columns_with_one_value_or_none_are_named_when_they_are_left_out():
     events = []
     _fit(_binary(300), events, families=["LightGBM"], target="y", max_models=1)
     assert "columns_left_out" not in [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+def test_a_target_without_negative_values_gets_no_negative_prediction():
+    rng = np.random.default_rng(3)
+    x = rng.uniform(0, 10, 400)
+    df = pd.DataFrame(
+        {"x": x, "y": np.maximum(x - 4, 0) * 3 + rng.normal(0, 0.5, 400).clip(0, None)}
+    )
+    model = _fit(df, families=["Linear"], target="y", max_models=1)
+    assert model.target_floor == 0.0
+    out = model.predict(pd.DataFrame({"x": [-50.0, 0.0, 9.0]}))
+    assert (out >= 0).all() and out.iloc[2] > out.iloc[0]
+    signed = _fit(df.assign(y=df["y"] - 5), families=["Linear"], target="y", max_models=1)
+    assert signed.target_floor is None
+    assert (signed.predict(pd.DataFrame({"x": [-50.0]})) < 0).all()
