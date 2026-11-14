@@ -27,6 +27,7 @@ PROSE_WORDS = 5  # a column whose median value has this many words is prose, not
 SHORT_PROSE_WORDS = 3
 SHORT_PROSE_UNIQUE = 0.5  # share of different values in the column
 SHORT_PROSE_WORD_CHARS = 3  # mean letters of a word, so that a code such as C_ID_92a is no text
+SPACED_PROSE = 0.5  # share of values with a space: words of one letter are text only if spaced
 # ... and so is a short text that repeats (a search query) when it takes this many different
 # values: a label has a few hundred at most, and a query is read by its words, not as a whole.
 REPEATED_PROSE_VALUES = 1000
@@ -148,7 +149,8 @@ def _as_str(s: pd.Series) -> pd.Series:
 
 def is_prose(s: pd.Series) -> bool:
     """Whether a string column holds text: the median value has ``PROSE_WORDS`` words (runs of
-    letters, so a timestamp or a code is not prose), or ``SHORT_PROSE_WORDS`` words in values
+    letters, so a timestamp or a code is not prose; nor is a hex id, whose runs are short and
+    have no spaces between them), or ``SHORT_PROSE_WORDS`` words in values
     that are mostly different (``SHORT_PROSE_UNIQUE``, of the whole column) or take
     ``REPEATED_PROSE_VALUES`` different values, and have longer words than a code."""
     values = _as_str(s).dropna()
@@ -157,7 +159,12 @@ def is_prose(s: pd.Series) -> bool:
         return False
     words = first.str.findall(_LETTERS.pattern)
     counts = words.str.len()
-    if counts.median() >= PROSE_WORDS:
+    # a hex id has as many runs of letters as a sentence has words, but runs of a letter or two
+    # and no spaces between them
+    spaced = first.str.contains(r"\s").mean() >= SPACED_PROSE
+    if counts.median() >= PROSE_WORDS and (
+        spaced or words.explode().str.len().mean() >= SHORT_PROSE_WORD_CHARS
+    ):
         return True
     if (
         counts.median() < SHORT_PROSE_WORDS
