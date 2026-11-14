@@ -20,6 +20,7 @@ from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from fione import db
+from fione.api import routes_jobs
 from fione.auth import service as auth_service
 from fione.tools import ToolContext, ToolError, call_tool, list_actions, list_tools
 from fione.version import __version__
@@ -220,7 +221,13 @@ def _call(request: Request, conn, user, rpc_id, params: dict) -> Response:
         return _error(rpc_id, _INVALID_PARAMS, "invalid params")
     # never example values, and no project scope: the user's own readable projects
     ctx = ToolContext(
-        conn, request.app.state.storage, user, allow_samples=False, project_id=None, via="mcp"
+        conn,
+        request.app.state.storage,
+        user,
+        allow_samples=False,
+        project_id=None,
+        via="mcp",
+        cancel=lambda job: routes_jobs.cancel(request, conn, job),
     )
     try:
         result = call_tool(name, arguments, ctx, actions=_writes(request))

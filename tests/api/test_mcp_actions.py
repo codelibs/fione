@@ -12,7 +12,8 @@ from fione.jobs import store
 from fione.projects import service as projects
 from fione.tools import list_actions, list_tools, registry
 
-ACTIONS = {"list_modules", "start_training", "start_batch_predict", "run_module"}
+READS = {"list_modules", "get_job", "wait_for_job", "list_jobs"}
+ACTIONS = READS | {"start_training", "start_batch_predict", "run_module", "cancel_job"}
 CONFIG = {"target": "species", "max_runtime_secs": 30}
 
 
@@ -55,8 +56,9 @@ def test_listed_with_honest_annotations(writes):
     client, user = writes
     tools = tool_list(client, bearer(client, user))
     assert ACTIONS <= set(tools) and "list_projects" in tools
-    assert tools["list_modules"]["annotations"]["readOnlyHint"] is True
-    for name in ACTIONS - {"list_modules"}:
+    for name in READS:
+        assert tools[name]["annotations"]["readOnlyHint"] is True
+    for name in ACTIONS - READS:
         ann = tools[name]["annotations"]
         assert ann["readOnlyHint"] is False and ann["destructiveHint"] is False
         assert ann["idempotentHint"] is False

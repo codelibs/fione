@@ -22,6 +22,7 @@ from typing import Literal
 import numpy as np
 
 from fione.auth.roles import User
+from fione.jobs.store import Job
 from fione.schema import clean_text, validate_args
 from fione.storage import Storage
 
@@ -61,6 +62,9 @@ class ToolContext:
     # a chat lets find_table_links ask the model for links the names do not show: (question,
     # tool) -> the arguments of the tool call, or None when the model gave none
     ask_model: Callable[[str, dict], dict | None] | None = None
+    # MCP lets cancel_job stop an unfinished job as the REST route does: job -> the job as it is
+    # now (the caller has checked write access)
+    cancel: Callable[[Job], Job] | None = None
 
 
 _TOOLS: dict[str, Tool] = {}
