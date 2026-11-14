@@ -412,7 +412,7 @@ models as a number of days.
 Each group is tried on a small LightGBM over rows it samples, and kept only if the loss drops
 over paired cross-validation folds by more than three standard errors and by 0.1 % on average,
 with at least 70 % of the folds improving, and the kept groups together pass a last check on
-other folds of the same rows. The gate gets a tenth of the run time (a short run gives it 30 seconds, but never more than 30 % of the run). The groups tried,
+other folds of the same rows. The gate gets a tenth of the run time (a short run gives it 30 seconds, but never more than 30 % of the run); when that is not enough for every group, it stops judging in time for the last check of the groups it has kept, and the groups it did not reach are marked as not judged. The groups tried,
 their gains and why each was kept or not are on the model (`features`) and in a `features`
 notice. A table of more than 5,000 columns gets none: one fit of the quick model on so many
 columns takes longer than the time the gate has, and a `notice` says so.

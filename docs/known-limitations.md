@@ -107,9 +107,11 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - **The choice of derived features uses the same rows as the cross-validation**, on different
   folds and with a strict rule, so the scores of a run are slightly optimistic, like the
   diagnostics. On small data a real but small gain (about 1 % of the loss) often does not clear
-  the rule and the feature is left out. If the time for the choice runs out, groups that passed
-  but were not yet confirmed by the last check are dropped, unless they saved 5 % of the loss or
-  more, so short runs may add none. The gate judges on a sample of at most 20,000 rows and a
+  the rule and the feature is left out. When the time for the choice is short, the search stops
+  judging groups once what is left only covers the last check of the groups it has kept, and the
+  groups it did not reach are listed as not judged; if the time runs out in the middle of the
+  last check, the groups that passed but were not yet confirmed are dropped, unless they saved
+  5 % of the loss or more, so short runs may add none. The gate judges on a sample of at most 20,000 rows and a
   small LightGBM, so a feature that only a neural network or a linear model would use is not
   found; target encoding and categorical crosses as categories are not built. The group size of
   an identifier counts training rows only, so a row of a training group counts itself and a new
