@@ -193,7 +193,11 @@ columns of each dataset (fewer when the result would not fit; the other datasets
 kept), so that the assistant can tell which table holds the column to predict. A dataset with several rows per key is
 added to the one with the column to predict by the **Join** module: the key, and `summarize`,
 which gives each key one row (the number of rows, and the mean, minimum, maximum and sum of each
-number). Name `columns` to add or summarize only those columns of the other dataset, for example
+number). Set the module's `stats` parameter to name others instead, from `mean`, `min`, `max`,
+`sum`, `std` and `last` (the last value that is not empty in the order of the rows of the other
+dataset, such as the latest statement of a customer; sort it first when it is not in time order);
+the assistant's join proposal does not set it.
+Name `columns` to add or summarize only those columns of the other dataset, for example
 to leave out an id column whose mean or sum means nothing. When both repeat, summarize the one
 that is not the base first. The job says how many rows found no row with their key in the other
 dataset (a notice), and asks to check how the keys are written when none did.

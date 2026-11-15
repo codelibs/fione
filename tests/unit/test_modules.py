@@ -415,6 +415,37 @@ def test_join_summarizes_a_table_with_many_rows_per_key():
     assert list(out["kind_nunique"].fillna(-1)) == [2, 1, -1]
 
 
+def test_join_summarize_takes_the_statistics_named_including_the_last_value_and_the_spread():
+    df = pd.DataFrame({"id": [1, 2, 3]})
+    other = pd.DataFrame(
+        {
+            "id": [1, 1, 1, 2],
+            "amount": [10.0, 30.0, np.nan, 5.0],
+            "n": [1, 2, 3, 4],
+            "kind": ["a", "b", "a", "a"],
+        }
+    )
+    params = {"other_dataset_id": 1, "key": "id", "summarize": True, "stats": "last, std,last"}
+    out, _ = run_op("join", df, params, other)
+    assert list(out.columns) == [
+        "id",
+        "rows",
+        "amount_last",
+        "amount_std",
+        "n_last",
+        "n_std",
+        "kind_nunique",
+    ]
+    # the last value that is not empty, in the order of the rows; a spread needs two values
+    assert list(out["amount_last"].fillna(-1)) == [30.0, 5.0, -1]
+    assert list(out["n_last"].fillna(-1)) == [3, 4, -1]
+    assert out["amount_std"].iloc[0] == pytest.approx(np.std([10.0, 30.0], ddof=1))
+    assert np.isnan(out["amount_std"].iloc[1])
+    for text in ("median", "", "mean,,bogus"):
+        with pytest.raises(ModuleError, match="stats must name"):
+            run_op("join", df, {**params, "stats": text}, other)
+
+
 def test_join_adds_only_the_chosen_columns_and_summarizes_only_those():
     df = pd.DataFrame({"id": [1, 2, 3]})
     other = pd.DataFrame(

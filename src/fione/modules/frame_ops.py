@@ -95,24 +95,35 @@ def concat(df, params, ctx):
     return _side_by_side(df, other) if params["axis"] == 1 else _stacked(df, other)
 
 
-_SUMMARIES = ("mean", "min", "max", "sum")
+_SUMMARIES = ("mean", "min", "max", "sum", "std", "last")
+_SUMMARY_DEFAULT = "mean,min,max,sum"
 _JOIN_KEY = "\0join_key"  # a name no column has
 _JOIN_MATCH = "\0join_match"
 
 
-def _summary(other: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
-    """One row per value of ``keys``: the number of rows, and per column the mean, minimum,
-    maximum and sum of a number, or the number of different values of anything else."""
+def _summary_stats(text: str) -> list[str]:
+    """The statistics named in a comma-separated list, without repeats."""
+    stats = [part.strip() for part in text.split(",") if part.strip()]
+    unknown = [stat for stat in stats if stat not in _SUMMARIES]
+    if unknown or not stats:
+        raise ModuleError(f"stats must name one or more of {', '.join(_SUMMARIES)}")
+    return list(dict.fromkeys(stats))
+
+
+def _summary(other: pd.DataFrame, keys: list[str], stats: list[str]) -> pd.DataFrame:
+    """One row per value of ``keys``: the number of rows, and per column the statistics ``stats``
+    of a number, or the number of different values of anything else. ``last`` is the last value
+    that is not empty, in the order of the rows."""
     others = [c for c in other.columns if c not in keys]
     numeric = [c for c in others if pd.api.types.is_numeric_dtype(other[c])]
     rest = [c for c in others if c not in numeric]
-    check_cells(len(other[keys].drop_duplicates()), 1 + len(numeric) * len(_SUMMARIES) + len(rest))
+    check_cells(len(other[keys].drop_duplicates()), 1 + len(numeric) * len(stats) + len(rest))
     groups = other.groupby(keys)
     parts = [groups.size().rename("rows").to_frame()]
     if numeric:
-        stats = groups[numeric].agg(list(_SUMMARIES))
-        stats.columns = [f"{column}_{how}" for column, how in stats.columns]
-        parts.append(stats)
+        summary = groups[numeric].agg(stats)
+        summary.columns = [f"{column}_{how}" for column, how in summary.columns]
+        parts.append(summary)
     if rest:
         parts.append(groups[rest].nunique().add_suffix("_nunique"))
     summary = pd.concat(parts, axis=1)
@@ -145,8 +156,9 @@ def join(df, params, ctx):
     row stays, with missing values where the other dataset has no such key). The key is one
     column (``key``) or several that identify a row together (``keys``); a row with a missing
     part matches nothing. The rows of the other dataset must each have a different key, unless
-    ``summarize`` replaces them by one row per key (the number of rows, and the mean, minimum,
-    maximum and sum of each number). With ``columns``, only those columns of the other dataset
+    ``summarize`` replaces them by one row per key (the number of rows, and of each number the
+    statistics named by ``stats``: the mean, minimum, maximum and sum unless others are named, from
+    mean, min, max, sum, std and last). With ``columns``, only those columns of the other dataset
     are added or summarized."""
     other = _other(ctx)
     keys = _key_columns(df, params, "key", "keys")
@@ -164,7 +176,7 @@ def join(df, params, ctx):
             raise ModuleError(f"unknown columns of the other dataset: {unknown}")
         other = other[[*other_keys, *[c for c in params["columns"] if c not in other_keys]]]
     if params["summarize"]:
-        other = _summary(other, other_keys)
+        other = _summary(other, other_keys, _summary_stats(params["stats"]))
     elif other[other_keys].dropna().duplicated().any():
         raise ModuleError(
             f"the values of {', '.join(repr(k) for k in other_keys)} repeat in the other "
@@ -782,6 +794,7 @@ _op(
         "other_key": {**_NAME, "default": ""},
         "other_keys": _NAMES,
         "summarize": {"type": "boolean", "default": False},
+        "stats": {"type": "string", "maxLength": 100, "default": _SUMMARY_DEFAULT},
         "columns": _NAMES,
     },
     ("other_dataset_id",),
