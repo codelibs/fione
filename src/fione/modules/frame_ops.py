@@ -439,38 +439,42 @@ def _order_numbers(key):
     return key.to_numpy(dtype="float64", na_value=np.nan)
 
 
-def _span_rows(run, order, span, around):
+def _span_rows(run, order, span, side):
     """The first row and the row after the last of each window of a range of the order, for rows
     sorted by group and order: the rows whose order is within ``span`` before the row's (the row's
-    own order and later ones are left out), or within half of ``span`` either side of it (itself
-    and the rows of its own order included). A group is a ``run``; the order values are replaced
-    by their ranks so that a group and an order make one sorted whole number to search."""
+    own order and later ones are left out), within ``span`` after it (the row's own order and
+    earlier ones are left out), or within half of ``span`` either side of it (itself and the rows
+    of its own order included). A group is a ``run``; the order values are replaced by their
+    ranks so that a group and an order make one sorted whole number to search."""
     # for 0.3 - 0.1 not being 0.2: a row on the edge of the range is in. The floats of large
     # orders are coarse (1.7e9 has gaps of 2.4e-7), so allow for their size too.
     finite = order[np.isfinite(order)]
     slack = max(span * 1e-6, 4 * np.spacing(np.abs(finite).max()) if len(finite) else 0.0)
-    reach = span / 2 if around else span
+    reach = span / 2 if side == "around" else span
     low = order - reach - slack
     high = order + reach + slack
-    ranked = np.unique(np.concatenate([order, low, high] if around else [order, low]))
+    bounds = {"before": [low], "after": [high], "around": [low, high]}[side]
+    ranked = np.unique(np.concatenate([order, *bounds]))
     width = len(ranked) + 1
 
     def key(values):
         return run * width + np.searchsorted(ranked, values)
 
     rows = key(order)
+    if side == "after":  # after the rows of its own order
+        return np.searchsorted(rows, rows, side="right"), np.searchsorted(rows, key(high), "right")
     start = np.searchsorted(rows, key(low), side="left")
-    if around:
+    if side == "around":
         return start, np.searchsorted(rows, key(high), side="right")
     return start, np.searchsorted(rows, rows, side="left")  # before the rows of its own order
 
 
-def _window_rows(groups, order, same, window, span, around):
+def _window_rows(groups, order, same, window, span, side):
     """The first row and the row after the last of each window, for rows sorted by group and
-    order: ``window`` rows centred on the row (itself included), or the ``window`` rows whose
-    order is earlier than the row's; or, for a ``span``, the rows within a range of the order.
-    No window goes over the edge of its group. ``same`` holds the order as it is, to tell rows of
-    one order from the others."""
+    order: ``window`` rows centred on the row (itself included), the ``window`` rows whose order
+    is earlier than the row's, or the ``window`` rows whose order is later; or, for a ``span``,
+    the rows within a range of the order. No window goes over the edge of its group. ``same``
+    holds the order as it is, to tell rows of one order from the others."""
     n = len(groups)
     rows = np.arange(n)
     group_new = np.ones(n, dtype=bool)
@@ -479,15 +483,20 @@ def _window_rows(groups, order, same, window, span, around):
     last = np.append(first[1:], n)
     run = np.cumsum(group_new) - 1
     if span:
-        return _span_rows(run, order, span, around)
+        return _span_rows(run, order, span, side)
     group_start, group_end = first[run], last[run]
-    if around:
+    if side == "around":
         reach = window // 2
         return np.maximum(rows - reach, group_start), np.minimum(rows + reach + 1, group_end)
-    # the first row of the rows that share the row's order: the window ends before it
+    # the rows that share the row's order are a tie: a window ends before the tie, or starts after
     tie_new = group_new.copy()
     tie_new[1:] |= same[1:] != same[:-1]
-    tie_start = np.flatnonzero(tie_new)[np.cumsum(tie_new) - 1]
+    ties = np.flatnonzero(tie_new)
+    tie = np.cumsum(tie_new) - 1
+    if side == "after":
+        tie_end = np.append(ties[1:], n)[tie]
+        return tie_end, np.minimum(tie_end + window, group_end)
+    tie_start = ties[tie]
     return np.maximum(tie_start - window, group_start), tie_start
 
 
@@ -495,8 +504,10 @@ def rolling(df, params, ctx):
     """Add statistics of the values around each row: ``column_before5_mean`` is the mean of the
     5 rows before it, ``column_around5_std`` the standard deviation of the 5 rows centred on it
     (itself included). The rows are taken in the order of the ``order`` column within each ``by``
-    group. ``before`` reads only rows whose order is earlier than the row's, so rows with the same
-    order do not read each other; ``around`` reads the rows next to the row, whatever their order.
+    group. ``before`` reads only rows whose order is earlier than the row's, and ``after`` only rows
+    whose order is later (so rows with the same order do not read each other); ``around`` reads the
+    rows next to the row, whatever their order. ``after`` and ``around`` read rows that come later,
+    so they suit data whose later rows are known when a row is predicted, not a forecast.
     A row with no ``order`` or no ``by`` value gets empty values and is left out of the windows of
     the others. A window at the edge of a group is shorter."""
     order = require_column(df, params["order"])
@@ -533,7 +544,7 @@ def rolling(df, params, ctx):
     ordered_key = key.iloc[position]
     numbers = _order_numbers(ordered_key)
     same = ordered_key.to_numpy() if _is_date(ordered_key) else numbers
-    start, end = _window_rows(groups, numbers, same, window, span, around)
+    start, end = _window_rows(groups, numbers, same, window, span, side)
     label = (
         f"{side}_span{np.format_float_positional(span, trim='-')}" if span else f"{side}{window}"
     )
@@ -830,7 +841,7 @@ _op(
         "columns": _NAMES,
         "window": {"type": "integer", "minimum": 0, "maximum": 1_000_000, "default": 0},
         "span": {"type": "number", "minimum": 0, "default": 0},
-        "side": {"type": "string", "enum": ["before", "around"], "default": "before"},
+        "side": {"type": "string", "enum": ["before", "around", "after"], "default": "before"},
         "stats": {"type": "string", "maxLength": 100, "default": "mean"},
     },
     ("order", "columns"),

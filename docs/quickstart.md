@@ -289,9 +289,12 @@ rows whose order is earlier than the row's, so the row itself, later rows and ro
 same order (several rows of one day) are never read. With `around`, `signal_around5_std` is the
 standard deviation of the 5 rows centred on the row, itself included (the window must be odd);
 it reads later rows and rows with the same order, so use it only on columns whose later values
-are also known when the model is used, never on the target. With a `span`, `before` reads the
-rows within the span before the row and `around` the rows within half of the span either side of
-it, itself included. A window at the edge of a group is shorter, a `std` needs at least two
+are also known when the model is used, never on the target. With `after`, `signal_after5_mean` is
+the mean of the 5 rows after the row: only rows whose order is later than the row's, so the row
+itself, earlier rows and rows with the same order are never read; the same caution applies, and
+next to a `before` window it shows what changes at a row (a level that drops or rises). With a
+`span`, `before` reads the rows within the span before the row, `after` the rows within the span
+after it, and `around` the rows within half of the span either side of it, itself included. A window at the edge of a group is shorter, a `std` needs at least two
 values, and an infinite value counts as missing. A row with no `order` or no `by` value gets
 empty values and is left out of the windows of the others. A `window` wider than any group
 (up to 1,000,000 rows) makes `before` read every earlier row of the group, so `sum` gives a
