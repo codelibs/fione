@@ -258,7 +258,8 @@ acknowledged to it in a few lines; the card has the settings.
 ## MCP
 
 Fione can serve the same read-only tools to MCP clients (an AI assistant or an editor that
-speaks MCP), and, with a second switch, tools that start jobs (see below). It is **off by
+speaks MCP), and, with a second switch, tools that create projects, upload datasets, start jobs
+and predict (see below). It is **off by
 default**; set `FIONE_MCP_ENABLED=true` (in `docker/.env` for
 Compose). The endpoint is `/mcp` on Fione's own port, for example `http://127.0.0.1:8080/mcp`.
 
@@ -290,8 +291,11 @@ claude mcp add --transport http fione http://127.0.0.1:8080/mcp \
 
 ### Starting jobs from an MCP client
 
-With `FIONE_MCP_WRITE_ENABLED=true` as well, the client also gets tools that change a project
-(as the token's user: an owner or editor of the project, as for the REST API):
+With `FIONE_MCP_WRITE_ENABLED=true` as well, the client also gets the tools below, as the
+token's user. `create_project` needs the role of an editor or an administrator; `upload_dataset`,
+`create_upload_url`, `start_training`, `start_batch_predict`, `run_module` and `cancel_job` need
+write access to the project (an owner or editor, as for the REST API); the others need only read
+access:
 
 | Tool | What it does |
 |---|---|
@@ -328,11 +332,11 @@ redact paths that start with `/api/v1/uploads/` there.
 **Predicting.** `predict` takes `rows`, each an object with a value for every column the model
 reads (other keys are ignored), and returns one prediction per row in order: `predict` and, for
 classification, `p_<class>` for each class. The rows are not stored. The result must fit in
-32 KiB; a larger request is refused with the number of rows that fit, and for more rows you
+32 KiB; a larger request is refused with about how many rows fit, and for more rows you
 upload a `predict` dataset, run `start_batch_predict` and read the result with
 `get_predictions`. `get_predictions` returns the prediction columns only, never the input
-values, `limit` rows at a time from `offset`; when it returns fewer than asked, `truncated` is
-true and the next page starts at `offset` plus the rows returned.
+values, `limit` rows at a time from `offset`; when the page is cut to fit 32 KiB, `truncated` is true
+and the next page starts at `offset` plus the rows returned.
 
 An example with Claude Code, which has a shell:
 

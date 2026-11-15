@@ -234,7 +234,11 @@ What this release does not do, or does with a catch. Japanese summary at the end
   CPU; asking for approval is up to the client (the tools say they change things). Text in names that
   the read tools return could push a client towards them, so keep that approval on. A token has
   no read-only setting, so give a client that must not start jobs a token of a user who can
-  only read. A one-time upload URL from `create_upload_url` is a credential for 15 minutes: anyone who holds it can add one dataset to that project, and a reverse proxy's access log records it (redact `/api/v1/uploads/` paths there). MCP uploads of CSV text are limited to 512 KiB, `predict` to 1000 rows and 32 KiB of result, and `wait_for_job` to 15 seconds per call; job messages are not sent over MCP.
+  only read. A one-time upload URL from `create_upload_url` is a credential for 15 minutes:
+  anyone who holds it can add one dataset to that project, and a reverse proxy's access log
+  records it (redact `/api/v1/uploads/` paths there). MCP uploads of CSV text are limited to
+  512 KiB, `predict` to 1000 rows and 32 KiB of result, and `wait_for_job` to 15 seconds per
+  call; job messages are not sent over MCP.
 - **A long conversation is shortened silently.** Only the newest part of it fits the model's
   context, so the assistant may not remember what was said earlier; start a new conversation for a
   new topic. A server whose real context is smaller than `FIONE_LLM_CONTEXT_TOKENS` cuts the

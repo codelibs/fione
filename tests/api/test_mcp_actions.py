@@ -1,6 +1,7 @@
 """The MCP action tools: off unless FIONE_MCP_WRITE_ENABLED, never in the chat, and each runs
 as the token's user with the write access the REST routes ask for."""
 
+import re
 from contextlib import closing
 
 import pytest
@@ -66,6 +67,9 @@ def test_instructions_name_the_workflow_tools(writes):
     init = post(client, rpc("initialize", {"protocolVersion": "2025-06-18"}), bearer(client, user))
     text = init.json()["result"]["instructions"]
     assert not text.startswith("Read-only")
+    listed = tool_list(client, bearer(client, user))
+    named = set(re.findall(r"\b[a-z]+(?:_[a-z]+)+\b", text))
+    assert named <= set(listed)
     for name in ("create_project", "create_upload_url", "wait_for_job", "predict"):
         assert name in text
 
