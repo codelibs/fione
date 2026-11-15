@@ -241,10 +241,10 @@ def test_check_accepts_a_target_it_fits():
 
 def test_resolve_accepts_every_registered_name_for_its_task_only():
     for name, metric in metrics.REGISTRY.items():
-        assert metrics.resolve(name.upper(), metric.task, "sort_metric") == name
+        assert metrics.resolve(name.upper(), metric.task, "sort_metric", 0.5) == name
         other = "regression" if metric.task == "classification" else "classification"
         with pytest.raises(ConfigError):
-            metrics.resolve(name, other, "sort_metric")
+            metrics.resolve(name, other, "sort_metric", 0.5)
 
 
 def test_tied_predictions_give_no_credit_and_do_not_depend_on_the_row_order():
@@ -406,3 +406,45 @@ def test_balanced_logloss_leaves_out_a_class_that_does_not_occur():
     y = np.array([0, 0, 1, 1])
     pred = np.array([[0.9, 0.05, 0.05]] * 2 + [[0.1, 0.8, 0.1]] * 2)
     assert np.isfinite(metrics.value("balanced_logloss", y, pred))
+
+
+def test_pinball_is_the_mean_of_the_misses_weighted_by_their_side():
+    y = np.array([1.0, 2.0, 3.0, 4.0])
+    pred = np.array([2.0, 2.0, 1.0, 5.0])
+    # misses: -1 (too high), 0, +2 (too low), -1 (too high)
+    assert metrics.value("pinball", y, pred, quantile=0.9) == pytest.approx(
+        (0.1 * 1 + 0 + 0.9 * 2 + 0.1 * 1) / 4
+    )
+    assert metrics.value("pinball", y, pred, quantile=0.1) == pytest.approx(
+        (0.9 * 1 + 0 + 0.1 * 2 + 0.9 * 1) / 4
+    )
+    assert metrics.value("pinball", VALUES, PRED, quantile=0.3) == pytest.approx(
+        sk.mean_pinball_loss(VALUES, PRED, alpha=0.3)
+    )
+
+
+def test_the_median_pinball_is_half_the_mean_absolute_error():
+    assert metrics.value("pinball", VALUES, PRED, quantile=0.5) == pytest.approx(
+        metrics.value("mae", VALUES, PRED) / 2
+    )
+
+
+def test_pinball_needs_a_quantile_and_is_the_automatic_metric_with_one():
+    with pytest.raises(ConfigError, match="needs a quantile"):
+        metrics.resolve("pinball", "regression", "sort_metric")
+    assert metrics.resolve("auto", "regression", "sort_metric", 0.9) == "pinball"
+    assert metrics.resolve("auto", "regression", "sort_metric") == "rmse"
+    assert metrics.resolve("rmse", "regression", "sort_metric", 0.9) == "rmse"
+    assert metrics.resolve("auto", "classification", "sort_metric") == "logloss"
+
+
+def test_pinball_is_a_loss_the_blend_is_chosen_on_and_summarised_only_for_a_quantile():
+    assert "pinball" not in metrics.HIGHER_IS_BETTER
+    assert "pinball" in metrics.BLEND_ON_METRIC
+    assert metrics.loss("pinball", VALUES, PRED, quantile=0.9) == metrics.value(
+        "pinball", VALUES, PRED, quantile=0.9
+    )
+    assert "pinball" not in metrics.summary("regression", VALUES, PRED)
+    summary = metrics.summary("regression", VALUES, PRED, quantile=0.9)
+    assert summary["pinball"] == pytest.approx(metrics.value("pinball", VALUES, PRED, quantile=0.9))
+    assert summary["rmse"] == pytest.approx(metrics.value("rmse", VALUES, PRED))

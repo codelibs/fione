@@ -158,8 +158,8 @@ small targets as closely as the large ones.
   (`map3`).
 - Regression: RMSE, MAE, R², MSE, RMSLE, MAPE, RMSPE, SMAPE, median absolute error (`medae`), explained
   variance, correlation (`pearson`), rank correlation (`spearman`), normalized Gini
-  (`normalized_gini`), Poisson deviance (`poisson`) and quadratic weighted kappa of the rounded
-  predictions (`rounded_qwk`).
+  (`normalized_gini`), Poisson deviance (`poisson`), quadratic weighted kappa of the rounded
+  predictions (`rounded_qwk`) and, for a quantile (see below), the pinball loss (`pinball`).
 
 `balanced_logloss` is the log loss of a task whose classes count alike, however rare one is: each
 class's mean log loss, averaged. It is measured on the probabilities shifted so that every class
@@ -313,6 +313,24 @@ A regression target with no value below 0 (a price, a count) never gets a predic
 `predict` and batch prediction raise such a prediction to 0, with or without the logarithm. The
 scores of the training are those of the predictions before this, and the explanation of a row
 shows the prediction it adds up to.
+
+## Predicting a quantile
+
+A regression predicts the mean of the target. To predict a quantile instead (the level a target stays under
+nine times in ten, a lower bound, the median), set `quantile` in the API to a number
+above 0 and below 1. It applies to regression only. The models then learn the pinball loss at that
+level: a prediction too low counts the quantile of its miss, and one too high counts one minus the
+quantile. Only LightGBM, XGBoost and CatBoost can do this, so only they are searched, and a notice
+says so. The derived features are not tried.
+
+*Automatic* ranking and stopping metrics are then the pinball loss (`pinball`, which is refused
+without a quantile), the final blend picks its weights by it, and the Metrics tab lists it besides
+the other metrics, which score the quantile as if it were a forecast of the mean. The loss is
+measured in the target's own units, also with `target_transform` `log1p` (a quantile follows a
+monotone transform). One model learns one quantile: a band between two levels is two runs. The
+share of held-out rows below a model's predictions is the check to make on it: it is close to the
+quantile with plenty of rows, and falls short of it in the tails (0.1 and 0.9, say) on a small
+table.
 
 ## Data that follows time
 

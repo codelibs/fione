@@ -319,9 +319,13 @@ def check_target(
     resolved = infer_task(y) if task == "auto" else task
     encoded, classes, _ = validate_target(y, resolved, nfolds)
     if config is not None:
+        if config.quantile is not None and resolved != "regression":
+            raise ConfigError("quantile needs a regression, but the target is a classification")
         chosen = {}
         for field in ("stopping_metric", "sort_metric"):  # as AutoML.fit resolves them
-            chosen[field] = metrics.resolve(getattr(config, field), resolved, field)
+            chosen[field] = metrics.resolve(
+                getattr(config, field), resolved, field, config.quantile
+            )
             metrics.check(chosen[field], encoded, len(classes), field)
         if config.decision == "tuned" and resolved == "classification":
             metrics.check_tuned(chosen["sort_metric"], len(classes))

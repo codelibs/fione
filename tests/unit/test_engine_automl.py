@@ -412,9 +412,9 @@ def test_a_relative_error_picks_the_blend_by_that_error(monkeypatch):
     chosen = []
     original = automl_module.caruana
 
-    def spy(oof, y, task, rounds=30, metric=None):
+    def spy(oof, y, task, rounds=30, metric=None, quantile=None):
         chosen.append(metric)
-        return original(oof, y, task, rounds, metric)
+        return original(oof, y, task, rounds, metric, quantile)
 
     monkeypatch.setattr(automl_module, "caruana", spy)
     for metric in ("rmspe", "rmse"):
@@ -432,9 +432,9 @@ def test_a_regression_metric_that_differs_from_squared_error_picks_the_blend(
     chosen = []
     original = automl_module.caruana
 
-    def spy(oof, y, task, rounds=30, metric=None):
+    def spy(oof, y, task, rounds=30, metric=None, quantile=None):
         chosen.append(metric)
-        return original(oof, y, task, rounds, metric)
+        return original(oof, y, task, rounds, metric, quantile)
 
     monkeypatch.setattr(automl_module, "caruana", spy)
     _fit(_positive(), families=["LightGBM"], target="y", max_models=1, sort_metric=metric)
@@ -1980,3 +1980,103 @@ def test_a_target_without_negative_values_gets_no_negative_prediction():
     signed = _fit(df.assign(y=df["y"] - 5), families=["Linear"], target="y", max_models=1)
     assert signed.target_floor is None
     assert (signed.predict(pd.DataFrame({"x": [-50.0]})) < 0).all()
+
+
+def _quantile_frame(n=4_000, seed=0):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"a": rng.uniform(size=n), "b": rng.uniform(size=n)})
+    df["y"] = 4 * df["a"] + rng.exponential(1.0, n) * (1 + df["b"])
+    return df
+
+
+@pytest.mark.parametrize("quantile", [0.1, 0.9])
+def test_a_quantile_fit_has_that_share_of_new_rows_below_its_predictions(quantile):
+    test = _quantile_frame(4_000, seed=1)
+    model = _fit(_quantile_frame(), target="y", quantile=quantile, max_models=3)
+    assert abs((test["y"] <= model.predict(test)).mean() - quantile) < 0.05
+
+
+def test_only_the_families_that_can_fit_a_quantile_are_searched_and_a_notice_says_so():
+    events = []
+    model = _fit(_quantile_frame(1_500), events, target="y", quantile=0.5, max_models=3)
+    assert automl_module.QUANTILE_FAMILIES == ("LightGBM", "CatBoost", "XGBoost")
+    assert set(model.trials["family"]) == set(automl_module.QUANTILE_FAMILIES)
+    notices = {e.data["kind"]: e.data for e in events if e.type == "notice" and "kind" in e.data}
+    assert notices["quantile_families"]["families"] == ["LightGBM", "CatBoost", "XGBoost"]
+    assert "derived features are not tried with a quantile" in [
+        e.data["message"] for e in events if e.type == "notice"
+    ]
+
+
+@pytest.mark.parametrize(
+    "families", [["ExtraTrees"], ["LightGBM", "Linear"], ["RandomForest"], ["LinearWide"]]
+)
+def test_naming_a_family_that_cannot_fit_a_quantile_is_refused(families):
+    with pytest.raises(ConfigError, match="cannot learn a quantile"):
+        _fit(_quantile_frame(300), families=families, target="y", quantile=0.5)
+    assert FAMILIES["LightGBM"]("regression", 0, quantile=0.5).quantile == 0.5
+    with pytest.raises(ConfigError, match="cannot learn a quantile"):
+        FAMILIES[families[-1]]("regression", 0, quantile=0.5)
+
+
+def test_a_quantile_of_a_classification_target_is_refused():
+    with pytest.raises(ConfigError, match="quantile needs a regression"):
+        _fit(_binary(200), target="y", quantile=0.5)
+
+
+def test_each_boosting_family_learns_and_stops_on_the_pinball_loss():
+    df = _quantile_frame(3_000)
+    X, y = df[["a", "b"]], df["y"].to_numpy()
+    for name in automl_module.QUANTILE_FAMILIES:
+        spec = FAMILIES[name]("regression", 0, quantile=0.9)
+        model = spec.fit(spec.defaults, X[:2_000], y[:2_000], X[2_000:], y[2_000:], Deadline(60))
+        assert 0.8 < (y[2_000:] <= spec.predict(model, X[2_000:])).mean() < 0.97
+        if name == "LightGBM":
+            assert list(model.evals_result_["valid_0"]) == ["quantile"]
+        elif name == "XGBoost":
+            assert list(model.evals_result()["validation_0"]) == ["quantile"]
+        else:
+            assert list(model.get_evals_result()["validation"]) == ["Quantile:alpha=0.9"]
+
+
+def test_the_blend_and_the_leaderboard_of_a_quantile_are_on_the_pinball_loss(monkeypatch):
+    chosen = []
+    original = automl_module.caruana
+
+    def spy(oof, y, task, rounds=30, metric=None, quantile=None):
+        chosen.append((metric, quantile))
+        return original(oof, y, task, rounds, metric, quantile)
+
+    monkeypatch.setattr(automl_module, "caruana", spy)
+    df = _quantile_frame(2_000)
+    model = _fit(df, target="y", quantile=0.9, max_models=3, keep_cv_predictions=True)
+    assert chosen[0][0] is not None and chosen[0][1] == 0.9
+    expected = metrics.value("pinball", df["y"].to_numpy(), model.cv_predictions, quantile=0.9)
+    board = model.leaderboard
+    assert board["cv_score"].is_monotonic_increasing
+    assert board.set_index("model").loc["Ensemble", "cv_score"] == pytest.approx(expected)
+    assert model.metrics["pinball"] == pytest.approx(expected)
+    assert model.config.quantile == 0.9
+
+
+def test_a_quantile_of_a_log_target_is_scored_in_the_targets_own_units():
+    df = _quantile_frame(2_000)
+    test = _quantile_frame(4_000, seed=1)
+    model = _fit(
+        df,
+        target="y",
+        quantile=0.9,
+        max_models=3,
+        keep_cv_predictions=True,
+        target_transform="log1p",
+    )
+    assert model.metrics["pinball"] == pytest.approx(
+        metrics.value("pinball", df["y"].to_numpy(), model.cv_predictions, quantile=0.9)
+    )
+    assert abs((test["y"] <= model.predict(test)).mean() - 0.9) < 0.05
+
+
+def test_a_quantile_fit_with_no_skill_does_not_say_so_in_r_squared():
+    events = []
+    _fit(_skill_frame("noise"), events, target="y", quantile=0.5, max_models=3)
+    assert not [e for e in events if e.data.get("kind") in KIND_QUALITY]

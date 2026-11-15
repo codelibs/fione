@@ -125,6 +125,8 @@ FAMILY_WEIGHTS = {
     "DeepLearning": 0.096,
     "Linear": 0.048,
 }
+# The families that can learn a quantile, the only ones searched for a ``quantile``.
+QUANTILE_FAMILIES = tuple(f for f in FAMILY_ORDER if FAMILIES[f].quantile_objective)
 # Run after the others, in the search time they leave (see the module docstring); each only
 # when the data suits it (``FamilySpec.applies``) and a model of it would not be too big.
 LATE_ORDER = ("LinearWide", "TextLinearChar", "TextLinearPlain", "TextLinearWide")
@@ -228,9 +230,16 @@ class AutoML:
         unknown = sorted(set(families or ()) - set(known))
         if unknown or families == []:
             raise ConfigError(f"unknown families: {unknown}; choose from {known}")
+        self.explicit = families is not None  # the caller named the families
+        if config.quantile is not None:
+            other = sorted(set(families or ()) - set(QUANTILE_FAMILIES))
+            if other:
+                raise ConfigError(
+                    f"{', '.join(other)} cannot learn a quantile; choose from {QUANTILE_FAMILIES}"
+                )
+            families = list(families or QUANTILE_FAMILIES)
         self.families = [f for f in FAMILY_ORDER if families is None or f in families]
         self.late = [f for f in LATE_ORDER if families is None or f in families]
-        self.explicit = families is not None  # the caller named the families
 
     def _event(self, type: str, **data) -> None:
         self.emit(Event(type, data=jsonable(data)))
@@ -324,7 +333,10 @@ class AutoML:
 
     def _fit_quality_notices(self, task: Task, model: TrainedModel) -> None:
         """Say when the validated fit is suspiciously good or no better than the average: a
-        column may give the answer away, or the features may not hold it."""
+        column may give the answer away, or the features may not hold it. A quantile is not
+        judged by R-squared or AUC, so it gets neither."""
+        if model.config.quantile is not None:
+            return
         scores = model.metrics
         if task == "regression":
             skill, low, high = scores.get("r2"), NO_SKILL_R2, NEAR_PERFECT_R2
@@ -383,8 +395,9 @@ class AutoML:
 
     def _target_scale_notices(self, y: np.ndarray, sort_metric: str) -> None:
         """Say when the target's scale and the ranking metric do not go together: a log target
-        ranked in the original units, or a skewed one that is learned and ranked as it is."""
-        if sort_metric not in metrics.ORIGINAL_UNITS:
+        ranked in the original units, or a skewed one that is learned and ranked as it is. A
+        quantile is learned as it is on purpose, so it gets none."""
+        if self.config.quantile is not None or sort_metric not in metrics.ORIGINAL_UNITS:
             return
         if self.config.target_transform == "log1p":
             self._notice(
@@ -423,10 +436,27 @@ class AutoML:
         X = df.drop(columns=[c.target, *c.ignored_columns])
         target = df[c.target]
         task: Task = infer_task(target) if c.task == "auto" else c.task
-        sort_metric = metrics.resolve(c.sort_metric, task, "sort_metric")
-        stopping_metric = metrics.resolve(c.stopping_metric, task, "stopping_metric")
+        if c.quantile is not None and task != "regression":
+            raise ConfigError("quantile needs a regression, but the target is a classification")
+        sort_metric = metrics.resolve(c.sort_metric, task, "sort_metric", c.quantile)
+        stopping_metric = metrics.resolve(c.stopping_metric, task, "stopping_metric", c.quantile)
         notices: list[Event] = []
         y, classes, nfolds = validate_target(target, task, c.nfolds, notices.append)
+        if c.quantile is not None:
+            notices.append(
+                Event(
+                    "notice",
+                    data={
+                        "message": (
+                            f"learning the quantile {c.quantile:g}: only "
+                            f"{', '.join(self.families)} are searched, as the other families "
+                            "cannot fit a quantile"
+                        ),
+                        "kind": "quantile_families",
+                        "families": self.families,
+                    },
+                )
+            )
         # Folds in time order are one fixed partition: another seed would not change them.
         repeats = 1 if c.time_column else c.cv_repeats or repeats_for(len(X))
         row_groups = None
@@ -525,12 +555,16 @@ class AutoML:
         rating_cuts = 3 <= len(ratings) <= metrics.MAX_ORDINAL_CLASSES and bool(
             (ratings == np.round(ratings)).all()
         )
-        if c.time_column is None:
+        if c.time_column is None and c.quantile is None:
             groups, tried = self._engineer(X, y, task, nfolds, deadline, row_groups)
-        else:  # the gate judges a feature on shuffled folds, which look at the future
+        else:  # the gate judges a feature on shuffled folds (the future) and on squared error
             groups, tried = [], None
             if c.feature_engineering:
-                self._notice("derived features are not tried with a time column")
+                self._notice(
+                    "derived features are not tried with a time column"
+                    if c.time_column
+                    else "derived features are not tried with a quantile"
+                )
         prep = Prep().fit(X, groups)
         self._notice_dropped_columns(prep, X)
         if c.time_column is None:
@@ -577,7 +611,7 @@ class AutoML:
 
         left = deadline.remaining()
         reserve = max(MIN_RESERVE_SECS, RESERVE_SHARE * left)
-        default_stopping = stopping_metric == metrics.ALLOWED[task][0]
+        default_stopping = stopping_metric == metrics.automatic(task, c.quantile)
         results, logs, reasons, finished, errors = self._search(
             families,
             X,
@@ -589,7 +623,9 @@ class AutoML:
             None
             if default_stopping
             else (
-                lambda oof: metrics.loss(stopping_metric, y_seen[rows], original(oof[rows]), prior)
+                lambda oof: metrics.loss(
+                    stopping_metric, y_seen[rows], original(oof[rows]), prior, c.quantile
+                )
             ),
             weight,
             repeats,
@@ -614,10 +650,14 @@ class AutoML:
         stacked = {name: result.stacked(rows) for name, result in results.items()}
         blend_metric = None
         if task == "regression" and sort_metric in metrics.BLEND_ON_METRIC:
-            blend_metric = lambda y, p: metrics.loss(sort_metric, original(y), original(p))  # noqa: E731
-        weights = caruana(stacked, np.tile(y_valid, repeats), task, metric=blend_metric)
+            blend_metric = lambda y, p: metrics.loss(  # noqa: E731
+                sort_metric, original(y), original(p), None, c.quantile
+            )
+        weights = caruana(
+            stacked, np.tile(y_valid, repeats), task, metric=blend_metric, quantile=c.quantile
+        )
         scores = {
-            name: metrics.value(sort_metric, y_seen[rows], original(p), prior)
+            name: metrics.value(sort_metric, y_seen[rows], original(p), prior, c.quantile)
             for name, p in oof.items()
         }
         pick = max if sort_metric in metrics.HIGHER_IS_BETTER else min
@@ -628,7 +668,7 @@ class AutoML:
             weights=weights,
             scores=scores,
             ensemble_score=metrics.value(
-                sort_metric, y_seen[rows], original(_blend(oof, weights)), prior
+                sort_metric, y_seen[rows], original(_blend(oof, weights)), prior, c.quantile
             ),
             best_single=pick(
                 {k: v for k, v in scores.items() if np.isfinite(v)} or scores, key=scores.get
@@ -668,6 +708,7 @@ class AutoML:
             prior,
             rows,
             tuned or rating_cuts,
+            c.quantile,
         )
         assignment = np.full(len(y), -1, dtype=np.int64)  # -1: never validated
         for i, (_, valid) in enumerate(first_run):
@@ -682,7 +723,7 @@ class AutoML:
             feature_importance=feature_importance(members, prep),
             stop_reason=stop_reason,
             config=c,
-            metrics=metrics.summary(task, y_seen[rows], blended, prior),
+            metrics=metrics.summary(task, y_seen[rows], blended, prior, c.quantile),
             prep=prep,
             members=members,
             label_dtype=target.dtype,
@@ -875,6 +916,7 @@ class AutoML:
                     sample_weight=weight,
                     repeats=repeats,
                     first_deadline=None if late else own.child(allowed),
+                    quantile=c.quantile,
                 )
             except NoModelError as e:
                 if late:
@@ -1158,6 +1200,7 @@ def _leaderboard(
     prior,
     valid_rows,
     tuned=False,
+    quantile=None,
 ) -> pd.DataFrame:
     """One row per candidate (a family's best trial, then its runners-up) and one for the
     ensemble. The ensemble's weights were chosen on the same OOF predictions it is scored on, so
@@ -1172,8 +1215,8 @@ def _leaderboard(
             {
                 "model": f"{result.spec.name}_{result.best_trial}",
                 "family": result.spec.name,
-                "cv_score": metrics.value(sort_metric, y, oof, own),
-                "cv_std": metrics.fold_std(sort_metric, y, oof, folds, own),
+                "cv_score": metrics.value(sort_metric, y, oof, own, quantile),
+                "cv_std": metrics.fold_std(sort_metric, y, oof, folds, own, quantile),
                 "train_secs": result.best_secs + refit_secs.get(name, 0.0),
                 "weight": weights.get(name, 0.0),
             }
@@ -1182,8 +1225,8 @@ def _leaderboard(
         {
             "model": "Ensemble",
             "family": "Ensemble",
-            "cv_score": metrics.value(sort_metric, y, blended, prior),
-            "cv_std": metrics.fold_std(sort_metric, y, blended, folds, prior),
+            "cv_score": metrics.value(sort_metric, y, blended, prior, quantile),
+            "cv_std": metrics.fold_std(sort_metric, y, blended, folds, prior, quantile),
             "train_secs": sum(row["train_secs"] for row in rows if row["weight"] > 0),
             "weight": np.nan,
         }

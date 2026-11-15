@@ -461,8 +461,9 @@ def _form_values(defaults: dict) -> dict:
 
 
 def _metric_options() -> list[tuple[str, str]]:
-    """``(metric, task)`` for every metric the engine accepts for a task."""
-    return [(m, task) for task, names in metrics.ALLOWED.items() for m in names]
+    """``(metric, task)`` for every metric the form offers for a task (not the pinball loss,
+    which needs a quantile the form does not set)."""
+    return [(m, task) for task, names in metrics.ALLOWED.items() for m in names if m != "pinball"]
 
 
 def _train_view(

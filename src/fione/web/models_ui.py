@@ -362,7 +362,9 @@ def _config(record: ModelRecord) -> list[tuple[str, tuple[str, str | None]]]:
 def _sort_metric(record: ModelRecord) -> str | None:
     config = record.config if isinstance(record.config, dict) else {}
     try:
-        return engine_metrics.resolve(str(config.get("sort_metric", "auto")), record.task, "sort")
+        return engine_metrics.resolve(
+            str(config.get("sort_metric", "auto")), record.task, "sort", config.get("quantile")
+        )
     except (ConfigError, KeyError):
         return None
 

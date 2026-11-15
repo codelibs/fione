@@ -16,16 +16,18 @@ def caruana(
     task: Task,
     rounds: int = 30,
     metric: Callable[[np.ndarray, np.ndarray], float] | None = None,
+    quantile: float | None = None,
 ) -> dict[str, float]:
     """Ensemble weights for the candidates in ``oof``, summing to 1, keyed in ``oof`` order.
 
     Each round adds, with replacement, the candidate that gives the averaged predictions the
-    lowest ``metric(y, pred)`` (default: log loss or RMSE); ties go to the earlier candidate.
+    lowest ``metric(y, pred)`` (default: log loss, RMSE or, for a ``quantile``, the pinball
+    loss); ties go to the earlier candidate.
     The best ensemble of all rounds is returned. The first round picks the best single
     candidate, so the result is never worse than it, and is that candidate alone (weight 1)
     when no blend beats it.
     """
-    metric = metric or partial(score, task)
+    metric = metric or partial(score, task, quantile=quantile)
     names = list(oof)
     total = np.zeros_like(oof[names[0]], dtype=float)
     counts = dict.fromkeys(names, 0)

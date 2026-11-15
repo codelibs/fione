@@ -144,3 +144,33 @@ def test_the_time_column_defaults_to_none_and_must_name_a_column():
         TrainConfig(target="y", time_column="").validate()
     with pytest.raises(ConfigError, match="cannot be the target"):
         TrainConfig(target="y", time_column="y").validate()
+
+
+def test_the_quantile_defaults_to_none_and_roundtrips_through_the_dict():
+    config = TrainConfig(target="y")
+    assert config.quantile is None
+    del config.__dict__["quantile"]  # a config saved before the setting
+    assert config.quantile is None
+    saved = TrainConfig(target="y", quantile=0.9, task="regression").validate()
+    assert TrainConfig.from_dict(saved.to_dict()).quantile == 0.9
+    assert TrainConfig.from_dict({"target": "y", "quantile": 1 / 2}).quantile == 0.5
+
+
+@pytest.mark.parametrize("quantile", [0, 1, -0.1, 1.5, True, "0.5", float("nan")])
+def test_the_quantile_must_be_a_number_between_0_and_1(quantile):
+    with pytest.raises(ConfigError, match="quantile must be a number above 0 and below 1"):
+        TrainConfig(target="y", quantile=quantile).validate()
+
+
+def test_a_quantile_is_for_a_regression():
+    TrainConfig(target="y", quantile=0.5).validate()
+    TrainConfig(target="y", quantile=0.5, task="regression").validate()
+    with pytest.raises(ConfigError, match="quantile needs a regression"):
+        TrainConfig(target="y", quantile=0.5, task="classification").validate()
+
+
+@pytest.mark.parametrize("field", ["sort_metric", "stopping_metric"])
+def test_the_pinball_metric_needs_a_quantile(field):
+    with pytest.raises(ConfigError, match="pinball metric needs a quantile"):
+        TrainConfig(target="y", **{field: "Pinball"}).validate()
+    TrainConfig(target="y", quantile=0.2, **{field: "pinball"}).validate()
