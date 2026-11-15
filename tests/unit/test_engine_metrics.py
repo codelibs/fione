@@ -90,6 +90,7 @@ def test_two_class_metrics_match_scikit_learn(name, reference):
     [
         ("balanced_accuracy", lambda y, p, c: sk.balanced_accuracy_score(y, c)),
         ("f1", lambda y, p, c: sk.f1_score(y, c, average="macro")),
+        ("macro_f1", lambda y, p, c: sk.f1_score(y, c, average="macro")),
         ("precision", lambda y, p, c: sk.precision_score(y, c, average="macro", zero_division=0)),
         ("recall", lambda y, p, c: sk.recall_score(y, c, average="macro")),
         ("mcc", lambda y, p, c: sk.matthews_corrcoef(y, c)),
@@ -448,3 +449,21 @@ def test_pinball_is_a_loss_the_blend_is_chosen_on_and_summarised_only_for_a_quan
     summary = metrics.summary("regression", VALUES, PRED, quantile=0.9)
     assert summary["pinball"] == pytest.approx(metrics.value("pinball", VALUES, PRED, quantile=0.9))
     assert summary["rmse"] == pytest.approx(metrics.value("rmse", VALUES, PRED))
+
+
+def test_macro_f1_of_two_classes_averages_both_and_is_tuned_for_both():
+    y = np.array([0] * 30 + [1] * 70)
+    p1 = np.concatenate([np.linspace(0.0, 0.7, 30), np.linspace(0.2, 1.0, 70)])
+    pred = np.column_stack([1 - p1, p1])
+    both = sk.f1_score(y, (p1 > 0.5).astype(int), average="macro")
+    assert metrics.value("macro_f1", y, pred) == pytest.approx(both)
+    assert metrics.value("macro_f1", y, pred) < metrics.value("f1", y, pred)  # the rare class
+    assert "macro_f1" in metrics.TUNABLE
+    macro_prior = metrics.tune_prior("macro_f1", y, pred)
+    tuned = metrics.value("macro_f1", y, pred, macro_prior)
+    for t in np.linspace(0.05, 0.95, 19):
+        assert tuned >= metrics.value("macro_f1", y, pred, np.array([1 - t, t])) - 1e-12
+    # F1 of the common class alone is best served by calling nearly every row positive
+    f1_prior = metrics.tune_prior("f1", y, pred)
+    assert f1_prior[1] < macro_prior[1]
+    assert metrics.value("macro_f1", y, pred, f1_prior) < tuned

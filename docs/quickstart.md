@@ -153,7 +153,7 @@ small targets as closely as the large ones.
 
 - Classification: log loss, AUC, accuracy, average precision (`aucpr`), Gini, lift of the top 10%
   (`lift_top_group`), balanced accuracy, error rate (`misclassification`), mean error per class
-  (`mean_per_class_error`), F1, precision, recall, MCC, kappa, quadratic weighted kappa (`qwk`),
+  (`mean_per_class_error`), F1, macro F1 (`macro_f1`), precision, recall, MCC, kappa, quadratic weighted kappa (`qwk`),
   Brier score, balanced log loss (`balanced_logloss`), top-3 accuracy (`top3_accuracy`) and MAP@3
   (`map3`).
 - Regression: RMSE, MAE, R², MSE, RMSLE, MAPE, RMSPE, SMAPE, median absolute error (`medae`), explained
@@ -202,8 +202,10 @@ which corrects the same imbalance while learning, and it is ignored for regressi
 For two classes scored by a metric that counts right answers, *Fit to the ranking metric*
 (`decision: "tuned"`) picks the probability threshold that gives that metric its best value on the
 validation predictions, instead of 0.5; the ranking metric must be one of accuracy, error rate,
-balanced accuracy, mean error per class, F1, MCC, kappa or `qwk` (precision and recall alone would
-be best served by predicting almost nothing or almost everything). The threshold is stored with
+balanced accuracy, mean error per class, F1, macro F1, MCC, kappa or `qwk` (precision and recall
+alone would be best served by predicting almost nothing or almost everything). For two classes F1 is that of the
+class listed last, which for a common class rewards predicting it for almost every row; macro F1
+averages the F1 of both classes (for more classes F1 is already that average). The threshold is stored with
 the model and used by predictions, Fione Serving and the explanation; the probabilities do not
 change, and the leaderboard scores each row at its own best threshold. The threshold is chosen on
 the same validation predictions the scores are reported on, so those scores are somewhat
