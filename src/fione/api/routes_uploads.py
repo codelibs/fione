@@ -12,6 +12,7 @@ from typing import BinaryIO
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
+from starlette.requests import ClientDisconnect
 
 from fione.api.deps import Conn
 from fione.api.downloads import tmp_dir
@@ -68,8 +69,10 @@ async def put_upload(token: str, request: Request, conn: Conn) -> dict:
             dataset = await ingest_upload(
                 request, conn, claimed.project_id, claimed.name, claimed.type, UploadFile(body)
             )
-    except BaseException:  # a failed or abandoned upload gives the token back
+    except BaseException as e:  # a failed or abandoned upload gives the token back
         upload_tokens.release(conn, claimed.id)
+        if isinstance(e, ClientDisconnect):
+            raise ApiError(400, "bad_request", "the upload was interrupted") from None
         raise
     await run_in_threadpool(upload_tokens.finish, conn, claimed.id)
     return dataset_out(dataset, schema=True)

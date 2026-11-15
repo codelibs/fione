@@ -1,12 +1,17 @@
 """The one-time upload URL: ``PUT /api/v1/uploads/{token}`` ingests a CSV as the token's user,
 needs no credentials, and answers one 404 for every token it will not use."""
 
+import logging
 import time
 from contextlib import closing
 
 import pytest
+from starlette.requests import ClientDisconnect
 
 from api_helpers import CSV, add_user, connect
+from fione.api import routes_uploads
+from fione.api.deps import UPLOAD_SLACK_BYTES
+from fione.api.security import UploadTokenRedactor, redact_upload_token
 from fione.auth.roles import ProjectAccess, Role
 from fione.projects import service as projects
 from fione.projects import upload_tokens
@@ -208,3 +213,92 @@ def test_deleting_the_project_removes_its_tokens(setup):
     assert put(client, token).status_code == 404
     with closing(connect(client)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM upload_tokens").fetchone()[0] == 0
+
+
+def test_body_declared_far_over_the_limit_is_413_and_token_survives(make_client):
+    # a real Content-Length past max_upload_bytes + UPLOAD_SLACK_BYTES: refused by BodyLimit
+    client = make_client(mcp_enabled=True, mcp_write_enabled=True, max_upload_bytes=1000)
+    user, project_id = new_project(client)
+    token = make_token(client, user, project_id)
+    r = put(client, token, b"x" * (UPLOAD_SLACK_BYTES + 2000))
+    assert r.status_code == 413 and r.json()["code"] == "too_large"
+    assert datasets(client, project_id) == []
+    assert put(client, token, b"a\n1\n").status_code == 201
+
+
+def test_unhandled_error_does_not_log_the_token_and_gives_it_back(make_client, monkeypatch, caplog):
+    client = make_client(mcp_enabled=True, mcp_write_enabled=True, raise_server_exceptions=False)
+    user, project_id = new_project(client)
+    token = make_token(client, user, project_id)
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    with monkeypatch.context() as patched, caplog.at_level("ERROR"):
+        patched.setattr(routes_uploads, "ingest_upload", broken)
+        r = put(client, token)
+    assert r.status_code == 500
+    assert "unhandled error on PUT" in caplog.text and token not in caplog.text
+    assert put(client, token).status_code == 201
+
+
+def test_interrupted_upload_is_quiet_and_gives_the_token_back(make_client, monkeypatch, caplog):
+    client = make_client(mcp_enabled=True, mcp_write_enabled=True)
+    user, project_id = new_project(client)
+    token = make_token(client, user, project_id)
+
+    async def interrupted(*args, **kwargs):
+        raise ClientDisconnect()
+
+    with monkeypatch.context() as patched, caplog.at_level("ERROR"):
+        patched.setattr(routes_uploads, "_spool", interrupted)
+        r = put(client, token)
+    assert r.status_code == 400 and r.json()["code"] == "bad_request"
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert put(client, token).status_code == 201
+
+
+def test_access_log_line_does_not_carry_the_token():
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:1", "PUT", "/api/v1/uploads/secretvalue?x=1", "1.1", 201),
+        None,
+    )
+    assert UploadTokenRedactor().filter(record)
+    line = record.getMessage()
+    assert "secretvalue" not in line and "/api/v1/uploads/<token>?x=1" in line
+    assert "uploads/<token>" in redact_upload_token("/api/v1/uploads/abc")
+    assert redact_upload_token("/api/v1/projects/p/datasets") == "/api/v1/projects/p/datasets"
+
+
+def test_app_installs_the_access_log_filter(setup):
+    assert any(
+        isinstance(f, UploadTokenRedactor) for f in logging.getLogger("uvicorn.access").filters
+    )
+
+
+def test_creating_a_token_prunes_only_the_ones_that_cannot_be_used(setup):
+    client, user, project_id = setup
+    now = time.time()
+    expired = make_token(client, user, project_id, now=now - 1000)
+    used = make_token(client, user, project_id)
+    live = make_token(client, user, project_id)
+    claimed = make_token(client, user, project_id)
+    with closing(connect(client)) as conn:
+        first = upload_tokens.claim(conn, used)
+        upload_tokens.finish(conn, first.id)
+        held = upload_tokens.claim(conn, claimed)
+    fresh = make_token(client, user, project_id)
+    with closing(connect(client)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM upload_tokens").fetchone()[0] == 3
+        assert upload_tokens.claim(conn, expired) is None
+        assert upload_tokens.claim(conn, used) is None
+        assert upload_tokens.claim(conn, claimed) is None  # still claimed, not pruned
+        upload_tokens.release(conn, held.id)
+        assert upload_tokens.claim(conn, claimed) is not None
+        assert upload_tokens.claim(conn, live) is not None
+        assert upload_tokens.claim(conn, fresh) is not None

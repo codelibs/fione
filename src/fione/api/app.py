@@ -31,7 +31,12 @@ from fione.api import (
 )
 from fione.api.deps import UPLOAD_SLACK_BYTES
 from fione.api.errors import error_response, install_error_handlers
-from fione.api.security import LoginThrottle, SessionSigner, ensure_setup_token
+from fione.api.security import (
+    LoginThrottle,
+    SessionSigner,
+    UploadTokenRedactor,
+    ensure_setup_token,
+)
 from fione.assistant import store as assistant_store
 from fione.assistant.provider import LlmMonitor
 from fione.assistant.turns import TurnManager
@@ -76,6 +81,7 @@ UPLOAD_PATHS = [
 ]
 
 setup_log = logging.getLogger("fione.setup")
+UPLOAD_TOKEN_REDACTOR = UploadTokenRedactor()
 
 
 class BodyLimit:
@@ -197,6 +203,8 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.throttle = _throttle(settings)
     app.state.setup_throttle = _throttle(settings)
     install_error_handlers(app)
+    # the access log names the request path, and on an upload URL the path is the credential
+    logging.getLogger("uvicorn.access").addFilter(UPLOAD_TOKEN_REDACTOR)
     app.add_middleware(BodyLimit, upload_limit=settings.max_upload_bytes + UPLOAD_SLACK_BYTES)
     # Outermost, so the UI's security headers are on every non-API response, 413s included.
     app.add_middleware(UIHeaders)
