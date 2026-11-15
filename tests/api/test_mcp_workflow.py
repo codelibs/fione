@@ -1,17 +1,19 @@
-"""The MCP job tools: get, wait for, list and cancel a job, as the token's user with the
-access the REST job routes ask for."""
+"""The MCP workflow tools: follow and cancel jobs, create a project and upload a dataset inline,
+each as the token's user with the access the REST routes ask for."""
 
+import json
 import threading
 from contextlib import closing
 
 import pytest
-from test_mcp import bearer, call, iris_dataset
+from test_mcp import bearer, call, iris_dataset, rpc
 from test_mcp_actions import CONFIG, writes  # noqa: F401  (the fixture)
 
-from api_helpers import add_user, connect
+from api_helpers import add_user, connect, iris_frame
 from fione.auth.roles import ProjectAccess, Role
 from fione.jobs import store
 from fione.projects import service as projects
+from fione.tools.workflow import INLINE_UPLOAD_MAX_BYTES
 
 NOT_ALLOWED = "not found or not allowed"
 
@@ -182,3 +184,201 @@ def test_job_id_is_required(writes, name):  # noqa: F811
     client, user = writes
     out = call(client, bearer(client, user), name, {})
     assert out["isError"] is True and "job_id" in text(out)
+
+
+def upload(client, headers, project_id, csv_text, name="d", type="train"):
+    return call(
+        client,
+        headers,
+        "upload_dataset",
+        {"project_id": project_id, "name": name, "type": type, "csv_text": csv_text},
+    )
+
+
+def one_line(result) -> str:
+    assert result["isError"] is True, result
+    message = text(result)
+    assert "\n" not in message and "Traceback" not in message and message.strip()
+    return message
+
+
+def new_project(client, user) -> str:
+    with closing(connect(client)) as conn:
+        return projects.create_project(conn, user, "P").id
+
+
+def test_create_project_owns_it(writes):  # noqa: F811
+    client, user = writes
+    out = call(client, bearer(client, user), "create_project", {"name": "  Sales  "})
+    assert out["isError"] is False, out
+    created = out["structuredContent"]
+    assert set(created) - {"_data_notice"} == {"project_id", "name"} and created["name"] == "Sales"
+    with closing(connect(client)) as conn:
+        project = projects.require_project(conn, created["project_id"])
+        assert project.owner_id == user.id and project.name == "Sales"
+        assert [p.id for p in projects.list_projects(conn, user)] == [project.id]
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 101])
+def test_create_project_refuses_a_bad_name(writes, name):  # noqa: F811
+    client, user = writes
+    out = call(client, bearer(client, user), "create_project", {"name": name})
+    one_line(out)
+    with closing(connect(client)) as conn:
+        assert projects.list_projects(conn, user) == []
+
+
+def test_upload_dataset_ingests_csv(writes):  # noqa: F811
+    client, user = writes
+    headers = bearer(client, user)
+    project_id = new_project(client, user)
+    csv_text = iris_frame().to_csv(index=False)
+    out = upload(client, headers, project_id, csv_text, name="  iris  ")
+    assert out["isError"] is False, out
+    dataset = out["structuredContent"]
+    assert dataset["name"] == "iris" and dataset["type"] == "train"
+    assert dataset["n_rows"] == 150 and dataset["n_cols"] == len(iris_frame().columns)
+    assert [c["name"] for c in dataset["schema"]] == list(iris_frame().columns)
+    assert all(set(c) == {"name", "type"} for c in dataset["schema"])
+    assert "setosa" not in str(dataset)  # no cell values
+    listed = call(client, headers, "list_datasets", {"project_id": project_id})
+    (entry,) = listed["structuredContent"]["datasets"]
+    assert entry["id"] == dataset["id"] and entry["n_rows"] == 150
+
+
+def test_upload_over_512_kib_names_create_upload_url(writes):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    csv_text = "a\n" + "1\n" * (INLINE_UPLOAD_MAX_BYTES // 2)  # just over, and under the body cap
+    assert len(csv_text.encode()) == INLINE_UPLOAD_MAX_BYTES + 2
+    out = upload(client, bearer(client, user), project_id, csv_text)
+    assert "create_upload_url" in one_line(out)
+    with closing(connect(client)) as conn:
+        assert projects.list_datasets(conn, project_id) == []
+
+
+def test_upload_limit_is_in_bytes(writes):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    csv_text = "列\n" + "あ\n" * 200_000
+    assert len(csv_text) < INLINE_UPLOAD_MAX_BYTES < len(csv_text.encode())
+    out = upload(client, bearer(client, user), project_id, csv_text)
+    assert "create_upload_url" in one_line(out)
+    with closing(connect(client)) as conn:
+        assert projects.list_datasets(conn, project_id) == []
+
+
+def test_upload_just_under_the_limit_is_accepted(writes):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    row = "1\n"
+    csv_text = "a\n" + row * ((INLINE_UPLOAD_MAX_BYTES - 2) // len(row))
+    assert len(csv_text.encode()) <= INLINE_UPLOAD_MAX_BYTES
+    out = upload(client, bearer(client, user), project_id, csv_text)
+    assert out["isError"] is False, out
+
+
+@pytest.mark.parametrize(
+    ("csv_text", "message"),
+    [
+        ("", "empty file"),
+        ("   \n\n", "empty file"),
+        ("a,b\n", "no data rows"),
+        ("a,b\n1,2\n3,SECRET,5\n", "could not parse the CSV: a row has 3 fields, the header 2"),
+        ('a,b\n1,2\n"SECRET\n', "could not parse the CSV: a row has 1 fields, the header 2"),
+    ],
+)
+def test_upload_bad_csv_is_one_line(writes, csv_text, message):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    out = upload(client, bearer(client, user), project_id, csv_text)
+    assert one_line(out) == message
+    with closing(connect(client)) as conn:
+        assert projects.list_datasets(conn, project_id) == []
+
+
+def test_upload_text_that_is_not_unicode_is_one_line(writes):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    arguments = {"project_id": project_id, "name": "d", "type": "train", "csv_text": "SECRET"}
+    body = json.dumps(rpc("tools/call", {"name": "upload_dataset", "arguments": arguments}))
+    # the JSON escape of a lone surrogate, which a client's JSON library can send
+    body = body.replace("SECRET", "a\\ud800")
+    headers = bearer(client, user) | {"Content-Type": "application/json"}
+    r = client.post("/mcp", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert "not valid text" in one_line(r.json()["result"])
+
+
+@pytest.mark.parametrize(
+    ("csv_text", "names"),
+    [
+        ("\ufeffa,b\n1,2\n", ["a", "b"]),  # a BOM is not part of the first name
+        ("a,a,\n1,2,3\n", ["a", "a_2", "column_3"]),  # duplicate and empty names
+        ("名前,値\nあ,1\n", ["名前", "値"]),
+    ],
+)
+def test_upload_odd_headers_are_made_usable(writes, csv_text, names):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    out = upload(client, bearer(client, user), project_id, csv_text)
+    assert out["isError"] is False, out
+    assert [c["name"] for c in out["structuredContent"]["schema"]] == names
+
+
+def test_upload_needs_write_access(writes):  # noqa: F811
+    client, owner = writes
+    project_id = new_project(client, owner)
+    viewer = add_user(client, "vi", Role.EDITOR)
+    stranger = add_user(client, "st", Role.EDITOR)
+    with closing(connect(client)) as conn:
+        projects.share_project(conn, owner, project_id, "vi", ProjectAccess.VIEWER)
+    csv_text = "a\n1\n"
+    seen = upload(client, bearer(client, viewer), project_id, csv_text)
+    assert "write access" in one_line(seen)
+    hidden = upload(client, bearer(client, stranger), project_id, csv_text)
+    missing = upload(client, bearer(client, stranger), "no-such-project", csv_text)
+    assert text(hidden) == NOT_ALLOWED and missing["content"] == hidden["content"]
+    with closing(connect(client)) as conn:
+        assert projects.list_datasets(conn, project_id) == []
+
+
+@pytest.mark.parametrize("type_", ["", "TRAIN", "validation", "predict "])
+def test_upload_type_must_be_train_test_predict(writes, type_):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    out = upload(client, bearer(client, user), project_id, "a\n1\n", type=type_)
+    assert "type" in one_line(out)
+    with closing(connect(client)) as conn:
+        assert projects.list_datasets(conn, project_id) == []
+
+
+@pytest.mark.parametrize("type_", ["train", "test", "predict"])
+def test_upload_takes_each_type(writes, type_):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    out = upload(client, bearer(client, user), project_id, "a\n1\n", type=type_)
+    assert out["structuredContent"]["type"] == type_
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 101])
+def test_upload_name_is_checked(writes, name):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    out = upload(client, bearer(client, user), project_id, "a\n1\n", name=name)
+    one_line(out)
+    with closing(connect(client)) as conn:
+        assert projects.list_datasets(conn, project_id) == []
+
+
+def test_upload_of_a_wide_csv_has_a_bounded_result(writes):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    names = [f"column_{i}" for i in range(5000)]
+    csv_text = ",".join(names) + "\n" + ",".join("1" for _ in names) + "\n"
+    out = upload(client, bearer(client, user), project_id, csv_text)
+    assert out["isError"] is False, out
+    assert len(text(out).encode()) <= 32 * 1024
+    dataset = out["structuredContent"]
+    assert dataset["n_cols"] == 5000 and dataset["truncated"] is True
+    assert dataset["truncated_lists"] == ["schema"]
