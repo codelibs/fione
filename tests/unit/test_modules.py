@@ -1448,6 +1448,33 @@ def test_rolling_around_includes_the_row_itself_and_is_shorter_at_the_edges():
     np.testing.assert_allclose(out["v_around3_min"], expected.min())
 
 
+def test_rolling_after_takes_the_rows_later_in_the_order_and_not_the_row_itself():
+    df = pd.DataFrame({"t": range(6), "g": [0, 0, 0, 1, 1, 1], "v": [1.0, 4.0, 2.0, 8.0, 5.0, 7.0]})
+    out, _ = run_op(
+        "rolling",
+        df,
+        {
+            "order": "t",
+            "by": ["g"],
+            "columns": ["v"],
+            "window": 2,
+            "side": "after",
+            "stats": "mean,count",
+        },
+    )
+    assert list(out.columns[-2:]) == ["v_after2_mean", "v_after2_count"]
+    # the next two rows of the group; the last row of a group has none
+    expected = [3.0, 2.0, np.nan, 6.0, 7.0, np.nan]
+    np.testing.assert_allclose(out["v_after2_mean"].to_numpy(), expected, equal_nan=True)
+    np.testing.assert_allclose(
+        out["v_after2_count"].to_numpy(), [2, 1, np.nan, 2, 1, np.nan], equal_nan=True
+    )
+    # rows of one order do not read each other: both rows of order 1 read the first row after them
+    tied = pd.DataFrame({"t": [1, 1, 2, 2], "v": [1.0, 3.0, 10.0, 20.0]})
+    out, _ = run_op("rolling", tied, {"order": "t", "columns": ["v"], "window": 1, "side": "after"})
+    np.testing.assert_allclose(out["v_after1_mean"], [10.0, 10.0, np.nan, np.nan], equal_nan=True)
+
+
 def test_rolling_leaves_a_row_without_an_order_empty_and_out_of_the_windows():
     df = pd.DataFrame({"t": [1.0, None, 2.0, 3.0], "v": [1.0, 100.0, 2.0, 3.0]})
     out, _ = run_op("rolling", df, {"order": "t", "columns": ["v"], "window": 2})
@@ -1491,7 +1518,7 @@ def test_rolling_matches_a_window_per_group_on_messy_data():
     df.loc[rng.choice(n, 20), "g"] = np.nan  # no group: empty values
     df.loc[rng.choice(n, 20), "t"] = np.nan  # no order: empty values, outside every window
     df.loc[rng.choice(n, 40), "v"] = np.nan
-    for side, window in (("before", 4), ("around", 5), ("around", 1_001)):
+    for side, window in (("before", 4), ("around", 5), ("around", 1_001), ("after", 4)):
         out, _ = run_op(
             "rolling",
             df.set_axis(rng.permutation(n)),  # a shuffled index must not matter
@@ -1511,6 +1538,8 @@ def test_rolling_matches_a_window_per_group_on_messy_data():
             values = part["v"]
             if side == "before":
                 rolled = values.shift(1).rolling(window, min_periods=1)
+            elif side == "after":  # the same on the rows read backwards
+                rolled = values.iloc[::-1].shift(1).rolling(window, min_periods=1)
             else:
                 rolled = values.rolling(window, center=True, min_periods=1)
             for stat in expected.columns:
@@ -1586,7 +1615,7 @@ def test_rolling_by_span_matches_a_brute_force_range_on_messy_data():
     )
     df.loc[rng.choice(n, 15), "g"] = np.nan
     df.loc[rng.choice(n, 15), "t"] = np.nan
-    for side, span in (("before", 7.0), ("around", 8.0)):
+    for side, span in (("before", 7.0), ("around", 8.0), ("after", 7.0)):
         out, _ = run_op(
             "rolling",
             df,
@@ -1607,6 +1636,8 @@ def test_rolling_by_span_matches_a_brute_force_range_on_messy_data():
                 part = df[(df["g"] == row["g"]) & (df["h"] == row["h"]) & df["t"].notna()]
                 if side == "before":
                     part = part[(part["t"] >= row["t"] - span) & (part["t"] < row["t"])]
+                elif side == "after":
+                    part = part[(part["t"] > row["t"]) & (part["t"] <= row["t"] + span)]
                 else:
                     part = part[(part["t"] - row["t"]).abs() <= span / 2]
                 if len(part):
@@ -1659,8 +1690,15 @@ def test_rolling_window_bounds_never_go_back_between_groups_and_orders():
             .transform(lambda part: part.sort_values(na_position="last").to_numpy())
             .to_numpy()
         )
-        for window, span, around in ((3, 0, False), (3, 0, True), (0, 4.0, False), (0, 5.0, True)):
-            start, end = frame_ops._window_rows(groups, order, order, window, span, around)
+        for window, span, side in (
+            (3, 0, "before"),
+            (3, 0, "around"),
+            (3, 0, "after"),
+            (0, 4.0, "before"),
+            (0, 5.0, "around"),
+            (0, 4.0, "after"),
+        ):
+            start, end = frame_ops._window_rows(groups, order, order, window, span, side)
             assert (np.diff(start) >= 0).all() and (np.diff(end) >= 0).all()
             assert (start <= end).all() and (start >= 0).all() and (end <= n).all()
 
