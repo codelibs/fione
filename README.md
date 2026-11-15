@@ -59,8 +59,9 @@ that a person confirms; it only reads. It needs a language model: the Ollama app
 your Mac by default (`gemma4:12b-mlx`), an Ollama in Compose (profile `ollama`) on Linux, or
 Claude through the Anthropic API (`FIONE_LLM_PROVIDER=claude` and an API key). A server outside
 this machine needs an administrator's one-time consent. The same read-only tools are available
-to MCP clients such as Claude Code, off by default, and a second switch lets them also queue
-training, prediction and module jobs. See [The assistant](docs/assistant.md).
+to MCP clients such as Claude Code, off by default, and a second switch lets them also create
+projects, upload datasets, queue training, prediction and module jobs, follow them and predict
+rows. See [The assistant](docs/assistant.md).
 
 ## Documentation
 

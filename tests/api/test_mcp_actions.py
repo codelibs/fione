@@ -61,6 +61,15 @@ def test_off_by_default(make_client):
     assert init.json()["result"]["instructions"].startswith("Read-only")
 
 
+def test_instructions_name_the_workflow_tools(writes):
+    client, user = writes
+    init = post(client, rpc("initialize", {"protocolVersion": "2025-06-18"}), bearer(client, user))
+    text = init.json()["result"]["instructions"]
+    assert not text.startswith("Read-only")
+    for name in ("create_project", "create_upload_url", "wait_for_job", "predict"):
+        assert name in text
+
+
 def test_listed_with_honest_annotations(writes):
     client, user = writes
     tools = tool_list(client, bearer(client, user))
