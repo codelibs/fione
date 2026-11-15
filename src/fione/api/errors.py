@@ -15,6 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
+from fione.api.security import redact_upload_token
 from fione.auth.service import UserConflict, UserNotFound
 from fione.engine.config import ConfigError
 from fione.models.service import ModelNotFound
@@ -129,5 +130,6 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _internal(request: Request, exc: Exception) -> JSONResponse:
-        log.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+        path = redact_upload_token(request.url.path)
+        log.error("unhandled error on %s %s", request.method, path, exc_info=exc)
         return error_response(500, "internal", "internal error")

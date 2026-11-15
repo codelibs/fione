@@ -3,6 +3,7 @@ import csv
 import io
 import itertools
 import logging
+import re
 import sqlite3
 import tempfile
 from collections.abc import Iterable, Iterator
@@ -18,6 +19,7 @@ import pyarrow.parquet as pq
 
 from fione.projects import service
 from fione.projects.service import Dataset, DatasetType
+from fione.schema import clean_text
 from fione.storage import Storage
 
 log = logging.getLogger(__name__)
@@ -35,6 +37,20 @@ _MAX_EXACT_FLOAT_INT = 2**53  # integers up to this magnitude survive a float64 
 
 class IngestError(Exception):
     """The upload is not a CSV Fione can read; the message is meant for the user."""
+
+
+_PARSE_ERROR = re.compile(r"Expected (\d+) columns?, got (\d+)")
+
+
+def ingest_error_message(error: IngestError) -> str:
+    """The one-line refusal for a CSV Fione cannot read. The parser's own text quotes the
+    offending row, which is data, so only the two field counts are kept."""
+    message = str(error)
+    if not message.startswith("could not parse the CSV"):
+        return clean_text(message, 200)
+    found = _PARSE_ERROR.search(message)
+    detail = f": a row has {found[2]} fields, the header {found[1]}" if found else ""
+    return f"could not parse the CSV{detail}"
 
 
 def _spool(stream: BinaryIO, path: Path, max_bytes: int) -> int:

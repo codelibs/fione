@@ -2,7 +2,7 @@
 
 A schema is ``{"type": "object", "properties": {...}, "required": [...]}`` whose properties are
 scalars (``string``, ``integer``, ``number``, ``boolean``), an ``array`` of strings or, for tools
-only, an ``object``. Nothing is
+only, an ``object`` or an ``array`` of objects (``"items": {"type": "object"}``). Nothing is
 evaluated and no ``$ref`` is followed: a property is checked against its own keywords only.
 """
 
@@ -34,6 +34,12 @@ _KEYWORDS = frozenset(
     }
 )
 MAX_ITEMS = 1000  # an array property never takes more than this many items
+# an array whose items are objects (``"items": {"type": "object"}``) instead of strings
+_OBJECT_ITEMS = {"type": "object"}
+
+
+def _is_object_list(value) -> bool:
+    return isinstance(value, list) and all(isinstance(x, dict) for x in value)
 
 
 def clean_text(s, max_len: int = 80) -> str:
@@ -63,7 +69,10 @@ def validate_args(schema: dict, args) -> dict:
                 out[name] = copy.deepcopy(spec["default"])
             continue
         value = args[name]
-        if not _TYPES[spec["type"]](value):
+        is_type = _TYPES[spec["type"]]
+        if spec["type"] == "array" and spec.get("items") == _OBJECT_ITEMS:
+            is_type = _is_object_list
+        if not is_type(value):
             raise ValueError(f"argument '{name}' must be of type {spec['type']}")
         if "enum" in spec and value not in spec["enum"]:
             raise ValueError(f"argument '{name}' must be one of {spec['enum']}")
@@ -93,7 +102,7 @@ def check_schema(schema) -> dict:
             raise ValueError("every parameter must be an object")
         if spec.get("type") not in _TYPES or spec["type"] == "object":
             raise ValueError(f"parameter '{clean_text(name, 40)}' has an unsupported type")
-        if not _KEYWORDS.issuperset(spec):
+        if not _KEYWORDS.issuperset(spec) or spec.get("items") == _OBJECT_ITEMS:
             raise ValueError(f"parameter '{clean_text(name, 40)}' uses an unsupported keyword")
         if "enum" in spec and not isinstance(spec["enum"], list):
             raise ValueError(f"parameter '{clean_text(name, 40)}' has an invalid enum")

@@ -21,9 +21,31 @@ class PredictInputError(ValueError):
     """The data cannot be predicted on; the message is meant for the user."""
 
 
+def class_columns(classes: Sequence | None) -> list[str]:
+    """``predict``, then ``p_<class>`` per class (``None`` for regression)."""
+    return [PREDICT] + [f"p_{label}" for label in classes or []]
+
+
 def prediction_columns(model: TrainedModel) -> list[str]:
     """``predict``, then ``p_<class>`` per class for classification."""
-    return [PREDICT] + [f"p_{label}" for label in model.classes_ or []]
+    return class_columns(model.classes_)
+
+
+def instances_frame(
+    model: TrainedModel, instances: list[dict], noun: str = "instance"
+) -> pd.DataFrame:
+    """The model's columns of ``instances`` (other keys are ignored, as in Fione Serving).
+    A numeric column takes no ``true``/``false``. ``PredictInputError`` names the offending
+    ``noun`` by position and the columns, never a value."""
+    numeric = set(model.prep.numeric_columns)
+    for i, row in enumerate(instances):
+        missing = [c for c in model.columns if c not in row]
+        if missing:
+            raise PredictInputError(f"{noun} {i}: missing columns: {missing}")
+        flags = [c for c in model.columns if c in numeric and isinstance(row[c], bool)]
+        if flags:
+            raise PredictInputError(f"{noun} {i}: numbers expected, not true or false: {flags}")
+    return pd.DataFrame({c: [row[c] for row in instances] for c in model.columns})
 
 
 def contribution_columns(model: TrainedModel) -> list[str]:

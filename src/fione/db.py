@@ -214,6 +214,19 @@ MIGRATIONS: list[str] = [
     ALTER TABLE chat_proposals ADD COLUMN kind TEXT NOT NULL DEFAULT 'train'
         CHECK (kind IN ('train', 'join'));
     """,
+    """
+    CREATE TABLE upload_tokens (
+        id INTEGER PRIMARY KEY,
+        token_sha256 TEXT NOT NULL UNIQUE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('train', 'test', 'predict')),
+        expires_at REAL NOT NULL,
+        claimed_at REAL,
+        used_at REAL
+    );
+    """,
 ]
 
 

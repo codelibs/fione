@@ -52,7 +52,10 @@ def _queued(job: Job) -> dict:
         "kind": job.kind,
         "status": job.status.value,
         "project_id": job.project_id,
-        "next": "follow it with get_training_events (job_id) until it is done, failed or cancelled",
+        "next": (
+            "call wait_for_job with this job_id until done is true; "
+            "get_training_events shows progress"
+        ),
     }
 
 

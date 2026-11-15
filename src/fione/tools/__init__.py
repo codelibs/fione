@@ -1,7 +1,7 @@
 """Typed tools for the LLM assistant (spec section 9), which only reads, and the action tools
 that MCP clients may use when the administrator allows them."""
 
-from fione.tools import actions, builtin  # noqa: F401  (register the tools)
+from fione.tools import actions, builtin, workflow  # noqa: F401  (register the tools)
 from fione.tools.registry import (
     Tool,
     ToolContext,

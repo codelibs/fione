@@ -14,7 +14,9 @@ import binascii
 import hashlib
 import hmac
 import json
+import logging
 import math
+import re
 import secrets
 import threading
 import time
@@ -265,3 +267,23 @@ def read_setup_token(settings: Settings) -> str | None:
 
 def discard_setup_token(settings: Settings) -> None:
     _setup_token_path(settings).unlink(missing_ok=True)
+
+
+_UPLOAD_TOKEN = re.compile(r"(/uploads/)[^/?#\s]+")
+
+
+def redact_upload_token(text: str) -> str:
+    """``text`` (a request path or URL) with the one-time upload token left out."""
+    return _UPLOAD_TOKEN.sub(r"\1<token>", text)
+
+
+class UploadTokenRedactor(logging.Filter):
+    """For uvicorn's access log, whose line names the request path: the upload token in it
+    must not reach a log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                redact_upload_token(arg) if isinstance(arg, str) else arg for arg in record.args
+            )
+        return True

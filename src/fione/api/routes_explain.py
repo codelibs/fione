@@ -43,7 +43,7 @@ from fione.models import explanations
 from fione.models.live import Busy, TooLarge, Untrusted
 from fione.models.service import ModelRecord
 from fione.modules.registry import redact
-from fione.predict.batch import PredictInputError, check_inputs
+from fione.predict.batch import check_inputs, instances_frame
 from fione.projects import ingest
 from fione.projects import service as projects
 from fione.projects.service import Dataset
@@ -127,20 +127,6 @@ def _read(read, *args, **kwargs) -> pd.DataFrame:
         raise not_found("dataset not found") from None
 
 
-def _instances(model: TrainedModel, instances: list[dict]) -> pd.DataFrame:
-    """The model's columns of ``instances`` (other keys are ignored, as in Fione Serving).
-    A numeric column takes no ``true``/``false``."""
-    numeric = set(model.prep.numeric_columns)
-    for i, row in enumerate(instances):
-        missing = [c for c in model.columns if c not in row]
-        if missing:
-            raise PredictInputError(f"instance {i}: missing columns: {missing}")
-        flags = [c for c in model.columns if c in numeric and isinstance(row[c], bool)]
-        if flags:
-            raise PredictInputError(f"instance {i}: numbers expected, not true or false: {flags}")
-    return pd.DataFrame({c: [row[c] for row in instances] for c in model.columns})
-
-
 def _check_request(model: TrainedModel, rows: int, class_index: int | None) -> None:
     """Refuse, before any work, more rows than the model's width allows here, and a
     ``class_index`` the model has no output for."""
@@ -179,7 +165,7 @@ def contributions(
             asked = body.limit if body.instances is None else len(body.instances)
             _check_request(model, asked, body.class_index)
             if dataset is None:
-                frame = _instances(model, body.instances)
+                frame = instances_frame(model, body.instances)
             else:
                 columns = explanations.model_columns(record)
                 frame = _read(

@@ -1,6 +1,7 @@
 """The MCP action tools: off unless FIONE_MCP_WRITE_ENABLED, never in the chat, and each runs
 as the token's user with the write access the REST routes ask for."""
 
+import re
 from contextlib import closing
 
 import pytest
@@ -12,7 +13,17 @@ from fione.jobs import store
 from fione.projects import service as projects
 from fione.tools import list_actions, list_tools, registry
 
-ACTIONS = {"list_modules", "start_training", "start_batch_predict", "run_module"}
+READS = {"list_modules", "get_job", "wait_for_job", "list_jobs", "get_predictions"}
+ACTIONS = READS | {
+    "start_training",
+    "start_batch_predict",
+    "run_module",
+    "cancel_job",
+    "create_project",
+    "upload_dataset",
+    "create_upload_url",
+    "predict",
+}
 CONFIG = {"target": "species", "max_runtime_secs": 30}
 
 
@@ -51,12 +62,25 @@ def test_off_by_default(make_client):
     assert init.json()["result"]["instructions"].startswith("Read-only")
 
 
+def test_instructions_name_the_workflow_tools(writes):
+    client, user = writes
+    init = post(client, rpc("initialize", {"protocolVersion": "2025-06-18"}), bearer(client, user))
+    text = init.json()["result"]["instructions"]
+    assert not text.startswith("Read-only")
+    listed = tool_list(client, bearer(client, user))
+    named = set(re.findall(r"\b[a-z]+(?:_[a-z]+)+\b", text))
+    assert named <= set(listed)
+    for name in ("create_project", "create_upload_url", "wait_for_job", "predict"):
+        assert name in text
+
+
 def test_listed_with_honest_annotations(writes):
     client, user = writes
     tools = tool_list(client, bearer(client, user))
     assert ACTIONS <= set(tools) and "list_projects" in tools
-    assert tools["list_modules"]["annotations"]["readOnlyHint"] is True
-    for name in ACTIONS - {"list_modules"}:
+    for name in READS:
+        assert tools[name]["annotations"]["readOnlyHint"] is True
+    for name in ACTIONS - READS:
         ann = tools[name]["annotations"]
         assert ann["readOnlyHint"] is False and ann["destructiveHint"] is False
         assert ann["idempotentHint"] is False

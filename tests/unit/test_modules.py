@@ -765,6 +765,23 @@ def test_check_schema_rejects_malformed_schemas(schema):
         check_schema(schema)
 
 
+def test_a_module_cannot_declare_an_array_of_objects():
+    check_schema({"properties": {"a": {"type": "array", "items": {"type": "string"}}}})
+    with pytest.raises(ValueError, match="unsupported keyword"):
+        check_schema({"properties": {"a": {"type": "array", "items": {"type": "object"}}}})
+
+
+def test_an_array_of_objects_takes_only_lists_of_objects():
+    schema = {"properties": {"a": {"type": "array", "items": {"type": "object"}}}}
+    assert validate_args(schema, {"a": [{}, {"x": 1}]}) == {"a": [{}, {"x": 1}]}
+    for bad in ([{}, 5], [1], "x", {"x": 1}):
+        with pytest.raises(ValueError, match="'a' must be of type array"):
+            validate_args(schema, {"a": bad})
+    strings = {"properties": {"a": {"type": "array"}}}
+    with pytest.raises(ValueError, match="'a' must be of type array"):
+        validate_args(strings, {"a": [{}]})
+
+
 # --- uploading, listing, deleting -----------------------------------------------------------
 
 GOOD = """

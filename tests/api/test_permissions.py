@@ -578,6 +578,13 @@ ROWS = [
         "/api/v1/system/status",
         e(401, 200, 200, 200, 200, 200, 200),
     ),
+    Row(
+        "PUT",
+        "/api/v1/uploads/{token}",
+        "/api/v1/uploads/not-a-token",
+        e(404, 404, 404, 404, 404, 404, 404),
+        note="the token is the credential, whoever asks (tests/api/test_uploads_api.py)",
+    ),
 ]
 
 
