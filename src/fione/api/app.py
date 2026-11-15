@@ -26,6 +26,7 @@ from fione.api import (
     routes_modules,
     routes_projects,
     routes_system,
+    routes_uploads,
     routes_users,
 )
 from fione.api.deps import UPLOAD_SLACK_BYTES
@@ -59,9 +60,11 @@ ROUTERS = [
     routes_models.router,
     routes_explain.router,
     routes_modules.router,
+    routes_uploads.router,
 ]
 UPLOAD_PATHS = [
     re.compile(rf"^{API_PREFIX}/projects/[^/]+/datasets$"),
+    re.compile(rf"^{API_PREFIX}/uploads/[^/]+$"),  # PUT, a one-time upload URL
     re.compile(rf"^{API_PREFIX}/projects/[^/]+/models/import$"),
     re.compile(rf"^{API_PREFIX}/modules$"),
     # The web UI's training-data and prediction-data uploads (fione.web.easyml).
@@ -91,7 +94,9 @@ class BodyLimit:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        upload = scope["method"] == "POST" and any(p.match(scope["path"]) for p in UPLOAD_PATHS)
+        upload = scope["method"] in ("POST", "PUT") and any(
+            p.match(scope["path"]) for p in UPLOAD_PATHS
+        )
         limit = self.upload_limit if upload else MAX_BODY_BYTES
         declared = Headers(scope=scope).get("content-length")
         if declared is not None and (not declared.isdigit() or int(declared) > limit):

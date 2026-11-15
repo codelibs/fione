@@ -4,6 +4,7 @@ each as the token's user with the access the REST routes ask for."""
 import json
 import threading
 from contextlib import closing
+from urllib.parse import urlsplit
 
 import pytest
 from test_mcp import bearer, call, iris_dataset, rpc
@@ -382,3 +383,77 @@ def test_upload_of_a_wide_csv_has_a_bounded_result(writes):  # noqa: F811
     dataset = out["structuredContent"]
     assert dataset["n_cols"] == 5000 and dataset["truncated"] is True
     assert dataset["truncated_lists"] == ["schema"]
+
+
+def upload_url(client, headers, project_id, name="big", type="train"):
+    return call(
+        client, headers, "create_upload_url", {"project_id": project_id, "name": name, "type": type}
+    )
+
+
+def test_create_upload_url_returns_absolute_url_and_works_end_to_end(writes):  # noqa: F811
+    client, user = writes
+    headers = bearer(client, user)
+    project_id = new_project(client, user)
+    out = upload_url(client, headers, project_id, name="  big  ")
+    assert out["isError"] is False, out
+    result = out["structuredContent"]
+    assert set(result) - {"_data_notice"} == {"url", "method", "expires_in", "example"}
+    assert result["method"] == "PUT" and result["expires_in"] == 900
+    assert result["url"].startswith(f"{client.base_url}/api/v1/uploads/")
+    assert result["example"] == f"curl -T file.csv '{result['url']}'"
+    path = urlsplit(result["url"]).path
+    r = client.put(path, content=iris_frame().to_csv(index=False).encode())
+    assert r.status_code == 201, r.text
+    listed = call(client, headers, "list_datasets", {"project_id": project_id})
+    (entry,) = listed["structuredContent"]["datasets"]
+    assert entry["id"] == r.json()["id"] and entry["n_rows"] == 150 and entry["name"] == "big"
+    assert client.put(path, content=b"a\n1\n").status_code == 404
+
+
+def test_create_upload_url_uses_public_url_when_set(make_client):
+    client = make_client(
+        mcp_enabled=True, mcp_write_enabled=True, public_url="https://fione.example.com"
+    )
+    user = add_user(client, "ed", Role.EDITOR)
+    project_id = new_project(client, user)
+    out = upload_url(client, bearer(client, user), project_id)
+    url = out["structuredContent"]["url"]
+    assert url.startswith("https://fione.example.com/api/v1/uploads/")
+
+
+def test_each_upload_url_is_new(writes):  # noqa: F811
+    client, user = writes
+    headers = bearer(client, user)
+    project_id = new_project(client, user)
+    urls = {upload_url(client, headers, project_id)["structuredContent"]["url"] for _ in range(2)}
+    assert len(urls) == 2
+
+
+def test_create_upload_url_needs_write_access(writes):  # noqa: F811
+    client, owner = writes
+    project_id = new_project(client, owner)
+    viewer = add_user(client, "vi", Role.EDITOR)
+    stranger = add_user(client, "st", Role.EDITOR)
+    with closing(connect(client)) as conn:
+        projects.share_project(conn, owner, project_id, "vi", ProjectAccess.VIEWER)
+    assert "write access" in one_line(upload_url(client, bearer(client, viewer), project_id))
+    hidden = upload_url(client, bearer(client, stranger), project_id)
+    missing = upload_url(client, bearer(client, stranger), "no-such-project")
+    assert text(hidden) == NOT_ALLOWED and missing["content"] == hidden["content"]
+    with closing(connect(client)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM upload_tokens").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 101])
+def test_create_upload_url_name_is_checked(writes, name):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    one_line(upload_url(client, bearer(client, user), project_id, name=name))
+
+
+def test_create_upload_url_type_must_be_train_test_predict(writes):  # noqa: F811
+    client, user = writes
+    project_id = new_project(client, user)
+    out = upload_url(client, bearer(client, user), project_id, type="model")
+    assert out["isError"] is True

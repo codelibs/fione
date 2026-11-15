@@ -13,6 +13,7 @@ from fione.engine.events import jsonable
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
 from fione.projects import service as projects
+from fione.projects import upload_tokens
 from fione.projects.ingest import IngestError, ingest_csv
 from fione.projects.service import DatasetType
 from fione.tools.actions import _ID, _PROJECT, _schema, _writable
@@ -26,6 +27,7 @@ _LISTED = 50  # jobs of one list_jobs call, the newest
 # /mcp bodies are capped at 1 MiB; this leaves room for the JSON around the CSV text.
 INLINE_UPLOAD_MAX_BYTES = 512 * 1024
 _NAME_CHARS = 100  # a project or dataset name, as the REST routes allow
+_UPLOAD_PATH = "/api/v1/uploads"  # routes_uploads, under the API prefix
 _PARSE_ERROR = re.compile(r"Expected (\d+) columns?, got (\d+)")
 
 
@@ -152,11 +154,16 @@ def _ingest_message(error: IngestError) -> str:
     return f"could not parse the CSV{detail}"
 
 
-def _upload_dataset(ctx: ToolContext, args: dict) -> dict:
-    _writable(ctx, args["project_id"])
+def _dataset_name(args: dict) -> str:
     name = args["name"].strip()
     if not 1 <= len(name) <= _NAME_CHARS:
         raise ToolError(f"name must be 1-{_NAME_CHARS} characters")
+    return name
+
+
+def _upload_dataset(ctx: ToolContext, args: dict) -> dict:
+    _writable(ctx, args["project_id"])
+    name = _dataset_name(args)
     try:
         data = args["csv_text"].encode()
     except UnicodeEncodeError:
@@ -184,6 +191,23 @@ def _upload_dataset(ctx: ToolContext, args: dict) -> dict:
     }
 
 
+def _create_upload_url(ctx: ToolContext, args: dict) -> dict:
+    _writable(ctx, args["project_id"])
+    name = _dataset_name(args)
+    if ctx.base_url is None:
+        raise ToolError("upload URLs are not available")
+    token = upload_tokens.create(
+        ctx.conn, ctx.user.id, args["project_id"], name, DatasetType(args["type"])
+    )
+    url = f"{ctx.base_url}{_UPLOAD_PATH}/{token}"
+    return {
+        "url": url,
+        "method": "PUT",
+        "expires_in": upload_tokens.TTL_SECS,
+        "example": f"curl -T file.csv '{url}'",
+    }
+
+
 for _tool in (
     Tool(
         "create_project",
@@ -208,6 +232,25 @@ for _tool in (
         ),
         False,
         _upload_dataset,
+    ),
+    Tool(
+        "create_upload_url",
+        "Make a one-time URL for adding a dataset (type train, test or predict) to a project "
+        "from a CSV file of any size up to the server's upload limit. It is valid for "
+        f"{upload_tokens.TTL_SECS // 60} minutes and for one successful upload: send the file "
+        "with the `example` command (an HTTP PUT of the raw CSV, no credentials needed); the "
+        "answer is the dataset. Needs a shell; without one use upload_dataset for small files. "
+        "Keep the URL private.",
+        _schema(
+            {
+                "project_id": _PROJECT,
+                "name": {"type": "string", "maxLength": _NAME_CHARS},
+                "type": {"type": "string", "enum": [t.value for t in DatasetType]},
+            },
+            ["project_id", "name", "type"],
+        ),
+        False,
+        _create_upload_url,
     ),
     Tool(
         "get_job",

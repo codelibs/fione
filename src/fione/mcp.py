@@ -228,6 +228,7 @@ def _call(request: Request, conn, user, rpc_id, params: dict) -> Response:
         project_id=None,
         via="mcp",
         cancel=lambda job: routes_jobs.cancel(request, conn, job),
+        base_url=request.app.state.settings.public_url or str(request.base_url).rstrip("/"),
     )
     try:
         result = call_tool(name, arguments, ctx, actions=_writes(request))

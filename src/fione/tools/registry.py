@@ -65,6 +65,8 @@ class ToolContext:
     # MCP lets cancel_job stop an unfinished job as the REST route does: job -> the job as it is
     # now (the caller has checked write access)
     cancel: Callable[[Job], Job] | None = None
+    # MCP gives create_upload_url the origin (no trailing slash) the client reaches Fione at
+    base_url: str | None = None
 
 
 _TOOLS: dict[str, Tool] = {}

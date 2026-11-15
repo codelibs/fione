@@ -20,6 +20,7 @@ ACTIONS = READS | {
     "cancel_job",
     "create_project",
     "upload_dataset",
+    "create_upload_url",
 }
 CONFIG = {"target": "species", "max_runtime_secs": 30}
 
