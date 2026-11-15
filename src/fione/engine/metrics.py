@@ -18,7 +18,7 @@ from sklearn.metrics import average_precision_score, matthews_corrcoef, roc_auc_
 
 from fione.engine.config import ConfigError
 from fione.engine.prep import Task
-from fione.engine.search import Folds, score
+from fione.engine.search import Folds, pinball, score
 
 TOP_K = 3  # the k of top3_accuracy and map3
 TOP_SHARE = 0.10  # the share of rows lift_top_group looks at
@@ -37,6 +37,8 @@ class Metric:
     # reported only for two classes (ranking measures; they are still allowed to sort by)
     binary_summary: bool = False
     why: str = ""  # said when ``applies`` is false
+    # ``compute`` takes the configured quantile where the other metrics take the prior
+    quantile: bool = False
 
 
 class Cuts(np.ndarray):
@@ -386,6 +388,7 @@ def _metrics() -> dict[str, Metric]:
         Metric(
             "poisson", r, False, _poisson, _non_negative, why="needs target values of 0 or more"
         ),
+        Metric("pinball", r, False, lambda y, p, quantile: pinball(y, p, quantile), quantile=True),
         Metric(
             "rounded_qwk",
             r,
@@ -408,15 +411,22 @@ HIGHER_IS_BETTER = frozenset(m.name for m in REGISTRY.values() if m.higher_is_be
 CORE = frozenset({"logloss", "auc", "accuracy", "rmse", "mae", "r2"})
 
 
-def resolve(name: str, task: Task, field: str) -> str:
-    """The metric ``name`` means (``auto``: logloss or rmse); ConfigError if it does not apply."""
+def automatic(task: Task, quantile: float | None = None) -> str:
+    """What ``auto`` means: log loss, RMSE or, for a ``quantile``, the pinball loss."""
+    return "pinball" if quantile is not None else ALLOWED[task][0]
+
+
+def resolve(name: str, task: Task, field: str, quantile: float | None = None) -> str:
+    """The metric ``name`` means; ConfigError if it does not apply."""
     name = name.lower()
     if name == "auto":
-        return ALLOWED[task][0]
+        return automatic(task, quantile)
     if name not in ALLOWED[task]:
         raise ConfigError(
             f"{field} {name!r} does not apply to {task}; use auto or one of {list(ALLOWED[task])}"
         )
+    if REGISTRY[name].quantile and quantile is None:
+        raise ConfigError(f"{field} {name!r} needs a quantile")
     return name
 
 
@@ -428,11 +438,18 @@ def check(name: str, y: np.ndarray, classes: int, field: str) -> None:
         raise ConfigError(f"{field} {name!r} {metric.why}")
 
 
-def value(name: str, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None = None) -> float:
+def value(
+    name: str,
+    y: np.ndarray,
+    pred: np.ndarray,
+    prior: np.ndarray | None = None,
+    quantile: float | None = None,
+) -> float:
     if name not in REGISTRY:
         raise ValueError(f"unknown metric {name!r}")
+    metric = REGISTRY[name]
     with np.errstate(all="ignore"):
-        return REGISTRY[name].compute(y, pred, prior)
+        return metric.compute(y, pred, quantile if metric.quantile else prior)
 
 
 # The relative errors, with the power of the target that scales a row's squared error to its share
@@ -450,7 +467,9 @@ RELATIVE_WEIGHT_CAP = 0.99
 # blend is chosen on them (the relative errors also weight the rows, see above). The others are
 # squared error or a correlation, which the average of well-fitted models serves as well, or
 # (rounded_qwk) are decided after the blend.
-BLEND_ON_METRIC = frozenset({"mae", "medae", "smape", "rmsle", "poisson", *RELATIVE_ERRORS})
+BLEND_ON_METRIC = frozenset(
+    {"pinball", "mae", "medae", "smape", "rmsle", "poisson", *RELATIVE_ERRORS}
+)
 
 
 def relative_weight(y: np.ndarray, name: str, log1p: bool = False) -> np.ndarray:
@@ -602,38 +621,55 @@ def tune_prior(name: str, y: np.ndarray, pred: np.ndarray) -> np.ndarray:
     return np.array([1.0 - t, t])
 
 
-def loss(name: str, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None = None) -> float:
+def loss(
+    name: str,
+    y: np.ndarray,
+    pred: np.ndarray,
+    prior: np.ndarray | None = None,
+    quantile: float | None = None,
+) -> float:
     """``value`` oriented so that lower is better; an undefined value is the worst."""
-    v = value(name, y, pred, prior)
+    v = value(name, y, pred, prior, quantile)
     if not np.isfinite(v):
         return float("inf")
     return -v if name in HIGHER_IS_BETTER else v
 
 
 def fold_std(
-    name: str, y: np.ndarray, pred: np.ndarray, folds: Folds, prior: np.ndarray | None = None
+    name: str,
+    y: np.ndarray,
+    pred: np.ndarray,
+    folds: Folds,
+    prior: np.ndarray | None = None,
+    quantile: float | None = None,
 ) -> float:
     """Standard deviation of the metric over the validation folds, leaving out the folds where
     it is undefined (an AUC of a part with one class); NaN if there is none."""
-    values = np.array([value(name, y[valid], pred[valid], prior) for _, valid in folds])
+    values = np.array([value(name, y[valid], pred[valid], prior, quantile) for _, valid in folds])
     values = values[np.isfinite(values)]
     return float(np.std(values)) if len(values) else float("nan")
 
 
 def summary(
-    task: Task, y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None = None
+    task: Task,
+    y: np.ndarray,
+    pred: np.ndarray,
+    prior: np.ndarray | None = None,
+    quantile: float | None = None,
 ) -> dict[str, float]:
     """Every metric of the task that is defined for the data, in the target's own units.
     The ranking measures (AUC, ...) only for two classes. Besides the core metrics, a value
-    that is not a number is left out."""
+    that is not a number is left out. The pinball loss is reported only for a ``quantile``."""
     classes = pred.shape[1] if task == "classification" else 0
     out = {}
     for name in ALLOWED[task]:
         metric = REGISTRY[name]
         if not metric.applies(y, classes) or metric.binary_summary and classes != 2:
             continue
+        if metric.quantile and quantile is None:
+            continue
         try:
-            v = value(name, y, pred, prior)
+            v = value(name, y, pred, prior, quantile)
         except MemoryError:  # a table over many classes: report what fits
             if name in CORE:
                 raise

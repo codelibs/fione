@@ -453,6 +453,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "ignored_columns": ["sepal width (cm)", "petal length (cm)"],
         "cv_group_column": None,
         "cv_repeats": None,
+        "quantile": None,  # not on the form
     }
     assert {f.name for f in dataclasses.fields(TrainConfig)} == set(expected)  # all covered
     assert config.to_dict() == expected
@@ -844,3 +845,9 @@ def test_a_refused_form_keeps_the_posted_run_time(world, monkeypatch):
     assert r.status_code == 422
     assert 'name="max_runtime_minutes" value="7"' in r.text
     assert "set to 10 minutes" not in r.text  # the field no longer holds the recommendation
+
+
+def test_the_form_does_not_offer_the_pinball_loss_that_needs_a_quantile():
+    offered = {metric for metric, _ in automl._metric_options()}
+    assert "rmse" in offered
+    assert "pinball" not in offered

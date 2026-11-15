@@ -184,11 +184,20 @@ def repeat_folds(
     ]
 
 
-def score(task: Task, y: np.ndarray, pred: np.ndarray) -> float:
-    """Log loss of class probabilities (labels 0..k-1) or RMSE; lower is better."""
+def pinball(y: np.ndarray, pred: np.ndarray, quantile: float) -> float:
+    """The mean pinball loss of ``pred`` as the ``quantile`` of ``y``; lower is better."""
+    over = y - pred
+    return float(np.mean(np.maximum(quantile * over, (quantile - 1) * over)))
+
+
+def score(task: Task, y: np.ndarray, pred: np.ndarray, quantile: float | None = None) -> float:
+    """Log loss of class probabilities (labels 0..k-1), the pinball loss for a ``quantile``, or
+    RMSE; lower is better."""
     if task == "classification":
         picked = np.clip(pred[np.arange(len(y)), y], 1e-15, 1.0)
         return float(-np.mean(np.log(picked)))
+    if quantile is not None:
+        return pinball(y, pred, quantile)
     return float(np.sqrt(np.mean((y - pred) ** 2)))
 
 
@@ -280,12 +289,12 @@ def _run_trial(
         oofs[i // per_run][valid] = pred
         if i < per_run:
             models.append(model)
-        losses.append(score(spec.task, y[valid], pred))
+        losses.append(score(spec.task, y[valid], pred, spec.quantile))
         trial.report(float(np.mean(losses)), i)
         if trial.should_prune():
             return _Outcome("pruned", float(np.mean(losses)))
     rows = covered(folds, len(y))
-    total = float(np.mean([score(spec.task, y[rows], oof[rows]) for oof in oofs]))
+    total = float(np.mean([score(spec.task, y[rows], oof[rows], spec.quantile) for oof in oofs]))
     return _Outcome("complete", total, oofs[0], models, oofs)
 
 
@@ -308,6 +317,7 @@ def run_family(
     sample_weight: np.ndarray | None = None,
     repeats: int = 1,
     first_deadline: Deadline | None = None,
+    quantile: float | None = None,
 ) -> FamilyResult:
     """Search family ``name`` within ``deadline``; ``y`` is float targets or class codes 0..k-1.
     ``folds`` holds ``repeats`` runs of folds (see ``repeat_folds``).
@@ -317,7 +327,7 @@ def run_family(
     its search ends at ``deadline`` as soon as that trial is done."""
     start = time.monotonic()
     n_classes = int(y.max()) + 1 if task == "classification" else 0
-    spec = FAMILIES[name](task, n_classes, seed=seed, n_jobs=n_threads(len(X)))
+    spec = FAMILIES[name](task, n_classes, seed=seed, n_jobs=n_threads(len(X)), quantile=quantile)
 
     def cap() -> float | None:
         if max_trial_secs is None or not spec.unit_secs:

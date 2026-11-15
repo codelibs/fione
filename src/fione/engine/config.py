@@ -63,6 +63,7 @@ _METRICS = frozenset(
         "top3_accuracy",
         "map3",
         "rmse",
+        "pinball",
         "mae",
         "r2",
         "mse",
@@ -127,6 +128,9 @@ class TrainConfig:
     # may also be ignored as a feature) are cut into parts, and each fold learns from the parts
     # before the one it predicts. None: shuffled folds.
     time_column: str | None = None
+    # Learn this quantile of the target (a regression, 0 < quantile < 1) instead of its mean:
+    # the models fit the pinball loss, and only the families that can do so are searched.
+    quantile: float | None = None
 
     def validate(self) -> "TrainConfig":
         """Raise ConfigError for the first invalid value; return self when everything is valid."""
@@ -200,6 +204,14 @@ class TrainConfig:
             raise ConfigError("the time column cannot be the target")
         if self.time_column is not None and group is not None:
             raise ConfigError("time_column and cv_group_column cannot be used together")
+        q = self.quantile
+        if q is not None:
+            if not isinstance(q, int | float) or isinstance(q, bool) or not 0 < q < 1:
+                raise ConfigError(f"quantile must be a number above 0 and below 1, got {q!r}")
+            if self.task == "classification":
+                raise ConfigError("quantile needs a regression, not a classification")
+        elif "pinball" in (self.stopping_metric.lower(), self.sort_metric.lower()):
+            raise ConfigError("the pinball metric needs a quantile")
         return self
 
     @classmethod

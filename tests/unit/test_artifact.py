@@ -524,3 +524,15 @@ def test_resign_manifest_changes_only_the_signature(saved):
     signed = resign_manifest(manifest, OTHER_SECRET)
     assert verify_manifest_hmac(signed, OTHER_SECRET) and not verify_manifest_hmac(signed, SECRET)
     assert dataclasses.replace(signed, hmac=manifest.hmac) == manifest
+
+
+def test_a_quantile_model_keeps_its_quantile_and_predicts_the_same_after_a_round_trip(storage):
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"a": rng.uniform(size=600)})
+    df["y"] = 3 * df["a"] + rng.exponential(1.0, 600)
+    config = TrainConfig(target="y", quantile=0.9, max_runtime_secs=30, max_models=3)
+    model = AutoML(config).fit(df)
+    save_model(model, storage, PREFIX, SECRET, image_tag="fione:test")
+    loaded = load_model(storage, PREFIX, SECRET)
+    assert loaded.config.quantile == 0.9
+    pd.testing.assert_series_equal(loaded.predict(df), model.predict(df))

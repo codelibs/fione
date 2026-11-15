@@ -126,3 +126,16 @@ def test_summary_lists_the_metrics_that_fit_the_data():
     signed = set(metrics.summary("regression", values - 2.5, values - 2.5))
     assert {"rmse", "mae", "r2", "smape", "spearman"} <= signed
     assert not {"rmsle", "poisson", "normalized_gini", "rounded_qwk"} & signed
+
+
+def test_the_blend_of_a_quantile_is_chosen_on_the_pinball_loss():
+    rng = np.random.default_rng(3)
+    y = rng.gamma(2.0, 3.0, 2_000)
+    low, high = np.quantile(y, 0.1), np.quantile(y, 0.9)
+    # a constant at the 0.9 quantile is the best single model of that quantile, while the
+    # constant at the mean is the best of squared error
+    oof = {"mean": np.full(len(y), y.mean()), "upper": np.full(len(y), high)}
+    assert caruana(oof, y, "regression") == {"mean": 1.0, "upper": 0.0}
+    assert caruana(oof, y, "regression", quantile=0.9) == {"mean": 0.0, "upper": 1.0}
+    oof["lower"] = np.full(len(y), low)
+    assert caruana(oof, y, "regression", quantile=0.1)["lower"] == 1.0

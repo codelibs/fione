@@ -1446,3 +1446,10 @@ def test_metrics_tab_names_and_explains_the_extra_metrics(world):
     assert '<th scope="row">mystery</th>' in panel  # a name nobody translated stays as it is
     ja = metrics_panel(world.client.get(url, headers={"Accept-Language": "ja"}).text)
     assert '<th scope="row">二次重み付きカッパ</th>' in ja
+
+
+def test_the_ranking_metric_of_a_quantile_model_is_the_pinball_loss():
+    record = SimpleNamespace(task="regression", config={"sort_metric": "auto", "quantile": 0.9})
+    assert models_ui._sort_metric(record) == "pinball"
+    record.config = {"sort_metric": "auto"}
+    assert models_ui._sort_metric(record) == "rmse"

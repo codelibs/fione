@@ -60,7 +60,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from threadpoolctl import threadpool_limits
 
-from fione.engine.config import DeadlineExceeded
+from fione.engine.config import ConfigError, DeadlineExceeded
 from fione.engine.prep import LINEAR_LEVELS, MAX_LEVELS, Task
 
 MAX_ROUNDS = 2000
@@ -92,9 +92,20 @@ class FamilySpec:
     ]  # Prep method producing this family's input: tree, catboost, dense or linear
     defaults: ClassVar[dict]  # the first trial's parameters, keyed like ``space``
     refit: ClassVar[bool] = True  # False: the final model is the average of the fold models
+    quantile_objective: ClassVar[bool] = False  # True: can learn a quantile of the target
     seeded: ClassVar[bool] = True  # False: the same fit gives the same model, whatever the seed
 
-    def __init__(self, task: Task, n_classes: int, seed: int = 0, n_jobs: int = 1):
+    def __init__(
+        self,
+        task: Task,
+        n_classes: int,
+        seed: int = 0,
+        n_jobs: int = 1,
+        quantile: float | None = None,
+    ):
+        if quantile is not None and not self.quantile_objective:
+            raise ConfigError(f"{self.name} cannot learn a quantile")
+        self.quantile = quantile  # the level of the regression's pinball loss; None: the mean
         self.task = task
         self.n_classes = n_classes
         self.seed = seed
@@ -276,6 +287,7 @@ class _LightGBMDeadline:
 class LightGBM(FamilySpec):
     name = "LightGBM"
     view = "tree"
+    quantile_objective = True
     defaults = {
         "learning_rate": 0.05,
         "num_leaves": 31,
@@ -297,7 +309,11 @@ class LightGBM(FamilySpec):
 
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         cls = lgb.LGBMClassifier if self.classification else lgb.LGBMRegressor
+        objective = (
+            {} if self.quantile is None else {"objective": "quantile", "alpha": self.quantile}
+        )
         model = cls(
+            **objective,
             n_estimators=MAX_ROUNDS if X_va is not None else rounds,
             subsample_freq=1,
             n_jobs=self.n_jobs,
@@ -336,6 +352,7 @@ class _XGBoostDeadline(xgb.callback.TrainingCallback):
 class XGBoost(FamilySpec):
     name = "XGBoost"
     view = "tree"
+    quantile_objective = True
     defaults = {
         "learning_rate": 0.05,
         "max_depth": 6,
@@ -358,7 +375,13 @@ class XGBoost(FamilySpec):
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         cls = xgb.XGBClassifier if self.classification else xgb.XGBRegressor
         stopping = X_va is not None
+        objective = (
+            {}
+            if self.quantile is None
+            else {"objective": "reg:quantileerror", "quantile_alpha": self.quantile}
+        )
         model = cls(
+            **objective,
             n_estimators=MAX_ROUNDS if stopping else rounds,
             early_stopping_rounds=EARLY_STOPPING_ROUNDS if stopping else None,
             max_leaves=MAX_LEAVES,
@@ -404,6 +427,7 @@ class _CatBoostDeadline:
 class CatBoost(FamilySpec):
     name = "CatBoost"
     view = "catboost"
+    quantile_objective = True
     defaults = {"learning_rate": 0.05, "depth": 6, "l2_leaf_reg": 3.0}
 
     def space(self, trial):
@@ -416,7 +440,11 @@ class CatBoost(FamilySpec):
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         cls = CatBoostClassifier if self.classification else CatBoostRegressor
         stopping = X_va is not None
+        objective = (
+            {} if self.quantile is None else {"loss_function": f"Quantile:alpha={self.quantile}"}
+        )
         model = cls(
+            **objective,
             iterations=MAX_ROUNDS if stopping else rounds,
             early_stopping_rounds=EARLY_STOPPING_ROUNDS if stopping else None,
             thread_count=self.n_jobs,
