@@ -2,6 +2,7 @@
 each as the token's user with the access the REST routes ask for."""
 
 import json
+import logging
 import re
 import signal
 import threading
@@ -803,3 +804,35 @@ def test_get_predictions_when_the_model_is_gone_says_so(writes):  # noqa: F811
     with closing(connect(client)) as conn:
         conn.execute("DELETE FROM models WHERE id = ?", (model_id,))
     assert "model" in one_line(get_predictions(client, headers, project.id, result))
+
+
+def test_get_predictions_when_the_file_is_gone_says_so(writes):  # noqa: F811
+    client, user = writes
+    project, dataset = iris_dataset(client, user)
+    headers = bearer(client, user)
+    model_id = add_model(client, project.id)
+    result = run_batch(client, headers, project.id, model_id, dataset.id)
+    with closing(connect(client)) as conn:
+        client.app.state.storage.delete(projects.get_dataset(conn, result).key)
+    message = one_line(get_predictions(client, headers, project.id, result))
+    assert "gone" in message and message != NOT_ALLOWED
+
+
+def test_the_log_line_has_no_cell_values(writes, caplog):  # noqa: F811
+    client, user = writes
+    project, dataset = iris_dataset(client, user)
+    headers = bearer(client, user)
+    model_id = add_model(client, project.id)
+    rows = iris_rows([0, 1])
+    rows[0]["note"] = "ssn-123-45-6789"
+    csv_text = "name,salary\nalice-cell,90000\n"
+    with caplog.at_level(logging.INFO, logger="fione.tools"):
+        up = upload(client, headers, project.id, csv_text, name="kept-name")
+        out = predict(client, headers, project.id, model_id, rows)
+    assert up["isError"] is False and out["isError"] is False
+    lines = [r.getMessage() for r in caplog.records if r.name == "fione.tools"]
+    log = "\n".join(lines)
+    assert "tool=upload_dataset" in log and "tool=predict" in log and "kept-name" in log
+    assert "<2 items>" in log and f"<{len(csv_text)} chars>" in log
+    for value in ("alice-cell", "salary", "90000", "ssn-123-45-6789", "5.1"):
+        assert value not in log

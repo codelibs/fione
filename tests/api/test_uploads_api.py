@@ -93,6 +93,16 @@ def test_failed_ingest_leaves_token_usable(setup):
     assert put(client, token).status_code == 201
 
 
+def test_failed_ingest_does_not_quote_the_file_and_leaves_the_token_usable(setup):
+    client, user, project_id = setup
+    token = make_token(client, user, project_id)
+    bad = put(client, token, b"a,b\n1,2\n3,SECRET-CELL,5\n")
+    assert bad.status_code == 422 and bad.json()["code"] == "invalid_csv"
+    assert "SECRET-CELL" not in bad.text and "a row has 3 fields, the header 2" in bad.text
+    assert datasets(client, project_id) == []
+    assert put(client, token).status_code == 201
+
+
 def test_write_switch_off_refuses(make_client):
     client = make_client(mcp_enabled=True)
     user, project_id = new_project(client)

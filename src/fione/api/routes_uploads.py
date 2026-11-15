@@ -22,6 +22,7 @@ from fione.api.schemas import dataset_out
 from fione.auth import service as auth_service
 from fione.auth.roles import can_access_project
 from fione.projects import upload_tokens
+from fione.projects.ingest import IngestError, ingest_error_message
 from fione.projects.upload_tokens import UploadToken
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
@@ -73,6 +74,8 @@ async def put_upload(token: str, request: Request, conn: Conn) -> dict:
         upload_tokens.release(conn, claimed.id)
         if isinstance(e, ClientDisconnect):
             raise ApiError(400, "bad_request", "the upload was interrupted") from None
+        if isinstance(e, IngestError):  # the parser's text quotes a row of the file
+            raise ApiError(422, "invalid_csv", ingest_error_message(e)) from None
         raise
     await run_in_threadpool(upload_tokens.finish, conn, claimed.id)
     return dataset_out(dataset, schema=True)

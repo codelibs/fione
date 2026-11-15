@@ -6,7 +6,6 @@ lists them."""
 
 import io
 import json
-import re
 import time
 from typing import Literal
 
@@ -21,7 +20,7 @@ from fione.models.service import ModelNotFound
 from fione.predict.batch import PredictInputError, batch_predict, class_columns, instances_frame
 from fione.projects import service as projects
 from fione.projects import upload_tokens
-from fione.projects.ingest import IngestError, ingest_csv, read_dataset_rows
+from fione.projects.ingest import IngestError, ingest_csv, ingest_error_message, read_dataset_rows
 from fione.projects.service import DatasetType
 from fione.tools.actions import _ID, _PROJECT, _schema, _writable
 from fione.tools.builtin import _dataset_block
@@ -43,7 +42,6 @@ _LISTED = 50  # jobs of one list_jobs call, the newest
 INLINE_UPLOAD_MAX_BYTES = 512 * 1024
 _NAME_CHARS = 100  # a project or dataset name, as the REST routes allow
 _UPLOAD_PATH = "/api/v1/uploads"  # routes_uploads, under the API prefix
-_PARSE_ERROR = re.compile(r"Expected (\d+) columns?, got (\d+)")
 MAX_PREDICT_ROWS = 1000
 _PAGE_ROWS = 100  # rows of one get_predictions call unless asked for more or fewer
 _SCALARS = (str, int, float, bool, type(None))
@@ -161,17 +159,6 @@ def _create_project(ctx: ToolContext, args: dict) -> dict:
     return {"project_id": project.id, "name": clean_text(project.name, _NAME_CHARS)}
 
 
-def _ingest_message(error: IngestError) -> str:
-    """The one-line refusal for a CSV Fione cannot read. The parser's own text quotes the
-    offending row, which is data, so only the two field counts are kept."""
-    message = str(error)
-    if not message.startswith("could not parse the CSV"):
-        return clean_text(message, 200)
-    found = _PARSE_ERROR.search(message)
-    detail = f": a row has {found[2]} fields, the header {found[1]}" if found else ""
-    return f"could not parse the CSV{detail}"
-
-
 def _dataset_name(args: dict) -> str:
     name = args["name"].strip()
     if not 1 <= len(name) <= _NAME_CHARS:
@@ -202,7 +189,7 @@ def _upload_dataset(ctx: ToolContext, args: dict) -> dict:
             max_bytes=INLINE_UPLOAD_MAX_BYTES,
         )
     except IngestError as e:
-        raise ToolError(_ingest_message(e)) from None
+        raise ToolError(ingest_error_message(e)) from None
     return {
         **_dataset_block(dataset),
         "schema": [{"name": clean_text(n), "type": clean_text(t)} for n, t in dataset.schema],
@@ -320,7 +307,10 @@ def _get_predictions(ctx: ToolContext, args: dict) -> dict:
     if job is None or job.project_id != dataset.project_id:
         raise ToolError("the dataset is not the result of a batch prediction")
     names = _prediction_columns(ctx, job, dataset)
-    frame = read_dataset_rows(ctx.storage, dataset, args["offset"], args["limit"], names)
+    try:
+        frame = read_dataset_rows(ctx.storage, dataset, args["offset"], args["limit"], names)
+    except KeyError:  # the file is gone from storage
+        raise ToolError("the file of these predictions is gone") from None
     rows = [[_cell(v) for v in row] for row in frame.itertuples(index=False, name=None)]
     result = {
         "columns": [clean_text(name) for name in names],
@@ -385,8 +375,9 @@ for _tool in (
         f"Predict rows now with a trained model of a project (1 to {MAX_PREDICT_ROWS} rows, each "
         "an object with a value for every column the model reads; other keys are ignored). "
         "Returns one prediction per row, in order: `predict` and, for classification, the "
-        "probability `p_<class>` of each class. The rows are not echoed or stored, and the "
-        "result must fit in 32 KiB (a few hundred rows of a 3-class model; a larger batch is "
+        "probability `p_<class>` of each class. The rows are not stored; an error for a bad "
+        "value may name up to 3 of the values you sent. The result must fit in 32 KiB (a few "
+        "hundred rows of a 3-class model; a larger batch is "
         "refused with the number of rows that fits). For more rows use upload_dataset or "
         "create_upload_url, then start_batch_predict and get_predictions.",
         _schema(
