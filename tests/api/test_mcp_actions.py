@@ -12,7 +12,7 @@ from fione.jobs import store
 from fione.projects import service as projects
 from fione.tools import list_actions, list_tools, registry
 
-READS = {"list_modules", "get_job", "wait_for_job", "list_jobs"}
+READS = {"list_modules", "get_job", "wait_for_job", "list_jobs", "get_predictions"}
 ACTIONS = READS | {
     "start_training",
     "start_batch_predict",
@@ -21,6 +21,7 @@ ACTIONS = READS | {
     "create_project",
     "upload_dataset",
     "create_upload_url",
+    "predict",
 }
 CONFIG = {"target": "species", "max_runtime_secs": 30}
 

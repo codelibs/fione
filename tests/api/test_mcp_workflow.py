@@ -2,17 +2,22 @@
 each as the token's user with the access the REST routes ask for."""
 
 import json
+import signal
 import threading
 from contextlib import closing
+from functools import cache
 from urllib.parse import urlsplit
 
 import pytest
 from test_mcp import bearer, call, iris_dataset, rpc
 from test_mcp_actions import CONFIG, writes  # noqa: F401  (the fixture)
 
-from api_helpers import add_user, connect, iris_frame
+from api_helpers import FAST_CONFIG, add_user, connect, iris_frame, store_model, tiny_model
 from fione.auth.roles import ProjectAccess, Role
-from fione.jobs import store
+from fione.engine.automl import AutoML
+from fione.engine.config import TrainConfig
+from fione.jobs import builtin, store, worker  # noqa: F401  (builtin registers the handlers)
+from fione.predict import batch_predict
 from fione.projects import service as projects
 from fione.tools.workflow import INLINE_UPLOAD_MAX_BYTES
 
@@ -457,3 +462,314 @@ def test_create_upload_url_type_must_be_train_test_predict(writes):  # noqa: F81
     project_id = new_project(client, user)
     out = upload_url(client, bearer(client, user), project_id, type="model")
     assert out["isError"] is True
+
+
+# --- predict and get_predictions ---------------------------------------------------------------
+
+FEATURES = ["sepal length (cm)", "sepal width (cm)", "petal length (cm)", "petal width (cm)"]
+CLASSES = ["setosa", "versicolor", "virginica"]
+PREDICTION_COLUMNS = ["predict", *(f"p_{c}" for c in CLASSES)]
+
+
+def iris_rows(picked) -> list[dict]:
+    return iris_frame()[FEATURES].iloc[picked].to_dict("records")
+
+
+@cache
+def colour_model():
+    """A classifier that also reads a text column (``colour``)."""
+    frame = iris_frame()
+    frame["colour"] = [("red", "green", "blue")[i % 3] for i in range(len(frame))]
+    return AutoML(TrainConfig(**FAST_CONFIG), lambda event: None).fit(frame)
+
+
+def add_model(client, project_id, **kwargs) -> int:
+    with closing(connect(client)) as conn:
+        secret = client.app.state.secret
+        return store_model(conn, client.app.state.storage, secret, project_id, **kwargs).id
+
+
+def predict(client, headers, project_id, model_id, rows):
+    return call(
+        client, headers, "predict", {"project_id": project_id, "model_id": model_id, "rows": rows}
+    )
+
+
+def run_batch(client, headers, project_id, model_id, dataset_id, **extra) -> int:
+    """Queue a batch prediction through MCP and run its job here; the result dataset's id."""
+    arguments = {"project_id": project_id, "model_id": model_id, "dataset_id": dataset_id}
+    out = call(client, headers, "start_batch_predict", {**arguments, **extra})
+    assert out["isError"] is False, out
+    job_id = out["structuredContent"]["job_id"]
+    before = signal.getsignal(signal.SIGTERM)
+    try:
+        with closing(connect(client)) as conn:
+            assert store.claim_job(conn, job_id, "t")
+            worker._run(conn, store.get_job(conn, job_id), client.app.state.settings)
+            job = store.get_job(conn, job_id)
+    finally:
+        signal.signal(signal.SIGTERM, before)
+    assert job.status == store.JobStatus.DONE, job.message
+    return job.result["dataset_id"]
+
+
+def get_predictions(client, headers, project_id, dataset_id, **extra):
+    return call(
+        client,
+        headers,
+        "get_predictions",
+        {"project_id": project_id, "dataset_id": dataset_id, **extra},
+    )
+
+
+def test_predict_returns_one_prediction_per_row_in_order(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    picked = [149, 0, 75, 100, 3]
+    out = predict(client, bearer(client, user), project.id, model_id, iris_rows(picked))
+    assert out["isError"] is False, out
+    predictions = out["structuredContent"]["predictions"]
+    expected = batch_predict(tiny_model(), iris_frame()[FEATURES].iloc[picked], [])
+    assert [p["predict"] for p in predictions] == expected["predict"].tolist()
+    assert predictions[0]["predict"] == "virginica" and predictions[1]["predict"] == "setosa"
+    for got, want in zip(predictions, expected.to_dict("records"), strict=True):
+        assert list(got) == PREDICTION_COLUMNS
+        assert got["p_setosa"] == pytest.approx(want["p_setosa"])
+        assert sum(got[f"p_{c}"] for c in CLASSES) == pytest.approx(1.0)
+
+
+def test_predict_does_not_echo_inputs(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    rows = iris_rows([0, 1])
+    rows[0]["sepal length (cm)"] = 5.123456
+    out = predict(client, bearer(client, user), project.id, model_id, rows)
+    assert out["isError"] is False, out
+    shown = json.dumps(out["structuredContent"])
+    assert "5.123456" not in shown and "sepal" not in shown
+    assert set(out["structuredContent"]) == {"_data_notice", "predictions"}
+
+
+def test_predict_ignores_keys_the_model_does_not_read(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    rows = [{**row, "extra": "x"} for row in iris_rows([0, 1])]
+    out = predict(client, bearer(client, user), project.id, model_id, rows)
+    assert out["isError"] is False, out
+    assert len(out["structuredContent"]["predictions"]) == 2
+
+
+def test_predict_missing_column_names_the_column_only(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    rows = iris_rows([0, 1])
+    rows[1]["sepal length (cm)"] = 7.654321
+    del rows[1]["petal width (cm)"]
+    message = one_line(predict(client, bearer(client, user), project.id, model_id, rows))
+    assert "row 1" in message and "petal width (cm)" in message
+    assert "7.654321" not in message and "5.1" not in message
+
+
+def test_predict_unseen_category_and_blank_value_do_not_fail_the_call(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id, model=colour_model())
+    rows = [{**row, "colour": "red"} for row in iris_rows([0, 1, 2, 3])]
+    rows[1]["colour"] = "ultraviolet-never-seen"
+    rows[2]["colour"] = None
+    rows[3]["petal width (cm)"] = ""
+    rows[3]["colour"] = ""
+    out = predict(client, bearer(client, user), project.id, model_id, rows)
+    assert out["isError"] is False, out
+    assert len(out["structuredContent"]["predictions"]) == 4
+    assert "ultraviolet" not in json.dumps(out["structuredContent"])
+
+
+def test_predict_text_in_a_number_column_is_refused_in_one_line(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    rows = iris_rows([0, 1])
+    rows[1]["petal width (cm)"] = "wide"
+    message = one_line(predict(client, bearer(client, user), project.id, model_id, rows))
+    assert "petal width (cm)" in message
+    rows[1]["petal width (cm)"] = True
+    flagged = one_line(predict(client, bearer(client, user), project.id, model_id, rows))
+    assert "row 1" in flagged and "petal width (cm)" in flagged
+
+
+@pytest.mark.parametrize("value", [[1], {"a": 1}])
+def test_predict_cell_values_must_be_scalars(writes, value):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    rows = iris_rows([0])
+    rows[0]["petal width (cm)"] = value
+    assert "row 0" in one_line(predict(client, bearer(client, user), project.id, model_id, rows))
+
+
+def test_predict_needs_rows_that_are_objects(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    headers = bearer(client, user)
+    assert "at least 1" in one_line(predict(client, headers, project.id, model_id, []))
+    assert "'rows'" in one_line(predict(client, headers, project.id, model_id, [{}, 5]))
+    assert "row 0: missing columns" in one_line(
+        predict(client, headers, project.id, model_id, [{}])
+    )
+
+
+def test_predict_over_1000_rows_refused(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    rows = iris_rows([0]) * 1001
+    assert "1000" in one_line(predict(client, bearer(client, user), project.id, model_id, rows))
+
+
+def test_predict_busy_model_slot_is_a_toolerror(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    live = client.app.state.live_models
+    live.wait_secs = 0.05
+    assert live.slot.acquire(timeout=1)
+    try:
+        busy = predict(client, bearer(client, user), project.id, model_id, iris_rows([0]))
+    finally:
+        live.slot.release()
+    assert "busy" in one_line(busy)
+    ok = predict(client, bearer(client, user), project.id, model_id, iris_rows([0]))
+    assert ok["isError"] is False
+
+
+def test_predict_untrusted_model_is_refused(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    with closing(connect(client)) as conn:
+        conn.execute("UPDATE models SET trusted = 0 WHERE id = ?", (model_id,))
+    message = one_line(predict(client, bearer(client, user), project.id, model_id, iris_rows([0])))
+    assert "start_batch_predict" in message
+
+
+def test_predict_follows_read_access_and_the_model_project(writes):  # noqa: F811
+    client, owner = writes
+    project, _ = iris_dataset(client, owner)
+    model_id = add_model(client, project.id)
+    viewer = add_user(client, "vi", Role.EDITOR)
+    stranger = add_user(client, "st", Role.EDITOR)
+    with closing(connect(client)) as conn:
+        projects.share_project(conn, owner, project.id, "vi", ProjectAccess.VIEWER)
+        other = projects.create_project(conn, owner, "Q").id
+    rows = iris_rows([0])
+    assert predict(client, bearer(client, viewer), project.id, model_id, rows)["isError"] is False
+    hidden = predict(client, bearer(client, stranger), project.id, model_id, rows)
+    missing = predict(client, bearer(client, stranger), project.id, 99999, rows)
+    wrong = predict(client, bearer(client, owner), other, model_id, rows)
+    for refused in (hidden, missing, wrong):
+        assert refused["isError"] is True and text(refused) == NOT_ALLOWED
+
+
+def test_get_predictions_pages_prediction_columns_only(writes):  # noqa: F811
+    client, user = writes
+    project, dataset = iris_dataset(client, user)
+    headers = bearer(client, user)
+    model_id = add_model(client, project.id)
+    result = run_batch(
+        client, headers, project.id, model_id, dataset.id, include_columns=["sepal length (cm)"]
+    )
+    with closing(connect(client)) as conn:
+        names = [name for name, _ in projects.get_dataset(conn, result).schema]
+    assert names[: len(PREDICTION_COLUMNS)] == PREDICTION_COLUMNS and "sepal length (cm)" in names
+    out = get_predictions(client, headers, project.id, result, offset=2, limit=3)
+    assert out["isError"] is False, out
+    page = out["structuredContent"]
+    assert page["columns"] == PREDICTION_COLUMNS
+    assert page["offset"] == 2 and page["n_rows"] == 150 and len(page["rows"]) == 3
+    assert "truncated" not in page and "sepal length (cm)" not in json.dumps(page)
+    expected = batch_predict(tiny_model(), iris_frame()[FEATURES].iloc[2:5], [])
+    assert [row[0] for row in page["rows"]] == expected["predict"].tolist()
+    assert page["rows"][0][1] == pytest.approx(expected["p_setosa"].iloc[0])
+    first = get_predictions(client, headers, project.id, result)["structuredContent"]
+    assert first["offset"] == 0 and len(first["rows"]) == 100
+
+
+def test_get_predictions_offset_past_end_is_empty_not_error(writes):  # noqa: F811
+    client, user = writes
+    project, dataset = iris_dataset(client, user)
+    headers = bearer(client, user)
+    result = run_batch(client, headers, project.id, add_model(client, project.id), dataset.id)
+    out = get_predictions(client, headers, project.id, result, offset=150)
+    assert out["isError"] is False, out
+    page = out["structuredContent"]
+    assert page["rows"] == [] and page["columns"] == PREDICTION_COLUMNS and page["n_rows"] == 150
+    far = get_predictions(client, headers, project.id, result, offset=10**9)
+    assert far["isError"] is False and far["structuredContent"]["rows"] == []
+
+
+def test_get_predictions_result_is_under_32_kib(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    headers = bearer(client, user)
+    frame = iris_frame()
+    big = frame.loc[frame.index.repeat(10)].to_csv(index=False)
+    uploaded = upload(client, headers, project.id, big, name="big", type="predict")
+    assert uploaded["isError"] is False, uploaded
+    dataset_id = uploaded["structuredContent"]["id"]
+    result = run_batch(client, headers, project.id, add_model(client, project.id), dataset_id)
+    out = get_predictions(client, headers, project.id, result, limit=1000)
+    assert out["isError"] is False, out
+    assert len(text(out).encode()) <= 32 * 1024
+    page = out["structuredContent"]
+    assert page["truncated"] is True and 0 < len(page["rows"]) < 1000
+    assert page["columns"] == PREDICTION_COLUMNS and page["n_rows"] == 1500
+    shown = len(page["rows"])
+    follow = get_predictions(client, headers, project.id, result, offset=shown, limit=5)
+    assert follow["structuredContent"]["offset"] == shown
+    assert len(follow["structuredContent"]["rows"]) == 5
+
+
+def test_get_predictions_of_non_result_dataset_refused(writes):  # noqa: F811
+    client, user = writes
+    project, dataset = iris_dataset(client, user)
+    headers = bearer(client, user)
+    assert "batch prediction" in one_line(get_predictions(client, headers, project.id, dataset.id))
+    uploaded = upload(client, headers, project.id, "a,b\n1,2\n", name="p", type="predict")
+    plain = get_predictions(client, headers, project.id, uploaded["structuredContent"]["id"])
+    assert "batch prediction" in one_line(plain)
+
+
+def test_get_predictions_follows_read_access_and_the_project(writes):  # noqa: F811
+    client, owner = writes
+    project, dataset = iris_dataset(client, owner)
+    headers = bearer(client, owner)
+    result = run_batch(client, headers, project.id, add_model(client, project.id), dataset.id)
+    viewer = add_user(client, "vi", Role.EDITOR)
+    stranger = add_user(client, "st", Role.EDITOR)
+    with closing(connect(client)) as conn:
+        projects.share_project(conn, owner, project.id, "vi", ProjectAccess.VIEWER)
+        other = projects.create_project(conn, owner, "Q").id
+    seen = get_predictions(client, bearer(client, viewer), project.id, result)
+    assert seen["isError"] is False
+    hidden = get_predictions(client, bearer(client, stranger), project.id, result)
+    missing = get_predictions(client, bearer(client, stranger), project.id, 99999)
+    wrong = get_predictions(client, headers, other, result)
+    for refused in (hidden, missing, wrong):
+        assert refused["isError"] is True and text(refused) == NOT_ALLOWED
+
+
+def test_get_predictions_when_the_model_is_gone_says_so(writes):  # noqa: F811
+    client, user = writes
+    project, dataset = iris_dataset(client, user)
+    headers = bearer(client, user)
+    model_id = add_model(client, project.id)
+    result = run_batch(client, headers, project.id, model_id, dataset.id)
+    with closing(connect(client)) as conn:
+        conn.execute("DELETE FROM models WHERE id = ?", (model_id,))
+    assert "model" in one_line(get_predictions(client, headers, project.id, result))

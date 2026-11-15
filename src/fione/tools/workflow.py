@@ -1,7 +1,8 @@
-"""The MCP workflow tools: create a project, upload a dataset inline, and follow and cancel
-jobs, as the token's user with the access the REST routes ask for (create a project as an
-editor, write to upload or cancel, read to look). Like the other action tools, they are for
-MCP clients only and only when ``FIONE_MCP_WRITE_ENABLED`` is set; the chat never lists them."""
+"""The MCP workflow tools: create a project, upload a dataset inline, follow and cancel jobs,
+and predict, as the token's user with the access the REST routes ask for (create a project as
+an editor, write to upload or cancel, read to look or predict). Like the other action tools,
+they are for MCP clients only and only when ``FIONE_MCP_WRITE_ENABLED`` is set; the chat never
+lists them."""
 
 import io
 import re
@@ -9,16 +10,21 @@ import time
 from typing import Literal
 
 from fione.auth.roles import Role, can_access_project
+from fione.engine.artifact import UntrustedArtifactError, read_manifest
 from fione.engine.events import jsonable
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
+from fione.models import service as models
+from fione.models.live import Busy, TooLarge, Untrusted
+from fione.models.service import ModelNotFound
+from fione.predict.batch import PredictInputError, batch_predict, class_columns, instances_frame
 from fione.projects import service as projects
 from fione.projects import upload_tokens
-from fione.projects.ingest import IngestError, ingest_csv
+from fione.projects.ingest import IngestError, ingest_csv, read_dataset_rows
 from fione.projects.service import DatasetType
 from fione.tools.actions import _ID, _PROJECT, _schema, _writable
 from fione.tools.builtin import _dataset_block
-from fione.tools.registry import Tool, ToolContext, ToolError, clean_text, register_action
+from fione.tools.registry import Tool, ToolContext, ToolError, clean_text, fits, register_action
 
 _MESSAGE_CHARS = 200
 MAX_WAIT_SECS = 15
@@ -29,6 +35,9 @@ INLINE_UPLOAD_MAX_BYTES = 512 * 1024
 _NAME_CHARS = 100  # a project or dataset name, as the REST routes allow
 _UPLOAD_PATH = "/api/v1/uploads"  # routes_uploads, under the API prefix
 _PARSE_ERROR = re.compile(r"Expected (\d+) columns?, got (\d+)")
+MAX_PREDICT_ROWS = 1000
+_PAGE_ROWS = 100  # rows of one get_predictions call unless asked for more or fewer
+_SCALARS = (str, int, float, bool, type(None))
 
 
 def _readable(ctx: ToolContext, project_id: str | None) -> None:
@@ -208,6 +217,107 @@ def _create_upload_url(ctx: ToolContext, args: dict) -> dict:
     }
 
 
+def _model(ctx: ToolContext, project_id: str, model_id: int) -> models.ModelRecord:
+    """The model, resolved first and then authorized on its project, as ``routes_models._model``
+    does; one that belongs to another project does not exist here."""
+    _readable(ctx, project_id)
+    record = models.get_model(ctx.conn, model_id)
+    if record.project_id != project_id:
+        raise PermissionError("the model belongs to another project")
+    return record
+
+
+def _cell(value):
+    """A prediction as plain JSON data; text (a class label) passes through ``clean_text``."""
+    value = jsonable(value)
+    return clean_text(value) if isinstance(value, str) else value
+
+
+def _rows(rows: list) -> list[dict]:
+    if not rows:
+        raise ToolError("argument 'rows' must have at least 1 item")
+    for i, row in enumerate(rows):
+        if not all(isinstance(v, _SCALARS) for v in row.values()):
+            raise ToolError(f"row {i} has a value that is not a number, text, true, false or null")
+    return rows
+
+
+def _predict(ctx: ToolContext, args: dict) -> dict:
+    record = _model(ctx, args["project_id"], args["model_id"])
+    rows = _rows(args["rows"])
+    if ctx.live_models is None:
+        raise ToolError("predictions are not available")
+    try:
+        with ctx.live_models.use(record) as model:
+            predictions = batch_predict(model, instances_frame(model, rows, "row"), [])
+    except Untrusted:
+        raise ToolError(
+            "this model is an import this install did not sign; use start_batch_predict"
+        ) from None
+    except Busy:
+        raise ToolError("the model is busy with another request; try again shortly") from None
+    except TooLarge:
+        raise ToolError(
+            "this model is too large to predict here; use start_batch_predict"
+        ) from None
+    except ModelNotFound:
+        raise ToolError("the model's files are gone") from None
+    except UntrustedArtifactError:
+        raise ToolError("the model's files failed verification") from None
+    except PredictInputError as e:
+        raise ToolError(clean_text(e, 200)) from None
+    return {
+        "predictions": [
+            {clean_text(name): _cell(value) for name, value in row.items()}
+            for row in predictions.to_dict("records")
+        ]
+    }
+
+
+def _prediction_columns(ctx: ToolContext, job: Job, dataset: projects.Dataset) -> list[str]:
+    """The names of the columns the batch job wrote for the model's predictions, as the model
+    names them (the manifest is read, no model is loaded). The result may also hold input
+    columns copied by ``include_columns`` and contributions, which this does not name."""
+    try:
+        record = models.get_model(ctx.conn, job.payload["model_id"])
+        if record.project_id != job.project_id:
+            raise KeyError
+    except KeyError:
+        raise ToolError("the model that made these predictions no longer exists") from None
+    try:
+        names = class_columns(read_manifest(ctx.storage, record.storage_prefix).classes)
+    except UntrustedArtifactError:
+        raise ToolError("the model's files are not readable") from None
+    if not set(names) <= {name for name, _ in dataset.schema}:
+        raise ToolError("the dataset does not hold this model's prediction columns")
+    return names
+
+
+def _get_predictions(ctx: ToolContext, args: dict) -> dict:
+    _readable(ctx, args["project_id"])
+    dataset = projects.get_dataset(ctx.conn, args["dataset_id"])
+    if dataset.project_id != args["project_id"]:
+        raise PermissionError("the dataset belongs to another project")
+    job = store.producer_of(ctx.conn, dataset.id)
+    if job is None or job.project_id != dataset.project_id:
+        raise ToolError("the dataset is not the result of a batch prediction")
+    names = _prediction_columns(ctx, job, dataset)
+    frame = read_dataset_rows(ctx.storage, dataset, args["offset"], args["limit"], names)
+    rows = [[_cell(v) for v in row] for row in frame.itertuples(index=False, name=None)]
+    result = {
+        "columns": [clean_text(name) for name in names],
+        "rows": rows,
+        "offset": args["offset"],
+        "n_rows": dataset.n_rows,
+    }
+    while not fits(result, ctx.max_result_bytes):  # fewer rows, never fewer columns
+        if len(rows) <= 1:
+            raise ToolError("a row of predictions is too large to return")
+        del rows[len(rows) - max(1, len(rows) // 10) :]
+        result["truncated"] = True
+    return result
+
+
 for _tool in (
     Tool(
         "create_project",
@@ -251,6 +361,52 @@ for _tool in (
         ),
         False,
         _create_upload_url,
+    ),
+    Tool(
+        "predict",
+        f"Predict rows now with a trained model of a project (1 to {MAX_PREDICT_ROWS} rows, each "
+        "an object with a value for every column the model reads; other keys are ignored). "
+        "Returns one prediction per row, in order: `predict` and, for classification, the "
+        "probability `p_<class>` of each class. The rows are not echoed or stored. For more "
+        "rows use upload_dataset and start_batch_predict.",
+        _schema(
+            {
+                "project_id": _PROJECT,
+                "model_id": _ID,
+                "rows": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "maxItems": MAX_PREDICT_ROWS,
+                },
+            },
+            ["project_id", "model_id", "rows"],
+        ),
+        False,
+        _predict,
+    ),
+    Tool(
+        "get_predictions",
+        "Read the predictions of a finished start_batch_predict: pass the result dataset_id "
+        "from its job. Returns `columns` (`predict` and `p_<class>`) and `rows` from `offset` "
+        "(row number = offset + position), `limit` rows at most, fewer when the result would be "
+        "too large (`truncated`: continue from offset + number of rows returned). The input "
+        "columns copied with include_columns are never returned.",
+        _schema(
+            {
+                "project_id": _PROJECT,
+                "dataset_id": _ID,
+                "offset": {"type": "integer", "minimum": 0, "maximum": 2**63 - 1, "default": 0},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_PREDICT_ROWS,
+                    "default": _PAGE_ROWS,
+                },
+            },
+            ["project_id", "dataset_id"],
+        ),
+        True,
+        _get_predictions,
     ),
     Tool(
         "get_job",

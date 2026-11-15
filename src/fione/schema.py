@@ -34,6 +34,12 @@ _KEYWORDS = frozenset(
     }
 )
 MAX_ITEMS = 1000  # an array property never takes more than this many items
+# an array whose items are objects (``"items": {"type": "object"}``) instead of strings
+_OBJECT_ITEMS = {"type": "object"}
+
+
+def _is_object_list(value) -> bool:
+    return isinstance(value, list) and all(isinstance(x, dict) for x in value)
 
 
 def clean_text(s, max_len: int = 80) -> str:
@@ -63,7 +69,10 @@ def validate_args(schema: dict, args) -> dict:
                 out[name] = copy.deepcopy(spec["default"])
             continue
         value = args[name]
-        if not _TYPES[spec["type"]](value):
+        is_type = _TYPES[spec["type"]]
+        if spec["type"] == "array" and spec.get("items") == _OBJECT_ITEMS:
+            is_type = _is_object_list
+        if not is_type(value):
             raise ValueError(f"argument '{name}' must be of type {spec['type']}")
         if "enum" in spec and value not in spec["enum"]:
             raise ValueError(f"argument '{name}' must be one of {spec['enum']}")

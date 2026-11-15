@@ -23,6 +23,7 @@ import numpy as np
 
 from fione.auth.roles import User
 from fione.jobs.store import Job
+from fione.models.live import LiveModels
 from fione.schema import clean_text, validate_args
 from fione.storage import Storage
 
@@ -67,6 +68,8 @@ class ToolContext:
     cancel: Callable[[Job], Job] | None = None
     # MCP gives create_upload_url the origin (no trailing slash) the client reaches Fione at
     base_url: str | None = None
+    # MCP gives predict the models loaded in the web process, as the explanation routes use them
+    live_models: LiveModels | None = None
 
 
 _TOOLS: dict[str, Tool] = {}
