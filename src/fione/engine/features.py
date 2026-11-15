@@ -48,6 +48,8 @@ from fione.engine.prep import Prep, Task, _as_str, _datetimes, is_prose
 from fione.engine.search import make_folds
 
 GATE_ROWS = 20_000  # rows the gate samples
+GATE_MIN_ROWS = 4_000  # fewest rows a short gate is cut down to
+GATE_AFFORDED_REPEATS = 40  # fold repeats the time should cover: six judgments and a last check
 GATE_FOLDS = 5
 GATE_Z = 3.0  # standard errors of the paired fold-wise loss difference a group must clear
 GATE_MIN_GAIN = 0.001  # and this share of the loss
@@ -907,25 +909,42 @@ def select_groups(
     """The candidate groups worth keeping, and a verdict for every candidate tried. With
     ``row_groups`` (a group label per row) the gate's folds keep the rows of a group together,
     as the search's do."""
+
+    def sampled(X, y, row_groups, size):
+        rows = _sample(y, task, seed, size)
+        return (
+            X.iloc[rows].reset_index(drop=True),
+            y[rows],
+            None if row_groups is None else row_groups[rows],
+        )
+
+    def new_gate(X, y, row_groups):
+        return _Gate(
+            X,
+            y,
+            task,
+            nfolds,
+            (seed + GATE_SEED_OFFSET) % GATE_SEED_SPACE,
+            lambda: deadline.expired() or should_stop(),
+            row_groups,
+        )
+
     if len(X) > GATE_ROWS:
-        rows = _sample(y, task, seed)
-        X, y = X.iloc[rows].reset_index(drop=True), y[rows]
-        row_groups = None if row_groups is None else row_groups[rows]
-    gate = _Gate(
-        X,
-        y,
-        task,
-        nfolds,
-        (seed + GATE_SEED_OFFSET) % GATE_SEED_SPACE,
-        lambda: deadline.expired() or should_stop(),
-        row_groups,
-    )
+        X, y, row_groups = sampled(X, y, row_groups, GATE_ROWS)
+    gate = new_gate(X, y, row_groups)
     kept: list[Group] = []
     verdicts: list[Verdict] = []
     pool: list[Group] = []
     try:
         pool = candidates(Prep().fit(X), X, gate.ranked())
         current = gate.losses([], range(1))
+        # When the time covers too few repeats of the folds to judge the groups, fewer rows do it
+        # faster (a repeat takes about as long as the rows are many).
+        afforded = deadline.remaining() / (GATE_AFFORDED_REPEATS * max(gate.secs([]), 1e-6))
+        if afforded < 1 and len(X) > GATE_MIN_ROWS:
+            X, y, row_groups = sampled(X, y, row_groups, max(GATE_MIN_ROWS, int(afforded * len(X))))
+            gate = new_gate(X, y, row_groups)
+            current = gate.losses([], range(1))
         for group in pool:
             # A group not kept for its gain alone must pass the last check, which time may not cut
             # short: the search stops once what is left covers that and one more group that
@@ -978,16 +997,18 @@ def _drop_adopted(verdicts: list[Verdict], reason: str) -> None:
             verdict.adopted, verdict.reason = False, reason
 
 
-def _sample(y: np.ndarray, task: Task, seed: int) -> np.ndarray:
-    """Sorted positions of about ``GATE_ROWS`` rows; for classification each class keeps its
-    share (and at least ``2 * GATE_FOLDS`` rows, or all of a smaller class)."""
+def _sample(y: np.ndarray, task: Task, seed: int, size: int | None = None) -> np.ndarray:
+    """Sorted positions of about ``size`` rows; for classification each class keeps its
+    share (and at least ``2 * GATE_FOLDS`` rows, or all of a smaller class). ``size`` is
+    ``GATE_ROWS`` unless given."""
+    size = size or GATE_ROWS
     rng = np.random.default_rng(seed)
     if task == "regression":
-        return np.sort(rng.choice(len(y), GATE_ROWS, replace=False))
+        return np.sort(rng.choice(len(y), size, replace=False))
     picked = []
     for label in np.unique(y):
         where = np.flatnonzero(y == label)
-        keep = max(round(GATE_ROWS * len(where) / len(y)), min(len(where), 2 * GATE_FOLDS))
+        keep = max(round(size * len(where) / len(y)), min(len(where), 2 * GATE_FOLDS))
         picked.append(rng.choice(where, min(keep, len(where)), replace=False))
     return np.sort(np.concatenate(picked))
 
