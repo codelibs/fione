@@ -5,6 +5,7 @@ they are for MCP clients only and only when ``FIONE_MCP_WRITE_ENABLED`` is set; 
 lists them."""
 
 import io
+import json
 import re
 import time
 from typing import Literal
@@ -24,7 +25,15 @@ from fione.projects.ingest import IngestError, ingest_csv, read_dataset_rows
 from fione.projects.service import DatasetType
 from fione.tools.actions import _ID, _PROJECT, _schema, _writable
 from fione.tools.builtin import _dataset_block
-from fione.tools.registry import Tool, ToolContext, ToolError, clean_text, fits, register_action
+from fione.tools.registry import (
+    MAX_RESULT_BYTES,
+    Tool,
+    ToolContext,
+    ToolError,
+    clean_text,
+    fits,
+    register_action,
+)
 
 _MESSAGE_CHARS = 200
 MAX_WAIT_SECS = 15
@@ -266,12 +275,21 @@ def _predict(ctx: ToolContext, args: dict) -> dict:
         raise ToolError("the model's files failed verification") from None
     except PredictInputError as e:
         raise ToolError(clean_text(e, 200)) from None
-    return {
+    result = {
         "predictions": [
             {clean_text(name): _cell(value) for name, value in row.items()}
             for row in predictions.to_dict("records")
         ]
     }
+    if not fits(result, ctx.max_result_bytes):  # never a silent cut: the rows are not stored
+        limit = min(ctx.max_result_bytes, MAX_RESULT_BYTES)
+        fitting = max(1, len(rows) * limit * 9 // 10 // len(json.dumps(result)))
+        raise ToolError(
+            f"the predictions of {len(rows)} rows would not fit in {limit // 1024} KiB; "
+            f"send about {fitting} rows at a time, or use start_batch_predict "
+            "(upload_dataset or create_upload_url first) for more"
+        )
+    return result
 
 
 def _prediction_columns(ctx: ToolContext, job: Job, dataset: projects.Dataset) -> list[str]:
@@ -367,8 +385,10 @@ for _tool in (
         f"Predict rows now with a trained model of a project (1 to {MAX_PREDICT_ROWS} rows, each "
         "an object with a value for every column the model reads; other keys are ignored). "
         "Returns one prediction per row, in order: `predict` and, for classification, the "
-        "probability `p_<class>` of each class. The rows are not echoed or stored. For more "
-        "rows use upload_dataset and start_batch_predict.",
+        "probability `p_<class>` of each class. The rows are not echoed or stored, and the "
+        "result must fit in 32 KiB (a few hundred rows of a 3-class model; a larger batch is "
+        "refused with the number of rows that fits). For more rows use upload_dataset or "
+        "create_upload_url, then start_batch_predict and get_predictions.",
         _schema(
             {
                 "project_id": _PROJECT,

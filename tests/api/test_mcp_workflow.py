@@ -2,6 +2,7 @@
 each as the token's user with the access the REST routes ask for."""
 
 import json
+import re
 import signal
 import threading
 from contextlib import closing
@@ -19,7 +20,7 @@ from fione.engine.config import TrainConfig
 from fione.jobs import builtin, store, worker  # noqa: F401  (builtin registers the handlers)
 from fione.predict import batch_predict
 from fione.projects import service as projects
-from fione.tools.workflow import INLINE_UPLOAD_MAX_BYTES
+from fione.tools.workflow import INLINE_UPLOAD_MAX_BYTES, MAX_PREDICT_ROWS
 
 NOT_ALLOWED = "not found or not allowed"
 
@@ -630,6 +631,35 @@ def test_predict_over_1000_rows_refused(writes):  # noqa: F811
     model_id = add_model(client, project.id)
     rows = iris_rows([0]) * 1001
     assert "1000" in one_line(predict(client, bearer(client, user), project.id, model_id, rows))
+
+
+def test_predict_refuses_a_result_over_32_kib_naming_the_rows_that_fit(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    headers = bearer(client, user)
+    message = one_line(
+        predict(client, headers, project.id, model_id, iris_rows([0]) * MAX_PREDICT_ROWS)
+    )
+    assert "start_batch_predict" in message and "32 KiB" in message
+    fitting = int(re.search(r"send about (\d+) rows", message)[1])
+    assert 100 < fitting < MAX_PREDICT_ROWS
+    out = predict(client, headers, project.id, model_id, iris_rows([0]) * fitting)
+    assert out["isError"] is False, out
+    assert len(text(out).encode()) <= 32 * 1024
+
+
+def test_predict_a_batch_that_fits_returns_every_row_in_order(writes):  # noqa: F811
+    client, user = writes
+    project, _ = iris_dataset(client, user)
+    model_id = add_model(client, project.id)
+    picked = [0, 100, 50, 149] * 50
+    out = predict(client, bearer(client, user), project.id, model_id, iris_rows(picked))
+    assert out["isError"] is False, out
+    result = out["structuredContent"]
+    assert "truncated" not in result and "truncated_lists" not in result
+    expected = batch_predict(tiny_model(), iris_frame()[FEATURES].iloc[picked], [])
+    assert [p["predict"] for p in result["predictions"]] == expected["predict"].tolist()
 
 
 def test_predict_busy_model_slot_is_a_toolerror(writes):  # noqa: F811
