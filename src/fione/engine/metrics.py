@@ -154,6 +154,15 @@ def _f1(y, pred, prior):
     return _precision_recall_f1(y, pred, prior)[2]
 
 
+def _macro_f1(y, pred, prior):
+    """The mean of the F1 of every class that occurs in the answers or the predictions: for two
+    classes both of them (``f1`` is the second class's alone)."""
+    table = _confusion(y, choose(pred, prior), pred.shape[1])
+    said, truth = table.sum(axis=0), table.sum(axis=1)
+    f1 = 2 * np.diag(table) / np.maximum(said + truth, 1)
+    return float(f1[(said + truth) > 0].mean())
+
+
 def _mcc(y, pred, prior):
     return float(matthews_corrcoef(y, choose(pred, prior)))
 
@@ -342,6 +351,7 @@ def _metrics() -> dict[str, Metric]:
         Metric("misclassification", c, False, _misclassification),
         Metric("mean_per_class_error", c, False, _mean_per_class_error),
         Metric("f1", c, True, _f1),
+        Metric("macro_f1", c, True, _macro_f1),
         Metric("precision", c, True, _precision),
         Metric("recall", c, True, _recall),
         Metric("mcc", c, True, _mcc),
@@ -491,6 +501,7 @@ TUNABLE = frozenset(
         "balanced_accuracy",
         "mean_per_class_error",
         "f1",
+        "macro_f1",
         "mcc",
         "kappa",
         "qwk",
@@ -531,6 +542,10 @@ def _from_counts(name: str, tp, fp, fn, tn) -> np.ndarray:
             return mean if name == "balanced_accuracy" else 1.0 - mean
         if name == "f1":
             return np.where(2 * tp + fp + fn > 0, 2 * tp / (2 * tp + fp + fn), 0.0)
+        if name == "macro_f1":
+            second = np.where(2 * tp + fp + fn > 0, 2 * tp / (2 * tp + fp + fn), 0.0)
+            first = np.where(2 * tn + fp + fn > 0, 2 * tn / (2 * tn + fp + fn), 0.0)
+            return (first + second) / 2.0
         if name == "mcc":
             root = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
             return np.where(root > 0, (tp * tn - fp * fn) / root, 0.0)

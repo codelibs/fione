@@ -53,6 +53,7 @@ _METRICS = frozenset(
         "misclassification",
         "mean_per_class_error",
         "f1",
+        "macro_f1",
         "precision",
         "recall",
         "mcc",
