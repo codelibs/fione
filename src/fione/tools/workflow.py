@@ -449,7 +449,8 @@ for _tool in (
     Tool(
         "list_jobs",
         f"The newest jobs (at most {_LISTED}), newest first, of one project or of every project "
-        "you can read; optionally only those with one status.",
+        "you can read, without jobs that belong to no project (get_job shows those to an "
+        "administrator); optionally only those with one status.",
         _schema(
             {
                 "project_id": _PROJECT,
