@@ -491,9 +491,9 @@ class Prep:
         spots = {self.feature_names.index(column): column for column in self.prose}
         drop = [c for c in out.columns if int(c[1:].split("_")[0]) in spots]
         out = out.drop(columns=drop)
-        for position, column in spots.items():
-            out[f"f{position}_t"] = _as_str(df[column]).fillna("")
-        return out
+        # dropping columns leaves a block per column: one concat adds the texts, not an insert each
+        texts = [_as_str(df[column]).fillna("").rename(f"f{at}_t") for at, column in spots.items()]
+        return pd.concat([out, *texts], axis=1) if texts else out
 
     def text_plain(self, df: pd.DataFrame) -> pd.DataFrame:
         """The text view without the columns of the derived features (``groups``)."""
@@ -514,6 +514,7 @@ class Prep:
             if self._category_at.get(c.split("_")[0]) in read and not c.endswith("_na")
         ]
         out = out.drop(columns=drop)
+        texts = []
         for name, column in self._level_at.items():
             values = df[column]
             if (
@@ -521,8 +522,9 @@ class Prep:
             ):  # a few whole numbers: infinite or huge is missing
                 values = pd.to_numeric(values, errors="coerce")
                 values = values.where(values.abs() < 2**53).round().astype("Int64")
-            out[name] = values.astype(str).where(values.notna(), "__na__")
-        return out
+            texts.append(values.astype(str).where(values.notna(), "__na__").rename(name))
+        # one concat: an insert each fragments the frame
+        return pd.concat([out, *texts], axis=1) if texts else out
 
     @property
     def level_width(self) -> int:

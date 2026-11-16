@@ -1,4 +1,5 @@
 import pickle
+import warnings
 
 import joblib
 import numpy as np
@@ -771,3 +772,42 @@ def test_a_text_column_is_not_durations_unless_nearly_all_of_it_is():
     )
     few = pd.DataFrame({"age": rng.choice(["1 year", "2 years"], 200), "n": rng.normal(size=200)})
     assert dict(Prep().fit(few)._plan)["age"] != "duration"  # two values are a flag already
+
+
+def _wide_text_frame(n=200, blocks=60):
+    """Numeric, few-level and prose columns mixed, so that the views drop columns from the middle
+    of the linear view and add more than a hundred."""
+    rng = np.random.default_rng(2)
+    words = ["red fox runs", "blue sky above", "old man walks", "a cat sat"]
+    columns = {}
+    for i in range(blocks):
+        values = rng.normal(size=n)
+        values[rng.random(n) < 0.1] = np.nan
+        columns[f"n{i}"] = values
+        columns[f"c{i}"] = rng.choice(["a", "b", "c", None], n)
+        if i in (0, blocks // 2, blocks - 1):
+            columns[f"post{i}"] = [
+                " ".join(rng.choice(words, 4)) + str(rng.integers(10**6)) for _ in range(n)
+            ]
+    return pd.DataFrame(columns)
+
+
+def test_the_text_and_level_views_add_their_columns_in_order_without_a_fragmentation_warning():
+    frame = _wide_text_frame()
+    prep = Prep().fit(frame)
+    assert len(prep.prose) == 3
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", pd.errors.PerformanceWarning)
+        text, levels = prep.text(frame), prep.levels(frame)
+    linear = prep.linear(frame)
+    spots = {prep.feature_names.index(c): c for c in prep.prose}
+    kept = [c for c in linear.columns if int(c[1:].split("_")[0]) not in spots]
+    assert list(text.columns) == [*kept, *(f"f{at}_t" for at in spots)]
+    for at, column in spots.items():
+        expected = frame[column].astype(str).where(frame[column].notna()).fillna("")
+        pd.testing.assert_series_equal(text[f"f{at}_t"], expected.rename(f"f{at}_t"))
+    pd.testing.assert_frame_equal(text[kept], linear[kept])
+    level_names = list(prep._level_at)
+    assert list(levels.columns)[-len(level_names) :] == level_names
+    assert (levels[level_names].dtypes == text[f"f{next(iter(spots))}_t"].dtype).all()
+    assert levels[level_names[0]].isin(["a", "b", "c", "__na__"]).all()
