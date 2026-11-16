@@ -104,16 +104,35 @@ def _is_categorical(s: pd.Series) -> bool:
 INTEGER_DATE_FORMATS = (("%Y%m%d", 8), ("%y%m%d%H", 8), ("%Y%m%d%H", 10))
 INTEGER_DATE_MIN_VALUES = 10  # different values; a few are codes, not a clock
 INTEGER_DATE_SAMPLE = 2_000
+# Unix time of 2000-01-01 and of 2100-01-01, in seconds: whole numbers between them may be a clock,
+# if they span no more than 50 years (ids spread over the whole range are not one)
+UNIX_SECONDS = (946_684_800, 4_102_444_800)
+UNIX_MAX_SPAN = 50 * 365 * 86_400
 
 
 def integer_date_format(s: pd.Series) -> str | None:
     """The format (``%Y%m%d``, ``%y%m%d%H``, ``%Y%m%d%H``) when ``s`` holds whole numbers that
-    all read as dates in it, such as 20141021 or 14102100; ``None`` when it does not."""
+    all read as dates in it, such as 20141021 or 14102100; ``unix_s`` or ``unix_ms`` when they
+    all lie between 2000 and 2100 as seconds or milliseconds since 1970; ``None`` when it does
+    not."""
     if not (pd.api.types.is_integer_dtype(s.dtype) and not pd.api.types.is_bool_dtype(s.dtype)):
         return None
     values = s.dropna().astype("int64")
-    if not len(values) or values.min() < 10_000_000 or values.max() >= 10_000_000_000:
-        return None  # 8 to 10 digits; most integer columns end here, at the cost of two scans
+    if not len(values):
+        return None
+    low, high = int(values.min()), int(values.max())
+    unix = next(
+        (
+            name
+            for name, scale in (("unix_s", 1), ("unix_ms", 1000))
+            if UNIX_SECONDS[0] * scale <= low
+            and high <= UNIX_SECONDS[1] * scale
+            and high - low <= UNIX_MAX_SPAN * scale
+        ),
+        None,
+    )
+    if low < 10_000_000 or (high >= 10_000_000_000 and unix is None):
+        return None  # most integer columns end here, at the cost of two scans
     if len(values) > INTEGER_DATE_SAMPLE:
         values = values.sample(INTEGER_DATE_SAMPLE, random_state=0)
     if values.nunique() < INTEGER_DATE_MIN_VALUES:
@@ -126,7 +145,7 @@ def integer_date_format(s: pd.Series) -> str | None:
             if fmt == "%Y%m%d" and not values.between(19000101, 21001231).all():
                 continue
             return fmt
-    return None
+    return unix
 
 
 def _holds_dates(s: pd.Series) -> bool:
