@@ -19,6 +19,7 @@ from sklearn.metrics import average_precision_score, matthews_corrcoef, roc_auc_
 from fione.engine.config import ConfigError
 from fione.engine.prep import Task
 from fione.engine.search import Folds, pinball, score
+from fione.engine.survival import concordance
 
 TOP_K = 3  # the k of top3_accuracy and map3
 TOP_SHARE = 0.10  # the share of rows lift_top_group looks at
@@ -39,6 +40,9 @@ class Metric:
     why: str = ""  # said when ``applies`` is false
     # ``compute`` takes the configured quantile where the other metrics take the prior
     quantile: bool = False
+    # ``y`` is the time and the event flag in two columns (an ``event_column``), and the metric
+    # is defined only for them
+    survival: bool = False
 
 
 class Cuts(np.ndarray):
@@ -400,6 +404,9 @@ def _metrics() -> dict[str, Metric]:
         ),
         Metric("pinball", r, False, lambda y, p, quantile: pinball(y, p, quantile), quantile=True),
         Metric(
+            "concordance", r, True, lambda y, p, _: concordance(y[:, 0], y[:, 1], p), survival=True
+        ),
+        Metric(
             "rounded_qwk",
             r,
             True,
@@ -421,22 +428,34 @@ HIGHER_IS_BETTER = frozenset(m.name for m in REGISTRY.values() if m.higher_is_be
 CORE = frozenset({"logloss", "auc", "accuracy", "rmse", "mae", "r2"})
 
 
-def automatic(task: Task, quantile: float | None = None) -> str:
-    """What ``auto`` means: log loss, RMSE or, for a ``quantile``, the pinball loss."""
+def automatic(task: Task, quantile: float | None = None, survival: bool = False) -> str:
+    """What ``auto`` means: log loss, RMSE or, for a ``quantile``, the pinball loss or, with an
+    ``event_column`` (``survival``), the concordance."""
+    if survival:
+        return "concordance"
     return "pinball" if quantile is not None else ALLOWED[task][0]
 
 
-def resolve(name: str, task: Task, field: str, quantile: float | None = None) -> str:
-    """The metric ``name`` means; ConfigError if it does not apply."""
+def resolve(
+    name: str, task: Task, field: str, quantile: float | None = None, survival: bool = False
+) -> str:
+    """The metric ``name`` means; ConfigError if it does not apply. With an ``event_column``
+    (``survival``) only the concordance does: the others compare a prediction with the time."""
     name = name.lower()
     if name == "auto":
-        return automatic(task, quantile)
+        return automatic(task, quantile, survival)
     if name not in ALLOWED[task]:
         raise ConfigError(
             f"{field} {name!r} does not apply to {task}; use auto or one of {list(ALLOWED[task])}"
         )
     if REGISTRY[name].quantile and quantile is None:
         raise ConfigError(f"{field} {name!r} needs a quantile")
+    if REGISTRY[name].survival != survival:
+        raise ConfigError(
+            f"{field} {name!r} needs an event_column"
+            if survival is False
+            else f"{field} must be auto or concordance with an event_column, not {name!r}"
+        )
     return name
 
 
@@ -674,11 +693,14 @@ def summary(
 ) -> dict[str, float]:
     """Every metric of the task that is defined for the data, in the target's own units.
     The ranking measures (AUC, ...) only for two classes. Besides the core metrics, a value
-    that is not a number is left out. The pinball loss is reported only for a ``quantile``."""
+    that is not a number is left out. The pinball loss is reported only for a ``quantile``, and the
+    concordance, which alone is, only for ``y`` of a time and an event flag."""
     classes = pred.shape[1] if task == "classification" else 0
     out = {}
     for name in ALLOWED[task]:
         metric = REGISTRY[name]
+        if metric.survival != (y.ndim == 2):  # the time and the event flag in two columns
+            continue
         if not metric.applies(y, classes) or metric.binary_summary and classes != 2:
             continue
         if metric.quantile and quantile is None:

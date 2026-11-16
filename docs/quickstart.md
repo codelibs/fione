@@ -159,7 +159,8 @@ small targets as closely as the large ones.
 - Regression: RMSE, MAE, R², MSE, RMSLE, MAPE, RMSPE, SMAPE, median absolute error (`medae`), explained
   variance, correlation (`pearson`), rank correlation (`spearman`), normalized Gini
   (`normalized_gini`), Poisson deviance (`poisson`), quadratic weighted kappa of the rounded
-  predictions (`rounded_qwk`) and, for a quantile (see below), the pinball loss (`pinball`).
+  predictions (`rounded_qwk`), for a quantile (see below), the pinball loss (`pinball`) and, for a
+  time that may be cut short (see below), the concordance (`concordance`).
 
 `balanced_logloss` is the log loss of a task whose classes count alike, however rare one is: each
 class's mean log loss, averaged. It is measured on the probabilities shifted so that every class
@@ -336,6 +337,30 @@ monotone transform). One model learns one quantile: a band between two levels is
 share of held-out rows below a model's predictions is the check to make on it: it is close to the
 quantile with plenty of rows, and falls short of it in the tails (0.1 and 0.9, say) on a small
 table.
+
+## A time that may be cut short
+
+A target that is the time until an event (a relapse, a failure, a churn) is often only known to be
+at least some value for the rows where the event has not happened yet. Give a column that is 1 where
+the event happened at the target's time and 0 where the row was last seen at that time
+(`event_column` in the API; the target is then a regression, and the column is not a feature). The
+models learn a score that grows with the time, and a prediction is that score: a higher one is a
+longer time, and it is not a time in the target's units.
+
+The score is the probability, by the Kaplan-Meier estimate of all the training rows, that the event
+has happened by the row's time (a row with an event) or by the time it is expected to last (a
+censored row, taken at its time plus what the estimate leaves of the time up to the last event). It
+is computed once from all the rows, as a monotone curve of the times; the validation parts are the
+ones the models do not learn from.
+
+*Automatic* ranking and stopping metrics are then the concordance (`concordance`, which is refused
+without an `event_column`, and the only metric an `event_column` allows): of the pairs of rows where
+one has its event before the other's time (a censored row at the time of an event counts as lasting
+longer), the share that the predictions order the same way, equal predictions counting half (1 is
+perfect, 0.5 is chance). It is computed on the validation
+predictions of all the parts together. The leaderboard and the Metrics tab report it; the other
+metrics, which compare a prediction with the time, are not reported. A quantile and a
+`target_transform` cannot be used with an `event_column`.
 
 ## Data that follows time
 

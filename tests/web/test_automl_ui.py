@@ -454,6 +454,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "cv_group_column": None,
         "cv_repeats": None,
         "quantile": None,  # not on the form
+        "event_column": None,  # not on the form
     }
     assert {f.name for f in dataclasses.fields(TrainConfig)} == set(expected)  # all covered
     assert config.to_dict() == expected
@@ -851,3 +852,4 @@ def test_the_form_does_not_offer_the_pinball_loss_that_needs_a_quantile():
     offered = {metric for metric, _ in automl._metric_options()}
     assert "rmse" in offered
     assert "pinball" not in offered
+    assert "concordance" not in offered
