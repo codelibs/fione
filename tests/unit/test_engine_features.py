@@ -610,6 +610,38 @@ def test_the_sample_keeps_every_class_and_never_fails(monkeypatch):
     assert len(features._sample(np.zeros(1000), "regression", 0)) == 300
 
 
+def _gate_sizes(monkeypatch, deadline_secs):
+    """Rows of every gate that ``select_groups`` builds, when a repeat of the folds takes 10 s."""
+    sizes = []
+
+    class Recording(features._Gate):
+        def __init__(self, X, *args, **kwargs):
+            sizes.append(len(X))
+            super().__init__(X, *args, **kwargs)
+
+        def secs(self, groups):
+            return 10.0
+
+    monkeypatch.setattr(features, "_Gate", Recording)
+    monkeypatch.setattr(features, "GATE_ROWS", 600)
+    monkeypatch.setattr(features, "GATE_MIN_ROWS", 100)
+    X, y = people(1000)
+    _, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(deadline_secs))
+    return sizes, verdicts
+
+
+def test_a_short_gate_judges_on_fewer_rows(monkeypatch):
+    (first, second), verdicts = _gate_sizes(
+        monkeypatch, 60
+    )  # 60 s cover 6 repeats of the 40 wanted
+    assert first == 600 and 100 <= second < 600
+    assert any(v.reason != "time" for v in verdicts)  # groups were judged on the smaller gate
+
+
+def test_a_gate_with_time_enough_keeps_all_its_rows(monkeypatch):
+    assert _gate_sizes(monkeypatch, 10_000)[0] == [600]
+
+
 def test_the_gate_works_for_regression_too():
     X, y = people()
     kept, verdicts = select_groups(X, y.astype(float), "regression", 5, 0, Deadline(120))
