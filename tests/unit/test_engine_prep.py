@@ -693,7 +693,7 @@ def test_whole_numbers_that_are_unix_seconds_or_milliseconds_are_found_and_ids_a
     )
     assert integer_date_format(pd.Series(rng.integers(10**11, 10**12, 500))) is None
     assert integer_date_format(pd.Series(rng.integers(10**15, 10**16, 500))) is None
-    ids = rng.choice(np.arange(1_000_000_000, 4_100_000_000), 500, replace=False)
+    ids = np.unique(rng.integers(1_000_000_000, 4_100_000_000, 500))
     assert integer_date_format(pd.Series(ids)) is None  # unique ids spread over 98 years
     assert integer_date_format(pd.Series(ids * 1000)) is None
     for years in (1, 10):
