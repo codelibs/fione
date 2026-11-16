@@ -677,6 +677,34 @@ def test_whole_numbers_that_all_read_as_dates_are_found_and_other_numbers_are_no
     assert integer_date_format(pd.Series(ymd.astype(float))) is None  # only integer columns
 
 
+def test_whole_numbers_that_are_unix_seconds_or_milliseconds_are_found_and_ids_are_not():
+    rng = np.random.default_rng(0)
+    seconds = 1_600_000_000 + np.sort(rng.integers(0, 30 * 86_400, 500))
+    assert integer_date_format(pd.Series(seconds)) == "unix_s"
+    assert integer_date_format(pd.Series(seconds * 1000 + 123)) == "unix_ms"
+    assert integer_date_format(pd.Series(seconds[:5].repeat(100))) is None  # five values: codes
+    assert integer_date_format(pd.Series(seconds.astype(float))) is None  # only integer columns
+    # outside 2000 to 2100: ten digits that are no time, and ids or amounts of other sizes
+    assert integer_date_format(pd.Series(rng.integers(100_000_000, 900_000_000, 500))) is None
+    assert integer_date_format(pd.Series(rng.integers(4_200_000_000, 9_000_000_000, 500))) is None
+    assert (
+        integer_date_format(pd.Series(rng.integers(4_200_000_000_000, 9_000_000_000_000, 500)))
+        is None
+    )
+    assert integer_date_format(pd.Series(rng.integers(10**11, 10**12, 500))) is None
+    assert integer_date_format(pd.Series(rng.integers(10**15, 10**16, 500))) is None
+    ids = rng.choice(np.arange(1_000_000_000, 4_100_000_000), 500, replace=False)
+    assert integer_date_format(pd.Series(ids)) is None  # unique ids spread over 98 years
+    assert integer_date_format(pd.Series(ids * 1000)) is None
+    for years in (1, 10):
+        spread = 1_300_000_000 + rng.integers(0, years * 365 * 86_400, 500)
+        assert integer_date_format(pd.Series(spread)) == "unix_s"
+        assert integer_date_format(pd.Series(spread * 1000)) == "unix_ms"
+    mixed = seconds.copy()
+    mixed[0] = 1_000  # one value outside the range
+    assert integer_date_format(pd.Series(mixed)) is None
+
+
 def test_emptier_reports_a_column_filled_in_training_and_mostly_empty_in_new_rows():
     rng = np.random.default_rng(0)
     n = 200

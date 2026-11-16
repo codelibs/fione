@@ -1548,6 +1548,24 @@ def test_dates_written_as_whole_numbers_are_pointed_out_too():
     assert not [e for e in events if e.data.get("kind") == "time_hint"]
 
 
+def test_unix_seconds_in_a_column_are_pointed_out_as_dates_and_a_plain_number_is_not():
+    df = _trend(400)
+    df["timestamp"] = 1_600_000_000 + df["day"] * 60
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    events = []
+    _fit(df, events, feature_engineering=False, **options)
+    (hint,) = [e for e in events if e.data.get("kind") == "time_hint"]
+    assert hint.data["columns"] == ["timestamp"]
+    events = []
+    _fit(
+        df.assign(timestamp=df["day"] * 60 + 100_000_000),
+        events,
+        feature_engineering=False,
+        **options,
+    )
+    assert not [e for e in events if e.data.get("kind") == "time_hint"]
+
+
 def test_the_time_column_may_be_ignored_as_a_feature_and_may_hold_dates():
     df = _trend(400)
     df["when"] = (pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")).dt.strftime(

@@ -569,7 +569,7 @@ class AutoML:
         self._notice_dropped_columns(prep, X)
         if c.time_column is None:
             dates = [column for column in prep.columns if prep.kind_of(column) == "datetime"]
-            # whole numbers that are dates (20141021, 14102100) order the rows by time as well
+            # whole numbers that are dates (20141021, 14102100) or Unix times order the rows too
             dates += [
                 column
                 for column in prep.columns
