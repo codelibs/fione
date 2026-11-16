@@ -1548,6 +1548,24 @@ def test_dates_written_as_whole_numbers_are_pointed_out_too():
     assert not [e for e in events if e.data.get("kind") == "time_hint"]
 
 
+def test_unix_seconds_in_a_column_are_pointed_out_as_dates_and_a_plain_number_is_not():
+    df = _trend(400)
+    df["timestamp"] = 1_600_000_000 + df["day"] * 60
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    events = []
+    _fit(df, events, feature_engineering=False, **options)
+    (hint,) = [e for e in events if e.data.get("kind") == "time_hint"]
+    assert hint.data["columns"] == ["timestamp"]
+    events = []
+    _fit(
+        df.assign(timestamp=df["day"] * 60 + 100_000_000),
+        events,
+        feature_engineering=False,
+        **options,
+    )
+    assert not [e for e in events if e.data.get("kind") == "time_hint"]
+
+
 def test_the_time_column_may_be_ignored_as_a_feature_and_may_hold_dates():
     df = _trend(400)
     df["when"] = (pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")).dt.strftime(
@@ -1905,15 +1923,25 @@ def _skill_frame(kind, n=600, seed=0):
 
 
 @pytest.mark.parametrize(
-    ("kind", "expected"), [("noise", "no_skill"), ("leak", "near_perfect_fit"), ("good", None)]
+    ("kind", "expected"), [("noise", "no_skill"), ("leak", "leak_suspects"), ("good", None)]
 )
 def test_a_fit_that_is_near_perfect_or_no_better_than_the_average_says_so(kind, expected):
     events = []
     _fit(_skill_frame(kind), events, families=["LightGBM", "Linear"], target="y", max_models=2)
     found = [e.data for e in events if e.type == "notice" and e.data.get("kind") in KIND_QUALITY]
     assert [n["kind"] for n in found] == ([expected] if expected else [])
-    if expected == "near_perfect_fit":
-        assert found[0]["column"] == "a"
+    if expected == "leak_suspects":  # the column is named once, before the training: not again
+        assert found[0]["columns"] == ["a"]
+
+
+def test_a_near_perfect_fit_from_columns_that_none_predicts_alone_names_the_most_used():
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"a": rng.normal(size=600), "b": rng.normal(size=600)})
+    df["y"] = df["a"] + df["b"] + 0.001 * rng.normal(size=600)
+    events = []
+    _fit(df, events, families=["LightGBM", "Linear"], target="y", max_models=2)
+    found = [e.data for e in events if e.type == "notice" and e.data.get("kind") in KIND_QUALITY]
+    assert [n["kind"] for n in found] == ["near_perfect_fit"]
 
 
 def test_a_binary_fit_with_no_ranking_skill_says_so():
@@ -1925,7 +1953,7 @@ def test_a_binary_fit_with_no_ranking_skill_says_so():
     assert "no_skill" in [e.data.get("kind") for e in events if e.type == "notice"]
 
 
-KIND_QUALITY = ("no_skill", "near_perfect_fit")
+KIND_QUALITY = ("no_skill", "near_perfect_fit", "leak_suspects")
 
 
 @pytest.mark.parametrize("options", [{"target_transform": "log1p"}, {"sort_metric": "rmsle"}])
@@ -1934,6 +1962,79 @@ def test_no_skill_notice_is_not_sent_for_a_target_ranked_off_its_own_scale(optio
     df = _skill_frame("noise").assign(y=lambda d: np.exp(d["y"]))
     _fit(df, events, families=["LightGBM"], target="y", max_models=1, **options)
     assert "no_skill" not in [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+@pytest.mark.parametrize("sort_metric", ["rmse", "pearson", "spearman"])
+@pytest.mark.parametrize(("kind", "expected"), [("noise", True), ("good", False)])
+def test_no_skill_notice_is_sent_for_a_correlation_sort_metric_as_for_an_error(
+    sort_metric, kind, expected
+):
+    events = []
+    _fit(
+        _skill_frame(kind),
+        events,
+        families=["LightGBM", "Linear"],
+        target="y",
+        max_models=2,
+        sort_metric=sort_metric,
+    )
+    assert ("no_skill" in _kinds(events)) is expected
+
+
+def _heavy_tailed(n=1500, seed=0):
+    """A target that rises with ``a`` but is dominated by a few huge values: its R-squared is
+    near 0 and its rank correlation with the predictions is about 0.4."""
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    df["y"] = np.exp(2.5 * (0.5 * df["a"] + rng.normal(size=n)))
+    return df
+
+
+@pytest.mark.parametrize(("sort_metric", "expected"), [("spearman", False), ("rmse", True)])
+def test_no_skill_notice_is_not_sent_when_the_ranking_correlation_is_clearly_above_zero(
+    sort_metric, expected
+):
+    events = []
+    model = _fit(
+        _heavy_tailed(),
+        events,
+        families=["LightGBM", "Linear"],
+        target="y",
+        max_models=2,
+        sort_metric=sort_metric,
+    )
+    assert model.metrics["r2"] <= automl_module.NO_SKILL_R2
+    assert model.metrics["spearman"] > 0.3
+    assert ("no_skill" in _kinds(events)) is expected
+
+
+def test_no_skill_notice_is_sent_for_a_weak_pearson_correlation():
+    events = []
+    model = _fit(
+        _heavy_tailed(),
+        events,
+        families=["LightGBM", "Linear"],
+        target="y",
+        max_models=2,
+        sort_metric="pearson",
+    )
+    assert model.metrics["pearson"] ** 2 <= automl_module.NO_SKILL_R2
+    assert "no_skill" in _kinds(events)
+
+
+def test_no_skill_notice_is_still_not_sent_for_a_log_target_ranked_by_a_correlation():
+    events = []
+    df = _skill_frame("noise").assign(y=lambda d: np.exp(d["y"]))
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        target_transform="log1p",
+        sort_metric="pearson",
+    )
+    assert "no_skill" not in _kinds(events)
 
 
 def test_the_derived_features_notice_counts_the_groups_that_ran_out_of_time(monkeypatch):
@@ -2186,3 +2287,65 @@ def test_an_event_column_fit_validates_on_later_parts_of_the_time():
     model = _fit(df, target="t", event_column="ev", time_column="day", max_models=2)
     assert model.leaderboard["cv_score"].iloc[0] > 0.6
     assert "ev" not in model.columns
+
+
+def _leak_notices(df, **config):
+    events = []
+    _fit(df, events, families=["LightGBM"], max_models=1, **config)
+    return [e.data for e in events if e.type == "notice" and e.data.get("kind") == "leak_suspects"]
+
+
+def test_a_column_that_predicts_the_target_alone_is_named_and_does_not_stop_the_fit():
+    rng = np.random.default_rng(0)
+    n = 2_000
+    df = pd.DataFrame({"x": rng.normal(size=n), "z": rng.normal(size=n)})
+    df["event"] = (df["x"] + rng.normal(size=n) > 0).astype(int)
+    df["after"] = df["event"] * 3.0 + rng.normal(0, 0.01, n)
+    df["noise"] = rng.normal(size=n)
+    events = []
+    model = _fit(df, events, families=["LightGBM"], target="event", max_models=1)
+    (found,) = [
+        e.data for e in events if e.type == "notice" and e.data.get("kind") == "leak_suspects"
+    ]
+    assert found["columns"] == ["after"] and "'after'" in found["message"]
+    assert model.leaderboard["cv_score"].notna().all()
+    # named once: the near-perfect score does not name the column again
+    assert "near_perfect_fit" not in [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+def test_a_table_without_a_leak_gets_no_leak_notice():
+    assert _leak_notices(_binary(600), target="y") == []
+
+
+def test_a_column_left_out_of_the_inputs_is_not_named():
+    df = _skill_frame("leak")
+    assert _leak_notices(df, target="y", ignored_columns=["a"]) == []
+
+
+def test_the_leak_notice_names_a_bounded_number_of_columns():
+    rng = np.random.default_rng(0)
+    n = 1_000
+    df = pd.DataFrame({"y": rng.normal(size=n)})
+    for i in range(automl_module.LEAK_SHOWN + 3):
+        df[f"copy{i}"] = df["y"] * (i + 1) + rng.normal(0, 1e-4, n)
+    (found,) = _leak_notices(df, target="y")
+    assert len(found["columns"]) == automl_module.LEAK_SHOWN
+    assert found["count"] == automl_module.LEAK_SHOWN + 3
+    assert "and 3 more" in found["message"]
+
+
+def test_a_leak_check_that_raises_does_not_stop_the_fit(monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(automl_module, "training_leak_suspects", broken)
+    events = []
+    model = _fit(_skill_frame("leak"), events, families=["LightGBM"], target="y", max_models=1)
+    assert model.stop_reason
+    assert "leak_suspects" not in [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+def test_a_table_with_empty_and_constant_columns_is_checked_without_error():
+    df = _skill_frame("leak").assign(empty=np.nan, const=1.0, text=None)
+    (found,) = _leak_notices(df, target="y")
+    assert found["columns"] == ["a"]

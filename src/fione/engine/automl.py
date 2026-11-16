@@ -5,7 +5,8 @@ spec 5.1/5.7) and spends it in phases:
 
 1. Checks, the choice of derived features (``fione.engine.features``; at most
    ``FEATURE_SHARE`` of the time, or ``FEATURE_MIN_SECS`` of a short run, and off with
-   ``feature_engineering=False``), ``Prep.fit``
+   ``feature_engineering=False``), ``Prep.fit``, the check for a column that gives the target
+   away on its own (a notice; at most ``LEAK_SHARE`` of the time and ``LEAK_SECS``)
    and the folds (a ``cv_group_column`` keeps the rows of a group in one fold, in the search and
    in the choice of derived features alike): measured, not otherwise budgeted. Call the time left
    after them L.
@@ -84,6 +85,7 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
+from fione.data.profile import training_leak_suspects
 from fione.engine import metrics
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.diagnostics import diagnostics
@@ -154,6 +156,11 @@ FEATURE_MAX_SHARE = 0.30
 # of the folds' fits, and the candidates' own fit grows faster than the columns).
 FEATURE_MAX_COLUMNS = 5_000
 DROPPED_SHOWN = 5  # names of left-out columns in the notice
+# The check for a column that predicts the target alone (``fione.data.profile.leak_check``) gets
+# this share of the time, at most LEAK_SECS, and names at most LEAK_SHOWN columns.
+LEAK_SHARE = 0.05
+LEAK_SECS = 3.0
+LEAK_SHOWN = 5
 # A text column of at least this many different values, each on this many rows or more on
 # average, may name rows that belong together (see ``AutoML._notice_repeated_values``).
 REPEATED_LEVELS = 100
@@ -241,6 +248,7 @@ class AutoML:
             families = list(families or QUANTILE_FAMILIES)
         self.families = [f for f in FAMILY_ORDER if families is None or f in families]
         self.late = [f for f in LATE_ORDER if families is None or f in families]
+        self._leaked: set[str] = set()  # the columns ``_notice_leaks`` named in this fit
 
     def _event(self, type: str, **data) -> None:
         self.emit(Event(type, data=jsonable(data)))
@@ -332,6 +340,33 @@ class AutoML:
             correlation=round(float(alike), 2),
         )
 
+    def _notice_leaks(self, prep: Prep, X: pd.DataFrame, target: pd.Series, secs: float) -> None:
+        """Name the input columns that give the target away on their own (the profile's leak
+        check, on a sample, within ``secs``): a column the model will not know when it is
+        used makes the score better than the model will do. It only warns; a check that fails
+        changes nothing."""
+        try:
+            found = training_leak_suspects(X, target, columns=prep.columns, time_budget=secs)
+        except Exception:  # an advisory check must not stop a training run
+            return
+        if not found:
+            return
+        shown = found[:LEAK_SHOWN]
+        self._leaked = {s.column for s in shown}
+        listing = ", ".join(f"{s.column!r} ({s.reason})" for s in shown)
+        more = len(found) - len(shown)
+        self._notice(
+            f"{len(found)} {'column' if len(found) == 1 else 'columns'} may give the answer "
+            f"away: {listing}" + (f" and {more} more" if more > 0 else "") + ". A column that "
+            "is not known when the model is used makes the score better than the model will "
+            "do; check that every input is known at that time, and leave out the ones that "
+            "are not",
+            kind="leak_suspects",
+            columns=[s.column for s in shown],
+            reasons=[s.reason for s in shown],
+            count=len(found),
+        )
+
     def _fit_quality_notices(self, task: Task, model: TrainedModel) -> None:
         """Say when the validated fit is suspiciously good or no better than the average: a
         column may give the answer away, or the features may not hold it. A quantile is not
@@ -352,6 +387,8 @@ class AutoML:
             return
         if skill >= high:
             top = model.feature_importance.index[0]
+            if top in self._leaked:  # named already, by ``_notice_leaks``
+                return
             self._notice(
                 f"the validation {name} is {skill:.4f}, as good as it gets: a column may give the "
                 f"answer away (the most used one is {top!r}) and not be known when the model is "
@@ -360,7 +397,11 @@ class AutoML:
                 column=top,
                 score=float(skill),
             )
-        elif skill <= low and not self._ranked_off_scale(task, model):
+        elif (
+            skill <= low
+            and not self._ranked_off_scale(task, model)
+            and not self._ranked_by_a_clear_correlation(task, model)
+        ):
             self._notice(
                 f"the validation {name} is {skill:.3f}: the model is hardly better than "
                 "predicting the average, so the inputs may not hold what the target needs, or "
@@ -373,11 +414,23 @@ class AutoML:
     @staticmethod
     def _ranked_off_scale(task: Task, model: TrainedModel) -> bool:
         """Whether the models were ranked on another scale than the target's own units (a log
-        target, or a relative error), where an R-squared near 0 in those units says little."""
+        target, or a relative error), where an R-squared near 0 in those units says little. A
+        correlation ranks the models learned on the target as it is, so R-squared still judges."""
         if task != "regression":
             return False
         ranked = metrics.resolve(model.config.sort_metric, task, "sort_metric")
-        return model.config.target_transform == "log1p" or ranked not in metrics.ORIGINAL_UNITS
+        on_scale = metrics.ORIGINAL_UNITS | metrics.CORRELATIONS
+        return model.config.target_transform == "log1p" or ranked not in on_scale
+
+    @staticmethod
+    def _ranked_by_a_clear_correlation(task: Task, model: TrainedModel) -> bool:
+        """Whether the models were ranked by a correlation that is clearly above 0 (a monotone
+        target with heavy tails has an R-squared near 0 and a rank correlation far from it)."""
+        if task != "regression":
+            return False
+        ranked = metrics.resolve(model.config.sort_metric, task, "sort_metric")
+        rho = model.metrics.get(ranked) if ranked in metrics.CORRELATIONS else None
+        return rho is not None and rho * rho > NO_SKILL_R2
 
     def _notice_dropped_columns(self, prep: Prep, X: pd.DataFrame) -> None:
         """Name the input columns the models cannot use: no value, or the same one on every row
@@ -589,9 +642,13 @@ class AutoML:
                 )
         prep = Prep().fit(X, groups)
         self._notice_dropped_columns(prep, X)
+        self._leaked = set()
+        self._notice_leaks(
+            prep, X, target, min(LEAK_SECS, LEAK_SHARE * max(deadline.remaining(), 0.0))
+        )
         if c.time_column is None:
             dates = [column for column in prep.columns if prep.kind_of(column) == "datetime"]
-            # whole numbers that are dates (20141021, 14102100) order the rows by time as well
+            # whole numbers that are dates (20141021, 14102100) or Unix times order the rows too
             dates += [
                 column
                 for column in prep.columns

@@ -1,4 +1,5 @@
 import pickle
+import warnings
 
 import joblib
 import numpy as np
@@ -677,6 +678,34 @@ def test_whole_numbers_that_all_read_as_dates_are_found_and_other_numbers_are_no
     assert integer_date_format(pd.Series(ymd.astype(float))) is None  # only integer columns
 
 
+def test_whole_numbers_that_are_unix_seconds_or_milliseconds_are_found_and_ids_are_not():
+    rng = np.random.default_rng(0)
+    seconds = 1_600_000_000 + np.sort(rng.integers(0, 30 * 86_400, 500))
+    assert integer_date_format(pd.Series(seconds)) == "unix_s"
+    assert integer_date_format(pd.Series(seconds * 1000 + 123)) == "unix_ms"
+    assert integer_date_format(pd.Series(seconds[:5].repeat(100))) is None  # five values: codes
+    assert integer_date_format(pd.Series(seconds.astype(float))) is None  # only integer columns
+    # outside 2000 to 2100: ten digits that are no time, and ids or amounts of other sizes
+    assert integer_date_format(pd.Series(rng.integers(100_000_000, 900_000_000, 500))) is None
+    assert integer_date_format(pd.Series(rng.integers(4_200_000_000, 9_000_000_000, 500))) is None
+    assert (
+        integer_date_format(pd.Series(rng.integers(4_200_000_000_000, 9_000_000_000_000, 500)))
+        is None
+    )
+    assert integer_date_format(pd.Series(rng.integers(10**11, 10**12, 500))) is None
+    assert integer_date_format(pd.Series(rng.integers(10**15, 10**16, 500))) is None
+    ids = np.unique(rng.integers(1_000_000_000, 4_100_000_000, 500))
+    assert integer_date_format(pd.Series(ids)) is None  # unique ids spread over 98 years
+    assert integer_date_format(pd.Series(ids * 1000)) is None
+    for years in (1, 10):
+        spread = 1_300_000_000 + rng.integers(0, years * 365 * 86_400, 500)
+        assert integer_date_format(pd.Series(spread)) == "unix_s"
+        assert integer_date_format(pd.Series(spread * 1000)) == "unix_ms"
+    mixed = seconds.copy()
+    mixed[0] = 1_000  # one value outside the range
+    assert integer_date_format(pd.Series(mixed)) is None
+
+
 def test_emptier_reports_a_column_filled_in_training_and_mostly_empty_in_new_rows():
     rng = np.random.default_rng(0)
     n = 200
@@ -743,3 +772,42 @@ def test_a_text_column_is_not_durations_unless_nearly_all_of_it_is():
     )
     few = pd.DataFrame({"age": rng.choice(["1 year", "2 years"], 200), "n": rng.normal(size=200)})
     assert dict(Prep().fit(few)._plan)["age"] != "duration"  # two values are a flag already
+
+
+def _wide_text_frame(n=200, blocks=60):
+    """Numeric, few-level and prose columns mixed, so that the views drop columns from the middle
+    of the linear view and add more than a hundred."""
+    rng = np.random.default_rng(2)
+    words = ["red fox runs", "blue sky above", "old man walks", "a cat sat"]
+    columns = {}
+    for i in range(blocks):
+        values = rng.normal(size=n)
+        values[rng.random(n) < 0.1] = np.nan
+        columns[f"n{i}"] = values
+        columns[f"c{i}"] = rng.choice(["a", "b", "c", None], n)
+        if i in (0, blocks // 2, blocks - 1):
+            columns[f"post{i}"] = [
+                " ".join(rng.choice(words, 4)) + str(rng.integers(10**6)) for _ in range(n)
+            ]
+    return pd.DataFrame(columns)
+
+
+def test_the_text_and_level_views_add_their_columns_in_order_without_a_fragmentation_warning():
+    frame = _wide_text_frame()
+    prep = Prep().fit(frame)
+    assert len(prep.prose) == 3
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", pd.errors.PerformanceWarning)
+        text, levels = prep.text(frame), prep.levels(frame)
+    linear = prep.linear(frame)
+    spots = {prep.feature_names.index(c): c for c in prep.prose}
+    kept = [c for c in linear.columns if int(c[1:].split("_")[0]) not in spots]
+    assert list(text.columns) == [*kept, *(f"f{at}_t" for at in spots)]
+    for at, column in spots.items():
+        expected = frame[column].astype(str).where(frame[column].notna()).fillna("")
+        pd.testing.assert_series_equal(text[f"f{at}_t"], expected.rename(f"f{at}_t"))
+    pd.testing.assert_frame_equal(text[kept], linear[kept])
+    level_names = list(prep._level_at)
+    assert list(levels.columns)[-len(level_names) :] == level_names
+    assert (levels[level_names].dtypes == text[f"f{next(iter(spots))}_t"].dtype).all()
+    assert levels[level_names[0]].isin(["a", "b", "c", "__na__"]).all()

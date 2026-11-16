@@ -361,9 +361,12 @@ def single_column_score(
     """How well ``s`` alone predicts ``t``, out of fold: the column is binned, each row is
     predicted by its bin's target mean over the other of two folds, and the predictions are
     scored by AUC (classification; the mean one-vs-rest AUC for more than two classes) or R^2.
-    A whole-number column is binned both ways and keeps the better score. ``None`` when the
-    target leaves nothing to score, and for targets with more than ``_SCORE_MAX_CLASSES``
-    classes (one pass per class would not fit the budget).
+    A whole-number column is binned both ways and keeps the better score. For more than two
+    classes, a column that is missing exactly when the row is in one class (its is-missing
+    indicator alone reaches ``LEAK_STRONG`` for that class) scores that AUC instead, since
+    the mean dilutes it. ``None`` when the target leaves nothing to score, and for targets
+    with more than ``_SCORE_MAX_CLASSES`` classes (one pass per class would not fit the
+    budget).
 
     Known limitation: the smoothing pulls small bins towards the mean, which costs R^2 but not
     AUC. Regression leaks in fewer than roughly 5,000 rows therefore mostly score below the
@@ -396,13 +399,22 @@ def single_column_score(
         # both AUCs are symmetric in the labels, so which label is "positive" does not matter
         positives = [codes == k for k in ([1] if n_classes == 2 else range(n_classes))]
 
-        def score(bins: np.ndarray) -> float | None:
+        def aucs_of(bins: np.ndarray) -> list[float]:
             aucs = [
                 _auc(_out_of_fold_means(bins, positive.astype("float64"), folds), positive)
                 for positive in positives
             ]
-            aucs = [a for a in aucs if a is not None]
+            return [a for a in aucs if a is not None]
+
+        def score(bins: np.ndarray) -> float | None:
+            aucs = aucs_of(bins)
             return float(np.mean(aucs)) if aucs else None
+
+        missing = s[keep].isna().to_numpy()
+        if n_classes > 2 and missing.any() and not missing.all():
+            best = max(aucs_of(missing.astype(np.int64)), default=0.0)
+            if best >= LEAK_STRONG:
+                return best
 
     found = [v for v in map(score, _score_binnings(s[keep], kind)) if v is not None]
     return max(found, default=None)
@@ -471,6 +483,38 @@ def leak_check(
             suspects.append(LeakSuspect(name, reason, scores[name]))
     suspects.sort(key=lambda s: (-s.score, s.column))
     return LeakCheck(suspects, partial)
+
+
+def training_leak_suspects(
+    X: pd.DataFrame,
+    y: pd.Series,
+    *,
+    columns: list[str] | None = None,
+    time_budget: float = 3.0,
+    max_rows: int = 10_000,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[LeakSuspect]:
+    """The columns of the features ``X`` that may reveal the target ``y`` (same rows), for a
+    training run: ``leak_check`` on a deterministic sample of at most ``max_rows`` rows, of the
+    ``columns`` given (all by default; picked after the sample, which is cheaper). Profiling the
+    columns takes up to half of ``time_budget`` seconds (the columns not reached are not
+    checked), the check the rest."""
+    start = clock()
+    if len(X) > max_rows:
+        rows = np.sort(np.random.default_rng(0).choice(len(X), max_rows, replace=False))
+        X, y = X.iloc[rows], y.iloc[rows]
+    if columns is not None:
+        X = X[columns]
+    target = "target"
+    while target in X.columns:
+        target += "_"
+    work = pd.concat([X.reset_index(drop=True), y.reset_index(drop=True).rename(target)], axis=1)
+    profiles = []
+    for name in X.columns:
+        if clock() - start > time_budget / 2:
+            break
+        profiles.append(_profile_column(name, work[name]))
+    return leak_check(work, profiles, target, time_budget=time_budget - (clock() - start)).suspects
 
 
 def leak_suspects(df: pd.DataFrame, columns: list[ColumnProfile], target: str) -> list[LeakSuspect]:
