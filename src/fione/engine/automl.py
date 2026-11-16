@@ -395,7 +395,11 @@ class AutoML:
                 column=top,
                 score=float(skill),
             )
-        elif skill <= low and not self._ranked_off_scale(task, model):
+        elif (
+            skill <= low
+            and not self._ranked_off_scale(task, model)
+            and not self._ranked_by_a_clear_correlation(task, model)
+        ):
             self._notice(
                 f"the validation {name} is {skill:.3f}: the model is hardly better than "
                 "predicting the average, so the inputs may not hold what the target needs, or "
@@ -408,11 +412,23 @@ class AutoML:
     @staticmethod
     def _ranked_off_scale(task: Task, model: TrainedModel) -> bool:
         """Whether the models were ranked on another scale than the target's own units (a log
-        target, or a relative error), where an R-squared near 0 in those units says little."""
+        target, or a relative error), where an R-squared near 0 in those units says little. A
+        correlation ranks the models learned on the target as it is, so R-squared still judges."""
         if task != "regression":
             return False
         ranked = metrics.resolve(model.config.sort_metric, task, "sort_metric")
-        return model.config.target_transform == "log1p" or ranked not in metrics.ORIGINAL_UNITS
+        on_scale = metrics.ORIGINAL_UNITS | metrics.CORRELATIONS
+        return model.config.target_transform == "log1p" or ranked not in on_scale
+
+    @staticmethod
+    def _ranked_by_a_clear_correlation(task: Task, model: TrainedModel) -> bool:
+        """Whether the models were ranked by a correlation that is clearly above 0 (a monotone
+        target with heavy tails has an R-squared near 0 and a rank correlation far from it)."""
+        if task != "regression":
+            return False
+        ranked = metrics.resolve(model.config.sort_metric, task, "sort_metric")
+        rho = model.metrics.get(ranked) if ranked in metrics.CORRELATIONS else None
+        return rho is not None and rho * rho > NO_SKILL_R2
 
     def _notice_dropped_columns(self, prep: Prep, X: pd.DataFrame) -> None:
         """Name the input columns the models cannot use: no value, or the same one on every row
