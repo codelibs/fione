@@ -1936,6 +1936,79 @@ def test_no_skill_notice_is_not_sent_for_a_target_ranked_off_its_own_scale(optio
     assert "no_skill" not in [e.data.get("kind") for e in events if e.type == "notice"]
 
 
+@pytest.mark.parametrize("sort_metric", ["rmse", "pearson", "spearman"])
+@pytest.mark.parametrize(("kind", "expected"), [("noise", True), ("good", False)])
+def test_no_skill_notice_is_sent_for_a_correlation_sort_metric_as_for_an_error(
+    sort_metric, kind, expected
+):
+    events = []
+    _fit(
+        _skill_frame(kind),
+        events,
+        families=["LightGBM", "Linear"],
+        target="y",
+        max_models=2,
+        sort_metric=sort_metric,
+    )
+    assert ("no_skill" in _kinds(events)) is expected
+
+
+def _heavy_tailed(n=1500, seed=0):
+    """A target that rises with ``a`` but is dominated by a few huge values: its R-squared is
+    near 0 and its rank correlation with the predictions is about 0.4."""
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    df["y"] = np.exp(2.5 * (0.5 * df["a"] + rng.normal(size=n)))
+    return df
+
+
+@pytest.mark.parametrize(("sort_metric", "expected"), [("spearman", False), ("rmse", True)])
+def test_no_skill_notice_is_not_sent_when_the_ranking_correlation_is_clearly_above_zero(
+    sort_metric, expected
+):
+    events = []
+    model = _fit(
+        _heavy_tailed(),
+        events,
+        families=["LightGBM", "Linear"],
+        target="y",
+        max_models=2,
+        sort_metric=sort_metric,
+    )
+    assert model.metrics["r2"] <= automl_module.NO_SKILL_R2
+    assert model.metrics["spearman"] > 0.3
+    assert ("no_skill" in _kinds(events)) is expected
+
+
+def test_no_skill_notice_is_sent_for_a_weak_pearson_correlation():
+    events = []
+    model = _fit(
+        _heavy_tailed(),
+        events,
+        families=["LightGBM", "Linear"],
+        target="y",
+        max_models=2,
+        sort_metric="pearson",
+    )
+    assert model.metrics["pearson"] ** 2 <= automl_module.NO_SKILL_R2
+    assert "no_skill" in _kinds(events)
+
+
+def test_no_skill_notice_is_still_not_sent_for_a_log_target_ranked_by_a_correlation():
+    events = []
+    df = _skill_frame("noise").assign(y=lambda d: np.exp(d["y"]))
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        target_transform="log1p",
+        sort_metric="pearson",
+    )
+    assert "no_skill" not in _kinds(events)
+
+
 def test_the_derived_features_notice_counts_the_groups_that_ran_out_of_time(monkeypatch):
     from fione.engine.features import Verdict
 
