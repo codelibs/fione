@@ -1905,15 +1905,25 @@ def _skill_frame(kind, n=600, seed=0):
 
 
 @pytest.mark.parametrize(
-    ("kind", "expected"), [("noise", "no_skill"), ("leak", "near_perfect_fit"), ("good", None)]
+    ("kind", "expected"), [("noise", "no_skill"), ("leak", "leak_suspects"), ("good", None)]
 )
 def test_a_fit_that_is_near_perfect_or_no_better_than_the_average_says_so(kind, expected):
     events = []
     _fit(_skill_frame(kind), events, families=["LightGBM", "Linear"], target="y", max_models=2)
     found = [e.data for e in events if e.type == "notice" and e.data.get("kind") in KIND_QUALITY]
     assert [n["kind"] for n in found] == ([expected] if expected else [])
-    if expected == "near_perfect_fit":
-        assert found[0]["column"] == "a"
+    if expected == "leak_suspects":  # the column is named once, before the training: not again
+        assert found[0]["columns"] == ["a"]
+
+
+def test_a_near_perfect_fit_from_columns_that_none_predicts_alone_names_the_most_used():
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"a": rng.normal(size=600), "b": rng.normal(size=600)})
+    df["y"] = df["a"] + df["b"] + 0.001 * rng.normal(size=600)
+    events = []
+    _fit(df, events, families=["LightGBM", "Linear"], target="y", max_models=2)
+    found = [e.data for e in events if e.type == "notice" and e.data.get("kind") in KIND_QUALITY]
+    assert [n["kind"] for n in found] == ["near_perfect_fit"]
 
 
 def test_a_binary_fit_with_no_ranking_skill_says_so():
@@ -1925,7 +1935,7 @@ def test_a_binary_fit_with_no_ranking_skill_says_so():
     assert "no_skill" in [e.data.get("kind") for e in events if e.type == "notice"]
 
 
-KIND_QUALITY = ("no_skill", "near_perfect_fit")
+KIND_QUALITY = ("no_skill", "near_perfect_fit", "leak_suspects")
 
 
 @pytest.mark.parametrize("options", [{"target_transform": "log1p"}, {"sort_metric": "rmsle"}])
@@ -2080,3 +2090,65 @@ def test_a_quantile_fit_with_no_skill_does_not_say_so_in_r_squared():
     events = []
     _fit(_skill_frame("noise"), events, target="y", quantile=0.5, max_models=3)
     assert not [e for e in events if e.data.get("kind") in KIND_QUALITY]
+
+
+def _leak_notices(df, **config):
+    events = []
+    _fit(df, events, families=["LightGBM"], max_models=1, **config)
+    return [e.data for e in events if e.type == "notice" and e.data.get("kind") == "leak_suspects"]
+
+
+def test_a_column_that_predicts_the_target_alone_is_named_and_does_not_stop_the_fit():
+    rng = np.random.default_rng(0)
+    n = 2_000
+    df = pd.DataFrame({"x": rng.normal(size=n), "z": rng.normal(size=n)})
+    df["event"] = (df["x"] + rng.normal(size=n) > 0).astype(int)
+    df["after"] = df["event"] * 3.0 + rng.normal(0, 0.01, n)
+    df["noise"] = rng.normal(size=n)
+    events = []
+    model = _fit(df, events, families=["LightGBM"], target="event", max_models=1)
+    (found,) = [
+        e.data for e in events if e.type == "notice" and e.data.get("kind") == "leak_suspects"
+    ]
+    assert found["columns"] == ["after"] and "'after'" in found["message"]
+    assert model.leaderboard["cv_score"].notna().all()
+    # named once: the near-perfect score does not name the column again
+    assert "near_perfect_fit" not in [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+def test_a_table_without_a_leak_gets_no_leak_notice():
+    assert _leak_notices(_binary(600), target="y") == []
+
+
+def test_a_column_left_out_of_the_inputs_is_not_named():
+    df = _skill_frame("leak")
+    assert _leak_notices(df, target="y", ignored_columns=["a"]) == []
+
+
+def test_the_leak_notice_names_a_bounded_number_of_columns():
+    rng = np.random.default_rng(0)
+    n = 1_000
+    df = pd.DataFrame({"y": rng.normal(size=n)})
+    for i in range(automl_module.LEAK_SHOWN + 3):
+        df[f"copy{i}"] = df["y"] * (i + 1) + rng.normal(0, 1e-4, n)
+    (found,) = _leak_notices(df, target="y")
+    assert len(found["columns"]) == automl_module.LEAK_SHOWN
+    assert found["count"] == automl_module.LEAK_SHOWN + 3
+    assert "and 3 more" in found["message"]
+
+
+def test_a_leak_check_that_raises_does_not_stop_the_fit(monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(automl_module, "training_leak_suspects", broken)
+    events = []
+    model = _fit(_skill_frame("leak"), events, families=["LightGBM"], target="y", max_models=1)
+    assert model.stop_reason
+    assert "leak_suspects" not in [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+def test_a_table_with_empty_and_constant_columns_is_checked_without_error():
+    df = _skill_frame("leak").assign(empty=np.nan, const=1.0, text=None)
+    (found,) = _leak_notices(df, target="y")
+    assert found["columns"] == ["a"]

@@ -28,6 +28,7 @@ from fione.data.profile import (
     leak_code,
     profile_dataset,
     single_column_score,
+    training_leak_suspects,
 )
 
 
@@ -978,3 +979,25 @@ def test_month_names_alone_are_no_dates_and_do_not_break_the_profile():
     assert mixed.notna().tolist() == [True, False, True]
     profile = profile_dataset(pd.DataFrame({"month": months, "y": range(len(months))}))
     assert profile.columns[0].kind == "categorical"
+
+
+def test_training_leak_suspects_samples_rows_and_names_a_column_called_target():
+    rng = np.random.default_rng(0)
+    n = 30_000
+    y = pd.Series(rng.integers(0, 2, n), index=np.arange(n) + 5, name="event")
+    X = pd.DataFrame({"target": rng.normal(size=n)}, index=y.index)
+    X["x"] = rng.normal(size=n)
+    X["after"] = y + rng.normal(0, 0.1, n)
+    X["empty"] = np.nan
+    found = training_leak_suspects(X, y, max_rows=5_000)
+    assert [s.column for s in found] == ["after"]
+    assert training_leak_suspects(X.drop(columns="after"), y, max_rows=5_000) == []
+
+
+def test_training_leak_suspects_stops_profiling_when_the_time_is_up():
+    rng = np.random.default_rng(0)
+    y = pd.Series(rng.integers(0, 2, 400))
+    X = pd.DataFrame({"a": y + 0.0, "b": rng.normal(size=400)})
+    ticks = itertools.count(0.0, 1.0)  # each look at the clock is one second
+    assert [s.column for s in training_leak_suspects(X, y)] == ["a"]
+    assert training_leak_suspects(X, y, time_budget=1.0, clock=lambda: next(ticks)) == []

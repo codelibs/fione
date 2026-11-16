@@ -485,6 +485,38 @@ def leak_check(
     return LeakCheck(suspects, partial)
 
 
+def training_leak_suspects(
+    X: pd.DataFrame,
+    y: pd.Series,
+    *,
+    columns: list[str] | None = None,
+    time_budget: float = 3.0,
+    max_rows: int = 10_000,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[LeakSuspect]:
+    """The columns of the features ``X`` that may reveal the target ``y`` (same rows), for a
+    training run: ``leak_check`` on a deterministic sample of at most ``max_rows`` rows, of the
+    ``columns`` given (all by default; picked after the sample, which is cheaper). Profiling the
+    columns takes up to half of ``time_budget`` seconds (the columns not reached are not
+    checked), the check the rest."""
+    start = clock()
+    if len(X) > max_rows:
+        rows = np.sort(np.random.default_rng(0).choice(len(X), max_rows, replace=False))
+        X, y = X.iloc[rows], y.iloc[rows]
+    if columns is not None:
+        X = X[columns]
+    target = "target"
+    while target in X.columns:
+        target += "_"
+    work = pd.concat([X.reset_index(drop=True), y.reset_index(drop=True).rename(target)], axis=1)
+    profiles = []
+    for name in X.columns:
+        if clock() - start > time_budget / 2:
+            break
+        profiles.append(_profile_column(name, work[name]))
+    return leak_check(work, profiles, target, time_budget=time_budget - (clock() - start)).suspects
+
+
 def leak_suspects(df: pd.DataFrame, columns: list[ColumnProfile], target: str) -> list[LeakSuspect]:
     """``leak_check(...).suspects`` with the default budget."""
     return leak_check(df, columns, target).suspects

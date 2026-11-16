@@ -190,6 +190,11 @@ What this release does not do, or does with a catch. Japanese summary at the end
   Targets with more than 100 classes get no score at all, and the screens do not say so; only
   the exact checks run. Scores use at most 10,000 rows, datasets under 200 rows are not
   scored, and after 3 s the check stops and says that some columns were not scored.
+- **A training run names the columns the same check flags**, in a notice before the search:
+  at most 5 of them, with the reason, and it never stops the run. The check runs on at most
+  10,000 rows of the columns the models will read, within 5% of the time and 3 s, so on a table
+  of thousands of columns the last ones may not be checked, and without a warning. A column
+  named there is not named again by the notice for a near-perfect score.
 
 ## Deployment
 
@@ -290,6 +295,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 診断を持つエクスポートは、診断の機能より前のインストールでは読み込めません（どちらもバージョン 20.0.0 で区別できません）。インポートは、有限でない数や float の範囲を超える整数（診断の中も含め、どこにあっても）、未知の項目や深すぎる入れ子を持つ診断を拒否するようになりました。
 - リークとして既定でチェックを外すのは完全なもの（予測する列と同じ列、値で答えが決まる列）だけです（行の ID の列はこれまでどおり ID としてチェックを外します）。スコアによる疑い（単独で答えをよく当てる列、並び順や欠損が答えに沿う列、相関 |r| ≥ 0.99 の列。相関の列は以前はチェックを外していました）は注意を出すだけで、チェックされたままです。
 - リークのスコアは注意であり、どちらの向きにも間違えます。強い正当な列が疑われることも、リークを見逃すこともあります。すでに 0.89〜0.95 の列がある場合は 0.99 以上だけが注意になり、値の 1% が違う答えのコピー（0.987）は報告されません。一方のクラスで常に 0 の列（もう一方の 80% だけ値がある金額など）は最大 0.90 で、報告されません。回帰のリークは約 5,000 行未満ではほとんど見逃します。101 クラス以上の目的変数にはスコアがなく、画面にもそう表示されません。200 行未満のデータセットは採点せず、3 秒で打ち切ると、採点しなかった列があることを表示します。
+- 学習は、同じチェックで疑われた列を、探索の前の通知で挙げます（最大 5 列、理由つき）。学習は止めません。チェックは、モデルが読む列の最大 10,000 行を、時間の 5%（最大 3 秒）以内で調べます。数千列の表では、後ろの列を警告なしに調べないことがあります。ここで挙げた列は、ほぼ満点のスコアの通知では重ねて挙げません。
 - 負荷の高いマシンでは、同じ時間予算で学習できるブースティングの回数が減ります。いちばん影響を受けるのは CatBoost です。
 - API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。
 - Fione Serving には認証も、予測のリクエスト数・同時実行数の制限もありません。寄与度を求めるリクエストだけは同時に 2 件まで（それ以上は 503）ですが、計算中はモデルを占有するので、通常の予測はその間待たされます。最大のリクエストでは約 100 MiB のメモリを使います。画面に出る `-p 8081:8080` はすべてのネットワークインターフェースで公開するので、このマシンだけで使うなら `-p 127.0.0.1:8081:8080` にしてください。
