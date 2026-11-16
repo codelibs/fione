@@ -504,6 +504,57 @@ def test_amount_for_most_positives_stays_below_the_threshold():
     assert "amount" not in _flagged(df, "t")
 
 
+def _three_class_frame(share=0.2, n=3000, seed=0):
+    """A label in {0, 1, 2} where class 2 has the given share of the rows."""
+    rng = np.random.default_rng(seed)
+    label = rng.choice([0, 1, 2], n, p=[(1 - share) * 0.6, (1 - share) * 0.4, share])
+    df = pd.DataFrame({"label": label, "x": rng.normal(size=n) + label * 0.3})
+    return df, label, rng
+
+
+@pytest.mark.parametrize("share", [0.2, 0.03])
+def test_column_present_only_for_one_class_is_flagged_in_a_three_class_target(share):
+    df, label, rng = _three_class_frame(share)
+    df["extra_value"] = np.where(label == 2, rng.lognormal(3, 1, len(df)), np.nan)
+    df["extra_code"] = np.where(label == 2, rng.integers(1, 40, len(df)).astype(str), None)
+    # the mean one-vs-rest AUC is far below the threshold, the AUC for class 2 alone is 1.0
+    found = _flagged(df, "label")
+    for name in ("extra_value", "extra_code"):
+        assert found[name].reason == PREDICTS_ALONE and found[name].score >= LEAK_STRONG, name
+    assert "x" not in found
+
+
+def test_column_missing_only_for_one_class_is_flagged_in_a_three_class_target():
+    df, label, rng = _three_class_frame()
+    df["extra_value"] = np.where(label == 0, np.nan, rng.normal(size=len(df)))
+    assert _flagged(df, "label")["extra_value"].reason == PREDICTS_ALONE
+
+
+def test_strong_but_not_leaking_column_in_a_three_class_target_is_not_flagged():
+    df, label, rng = _three_class_frame()
+    # present for most of class 2 and for 5% of the others: its AUC for that class is about
+    # 0.93, below LEAK_STRONG
+    df["hint"] = np.where((label == 2) & (rng.random(len(df)) < 0.9), 1.0, np.nan)
+    df.loc[(label != 2) & (rng.random(len(df)) < 0.05), "hint"] = 1.0
+    assert single_column_score(df["hint"], "numeric", df["label"], "classification") < 0.9
+    assert "hint" not in _flagged(df, "label")
+
+
+def test_a_complete_column_that_separates_one_class_is_not_flagged_in_a_three_class_target():
+    """No missing values, so only the mean one-vs-rest AUC counts, as for any strong feature."""
+    df, label, _ = _three_class_frame()
+    df["sensor"] = (label == 2) * 100.0 + np.random.default_rng(1).normal(size=len(df))
+    assert "sensor" not in _flagged(df, "label")
+
+
+def test_binary_score_is_unchanged_by_the_missing_indicator_rule():
+    df, label, _ = _three_class_frame()
+    top = pd.Series((label == 2).astype(int))
+    present = pd.Series(np.where(label == 2, 1.0, np.nan))
+    assert single_column_score(present, "numeric", top, "classification") >= LEAK_STRONG
+    assert single_column_score(df["x"], "numeric", top, "classification") < 0.9
+
+
 def test_injected_regression_leaks():
     rng = np.random.default_rng(1)
     X, t = make_regression(n_samples=5000, n_features=10, noise=10, random_state=0)
