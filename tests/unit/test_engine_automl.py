@@ -1783,6 +1783,34 @@ def test_a_skewed_target_and_a_log_target_are_pointed_at_the_metric_that_fits(
     assert scale == ([kind] if kind else [])
 
 
+def _zero_kinds(zero_share, task="regression", shift=0.0, **config):
+    rng = np.random.default_rng(0)
+    df = _positive(n=400)
+    df["y"] = np.where(rng.random(len(df)) < zero_share, 0.0, 1.0 + df["y"] * 100) + shift
+    if task == "classification":
+        df["y"] = (df["y"] > 0).astype(int)
+    events = []
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1, task=task, **config)
+    return [e.data.get("kind") for e in events if e.type == "notice"]
+
+
+def test_a_target_that_is_almost_all_zero_is_pointed_at_a_classification():
+    assert "zero_inflated" in _zero_kinds(0.98)
+
+
+@pytest.mark.parametrize(
+    ("share", "options"),
+    [
+        (0.80, {}),  # not enough zeros
+        (0.98, {"task": "classification"}),  # a classification is not a score on the amounts
+        (0.98, {"shift": -0.5}),  # negative values: the zeros are not the floor
+        (0.98, {"quantile": 0.9}),  # a quantile has its own level
+    ],
+)
+def test_a_target_that_is_not_almost_all_zero_gets_no_zero_notice(share, options):
+    assert "zero_inflated" not in _zero_kinds(share, **options)
+
+
 def test_a_target_that_is_not_skewed_gets_no_scale_notice():
     events = []
     df = _positive().assign(y=lambda d: d["a"] + 0.1 * d["b"])
