@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.special import xlogy
-from scipy.stats import rankdata
+from scipy.stats import rankdata, skew
 from sklearn.metrics import average_precision_score, matthews_corrcoef, roc_auc_score
 
 from fione.engine.config import ConfigError
@@ -494,6 +494,9 @@ CORRELATIONS = frozenset({"pearson", "spearman"})
 # A non-negative target skewed more than this may be learned better as log1p (see the tip in
 # ``fione.tools.builtin`` for the evidence behind the value).
 TARGET_SKEW = 1.0
+# The logarithm has to cut the skewness at least by half for the advice to log1p to stand: a
+# target that is already a logarithm, or mostly 0, stays as skewed.
+TARGET_SKEW_CUT = 0.5
 RELATIVE_WEIGHT_CAP = 0.99
 # The regression metrics whose best average of predictions is not the one of squared error: the
 # blend is chosen on them (the relative errors also weight the rows, see above). The others are
@@ -502,6 +505,17 @@ RELATIVE_WEIGHT_CAP = 0.99
 BLEND_ON_METRIC = frozenset(
     {"pinball", "mae", "medae", "smape", "rmsle", "poisson", *RELATIVE_ERRORS}
 )
+
+
+def log1p_skew(y: np.ndarray) -> float | None:
+    """The skewness of a target of 0 or more that is skewed above ``TARGET_SKEW`` and that
+    log1p brings down to ``TARGET_SKEW_CUT`` of it or less, else ``None``."""
+    if len(y) <= 2 or y.min() < 0:
+        return None
+    skewness = float(skew(y, bias=False))
+    if not skewness > TARGET_SKEW:
+        return None
+    return skewness if float(skew(np.log1p(y), bias=False)) <= TARGET_SKEW_CUT * skewness else None
 
 
 def relative_weight(y: np.ndarray, name: str, log1p: bool = False) -> np.ndarray:

@@ -1771,7 +1771,7 @@ def test_a_skewed_target_and_a_log_target_are_pointed_at_the_metric_that_fits(
 ):
     events = []
     _fit(
-        _positive(),
+        _positive().assign(y=lambda d: d["y"] * 1000),  # on a scale where log1p changes it
         events,
         families=["LightGBM"],
         target="y",
@@ -1810,6 +1810,21 @@ def test_a_target_that_is_almost_all_zero_is_pointed_at_a_classification():
 )
 def test_a_target_that_is_not_almost_all_zero_gets_no_zero_notice(share, options):
     assert "zero_inflated" not in _zero_kinds(share, **options)
+
+
+def test_a_target_that_is_already_a_logarithm_gets_no_skewed_notice():
+    # log1p of a revenue that is 0 on most rows: still skewed, and log1p would not change that
+    rng = np.random.default_rng(1)
+    df = _positive()
+    revenue = np.where(rng.random(len(df)) < 0.05, rng.lognormal(8, 1.5, len(df)), 0.0)
+    events = []
+    _fit(df.assign(y=np.log1p(revenue)), events, families=["LightGBM"], target="y", max_models=1)
+    kinds = [e.data.get("kind") for e in events if e.type == "notice"]
+    assert "skewed_target" not in kinds
+    events = []  # the same revenue as it is: the logarithm does help
+    _fit(df.assign(y=revenue), events, families=["LightGBM"], target="y", max_models=1)
+    kinds = [e.data.get("kind") for e in events if e.type == "notice"]
+    assert "skewed_target" in kinds
 
 
 def test_a_target_that_is_not_skewed_gets_no_scale_notice():

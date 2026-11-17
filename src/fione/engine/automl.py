@@ -505,11 +505,7 @@ class AutoML:
                 "'rmsle'",
                 kind="log_target_metric",
             )
-        elif (
-            len(y) > 2
-            and y.min() >= 0
-            and (skew := float(pd.Series(y).skew())) > metrics.TARGET_SKEW
-        ):
+        elif (skew := metrics.log1p_skew(y)) is not None:
             self._notice(
                 f"the target is 0 or more and skewed (skewness {skew:.1f}), and a model that "
                 "learns and is ranked on it as it is gives the many small values predictions far "
