@@ -44,6 +44,10 @@ NAN = float("nan")
         ("regression", {"rmse": 5.0}, {"target_std": 10.0}, False, (3, "rmse")),
         ("regression", {"rmse": 12.0}, {"target_std": 10.0}, False, (1, "rmse")),
         ("regression", {"rmse": 2.0}, {"target_std": 10.0}, True, (2, "rmse")),
+        # a time that may be cut short: 2 * (concordance - 0.5)
+        ("regression", {"concordance": 0.9}, {}, False, (5, "concordance")),
+        ("regression", {"concordance": 0.7}, {}, False, (3, "concordance")),
+        ("regression", {"concordance": 0.45}, {}, False, (1, "concordance")),
         # no training data any more: from r2 (rmse / std = sqrt(1 - r2))
         ("regression", {"rmse": 1.0, "r2": 0.99}, {}, False, (5, "r2")),
         ("regression", {"rmse": 1.0, "r2": -0.5}, {}, False, (1, "r2")),

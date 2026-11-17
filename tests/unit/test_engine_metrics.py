@@ -242,10 +242,12 @@ def test_check_accepts_a_target_it_fits():
 
 def test_resolve_accepts_every_registered_name_for_its_task_only():
     for name, metric in metrics.REGISTRY.items():
-        assert metrics.resolve(name.upper(), metric.task, "sort_metric", 0.5) == name
+        assert (
+            metrics.resolve(name.upper(), metric.task, "sort_metric", 0.5, metric.survival) == name
+        )
         other = "regression" if metric.task == "classification" else "classification"
         with pytest.raises(ConfigError):
-            metrics.resolve(name, other, "sort_metric", 0.5)
+            metrics.resolve(name, other, "sort_metric", 0.5, metric.survival)
 
 
 def test_tied_predictions_give_no_credit_and_do_not_depend_on_the_row_order():

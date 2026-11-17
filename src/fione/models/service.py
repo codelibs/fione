@@ -295,6 +295,8 @@ def submit_training(
         raise ConfigError(f"cv_group_column '{config.cv_group_column}' is not in the data")
     if config.time_column is not None and config.time_column not in columns:
         raise ConfigError(f"time column '{config.time_column}' is not in the data")
+    if config.event_column is not None and config.event_column not in columns:
+        raise ConfigError(f"event column '{config.event_column}' is not in the data")
     check_target(storage, dataset, config.target, config.task, config.nfolds, config)
     payload = {"dataset_id": dataset_id, "config": config.to_dict(), "name": name}
     return store.enqueue(conn, "automl", project_id, user.id, payload)
@@ -321,10 +323,13 @@ def check_target(
     if config is not None:
         if config.quantile is not None and resolved != "regression":
             raise ConfigError("quantile needs a regression, but the target is a classification")
+        survival = config.event_column is not None
+        if survival and resolved != "regression":
+            raise ConfigError("event_column needs a regression, but the target is a classification")
         chosen = {}
         for field in ("stopping_metric", "sort_metric"):  # as AutoML.fit resolves them
             chosen[field] = metrics.resolve(
-                getattr(config, field), resolved, field, config.quantile
+                getattr(config, field), resolved, field, config.quantile, survival
             )
             metrics.check(chosen[field], encoded, len(classes), field)
         if config.decision == "tuned" and resolved == "classification":

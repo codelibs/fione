@@ -106,6 +106,7 @@ from fione.engine.search import (
     repeats_for,
     run_family,
 )
+from fione.engine.survival import km_target
 
 FAMILY_ORDER = (
     "LightGBM",
@@ -369,8 +370,9 @@ class AutoML:
     def _fit_quality_notices(self, task: Task, model: TrainedModel) -> None:
         """Say when the validated fit is suspiciously good or no better than the average: a
         column may give the answer away, or the features may not hold it. A quantile is not
-        judged by R-squared or AUC, so it gets neither."""
-        if model.config.quantile is not None:
+        judged by R-squared or AUC, so it gets neither, and nor is a score of a time that may be
+        cut short."""
+        if model.config.quantile is not None or model.config.event_column is not None:
             return
         scores = model.metrics
         if task == "regression":
@@ -486,13 +488,21 @@ class AutoML:
         unknown = [column for column in c.ignored_columns if column not in df.columns]
         if unknown:
             raise ConfigError(f"unknown columns in ignored_columns: {unknown}")
-        X = df.drop(columns=[c.target, *c.ignored_columns])
+        survival = c.event_column is not None
+        if survival and c.event_column not in df.columns:
+            raise ConfigError(f"event column '{c.event_column}' is not in the data")
+        not_features = [c.target, *c.ignored_columns, *([c.event_column] if survival else [])]
+        X = df.drop(columns=not_features)
         target = df[c.target]
         task: Task = infer_task(target) if c.task == "auto" else c.task
         if c.quantile is not None and task != "regression":
             raise ConfigError("quantile needs a regression, but the target is a classification")
-        sort_metric = metrics.resolve(c.sort_metric, task, "sort_metric", c.quantile)
-        stopping_metric = metrics.resolve(c.stopping_metric, task, "stopping_metric", c.quantile)
+        if survival and task != "regression":
+            raise ConfigError("event_column needs a regression, but the target is a classification")
+        sort_metric = metrics.resolve(c.sort_metric, task, "sort_metric", c.quantile, survival)
+        stopping_metric = metrics.resolve(
+            c.stopping_metric, task, "stopping_metric", c.quantile, survival
+        )
         notices: list[Event] = []
         y, classes, nfolds = validate_target(target, task, c.nfolds, notices.append)
         if c.quantile is not None:
@@ -562,16 +572,28 @@ class AutoML:
                 "and in the blend"
             )
         y_seen = y  # the target as the user gave it; ``y`` is what the models learn
+        if survival:
+            # the time and the event flag, in two columns so that a metric reads both; the
+            # curve is that of every training row (it holds no row's own prediction)
+            event = _event_flags(df[c.event_column], c.event_column, y)
+            y_seen = np.column_stack([y, event])
+            y = km_target(y, event)
+            self._notice(
+                f"the prediction is a score from 0 to 1 that grows with '{c.target}': a higher "
+                "score is a longer time, and it is not a time in its units",
+                kind="survival_score",
+                target=c.target,
+            )
         if c.target_transform == "log1p" and task == "classification":
             self._notice("target_transform is ignored for classification")
-        elif c.target_transform == "log1p":
+        elif c.target_transform == "log1p" and not survival:
             if (y <= -1).any():
                 raise ConfigError("target_transform 'log1p' needs target values above -1")
             y = np.log1p(y)
-        if task == "regression":
+        if task == "regression" and not survival:
             self._target_scale_notices(y_seen, sort_metric)
         # What is reported and ranked is in the target's own units.
-        original = np.expm1 if y is not y_seen else _same
+        original = np.expm1 if y is not y_seen and not survival else _same
         for field, name in (("sort_metric", sort_metric), ("stopping_metric", stopping_metric)):
             metrics.check(name, y_seen, len(classes), field)
         prior = None
@@ -644,7 +666,7 @@ class AutoML:
             if row_groups is None:
                 self._notice_repeated_values(prep, X)
                 if not dates and not self._notice_sorted_column(prep, X):
-                    if task == "regression":
+                    if task == "regression" and not survival:
                         self._notice_ordered_target(y_seen)
             folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
             first_run = folds[:nfolds]  # reported: the other repeats only judge the search
@@ -668,7 +690,8 @@ class AutoML:
 
         left = deadline.remaining()
         reserve = max(MIN_RESERVE_SECS, RESERVE_SHARE * left)
-        default_stopping = stopping_metric == metrics.automatic(task, c.quantile)
+        # (the search's own score is squared error of the learned score, not the concordance)
+        default_stopping = not survival and stopping_metric == metrics.automatic(task, c.quantile)
         results, logs, reasons, finished, errors = self._search(
             families,
             X,
@@ -743,7 +766,12 @@ class AutoML:
         if tuned or rating_cuts:
             prior = metrics.tune_prior(sort_metric, y_seen[rows], blended)
         try:
-            found = diagnostics(task, y_seen[rows], blended, classes, seed=c.seed, prior=prior)
+            # (the diagnostics read one target column: a survival fit has none in its own units)
+            found = (
+                None
+                if survival
+                else diagnostics(task, y_seen[rows], blended, classes, seed=c.seed, prior=prior)
+            )
         except Exception as e:
             found = None
             self._notice(
@@ -794,7 +822,7 @@ class AutoML:
             class_prior=prior,
             proba_shift=shift,
             target_floor=0.0
-            if task == "regression" and not rating_cuts and y_seen.min() >= 0
+            if task == "regression" and not survival and not rating_cuts and y_seen.min() >= 0
             else None,
         )
         self._fit_quality_notices(task, model)
@@ -1243,6 +1271,19 @@ def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
 
 def _same(values: np.ndarray) -> np.ndarray:
     return values
+
+
+def _event_flags(column: pd.Series, name: str, time: np.ndarray) -> np.ndarray:
+    """The 0/1 event flags of ``column`` as floats; ConfigError if they are not 0 or 1 on
+    every row, or the times (``time``) are not 0 or more, or no row has an event."""
+    flags = pd.to_numeric(column, errors="coerce").to_numpy(dtype=float)
+    if not np.isin(flags, (0.0, 1.0)).all():
+        raise ConfigError(f"event column '{name}' must hold only 0 (censored) or 1 (event)")
+    if (time < 0).any():
+        raise ConfigError("the time target must be 0 or more with an event_column")
+    if not flags.any():
+        raise ConfigError(f"event column '{name}' has no event (no row is 1)")
+    return flags
 
 
 def _leaderboard(

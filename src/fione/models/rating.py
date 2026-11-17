@@ -7,6 +7,8 @@ The rating says how much better than a trivial guess the model's cross-validated
   is the model's out-of-fold accuracy (``metrics["accuracy"]``) and ``majority_rate`` the
   share of the most common class in the training data (always guessing that class). When
   the training data is gone, binary models fall back to ``2 * (auc - 0.5)``.
+- regression of a time that may be cut short (``concordance`` is its only metric):
+  ``2 * (concordance - 0.5)``.
 - regression: ``1 - rmse / baseline_rmse``, where ``baseline_rmse`` is the standard
   deviation (ddof=0) of the training target, the error of always guessing its mean. When the
   training data is gone it is derived from ``r2``: ``rmse / std = sqrt(1 - r2)`` exactly.
@@ -63,6 +65,8 @@ def _skill(task: str, metrics: dict, majority_rate, target_std) -> tuple[float |
             return 2 * (auc - 0.5), "auc", None
         return None, None, "no_metric"
     if task == "regression":
+        if (concordance := _finite(metrics.get("concordance"))) is not None:
+            return 2 * (concordance - 0.5), "concordance", None
         rmse, std = _finite(metrics.get("rmse")), _finite(target_std)
         if rmse is not None and std is not None:
             if std <= 0:
