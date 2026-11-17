@@ -377,6 +377,35 @@ def test_value_determines_target():
     assert "r" not in s
 
 
+def test_value_determines_target_ignores_a_mostly_zero_target_with_unique_rows():
+    # ties only at 0, where the target is 0; the few non-zero targets sit on rows of their own
+    flagged = 0
+    for seed in range(20):
+        rng = np.random.default_rng(seed)
+        n = 5000
+        repeat = rng.random(n) < 0.4
+        span = np.where(repeat, np.round(rng.exponential(30, n) * 86400) / 86400, 0.0)
+        target = np.where(repeat & (rng.random(n) < 0.01), np.round(rng.lognormal(3, 1, n), 2), 0.0)
+        df = pd.DataFrame({"t": target, "span": span, "x": rng.normal(size=n)})
+        flagged += "span" in _suspects(df, "t")
+    assert flagged <= 1
+
+
+@pytest.mark.parametrize("share", [0.002, 0.0005])
+def test_a_text_column_that_holds_the_target_on_the_non_zero_rows_is_flagged(share):
+    # repeated texts on the zero rows, a text of its own that spells the target on the others
+    rng = np.random.default_rng(0)
+    n = 10_000
+    nonzero = rng.random(n) < share
+    target = np.where(nonzero, np.round(rng.lognormal(4, 1, n), 2), 0.0)
+    texts = np.array(["pv=1", "pv=2", "pv=3"], dtype=object)[rng.integers(0, 3, n)]
+    texts[nonzero] = [f"pv=1;revenue={v}" for v in target[nonzero]]
+    df = pd.DataFrame({"t": target, "totals": texts, "x": rng.normal(size=n)})
+    assert nonzero.sum() >= 2
+    assert _suspects(df, "t")["totals"].reason == "value determines target"
+    assert [s.column for s in training_leak_suspects(df.drop(columns="t"), df["t"])] == ["totals"]
+
+
 def test_value_determines_target_needs_enough_rows_and_low_cardinality():
     # 10 rows only: too few non-null rows
     df = pd.DataFrame({"t": [0, 1] * 5, "g": ["a", "b"] * 5})
