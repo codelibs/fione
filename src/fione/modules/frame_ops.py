@@ -39,6 +39,7 @@ _COMPARE = {
     ">": operator.gt,
 }
 _CONDITION = re.compile(r"(?P<column>.+?) (?P<op>==|!=|<=|>=|<|>) (?P<value>.*)")
+_EMPTINESS = re.compile(r"(?P<column>.+) is (?P<no>not )?empty")
 # The stop words of tokenize.
 STOP_WORDS = frozenset(
     "ax i you edu s t m subject can lines re what there all we one the a an of or in for by on"
@@ -740,7 +741,13 @@ def _typed(series: pd.Series, column: str, text: str):
 def _comparison(df: pd.DataFrame, text: str) -> np.ndarray:
     found = _CONDITION.fullmatch(text.strip())
     if found is None:
-        raise ModuleError(f"cannot read the condition '{text.strip()}'; use: column == value")
+        if empty := _EMPTINESS.fullmatch(text.strip()):
+            column = require_column(df, empty["column"].strip())
+            return (df[column].notna() if empty["no"] else df[column].isna()).to_numpy()
+        raise ModuleError(
+            f"cannot read the condition '{text.strip()}'; use: column == value, "
+            "column is empty or column is not empty"
+        )
     column = require_column(df, found["column"].strip())
     value = _typed(df[column], column, found["value"].strip())
     return np.asarray(_COMPARE[found["op"]](df[column], value).fillna(False), dtype=bool)
@@ -748,7 +755,8 @@ def _comparison(df: pd.DataFrame, text: str) -> np.ndarray:
 
 def row_mask(df: pd.DataFrame, conditions: str) -> np.ndarray:
     """Rows matching ``col op value`` terms (ops ``== != < <= > >=``, each with a space on both
-    sides) joined by ``&`` and ``|``; ``&`` binds tighter. Empty conditions match every row."""
+    sides) or ``col is empty`` / ``col is not empty`` terms, joined by ``&`` and ``|``; ``&``
+    binds tighter. Empty conditions match every row."""
     if not conditions.strip():
         return np.ones(len(df), dtype=bool)
     mask = np.zeros(len(df), dtype=bool)

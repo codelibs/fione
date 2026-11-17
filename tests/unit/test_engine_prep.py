@@ -314,6 +314,12 @@ def test_validate_target_rejects_missing_values():
         validate_target(pd.Series([1.0, None] * 10), "regression", 5)
 
 
+def test_the_missing_target_error_names_the_condition_that_removes_those_rows():
+    with pytest.raises(ConfigError, match="'sales is not empty'") as raised:
+        validate_target(pd.Series([1.0, None] * 10, name="sales"), "regression", 5)
+    assert raised.value.details == {"n": 10, "column": "sales"}
+
+
 def test_validate_target_rejects_single_value():
     with pytest.raises(ConfigError, match="single distinct value"):
         validate_target(pd.Series(["a"] * 20), "classification", 5)
@@ -379,7 +385,7 @@ def test_validate_target_keeps_folds_for_balanced_small_data():
     ("y", "task", "code", "details"),
     [
         (pd.Series([0, 1] * 4), "classification", "few_rows", {"n": 8, "min": 10}),
-        (pd.Series([1.0, None] * 10), "regression", "missing", {"n": 10}),
+        (pd.Series([1.0, None] * 10), "regression", "missing", {"n": 10, "column": "target"}),
         (pd.Series(["a"] * 20), "classification", "single_value", {}),
         (pd.Series(["a", "b"] * 10), "regression", "not_numeric", {}),
         (pd.Series([1.0, np.inf] * 10), "regression", "infinite", {}),

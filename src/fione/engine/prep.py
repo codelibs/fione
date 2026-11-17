@@ -669,11 +669,13 @@ def validate_target(
         )
     missing = int(y.isna().sum())
     if missing:
+        column = "target" if y.name is None else str(y.name)
         raise TargetError(
-            f"target has missing values in {missing} rows; "
-            "remove those rows or choose another column",
+            f"target has missing values in {missing} rows; remove those rows (the Slice rows "
+            f"module with the condition '{column} is not empty') or choose another column",
             "missing",
             n=missing,
+            column=column,
         )
     distinct = y.nunique()
     if distinct < 2:
