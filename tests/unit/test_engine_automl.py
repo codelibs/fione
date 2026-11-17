@@ -1791,6 +1791,48 @@ def test_a_target_that_is_not_skewed_gets_no_scale_notice():
     assert "skewed_target" not in kinds
 
 
+def _codes(n=2_000, kind="codes", seed=0):
+    """A whole-number target on many rows per value: codes with uneven counts, or counts of
+    something (a Poisson), whose counts rise and fall smoothly with the value."""
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    if kind == "codes":
+        share = rng.lognormal(sigma=0.8, size=25)
+        df["y"] = rng.choice(np.arange(25) * 3 + 3, n, p=share / share.sum())
+    elif kind == "poisson":
+        df["y"] = rng.poisson(15, n)
+    else:
+        df["y"] = rng.integers(0, 10, n)
+    return df
+
+
+def _class_code_notices(df, **config):
+    events = []
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1, **config)
+    started = next(e for e in events if e.type == "started")
+    notices = [e.data for e in events if e.data.get("kind") == "class_codes"]
+    return started.data["task"], notices
+
+
+def test_class_codes_fitted_as_a_regression_are_pointed_out_unless_the_task_was_chosen():
+    task, notices = _class_code_notices(_codes())
+    assert task == "regression"
+    (notice,) = notices
+    assert notice["values"] == 25 and "task to 'classification'" in notice["message"]
+    assert _class_code_notices(_codes(), task="regression")[1] == []
+
+
+def test_a_whole_number_time_with_an_event_column_is_not_called_class_codes():
+    df = _codes()
+    df["ev"] = np.random.default_rng(1).integers(0, 2, len(df))
+    assert _class_code_notices(df, event_column="ev") == ("regression", [])
+
+
+def test_counts_of_something_and_few_values_get_no_class_code_notice():
+    assert _class_code_notices(_codes(kind="poisson")) == ("regression", [])
+    assert _class_code_notices(_codes(kind="few")) == ("classification", [])
+
+
 def test_a_model_on_durations_written_as_text_predicts_explains_and_profiles_them():
     from fione.engine import explain
 
