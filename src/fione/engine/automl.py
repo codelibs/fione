@@ -189,6 +189,7 @@ NEAR_PERFECT_R2 = 0.999
 NO_SKILL_R2 = 0.02
 NEAR_PERFECT_AUC = 0.9995
 NO_SKILL_AUC = 0.55
+ZERO_SHARE = 0.95  # of a target of 0 or more that is exactly 0: the few others decide the score
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -475,6 +476,22 @@ class AutoML:
             empty=len(empty),
         )
 
+    def _zero_inflated_notice(self, y: np.ndarray) -> None:
+        """Say when a target of 0 or more is almost always exactly 0: its score rests on the
+        few other rows. A quantile is a level of its own, so it gets none."""
+        if self.config.quantile is not None or len(y) == 0 or y.min() < 0:
+            return
+        share = float((y == 0).mean())
+        if share >= ZERO_SHARE:
+            self._notice(
+                f"{share:.1%} of the target values are exactly 0, so the score rests on the few "
+                "other rows. To find which rows are above 0, make a column that is 1 there and 0 "
+                "elsewhere and classify it; a second model on the rows above 0 can then predict "
+                "how much",
+                kind="zero_inflated",
+                zero_share=share,
+            )
+
     def _target_scale_notices(self, y: np.ndarray, sort_metric: str) -> None:
         """Say when the target's scale and the ranking metric do not go together: a log target
         ranked in the original units, or a skewed one that is learned and ranked as it is. A
@@ -616,6 +633,7 @@ class AutoML:
         if task == "regression" and not survival:
             if c.task == "auto" and c.quantile is None:
                 self._notice_class_codes(y_seen)
+            self._zero_inflated_notice(y_seen)
             self._target_scale_notices(y_seen, sort_metric)
         # What is reported and ranked is in the target's own units.
         original = np.expm1 if y is not y_seen and not survival else _same
