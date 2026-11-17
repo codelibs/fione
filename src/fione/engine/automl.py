@@ -176,6 +176,13 @@ ORDERED_AUTOCORR = 0.8
 # values each on this many rows or more on average: see ``AutoML._notice_sorted_column``.
 SORTED_VALUES = 20
 SORTED_ROWS = 20
+# A whole-number target of this many different values, each on this many rows or more on
+# average, whose counts do not rise and fall smoothly with the value (the correlation of each
+# count with the next under CODE_SMOOTH, as an age or a count would), may be class codes: see
+# ``AutoML._notice_class_codes``.
+CODE_VALUES = (21, 100)
+CODE_ROWS = 50
+CODE_SMOOTH = 0.5
 
 # A validated fit this good (or this poor) gets a notice: R-squared, or AUC for two classes.
 NEAR_PERFECT_R2 = 0.999
@@ -317,6 +324,26 @@ class AutoML:
                 )
                 return True
         return False
+
+    def _notice_class_codes(self, y: np.ndarray) -> None:
+        """Say when a target fitted as a regression because ``task`` is ``auto`` looks like class
+        codes: whole numbers, each on many rows, with no smooth shape over the values. Codes are
+        not amounts, so the regression, and the advice for a skewed amount, may not suit them."""
+        values, counts = np.unique(y, return_counts=True)  # in the order of the values
+        if not CODE_VALUES[0] <= len(values) <= CODE_VALUES[1] or len(y) / len(values) < CODE_ROWS:
+            return
+        if (y % 1).any() or counts.min() == counts.max():
+            return
+        if not np.corrcoef(counts[:-1], counts[1:])[0, 1] < CODE_SMOOTH:
+            return
+        self._notice(
+            f"the target holds {len(values)} different whole numbers, each on about "
+            f"{len(y) / len(values):,.0f} rows, and no smooth shape over them, so it is fitted "
+            "as a regression. If they are class codes (a category number, a type id) "
+            "rather than amounts, set task to 'classification'",
+            kind="class_codes",
+            values=len(values),
+        )
 
     def _notice_ordered_target(self, y: np.ndarray) -> None:
         """Say when the target of a row is nearly that of the row before it: the rows are in
@@ -591,6 +618,8 @@ class AutoML:
                 raise ConfigError("target_transform 'log1p' needs target values above -1")
             y = np.log1p(y)
         if task == "regression" and not survival:
+            if c.task == "auto" and c.quantile is None:
+                self._notice_class_codes(y_seen)
             self._target_scale_notices(y_seen, sort_metric)
         # What is reported and ranked is in the target's own units.
         original = np.expm1 if y is not y_seen and not survival else _same
