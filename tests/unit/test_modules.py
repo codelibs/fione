@@ -1285,9 +1285,9 @@ def calc_frame():
             "a": [1.0, 2.0, np.nan, 4.0, -3.0],
             "b": [2.0, 0.0, 5.0, np.nan, 3.0],
             "n": pd.array([1, 2, 3, None, 5], dtype="Int64"),
-            "ind_x_1": [1, 0, 1, 1, 0],
-            "ind_y_2": [0, 0, 1, np.nan, 1],
-            "ind_t": ["u", "v", "u", "v", "u"],
+            "flag_x_1": [1, 0, 1, 1, 0],
+            "flag_y_2": [0, 0, 1, np.nan, 1],
+            "flag_t": ["u", "v", "u", "v", "u"],
             "unit price": [10.0, 20.0, 40.0, 5.0, 1.0],
             "名前": [1.0, 2.0, 3.0, 4.0, 5.0],
         }
@@ -1363,20 +1363,20 @@ def test_calc_comparisons_and_booleans_give_zero_or_one():
 
 def test_calc_row_functions_over_columns_and_patterns_skip_empty_values():
     df = calc_frame()
-    flags = df[["ind_x_1", "ind_y_2"]]
-    np.testing.assert_array_equal(calc('rowsum("ind_*_*")'), flags.sum(axis=1))
-    np.testing.assert_array_equal(calc('rowcount("ind_*_*")'), flags.count(axis=1))
-    np.testing.assert_allclose(calc('rowmean("ind_*_*")'), flags.mean(axis=1))
+    flags = df[["flag_x_1", "flag_y_2"]]
+    np.testing.assert_array_equal(calc('rowsum("flag_*_*")'), flags.sum(axis=1))
+    np.testing.assert_array_equal(calc('rowcount("flag_*_*")'), flags.count(axis=1))
+    np.testing.assert_allclose(calc('rowmean("flag_*_*")'), flags.mean(axis=1))
     np.testing.assert_allclose(calc("rowsum(a, b, 1)"), df[["a", "b"]].sum(axis=1) + 1)
-    np.testing.assert_allclose(calc('rowsum("ind_x*", a)'), df[["ind_x_1", "a"]].sum(axis=1))
+    np.testing.assert_allclose(calc('rowsum("flag_x*", a)'), df[["flag_x_1", "a"]].sum(axis=1))
     both = pd.DataFrame({"a": [np.nan, 1.0], "b": [np.nan, 3.0]})
     out = calc("rowmean(a, b)", both)
     assert np.isnan(out[0]) and out[1] == 2.0
     assert calc("rowsum(a, b)", both).tolist() == [0.0, 4.0]
     with pytest.raises(ModuleError, match="no column matches 'zzz\\*'"):
         calc('rowsum("zzz*")')
-    with pytest.raises(ModuleError, match="column 'ind_t' is not numeric"):
-        calc('rowsum("ind_*")')
+    with pytest.raises(ModuleError, match="column 'flag_t' is not numeric"):
+        calc('rowsum("flag_*")')
     with pytest.raises(ModuleError, match="at least one"):
         calc("rowsum()")
 
@@ -1414,8 +1414,8 @@ def test_calc_star_is_the_only_wildcard_and_works_in_the_middle():
 
 
 def test_calc_names_the_column_that_is_not_numeric():
-    with pytest.raises(ModuleError, match="column 'ind_t' is not numeric"):
-        calc("ind_t + 1")
+    with pytest.raises(ModuleError, match="column 'flag_t' is not numeric"):
+        calc("flag_t + 1")
     dates = pd.DataFrame({"d": pd.to_datetime(["2020-01-01"])})
     with pytest.raises(ModuleError, match="column 'd' is not numeric"):
         calc("d + 1", dates)

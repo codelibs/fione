@@ -310,7 +310,7 @@ of the dataset: name the new column (`name`; it must not exist yet) and write ho
 (`expression`, up to 1,000 characters). The other columns and the rows stay as they are, and the new
 column holds decimal numbers. For example `close / close_before1_mean - 1` (a return),
 `price - price_around999999_mean` (a value relative to its group's mean), `flag - flag_lag1` (a change
-from the month before) or `rowsum("ind_*")` (the number of the flags `ind_...` that are set).
+from the month before) or `rowsum("flag_*")` (the number of the flags `flag_...` that are set).
 
 An expression is built from:
 
@@ -325,7 +325,7 @@ An expression is built from:
   (`x` where the condition is true, `y` elsewhere).
 - `rowsum`, `rowmean` and `rowcount` of any number of values on one row, which skip the empty ones:
   `rowsum(a, b, c)`, or a pattern in quotes for every column whose name matches it (`*` for any
-  characters, also none; it is the only wildcard), such as `rowsum("ind_*_ult1")`, which gives the number
+  characters, also none; it is the only wildcard), such as `rowsum("flag_*_on")`, which gives the number
   of such flags that are set. `rowsum` of nothing but empty values is 0, `rowmean` is empty, and
   `rowcount` is the number of values that are not empty.
 

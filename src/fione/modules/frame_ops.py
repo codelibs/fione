@@ -793,7 +793,7 @@ _op(
                 'numbers and columns (col("a b") for a name with spaces or symbols); + - * / **;'
                 " == != < <= > >= & | ~ (give 1 or 0); abs sqrt log log1p exp min2 max2 clip"
                 " isnull where(cond, x, y); rowsum rowmean rowcount of values and quoted"
-                ' patterns ("ind_*"); nan. An infinite result is empty.'
+                ' patterns ("flag_*"); nan. An infinite result is empty.'
             ),
         },
     },
