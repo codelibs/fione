@@ -53,6 +53,7 @@ _CORR_MIN_PERIODS = 10
 _CORR_MAX_COLUMNS = 1000
 _LEAK_CORRELATION = 0.99
 _LEAK_MIN_ROWS = 20
+_DETERMINES_MIN_SINGLES = 2
 _SCORE_BINS = 64
 _SCORE_SMOOTHING = 10.0
 _SCORE_MARGIN = 0.10
@@ -242,6 +243,14 @@ def _same_values(a: pd.Series, b: pd.Series) -> bool:
     return bool((a.astype(str).to_numpy() == b.astype(str).to_numpy()).all())
 
 
+def _only_unusual_targets(singles: pd.Series, target: pd.Series) -> bool:
+    """Whether the rows with a value of their own (``singles``) hold, at least
+    ``_DETERMINES_MIN_SINGLES`` of them and ``LEAK_STRONG`` of them, a target other than the
+    most common one of ``target``: the value tells these rows from the rest."""
+    unusual = singles != target.mode().iloc[0]
+    return int(unusual.sum()) >= _DETERMINES_MIN_SINGLES and float(unusual.mean()) >= LEAK_STRONG
+
+
 def _leak_reason(
     col: ColumnProfile, s: pd.Series, t: pd.Series, t_float: np.ndarray | None
 ) -> tuple[str, float] | None:
@@ -262,10 +271,14 @@ def _leak_reason(
     n_values = int(s.notna().sum())
     if n_values >= _LEAK_MIN_ROWS and 2 <= col.n_unique <= 0.5 * n_values and tp.nunique() >= 2:
         pairs = pd.DataFrame({"value": sp.to_numpy(), "target": tp.to_numpy()})
-        # only a value seen on 2+ rows can show it fixes the target; a lone row, like the few
-        # non-zero rows of a mostly-zero target, always maps to one value
-        repeated = pairs[pairs["value"].duplicated(keep=False)].drop_duplicates()
-        if repeated["target"].nunique() >= 2 and repeated["value"].is_unique:
+        once = ~pairs["value"].duplicated(keep=False)
+        repeated = pairs[~once].drop_duplicates()
+        if repeated["value"].is_unique and (
+            # a value seen on 2+ rows that fixes the target is the evidence; so is a value
+            # seen on one row only when, on every such row, the target is not its usual one
+            # (a column that holds the target on the few rows where it is not 0)
+            repeated["target"].nunique() >= 2 or _only_unusual_targets(pairs["target"][once], tp)
+        ):
             return DETERMINES, 1.0
     return None
 
