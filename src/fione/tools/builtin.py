@@ -725,7 +725,7 @@ def is_skewed_target(y: pd.Series, task: str) -> bool:
     y = y.dropna()
     if task != "regression" or len(y) == 0 or not pd.api.types.is_numeric_dtype(y):
         return False
-    return bool(y.min() >= 0 and y.skew() > TARGET_SKEW)
+    return metrics.log1p_skew(y.to_numpy(dtype=float)) is not None
 
 
 def rare_class_share(y: pd.Series, task: str) -> float | None:
