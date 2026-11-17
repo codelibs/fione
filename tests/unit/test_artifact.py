@@ -538,6 +538,23 @@ def test_a_quantile_model_keeps_its_quantile_and_predicts_the_same_after_a_round
     pd.testing.assert_series_equal(loaded.predict(df), model.predict(df))
 
 
+def test_a_whole_number_date_column_predicts_the_same_after_a_round_trip(storage):
+    rng = np.random.default_rng(0)
+    n = 600
+    when = pd.Timestamp("2014-10-21") + pd.to_timedelta(np.sort(rng.integers(0, 240, n)), unit="h")
+    df = pd.DataFrame({"hour": when.strftime("%y%m%d%H").astype("int64"), "x": rng.normal(size=n)})
+    df["y"] = np.where(when.hour < 6, 0.9, 0.1) + 0.1 * rng.normal(size=n)
+    config = TrainConfig(target="y", max_runtime_secs=30, max_models=3)
+    model = AutoML(config).fit(df)
+    assert model.prep.integer_dates == {"hour": "%y%m%d%H"}
+    save_model(model, storage, PREFIX, SECRET, image_tag="fione:test")
+    loaded = load_model(storage, PREFIX, SECRET)
+    assert loaded.prep.integer_dates == {"hour": "%y%m%d%H"}
+    pd.testing.assert_series_equal(loaded.predict(df), model.predict(df))
+    # the model reads the hour of the day: night rows get high values
+    assert model.predict(df)[when.hour < 6].mean() > model.predict(df)[when.hour >= 6].mean() + 0.3
+
+
 def test_an_event_column_model_keeps_its_event_column_and_predicts_the_same_after_a_round_trip(
     storage,
 ):

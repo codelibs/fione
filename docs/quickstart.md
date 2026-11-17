@@ -412,7 +412,9 @@ column are in the same part, and a column with few different values gives fewer 
 When a column holds dates, or whole numbers that are dates (20141021, or 14102100 for a year,
 month, day and hour) or Unix times (seconds or milliseconds between 2000 and 2100), and no time
 column is given, a notice points this out, since the score
-of shuffled parts is then probably better than on later dates.
+of shuffled parts is then probably better than on later dates. The models read such a whole-number
+column as a number and also as its year, month, day, day of the week and, with an hour or a
+Unix time, hour of the day.
 
 The first part is only learned from. The scores, the ensemble weights, the diagnostics and the
 cross-validation predictions cover the other parts; a row of the first part has no prediction

@@ -706,6 +706,61 @@ def test_whole_numbers_that_are_unix_seconds_or_milliseconds_are_found_and_ids_a
     assert integer_date_format(pd.Series(mixed)) is None
 
 
+def test_a_whole_number_date_column_keeps_its_number_and_gets_the_parts_of_the_date():
+    rng = np.random.default_rng(0)
+    when = pd.Timestamp("2014-10-21") + pd.to_timedelta(rng.integers(0, 240, 500), unit="h")
+    X = pd.DataFrame({"hour": when.strftime("%y%m%d%H").astype("int64"), "x": rng.normal(size=500)})
+    prep = Prep().fit(X)
+    assert prep.kind_of("hour") == "numeric" and prep.integer_dates == {"hour": "%y%m%d%H"}
+    names = [n for n in prep.feature_names if n.startswith("hour")]
+    assert names == ["hour", *(f"hour__{p}" for p in ("year", "month", "day", "dayofweek", "hour"))]
+    tree = prep.tree(X)
+    assert tree.shape[1] == len(prep.feature_names) == len(prep.sources)
+    assert tree.iloc[:, 1:6].to_numpy().tolist() == [
+        [t.year, t.month, t.day, t.day_of_week, t.hour] for t in when
+    ]
+    # rows to predict: a missing value, a number that is no date and a float column
+    new = pd.DataFrame({"hour": [14102103.0, np.nan, 14139999.0], "x": [0.0, 0.0, 0.0]})
+    parts = prep.tree(new).iloc[:, 1:6]
+    assert parts.iloc[0].tolist() == [2014, 10, 21, 1, 3]
+    assert parts.iloc[1:].isna().all().all()
+
+
+def test_a_date_only_and_a_unix_column_get_parts_and_other_whole_numbers_get_none():
+    rng = np.random.default_rng(0)
+    days = pd.Timestamp("2021-01-01") + pd.to_timedelta(rng.integers(0, 400, 500), unit="D")
+    seconds = 1_600_000_000 + np.sort(rng.integers(0, 30 * 86_400, 500))
+    X = pd.DataFrame(
+        {
+            "day": days.strftime("%Y%m%d").astype("int64"),
+            "unix": seconds,
+            "id": rng.integers(10_000_000, 99_999_999, 500),
+            "count": rng.integers(0, 50, 500),
+        }
+    )
+    prep = Prep().fit(X)
+    assert prep.integer_dates == {"day": "%Y%m%d", "unix": "unix_s"}
+    assert [n for n in prep.feature_names if n.startswith("day")] == [
+        "day",
+        "day__year",
+        "day__month",
+        "day__day",
+        "day__dayofweek",
+    ]
+    assert "unix__hour" in prep.feature_names
+    assert not [n for n in prep.feature_names if n.startswith(("id__", "count__"))]
+    frame = prep.tree(X)
+    unix = pd.to_datetime(seconds, unit="s")
+    assert frame[f"f{prep.feature_names.index('unix__hour')}"].tolist() == list(unix.hour)
+
+
+def test_a_model_saved_before_whole_number_dates_were_expanded_still_loads():
+    X = pd.DataFrame({"a": np.arange(30.0), "b": np.arange(30.0) ** 2})
+    prep = Prep().fit(X)
+    del prep.__dict__["integer_dates"]
+    assert prep.integer_dates == {} and prep.tree(X).shape[1] == 2
+
+
 def test_emptier_reports_a_column_filled_in_training_and_mostly_empty_in_new_rows():
     rng = np.random.default_rng(0)
     n = 200
@@ -811,3 +866,16 @@ def test_the_text_and_level_views_add_their_columns_in_order_without_a_fragmenta
     assert list(levels.columns)[-len(level_names) :] == level_names
     assert (levels[level_names].dtypes == text[f"f{next(iter(spots))}_t"].dtype).all()
     assert levels[level_names[0]].isin(["a", "b", "c", "__na__"]).all()
+
+
+def test_the_date_columns_of_one_fit_are_not_shared_with_another_prep():
+    rng = np.random.default_rng(0)
+    when = pd.Timestamp("2014-10-21") + pd.to_timedelta(rng.integers(0, 240, 500), unit="h")
+    dates = pd.DataFrame(
+        {"c": when.strftime("%y%m%d%H").astype("int64"), "x": rng.normal(size=500)}
+    )
+    plain = pd.DataFrame({"c": rng.integers(0, 1000, 500), "x": rng.normal(size=500)})
+    first = Prep().fit(dates)
+    second = Prep().fit(plain)
+    assert first.integer_dates == {"c": "%y%m%d%H"} and second.integer_dates == {}
+    assert second.feature_names == ["c", "x"] and Prep.integer_dates == {}
