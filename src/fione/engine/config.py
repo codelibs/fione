@@ -65,6 +65,7 @@ _METRICS = frozenset(
         "map3",
         "rmse",
         "pinball",
+        "concordance",
         "mae",
         "r2",
         "mse",
@@ -132,6 +133,11 @@ class TrainConfig:
     # Learn this quantile of the target (a regression, 0 < quantile < 1) instead of its mean:
     # the models fit the pinball loss, and only the families that can do so are searched.
     quantile: float | None = None
+    # The target is a time that may be cut short (a regression), and this column says for each row
+    # whether the event happened at that time (1) or the row was only seen up to it (0). The
+    # models then learn a score that grows with the time (``fione.engine.survival``), and
+    # ``concordance`` ranks them. The column is not a feature.
+    event_column: str | None = None
 
     def validate(self) -> "TrainConfig":
         """Raise ConfigError for the first invalid value; return self when everything is valid."""
@@ -213,6 +219,24 @@ class TrainConfig:
                 raise ConfigError("quantile needs a regression, not a classification")
         elif "pinball" in (self.stopping_metric.lower(), self.sort_metric.lower()):
             raise ConfigError("the pinball metric needs a quantile")
+        event = self.event_column
+        if event is None:
+            if "concordance" in (self.stopping_metric.lower(), self.sort_metric.lower()):
+                raise ConfigError("the concordance metric needs an event_column")
+            return self
+        if not isinstance(event, str) or not event:
+            raise ConfigError("event_column must name a column or be empty")
+        if event == self.target:
+            raise ConfigError("the event column cannot be the target")
+        if self.task == "classification":
+            raise ConfigError("event_column needs a regression: the target is the time")
+        if q is not None:
+            raise ConfigError("event_column and quantile cannot be used together")
+        if self.target_transform != "none":
+            raise ConfigError("event_column cannot be used with a target_transform")
+        for name in ("stopping_metric", "sort_metric"):
+            if getattr(self, name).lower() not in ("auto", "concordance"):
+                raise ConfigError(f"{name} must be auto or concordance with an event_column")
         return self
 
     @classmethod

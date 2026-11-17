@@ -609,15 +609,71 @@ def cor(df, params, ctx):
     return pd.DataFrame(result.to_numpy(), columns=columns)
 
 
+_PIVOT_AGGS = ("first", "sum", "mean", "min", "max", "count")
+
+
 def pivot(df, params, ctx):
     names = [require_column(df, params[k]) for k in ("index", "column", "value")]
     if len(set(names)) != 3:
         raise ModuleError("index, column and value must be three different columns")
     index, column, value = names
+    agg = params["agg"]
+    if agg not in ("first", "count") and (
+        not pd.api.types.is_numeric_dtype(df[value]) or pd.api.types.is_bool_dtype(df[value])
+    ):
+        raise ModuleError(f"agg '{agg}' needs a numeric value column, and '{value}' is not one")
     check_cells(df[index].nunique(), df[column].nunique() + 1)
-    table = df.groupby([index, column])[value].first().unstack()
+    groups = df.groupby([index, column])  # rows with an empty index or column are left out
+    if agg == "sum":
+        cells = groups[value].sum(min_count=1)  # a cell with nothing to add up stays empty
+    else:
+        cells = getattr(groups[value], agg)()
+    table = cells.unstack()
     table.columns = [str(c) for c in table.columns]
-    return table.reset_index()
+    notes = _pivot_notes(df, index, column, groups[value].count() if agg == "first" else None)
+    return ModuleOutput(table.reset_index(), notes=notes)
+
+
+def _pivot_notes(df, index: str, column: str, cell_values) -> tuple[dict, ...]:
+    """What to tell about rows that did not get a cell of their own: the rows with an empty index
+    or column value (left out), and, when ``cell_values`` (the number of values in each cell) is
+    given, the cells that hold more than one value although only the first is kept."""
+    notes = []
+    left_out = df[df[index].isna() | df[column].isna()]
+    if len(left_out):
+        gone = left_out[index].dropna().drop_duplicates()
+        gone = int((~gone.isin(df.loc[df[column].notna(), index])).sum())
+        text = (
+            f"{len(left_out)} of {len(df)} rows have no '{index}' or no '{column}' and are left "
+            "out of the table"
+        )
+        if gone:
+            text += f"; {gone} values of '{index}' have no row in it because of that"
+        notes.append(
+            {
+                "message": text + ".",
+                "kind": "pivot_rows_left_out",
+                "rows_left_out": len(left_out),
+                "rows": len(df),
+                "index_values_lost": gone,
+            }
+        )
+    if cell_values is not None:
+        shared = cell_values[cell_values > 1]
+        if len(shared):
+            notes.append(
+                {
+                    "message": (
+                        f"{len(shared)} of {len(cell_values)} cells hold more than one value "
+                        f"({int(shared.sum())} values); only the first of each is kept. "
+                        "Set agg to sum, mean, min, max or count to combine them."
+                    ),
+                    "kind": "pivot_cells_shared",
+                    "cells_shared": len(shared),
+                    "cells": len(cell_values),
+                }
+            )
+    return tuple(notes)
 
 
 def unpivot(df, params, ctx):
@@ -817,7 +873,12 @@ _op(
 _op(
     "pivot",
     "Pivot table",
-    {"index": _NAME, "column": _NAME, "value": _NAME},
+    {
+        "index": _NAME,
+        "column": _NAME,
+        "value": _NAME,
+        "agg": {"type": "string", "enum": list(_PIVOT_AGGS), "default": "first"},
+    },
     ("index", "column", "value"),
     pivot,
 )

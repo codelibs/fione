@@ -1794,6 +1794,48 @@ def test_a_target_that_is_not_skewed_gets_no_scale_notice():
     assert "skewed_target" not in kinds
 
 
+def _codes(n=2_000, kind="codes", seed=0):
+    """A whole-number target on many rows per value: codes with uneven counts, or counts of
+    something (a Poisson), whose counts rise and fall smoothly with the value."""
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    if kind == "codes":
+        share = rng.lognormal(sigma=0.8, size=25)
+        df["y"] = rng.choice(np.arange(25) * 3 + 3, n, p=share / share.sum())
+    elif kind == "poisson":
+        df["y"] = rng.poisson(15, n)
+    else:
+        df["y"] = rng.integers(0, 10, n)
+    return df
+
+
+def _class_code_notices(df, **config):
+    events = []
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1, **config)
+    started = next(e for e in events if e.type == "started")
+    notices = [e.data for e in events if e.data.get("kind") == "class_codes"]
+    return started.data["task"], notices
+
+
+def test_class_codes_fitted_as_a_regression_are_pointed_out_unless_the_task_was_chosen():
+    task, notices = _class_code_notices(_codes())
+    assert task == "regression"
+    (notice,) = notices
+    assert notice["values"] == 25 and "task to 'classification'" in notice["message"]
+    assert _class_code_notices(_codes(), task="regression")[1] == []
+
+
+def test_a_whole_number_time_with_an_event_column_is_not_called_class_codes():
+    df = _codes()
+    df["ev"] = np.random.default_rng(1).integers(0, 2, len(df))
+    assert _class_code_notices(df, event_column="ev") == ("regression", [])
+
+
+def test_counts_of_something_and_few_values_get_no_class_code_notice():
+    assert _class_code_notices(_codes(kind="poisson")) == ("regression", [])
+    assert _class_code_notices(_codes(kind="few")) == ("classification", [])
+
+
 def test_a_model_on_durations_written_as_text_predicts_explains_and_profiles_them():
     from fione.engine import explain
 
@@ -2184,6 +2226,112 @@ def test_a_quantile_fit_with_no_skill_does_not_say_so_in_r_squared():
     events = []
     _fit(_skill_frame("noise"), events, target="y", quantile=0.5, max_models=3)
     assert not [e for e in events if e.data.get("kind") in KIND_QUALITY]
+
+
+def _survival_frame(n=1_500, seed=0):
+    """Exponential times whose rate grows with x0 (and a little with x1), cut short at a random
+    time: about a third of the rows are censored. ``ev`` is the event flag."""
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame(
+        {"x0": rng.normal(size=n), "x1": rng.normal(size=n), "x2": rng.normal(size=n)}
+    )
+    lasts = rng.exponential(np.exp(-df["x0"] - 0.5 * df["x1"]))
+    seen = rng.exponential(2.0, n)
+    df["t"] = np.minimum(lasts, seen)
+    df["ev"] = (lasts <= seen).astype(int)
+    return df
+
+
+def test_an_event_column_fit_scores_the_order_of_the_times_and_predicts_a_longer_time_higher():
+    train, test = _survival_frame(), _survival_frame(1_500, seed=1)
+    assert 0.2 < train["ev"].mean() < 0.9  # some rows are censored
+    model = _fit(train, target="t", event_column="ev", max_models=3)
+    assert "ev" not in model.columns  # the event flag is not a feature
+    assert model.config.event_column == "ev"
+    assert list(model.metrics) == ["concordance"]  # the other metrics compare with the time
+    assert (model.leaderboard["cv_score"].diff().dropna() <= 0).all()  # best (highest) first
+    assert model.leaderboard["cv_score"].iloc[0] > 0.65
+    held_out = metrics.value(
+        "concordance",
+        test[["t", "ev"]].to_numpy(),
+        model.predict(test.drop(columns=["ev"])).to_numpy(),
+    )
+    assert held_out > 0.65  # a larger prediction is a longer time
+    assert model.target_floor is None and model.diagnostics is None
+
+
+def test_an_event_column_fit_stops_on_the_concordance_and_ranks_by_it_by_default(monkeypatch):
+    stopping = []
+    search = automl_module.AutoML._search
+
+    def spy(self, families, X, y, folds, task, prep, deadline, stopping_score, *args):
+        stopping.append(stopping_score)
+        return search(self, families, X, y, folds, task, prep, deadline, stopping_score, *args)
+
+    monkeypatch.setattr(automl_module.AutoML, "_search", spy)
+    events = []
+    model = _fit(
+        _survival_frame(800),
+        events,
+        target="t",
+        event_column="ev",
+        max_models=2,
+        stopping_metric="concordance",
+        sort_metric="concordance",
+    )
+    assert callable(stopping[0])  # the search is stopped by the concordance of the OOF scores
+    ensemble = [e for e in events if e.type == "ensemble"][0]
+    assert ensemble.data["sort_metric"] == "concordance"
+    assert model.leaderboard["cv_score"].between(0.5, 1).all()
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda df: df.drop(columns=["ev"]), "event column 'ev' is not in the data"),
+        (lambda df: df.assign(ev=df["ev"] * 2), r"must hold only 0 \(censored\) or 1"),
+        (lambda df: df.assign(ev=0), "has no event"),
+        (lambda df: df.assign(ev=df["ev"].astype(float).where(df.index > 0)), "must hold only 0"),
+        (lambda df: df.assign(t=df["t"] - 1), "must be 0 or more"),
+    ],
+)
+def test_an_event_column_that_is_not_zeros_and_ones_is_refused(change, message):
+    with pytest.raises(ConfigError, match=message):
+        _fit(change(_survival_frame(200)), target="t", event_column="ev", max_models=1)
+
+
+def test_a_fit_without_an_event_column_has_no_concordance():
+    df = _survival_frame(300)
+    model = _fit(df, target="t", max_models=1, families=["Linear"])
+    assert "concordance" not in model.metrics and "rmse" in model.metrics
+    assert "ev" in model.columns  # without the setting it is an ordinary column
+
+
+def test_an_event_column_fit_says_the_prediction_is_a_score_and_not_a_time():
+    events = []
+    _fit(_survival_frame(400), events, target="t", event_column="ev", max_models=1)
+    (notice,) = [e.data for e in events if e.data.get("kind") == "survival_score"]
+    assert "not a time" in notice["message"] and notice["target"] == "t"
+    other = []
+    _fit(_survival_frame(400), other, target="t", max_models=1, families=["Linear"])
+    assert not [e for e in other if e.data.get("kind") == "survival_score"]
+    assert not [e for e in events if e.data.get("kind") in KIND_QUALITY]
+
+
+def test_an_event_column_fit_validates_on_groups():
+    df = _survival_frame(900)
+    df["g"] = np.arange(900) % 30
+    model = _fit(df, target="t", event_column="ev", cv_group_column="g", max_models=2)
+    assert model.leaderboard["cv_score"].iloc[0] > 0.6
+    assert "ev" not in model.columns
+
+
+def test_an_event_column_fit_validates_on_later_parts_of_the_time():
+    df = _survival_frame(1_200)
+    df["day"] = np.arange(1_200)
+    model = _fit(df, target="t", event_column="ev", time_column="day", max_models=2)
+    assert model.leaderboard["cv_score"].iloc[0] > 0.6
+    assert "ev" not in model.columns
 
 
 def _leak_notices(df, **config):

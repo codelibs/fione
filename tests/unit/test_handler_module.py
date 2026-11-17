@@ -338,6 +338,30 @@ def test_join_tells_how_many_rows_found_no_match(conn, run_job, owner, project, 
     assert (notice["kind"], notice["rows_unmatched"], notice["rows"]) == ("join_unmatched", 1, 4)
 
 
+def test_pivot_tells_which_cells_hold_more_than_one_value_and_takes_params_without_agg(
+    conn, run_job, owner, project, storage
+):
+    lines = pd.DataFrame(
+        {"visit": [1, 1, 2, 3], "dept": ["a", "a", "b", None], "n": [2.0, 3.0, 4.0, 5.0]}
+    )
+    data = add_dataset(conn, storage, project, lines, "lines")
+    params = {"index": "visit", "column": "dept", "value": "n"}  # no agg: the default is filled
+    done = run_job(submit(conn, owner, project, data, "pivot", params))
+    assert done.status is JobStatus.DONE, done.message
+    notices = {e.data["kind"]: e.data for e in event_list(conn, done.id) if e.type == "notice"}
+    assert notices["pivot_cells_shared"]["cells_shared"] == 1
+    assert notices["pivot_rows_left_out"]["rows_left_out"] == 1
+    out = read_dataset(storage, projects.get_dataset(conn, done.result["dataset_id"]))
+    assert out["a"].dropna().tolist() == [2.0]
+    summed = run_job(submit(conn, owner, project, data, "pivot", {**params, "agg": "sum"}))
+    assert summed.status is JobStatus.DONE, summed.message
+    assert [e.data["kind"] for e in event_list(conn, summed.id) if e.type == "notice"] == [
+        "pivot_rows_left_out"
+    ]
+    out = read_dataset(storage, projects.get_dataset(conn, summed.result["dataset_id"]))
+    assert out["a"].dropna().tolist() == [5.0]
+
+
 def test_the_module_sees_the_same_integers_with_gaps(conn, run_job, owner, project, storage):
     ids = pd.array([2**60 + 1, None, 3], dtype="Int64")
     data = add_dataset(conn, storage, project, pd.DataFrame({"id": ids, "v": [1.0, 2.0, 3.0]}))
