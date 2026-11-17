@@ -261,8 +261,11 @@ def _leak_reason(
                 return CORRELATED, r
     n_values = int(s.notna().sum())
     if n_values >= _LEAK_MIN_ROWS and 2 <= col.n_unique <= 0.5 * n_values and tp.nunique() >= 2:
-        pairs = pd.DataFrame({"value": sp.to_numpy(), "target": tp.to_numpy()}).drop_duplicates()
-        if pairs["value"].is_unique:
+        pairs = pd.DataFrame({"value": sp.to_numpy(), "target": tp.to_numpy()})
+        # only a value seen on 2+ rows can show it fixes the target; a lone row, like the few
+        # non-zero rows of a mostly-zero target, always maps to one value
+        repeated = pairs[pairs["value"].duplicated(keep=False)].drop_duplicates()
+        if repeated["target"].nunique() >= 2 and repeated["value"].is_unique:
             return DETERMINES, 1.0
     return None
 

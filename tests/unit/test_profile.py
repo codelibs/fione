@@ -377,6 +377,20 @@ def test_value_determines_target():
     assert "r" not in s
 
 
+def test_value_determines_target_ignores_a_mostly_zero_target_with_unique_rows():
+    # ties only at 0, where the target is 0; the few non-zero targets sit on rows of their own
+    flagged = 0
+    for seed in range(20):
+        rng = np.random.default_rng(seed)
+        n = 5000
+        repeat = rng.random(n) < 0.4
+        span = np.where(repeat, np.round(rng.exponential(30, n) * 86400) / 86400, 0.0)
+        target = np.where(repeat & (rng.random(n) < 0.01), np.round(rng.lognormal(3, 1, n), 2), 0.0)
+        df = pd.DataFrame({"t": target, "span": span, "x": rng.normal(size=n)})
+        flagged += "span" in _suspects(df, "t")
+    assert flagged <= 1
+
+
 def test_value_determines_target_needs_enough_rows_and_low_cardinality():
     # 10 rows only: too few non-null rows
     df = pd.DataFrame({"t": [0, 1] * 5, "g": ["a", "b"] * 5})
