@@ -347,6 +347,27 @@ def test_the_module_sees_the_same_integers_with_gaps(conn, run_job, owner, proje
     assert read_dataset(storage, out, nullable_dtypes=True)["id"].tolist()[0] == 2**60 + 1
 
 
+def test_calc_adds_a_column_and_a_bad_expression_fails_the_job(
+    conn, run_job, owner, project, dataset, storage
+):
+    params = {"name": "double", "expression": 'col("a") * 2 + id'}
+    done = run_job(submit(conn, owner, project, dataset, "calc", params))
+    assert done.status is JobStatus.DONE, done.message
+    out = read_dataset(storage, projects.get_dataset(conn, done.result["dataset_id"]))
+    source = read_dataset(storage, dataset)
+    assert out["double"].tolist() == (source["a"] * 2 + source["id"]).tolist()
+    pd.testing.assert_frame_equal(out[list(source.columns)], source)
+    assert not [e for e in event_list(conn, done.id) if e.type == "notice"]  # no infinite result
+    infinite = {"name": "inverse", "expression": "1 / id"}  # row 0 divides by 0
+    done = run_job(submit(conn, owner, project, dataset, "calc", infinite))
+    assert done.status is JobStatus.DONE, done.message
+    (notice,) = [e.data for e in event_list(conn, done.id) if e.type == "notice"]
+    assert (notice["kind"], notice["rows_infinite"], notice["rows"]) == ("calc_infinite", 1, 30)
+    bad = {"name": "x", "expression": "__import__('os')"}
+    done = failure(conn, run_job, owner, project, dataset, storage, "calc", bad)
+    assert done.message.startswith("unknown function '__import__'")
+
+
 def failure(conn, run_job, owner, project, dataset, storage, module_id, params=None):
     before = (projects.list_datasets(conn, project.id), dataset_objects(storage, project))
     done = run_job(submit(conn, owner, project, dataset, module_id, params))

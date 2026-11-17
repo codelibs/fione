@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from pandas.api.indexers import BaseIndexer
 
+from fione.modules.expression import evaluate
 from fione.modules.registry import (
     Module,
     ModuleContext,
@@ -577,6 +578,31 @@ def rolling(df, params, ctx):
     return out
 
 
+def calc(df, params, ctx):
+    """Add the column ``name``, computed by ``expression`` from the other columns (see
+    ``fione.modules.expression``); the rows and the other columns stay as they are."""
+    name = params["name"].strip()
+    if not name:
+        raise ModuleError("name the new column")
+    if name in df.columns:
+        raise ModuleError(f"column '{name}' already exists")
+    check_cells(len(df), len(df.columns) + 1)
+    values, infinite = evaluate(params["expression"], df)
+    out = df.assign(**{name: values})  # not a copy of the other columns
+    return ModuleOutput(out, notes=_calc_notes(infinite, len(df)))
+
+
+def _calc_notes(infinite: int, rows: int) -> tuple[dict, ...]:
+    """What to tell about the rows whose result was infinite, which is left empty."""
+    if not infinite:
+        return ()
+    message = (
+        f"{infinite} of {rows} rows have an infinite result (a division by zero, the logarithm "
+        "of 0 or too large a number); it is left empty."
+    )
+    return ({"message": message, "kind": "calc_infinite", "rows_infinite": infinite, "rows": rows},)
+
+
 def cslice(df, params, ctx):
     return df[pick_columns(df, params["columns"])]
 
@@ -754,6 +780,25 @@ _op(
     {"other_dataset_id": _OTHER, "axis": {"type": "integer", "enum": [0, 1], "default": 1}},
     ("other_dataset_id",),
     concat,
+)
+_op(
+    "calc",
+    "Add a calculated column",
+    {
+        "name": _NAME,
+        "expression": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": (
+                'numbers and columns (col("a b") for a name with spaces or symbols); + - * / **;'
+                " == != < <= > >= & | ~ (give 1 or 0); abs sqrt log log1p exp min2 max2 clip"
+                " isnull where(cond, x, y); rowsum rowmean rowcount of values and quoted"
+                ' patterns ("ind_*"); nan. An infinite result is empty.'
+            ),
+        },
+    },
+    ("name", "expression"),
+    calc,
 )
 _op(
     "cor",

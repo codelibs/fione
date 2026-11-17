@@ -15,7 +15,7 @@ from fione import db
 from fione.auth import service as auth
 from fione.auth.roles import ProjectAccess, Role
 from fione.jobs import store
-from fione.modules import registry, service, unsupervised
+from fione.modules import expression, registry, service, unsupervised
 from fione.modules.registry import ModuleContext, ModuleError, get_builtin, validate_output
 from fione.projects import ingest
 from fione.projects import service as projects
@@ -60,7 +60,7 @@ def test_the_built_in_ids_and_kinds():
     modules = registry.builtin_modules()
     ids = [m.id for m in modules]
     frame_ops = (
-        "cbind concat cor cslice fillna floor join lag pivot rbind replace rolling rslice sort"
+        "calc cbind concat cor cslice fillna floor join lag pivot rbind replace rolling rslice sort"
         " split tokenize unpivot"
     )
     assert ids == sorted(frame_ops.split()) + [
@@ -1274,6 +1274,347 @@ def test_tokenize_is_linear_on_hostile_text(params):
     started = time.monotonic()
     out = tokens(text, **params)
     assert time.monotonic() - started < 1.0 and len(out) > 1
+
+
+# --- calc: a column computed from other columns ---------------------------------------------
+
+
+def calc_frame():
+    return pd.DataFrame(
+        {
+            "a": [1.0, 2.0, np.nan, 4.0, -3.0],
+            "b": [2.0, 0.0, 5.0, np.nan, 3.0],
+            "n": pd.array([1, 2, 3, None, 5], dtype="Int64"),
+            "ind_x_1": [1, 0, 1, 1, 0],
+            "ind_y_2": [0, 0, 1, np.nan, 1],
+            "ind_t": ["u", "v", "u", "v", "u"],
+            "unit price": [10.0, 20.0, 40.0, 5.0, 1.0],
+            "名前": [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
+    )
+
+
+def calc(expression, df=None, name="out"):
+    out, _ = run_op(
+        "calc", calc_frame() if df is None else df, {"name": name, "expression": expression}
+    )
+    return out[name].to_numpy()
+
+
+def test_calc_adds_one_float_column_and_leaves_the_rest_as_it_is():
+    df = calc_frame().set_axis([10, 11, 12, 13, 14])
+    out, _ = run_op("calc", df, {"name": " total ", "expression": "a + 1"})
+    assert list(out.columns) == [*df.columns, "total"]
+    assert out["total"].dtype == np.float64
+    pd.testing.assert_frame_equal(out[list(df.columns)], df)
+    assert out.index.tolist() == [10, 11, 12, 13, 14]
+
+
+def test_calc_arithmetic_matches_pandas_with_empty_values():
+    df = calc_frame()
+    a, b = df["a"], df["b"]
+    np.testing.assert_allclose(calc("a + b * 2 - 1"), a + b * 2 - 1, equal_nan=True)
+    np.testing.assert_allclose(calc("-a ** 2 + +b"), -(a**2) + b, equal_nan=True)
+    ratio = ((a - b) / (a + b)).replace([np.inf, -np.inf], np.nan)  # a + b is 0 in row 4
+    np.testing.assert_allclose(calc("(a - b) / (a + b)"), ratio, equal_nan=True)
+    np.testing.assert_allclose(calc("n * 2 + 0.5"), df["n"].astype(float) * 2 + 0.5, equal_nan=True)
+    np.testing.assert_allclose(calc("a ** 0.5"), np.where(a >= 0, a**0.5, np.nan), equal_nan=True)
+
+
+def test_calc_division_by_zero_and_other_infinite_results_are_empty():
+    out = calc("a / b")  # b is 0 in row 1
+    assert np.isnan(out[1]) and out[0] == 0.5 and out[4] == -1.0
+    assert np.isnan(calc("1 / 0")).all() and np.isnan(calc("0 / 0")).all()
+    assert np.isnan(calc("log(b)")[1]) and np.isnan(calc("exp(1000)")).all()
+    inf = pd.DataFrame({"a": [np.inf, -np.inf, 1.0]})
+    np.testing.assert_array_equal(calc("a", inf), [np.nan, np.nan, 1.0])
+
+
+def test_calc_functions_match_numpy_and_pandas():
+    df = calc_frame()
+    a, b = df["a"], df["b"]
+    np.testing.assert_allclose(calc("abs(a)"), a.abs(), equal_nan=True)
+    np.testing.assert_allclose(calc("sqrt(abs(a))"), np.sqrt(a.abs()), equal_nan=True)
+    np.testing.assert_allclose(calc("log1p(abs(a))"), np.log1p(a.abs()), equal_nan=True)
+    np.testing.assert_allclose(calc("exp(a / 4)"), np.exp(a / 4), equal_nan=True)
+    assert np.isnan(calc("sqrt(a)")[4]) and np.isnan(calc("log(a)")[4])
+    np.testing.assert_allclose(calc("min2(a, b)"), np.minimum(a, b), equal_nan=True)
+    np.testing.assert_allclose(calc("max2(a, 1)"), np.maximum(a, 1), equal_nan=True)
+    np.testing.assert_allclose(calc("clip(a, -1, 2)"), a.clip(-1, 2), equal_nan=True)
+    np.testing.assert_array_equal(calc("isnull(a) + isnull(b)"), a.isna() * 1.0 + b.isna())
+    np.testing.assert_array_equal(calc("where(a > 1, a, -1)"), np.where(a > 1, a, -1))
+    np.testing.assert_array_equal(calc("where(a > 1, a, nan)"), np.where(a > 1, a, np.nan))
+
+
+def test_calc_comparisons_and_booleans_give_zero_or_one():
+    np.testing.assert_array_equal(calc("a > b"), [0, 1, 0, 0, 0])
+    np.testing.assert_array_equal(calc("a == 4"), [0, 0, 0, 1, 0])
+    np.testing.assert_array_equal(calc("a != 4"), [1, 1, 1, 0, 1])  # empty is not 4
+    np.testing.assert_array_equal(calc("(a > 0) & (b > 0)"), [1, 0, 0, 0, 0])
+    np.testing.assert_array_equal(calc("(a > 3) | (b > 4)"), [0, 0, 1, 1, 0])
+    np.testing.assert_array_equal(calc("~(a > 0)"), [0, 0, 1, 0, 1])
+    with pytest.raises(ModuleError, match="two values at a time"):
+        calc("a > 0 & b > 0")  # reads as the chain a > (0 & b) > 0
+    with pytest.raises(ModuleError, match="two values at a time"):
+        calc("0 < a < 5")
+    with pytest.raises(ModuleError, match="and/or"):
+        calc("(a > 0) and (b > 0)")
+
+
+def test_calc_row_functions_over_columns_and_patterns_skip_empty_values():
+    df = calc_frame()
+    flags = df[["ind_x_1", "ind_y_2"]]
+    np.testing.assert_array_equal(calc('rowsum("ind_*_*")'), flags.sum(axis=1))
+    np.testing.assert_array_equal(calc('rowcount("ind_*_*")'), flags.count(axis=1))
+    np.testing.assert_allclose(calc('rowmean("ind_*_*")'), flags.mean(axis=1))
+    np.testing.assert_allclose(calc("rowsum(a, b, 1)"), df[["a", "b"]].sum(axis=1) + 1)
+    np.testing.assert_allclose(calc('rowsum("ind_x*", a)'), df[["ind_x_1", "a"]].sum(axis=1))
+    both = pd.DataFrame({"a": [np.nan, 1.0], "b": [np.nan, 3.0]})
+    out = calc("rowmean(a, b)", both)
+    assert np.isnan(out[0]) and out[1] == 2.0
+    assert calc("rowsum(a, b)", both).tolist() == [0.0, 4.0]
+    with pytest.raises(ModuleError, match="no column matches 'zzz\\*'"):
+        calc('rowsum("zzz*")')
+    with pytest.raises(ModuleError, match="column 'ind_t' is not numeric"):
+        calc('rowsum("ind_*")')
+    with pytest.raises(ModuleError, match="at least one"):
+        calc("rowsum()")
+
+
+def test_calc_names_with_spaces_or_symbols_are_written_with_col():
+    np.testing.assert_array_equal(calc('col("unit price") / 10'), [1, 2, 4, 0.5, 0.1])
+    np.testing.assert_array_equal(calc('col("名前") * 2'), [2, 4, 6, 8, 10])
+    np.testing.assert_array_equal(calc("名前 * 2"), [2, 4, 6, 8, 10])
+    full = pd.DataFrame({"売上１": [1.0, 2.0], "ｶﾃｺﾞﾘ": [3.0, 4.0]})  # read as 売上1, カテゴリ
+    np.testing.assert_array_equal(calc("売上１ + ｶﾃｺﾞﾘ", full), [4, 6])
+    np.testing.assert_array_equal(calc('col("売上１") * 2', full), [2, 4])
+    odd = pd.DataFrame({"a-b": [1.0, 2.0], "if": [3.0, 4.0], "nan": [5.0, 6.0]})
+    np.testing.assert_array_equal(calc('col("a-b") + col("if") + nan', odd), [9, 12])
+    with pytest.raises(ModuleError, match=r"unknown column 'unit prize'"):
+        calc('col("unit price") + col("unit prize")')
+    with pytest.raises(ModuleError, match=r'unknown column \'zz\'; write.*col\("zz"\)'):
+        calc("zz + 1")
+    with pytest.raises(ModuleError, match="takes one name in quotes"):
+        calc("col(a)")
+
+
+def test_calc_star_is_the_only_wildcard_and_works_in_the_middle():
+    odd = pd.DataFrame(
+        {"q?": [1.0], "qa": [2.0], "[ab]": [4.0], "a": [8.0], "b": [16.0], "a_x_b": [32.0]}
+    )
+    assert calc('rowsum("q?")', odd).tolist() == [1.0]  # ? is a question mark
+    assert calc('rowsum("[ab]")', odd).tolist() == [4.0]  # not a set of a and b
+    assert calc('rowsum("a*b")', odd).tolist() == [32.0]
+    assert calc('rowsum("a*x*b", "q*")', odd).tolist() == [35.0]
+    assert calc('rowcount("*")', odd).tolist() == [6.0]
+    assert calc('rowcount("a_x_b", "a_x_b*", "*a_x_b", "a_x_b")', odd).tolist() == [1.0]  # once
+    for pattern in ["a*a", "q?*?", "ab*", "*xa_x_b"]:
+        with pytest.raises(ModuleError, match="no column matches"):
+            calc(f'rowsum("{pattern}")', odd)
+
+
+def test_calc_names_the_column_that_is_not_numeric():
+    with pytest.raises(ModuleError, match="column 'ind_t' is not numeric"):
+        calc("ind_t + 1")
+    dates = pd.DataFrame({"d": pd.to_datetime(["2020-01-01"])})
+    with pytest.raises(ModuleError, match="column 'd' is not numeric"):
+        calc("d + 1", dates)
+
+
+def test_calc_reads_a_yes_no_column_as_one_and_zero():
+    flags = pd.DataFrame(
+        {"yes": [True, False, True], "maybe": pd.array([True, None, False], dtype="boolean")}
+    )
+    assert calc("yes + 1", flags).tolist() == [2.0, 1.0, 2.0]
+    np.testing.assert_array_equal(calc("yes + maybe", flags), [2, np.nan, 1])
+    np.testing.assert_array_equal(calc('rowsum("*")', flags), [2, 0, 1])
+
+
+def test_calc_refuses_what_is_not_arithmetic():
+    for text, match in [
+        ("__import__('os')", "unknown function '__import__'"),
+        ("__import__('os').system('true')", "not allowed in an expression: attribute access"),
+        ("a.__class__", "attribute access"),
+        ("(1).real", "attribute access"),
+        ("lambda: 1", "lambda"),
+        ("[a for a in b]", "comprehension"),
+        ("[1, 2]", "not allowed in an expression: List"),
+        ("a[0]", "subscript"),
+        ("a if b else 1", "if/else"),
+        ("(x := 1)", "assignment"),
+        ("'abc'", "only numbers"),
+        ("'a' + 'b'", "only numbers"),
+        ("f'{a}'", "formatted text"),
+        ("abs(a)(b)", "calling the result"),
+        ("a.abs()", "attribute access"),
+        ("class + 1", r'col\("class"\)'),
+        ("1st", r'col\("class"\)'),
+        ("abs(*a)", "not allowed in an expression: [*]"),
+        ("abs(a, b)", "takes 1 argument"),
+        ("abs(x=a)", "no named arguments"),
+        ("open('x')", "unknown function 'open'"),
+        ("eval('1')", "unknown function 'eval'"),
+        ("a % 2", "this operator"),
+        ("a // 2", "this operator"),
+        ("a ^ 2", "this operator"),
+        ("True", "only numbers"),
+        ("1e999", "too large"),
+        ("a +", "cannot read the expression"),
+        ("", "cannot read the expression"),
+        ("a; b", "cannot read the expression"),
+        ("a\x00", "cannot read the expression"),
+    ]:
+        with pytest.raises(ModuleError, match=match):
+            calc(text)
+
+
+def test_calc_bounds_the_length_the_depth_and_the_size_of_a_number():
+    started = time.monotonic()
+    assert np.isnan(calc("9 ** 9 ** 9")).all()  # a float power: no huge integer is built
+    assert np.isnan(calc("10 ** 300 * 10 ** 300")).all()  # an overflow is empty
+    assert time.monotonic() - started < 1.0
+    with pytest.raises(ModuleError, match="longer than 1000"):
+        expression.evaluate("1 + " * 300 + "1", calc_frame())
+    np.testing.assert_array_equal(calc("(" * 150 + "a" + ")" * 150), calc_frame()["a"])
+    with pytest.raises(ModuleError, match="cannot read the expression"):
+        calc("(" * 250 + "a" + ")" * 250)
+    with pytest.raises(ModuleError, match="cannot read the expression"):
+        calc("(" * 499 + "a" + ")" * 499)
+    # a deep or long stack of operators is refused quickly, never a crash of the process
+    for deep in [
+        "-" * 999 + "a",
+        "~" * 999 + "a",
+        "+".join(["a"] * 500)[:999],
+        "abs(" * 150 + "a" + ")" * 150,
+    ]:
+        with pytest.raises(ModuleError, match="nested too deeply"):
+            calc(deep)
+    assert calc("+".join(["1"] * 50)).tolist() == [50.0] * 5  # a chain of 50 terms is fine
+
+
+def test_calc_bounds_what_the_row_functions_read_before_reading_it(monkeypatch):
+    monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 20)
+    wide = pd.DataFrame({f"c{i}": [1.0, 2.0] for i in range(5)})
+    assert calc('rowsum("*")', wide).tolist() == [5.0, 10.0]  # 2 rows x 5 columns
+    assert calc('rowsum("*", "c*", "*0", "c0")', wide).tolist() == [5.0, 10.0]  # each read once
+    with pytest.raises(ModuleError, match="reads 11 columns and values on each of 2 rows"):
+        calc('rowsum("*", 1, 1, 1, 1, 1, 1)', wide)
+    cheap = ", ".join(["a"] * 11)  # also a count of operands, not only of columns
+    with pytest.raises(ModuleError, match="reads 11 columns"):
+        calc(f"rowsum({cheap})", pd.DataFrame({"a": [1.0, 2.0]}))
+
+
+def test_calc_repeated_patterns_are_read_once_and_the_operands_have_an_absolute_cap():
+    started = time.monotonic()
+    many = "rowsum(" + ",".join(['"*"'] * 245) + ")"
+    nine = pd.DataFrame(np.ones((1, 9000)), columns=[f"c{i}" for i in range(9000)])
+    assert calc(many, nine).tolist() == [9000.0]  # 9,000 columns, each read once
+    wide = pd.DataFrame(np.ones((1, 20000)), columns=[f"c{i}" for i in range(20000)])
+    with pytest.raises(ModuleError, match="more than 10000 columns and values"):
+        calc(many, wide)
+    with pytest.raises(ModuleError, match="more than 10000 columns and values"):
+        calc("rowsum(" + ", ".join(f'"c{i}*"' for i in range(1, 60)) + ")", wide)
+    assert time.monotonic() - started < 2.0
+
+
+def test_calc_counts_the_arrays_a_nested_expression_holds_at_once(monkeypatch):
+    monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 1000)
+    df = pd.DataFrame({"a": np.arange(10.0)})
+    right = "-a+(" * 99 + "a" + ")" * 99  # holds an array for each level while the right is run
+    with pytest.raises(ModuleError, match="holds 101 columns of 10 values at once"):
+        calc(right, df)
+    left = "+".join(["a"] * 24)  # a hand-written sum holds three at most
+    assert calc(left, df).tolist() == (df["a"] * 24).tolist()
+    assert calc("a + (a + (a + a))", df).tolist() == (df["a"] * 4).tolist()
+    assert calc('rowsum(a, "a", a * 2)', df).tolist() == (df["a"] * 4).tolist()
+
+
+def test_calc_reads_a_name_in_full_width_with_one_pass_over_the_columns(monkeypatch):
+    calls = []
+    original = expression.unicodedata.normalize
+    monkeypatch.setattr(
+        expression.unicodedata,
+        "normalize",
+        lambda form, text: calls.append(1) or original(form, text),
+    )
+    df = pd.DataFrame(np.ones((2, 2000)), columns=["ａ", *[f"c{i}" for i in range(1999)]])
+    assert calc("+".join(["ａ"] * 100), df).tolist() == [100.0, 100.0]
+    assert len(calls) < 3000  # not once per reference and column: 200,000
+
+
+def test_calc_matches_a_pattern_to_a_column_whose_label_is_not_text():
+    df = pd.DataFrame({1: [1.0, 2.0], "x": [10.0, 20.0], 12: [100.0, 200.0]})
+    values, _ = expression.evaluate('rowsum("1*") + col("x")', df)
+    assert values.tolist() == [111.0, 222.0]
+
+
+def test_calc_a_pattern_does_not_keep_its_columns(monkeypatch):
+    kept = []
+    original = expression._Evaluator.column
+
+    def spy(self, name, keep=True):
+        out = original(self, name, keep)
+        kept.append(len(self.columns))
+        return out
+
+    monkeypatch.setattr(expression._Evaluator, "column", spy)
+    wide = pd.DataFrame({f"c{i}": [1.0, 2.0] for i in range(5)})
+    assert calc('rowsum("*")', wide).tolist() == [5.0, 10.0]
+    assert max(kept) == 0
+
+
+def test_calc_tells_how_many_rows_had_an_infinite_result():
+    df = pd.DataFrame({"a": [1.0, 0.0, 2.0, 0.0, np.nan], "b": [0.0, 0.0, 4.0, 5.0, 0.0]})
+
+    def notes(expression_text):
+        module = get_builtin("calc")
+        params = validate_args(module.params, {"name": "r", "expression": expression_text})
+        return module.run(df, params, ModuleContext(None, None)).notes
+
+    (note,) = notes("a / b")  # only row 0 is infinite: 0 / 0 and empty / 0 are empty, not infinite
+    assert (note["kind"], note["rows_infinite"], note["rows"]) == ("calc_infinite", 1, 5)
+    assert note["message"].startswith("1 of 5 rows have an infinite result")
+    assert notes("a + b") == ()
+    assert notes("where(b == 0, 0, a / b)") == ()  # the infinite step was not used
+    assert notes("log(a)")[0]["rows_infinite"] == 2
+    assert notes("1 / a + 1 / b")[0]["rows_infinite"] == 4  # rows 0, 1, 3 and 4
+    module = get_builtin("calc")  # an infinite value in a column is empty, without a note
+    params = validate_args(module.params, {"name": "r", "expression": "a + 1"})
+    out = module.run(pd.DataFrame({"a": [np.inf, 1.0]}), params, ModuleContext(None, None))
+    assert out.notes == () and np.isnan(out.df["r"][0])
+
+
+def test_calc_refuses_a_missing_empty_or_existing_name():
+    with pytest.raises(ModuleError, match="name the new column"):
+        calc("1", name="  ")
+    with pytest.raises(ModuleError, match="column 'a' already exists"):
+        calc("1", name="a")
+    with pytest.raises(ModuleError, match="column 'a' already exists"):
+        calc("1", name=" a ")
+
+
+def test_calc_is_refused_over_the_cell_cap(monkeypatch):
+    monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 10)
+    module = get_builtin("calc")
+    with pytest.raises(ModuleError, match="10 cells"):
+        module.run(
+            expect(a=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            {"name": "b", "expression": "a"},
+            ModuleContext(None, None),
+        )
+
+
+def test_calc_params_are_registered_and_validated():
+    module = get_builtin("calc")
+    assert module.kind == "frame" and module.name == "Add a calculated column"
+    assert module.params["required"] == ["name", "expression"]
+    described = module.params["properties"]["expression"]["description"]
+    assert "rowsum" in described and "where" in described and len(described) < 450
+    check_schema(module.params)
+    with pytest.raises(ValueError):
+        validate_args(module.params, {"name": "x"})
+    with pytest.raises(ValueError):
+        validate_args(module.params, {"name": "x", "expression": "1" * 1001})
 
 
 # --- the output-size estimate runs before the result is built --------------------------------
