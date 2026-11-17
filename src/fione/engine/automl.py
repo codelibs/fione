@@ -862,13 +862,17 @@ class AutoML:
         if not kept or kept == self.families:
             return self.families
         left_out = [name for name in self.families if name not in kept]
+        self._notice_wide_linear_view(left_out, prep, n_rows)
+        return kept
+
+    def _notice_wide_linear_view(self, left_out: list[str], prep: Prep, n_rows: int) -> None:
         self._notice(
             f"{', '.join(left_out)} left out: the one-hot encoded data "
-            f"({n_rows:,} rows x {prep.linear_width:,} columns) would take too much memory",
+            f"({n_rows:,} rows x {prep.linear_width:,} columns = {n_rows * prep.linear_width:,} "
+            f"cells) would take too much memory; the limit is {LINEAR_MAX_CELLS:,} cells",
             kind="families_left_out",
             families=left_out,
         )
-        return kept
 
     def _late_families(self, prep: Prep, X, y, task: Task) -> list[str]:
         """The late families this data suits, whose models would not be too big, and whose view
@@ -876,12 +880,7 @@ class AutoML:
         if len(X) * prep.linear_width > LINEAR_MAX_CELLS:
             left_out = [name for name in self.late if FAMILIES[name].applies(prep, X)]
             if left_out:
-                self._notice(
-                    f"{', '.join(left_out)} left out: the one-hot encoded data "
-                    f"({len(X):,} rows x {prep.linear_width:,} columns) would take too much memory",
-                    kind="families_left_out",
-                    families=left_out,
-                )
+                self._notice_wide_linear_view(left_out, prep, len(X))
             return []
         outputs = int(y.max()) + 1 if task == "classification" else 1
         outputs = 1 if outputs == 2 else outputs
