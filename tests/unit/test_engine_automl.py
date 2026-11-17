@@ -1453,6 +1453,9 @@ def test_a_date_column_without_a_time_column_is_pointed_out_once_and_not_with_on
     events = []
     _fit(df, events, time_column="when", **options)
     assert not [e for e in events if e.data.get("kind") == "time_hint"]
+    events = []  # a group column does not stand in for the order: the hint stays
+    _fit(df.assign(user=df["day"] % 40), events, cv_group_column="user", **options)
+    assert len([e for e in events if e.data.get("kind") == "time_hint"]) == 1
 
 
 def _walk(n=400, seed=0):
@@ -1652,11 +1655,89 @@ def test_the_members_without_a_refit_keep_only_the_last_time_ordered_fold_model(
     assert len(member.models) == 1  # not five models, four of them learned from older rows only
 
 
-def test_a_group_column_and_a_time_column_cannot_be_used_together():
-    df = _grouped()
-    df["when"] = np.arange(len(df))
-    with pytest.raises(ConfigError, match="cannot be used together"):
-        _fit(df, target="y", cv_group_column="user", time_column="when")
+def test_a_group_column_and_a_time_column_validate_forward_without_splitting_a_group():
+    rng = np.random.default_rng(0)
+    users = np.repeat(np.arange(60), 8)
+    start = np.repeat(rng.integers(0, 100, 60), 8)
+    df = pd.DataFrame({"user": [f"u{u}" for u in users], "when": start + np.tile(np.arange(8), 60)})
+    df["x"] = rng.normal(size=len(df))
+    df["y"] = df["x"] + np.repeat(rng.normal(size=60), 8)
+    model = _fit(
+        df,
+        target="y",
+        task="regression",
+        families=["LightGBM"],
+        max_models=1,
+        nfolds=3,
+        cv_group_column="user",
+        time_column="when",
+        keep_cv_fold_assignment=True,
+    )
+    assert len(model.leaderboard) >= 1
+    fold = model.fold_assignment
+    assert (fold < 0).any() and (fold >= 0).any()  # the first part is only learned from
+    for rows in pd.Series(np.arange(len(df))).groupby(users):
+        assert len(set(fold[rows[1].to_numpy()])) == 1  # a user is in one part
+
+
+def _stacked(present):
+    """One row per user and origin (the time value) the user is present at."""
+    rng = np.random.default_rng(0)
+    users = [
+        (u, origin) for u, origins in enumerate(present) for origin in origins for _ in range(4)
+    ]
+    df = pd.DataFrame(users, columns=["u", "origin"])
+    df["user"] = "u" + df["u"].astype(str)
+    df["x"] = rng.normal(size=len(df))
+    df["y"] = df["x"] + rng.normal(scale=0.3, size=len(df))
+    return df.drop(columns="u")
+
+
+def test_users_present_at_every_origin_of_a_stacked_table_are_refused_naming_the_group_column():
+    df = _stacked([(0, 1, 2)] * 60)  # every user ends at the last origin: one time to order by
+    with pytest.raises(ConfigError, match="groups of 'user' end at too few different values"):
+        _fit(df, target="y", task="regression", cv_group_column="user", time_column="origin")
+
+
+def test_groups_that_mostly_end_together_run_and_say_that_one_part_holds_most_rows():
+    df = _stacked([(0, 1, 2)] * 30 + [(0,)] * 15 + [(0, 1)] * 15)
+    events = []
+    model = _fit(
+        df,
+        events,
+        target="y",
+        task="regression",
+        families=["LightGBM"],
+        max_models=1,
+        nfolds=4,
+        cv_group_column="user",
+        time_column="origin",
+    )
+    assert len(model.leaderboard) >= 1
+    (notice,) = [e for e in events if e.data.get("kind") == "time_groups_one_part"]
+    assert notice.data["part_rows"] == [180, 360]  # a part of 180 rows, a part of 360
+    assert "group column alone" in notice.data["message"]
+
+
+def test_a_time_ordered_group_validation_with_fewer_groups_than_parts_has_fewer_folds():
+    df = _binary(120)
+    df["user"] = np.repeat(["a", "b", "c"], 40)
+    df["when"] = np.repeat([0, 100, 200], 40) + np.tile(np.arange(40), 3)
+    events = []
+    _fit(
+        df,
+        events,
+        target="y",
+        families=["LightGBM"],
+        max_models=1,
+        nfolds=5,
+        cv_group_column="user",
+        time_column="when",
+    )
+    (notice,) = [e for e in events if e.data.get("kind") == "time_validation"]
+    assert notice.data["folds"] == 2  # three groups: one learned from, two predicted
+    assert not [e for e in events if "nfolds_reduced_to" in e.data]
+    assert not [e for e in events if e.data.get("kind") == "time_groups_one_part"]
 
 
 def test_few_rows_repeat_the_folds_and_the_ensemble_sees_every_repeat(monkeypatch):

@@ -347,6 +347,16 @@ no missing value). Fione then cuts the rows, in the order of that column, into `
 about the same size. Fold *j* checks the models on part *j* and learns from the parts before
 it, so no model learns from a later row than it predicts. Rows with the same value of the
 column are in the same part, and a column with few different values gives fewer folds.
+With a group column too ("Keep related rows together by"), each group is ordered by its
+last row and all its rows are in one part, so no group has rows on both sides of a fold, and a
+fold learns only from groups that end no later than the ones it predicts. Rows are not ordered
+inside a group: an early row of a validated group is predicted from other groups' later rows.
+This serves groups that sit inside a stretch of time (the rows of one search, one order, a
+short visit). Groups that stay over the whole range (users present at every period of a
+stacked table) all end together, so a fold learns from few rows and predicts many, and a notice
+says so; with all of them ending at the same value the run is refused. For such data use the
+group column alone. With fewer groups than parts the number of folds is lower, as with few
+different values of the column.
 When a column holds dates, or whole numbers that are dates (20141021, or 14102100 for a year,
 month, day and hour) or Unix times (seconds or milliseconds between 2000 and 2100), and no time
 column is given, a notice points this out, since the score
@@ -390,7 +400,7 @@ A training run also says so when no group column is given and a text column of 1
 values has about 20 rows or more for each value, and the rows of one value share the value of
 most other columns (rows of one game or patient look alike).
 
-A group column and a time column cannot be used together.
+A group column and a time column can be used together (see "Data that follows time").
 
 ## Derived features
 
