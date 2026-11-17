@@ -1024,7 +1024,8 @@ def test_a_too_wide_linear_view_leaves_those_families_out(monkeypatch):
     )
     assert [m.spec.name for m in model.members] == ["LightGBM"]
     notices = [e.data for e in events if e.type == "notice"]
-    assert any(n.get("kind") == "families_left_out" for n in notices)
+    (left_out,) = [n for n in notices if n.get("kind") == "families_left_out"]
+    assert "cells) would take too much memory; the limit is 100 cells" in left_out["message"]
     only = _fit(_binary(300), families=["Linear"], target="y", max_models=1)  # nothing else to run
     assert [m.spec.name for m in only.members] == ["Linear"]
 
