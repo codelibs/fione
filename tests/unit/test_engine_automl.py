@@ -1547,8 +1547,11 @@ def test_dates_written_as_whole_numbers_are_pointed_out_too():
     (hint,) = [e for e in events if e.data.get("kind") == "time_hint"]
     assert hint.data["columns"] == ["hour"]
     events = []
-    _fit(df, events, time_column="hour", **options)
+    model = _fit(df, events, time_column="hour", **options)
     assert not [e for e in events if e.data.get("kind") == "time_hint"]
+    assert model.prep.integer_dates == {"hour": "%y%m%d%H"}  # also a feature, with its parts
+    predicted = model.predict(df)
+    assert predicted.notna().all() and np.corrcoef(predicted, df["y"])[0, 1] > 0.9
 
 
 def test_unix_seconds_in_a_column_are_pointed_out_as_dates_and_a_plain_number_is_not():

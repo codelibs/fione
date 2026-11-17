@@ -44,6 +44,14 @@ _LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code
 # ordinal: seconds since the Unix epoch; the hour is added for columns that carry a time of day
 _DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
 _EPOCH = pd.Timestamp("1970-01-01")
+_DT_ATTRIBUTE = {"dayofweek": "day_of_week"}  # feature part -> its Series.dt attribute
+
+
+def _integer_date_parts(fmt: str) -> tuple[str, ...]:
+    """The parts of a whole-number date column besides the number itself: the day parts, and the
+    hour when the format has one."""
+    timed = "H" in fmt or fmt.startswith("unix")
+    return ("year", "month", "day", "dayofweek") + (("hour",) if timed else ())
 
 
 def _repeats(s: pd.Series) -> bool:
@@ -148,6 +156,23 @@ def integer_date_format(s: pd.Series) -> str | None:
     return unix
 
 
+def _integer_dates(s: pd.Series, fmt: str) -> pd.Series:
+    """Whole numbers ``s`` read as datetimes in ``fmt`` (a name from ``integer_date_format``);
+    NaT where a value is missing, not whole or not a date. Each different value is read once."""
+    numbers = pd.to_numeric(s, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan)
+    codes, values = pd.factorize(numbers)
+    when = pd.Series(pd.NaT, index=range(len(values)), dtype="datetime64[ns]")
+    if fmt.startswith("unix"):
+        when[:] = pd.to_datetime(values, unit="s" if fmt == "unix_s" else "ms", errors="coerce")
+    else:
+        whole = values % 1 == 0
+        text = pd.Series(values[whole].astype("int64")).astype(str)
+        when[whole] = pd.to_datetime(text, format=fmt, errors="coerce").to_numpy()
+    out = when.reindex(codes)  # -1, a missing value, is no label: NaT
+    out.index = s.index
+    return out
+
+
 def _holds_dates(s: pd.Series) -> bool:
     """Whether ``s`` is an object column of dates (a date-only column read from Parquet)."""
     return s.dtype == object and pd.api.types.infer_dtype(s, skipna=True) in ("date", "datetime")
@@ -215,8 +240,9 @@ class Prep:
     """Turns raw feature frames into the inputs of each model family.
 
     ``fit`` decides per column: constant and all-null columns are dropped; datetime and date
-    columns are expanded into numeric parts; a text column of durations (``2 years``) becomes a
-    number of days; bool and non-numeric columns become categoricals, or
+    columns are expanded into numeric parts (a column of whole numbers that are dates, such as
+    14102103, keeps its number and gets the parts besides it); a text column of durations
+    (``2 years``) becomes a number of days; bool and non-numeric columns become categoricals, or
     frequency encodings above ``HIGH_CARDINALITY`` categories (the share of the training rows
     with the value; a value not seen in training gets the share of the rarest one); everything
     else is numeric. The views put the features in ``feature_names`` order under positional
@@ -229,6 +255,7 @@ class Prep:
     _logged: tuple = ()
     prose: tuple = ()
     dayfirst: tuple = ()  # date string columns that put the day before the month
+    integer_dates: dict = {}  # whole-number date column -> its format (``integer_date_format``)
     timed: tuple = ()  # date columns that carry a time of day
     _unseen: dict = {}  # frequency column -> share given to a value not seen in training (old: 0)
     _no_trend: tuple = ()  # view columns the linear view leaves out (see ``_fit_no_trend``)
@@ -239,6 +266,7 @@ class Prep:
     def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
         self.dayfirst = ()
+        self.integer_dates = {}
         self.timed = ()
         self._plan: list[
             tuple[str, str]
@@ -274,6 +302,8 @@ class Prep:
                     self._plan.append((column, "category"))
             else:
                 self._plan.append((column, "numeric"))
+                if fmt := integer_date_format(s):
+                    self.integer_dates[column] = fmt
         if not self._plan:
             raise ConfigError("no usable feature columns: every column is empty or constant")
         self.fill = {column: float(X[column].notna().mean()) for column, _ in self._plan}
@@ -309,6 +339,10 @@ class Prep:
             else:
                 self.feature_names.append(column)
                 self.sources.append((column,))
+                if column in self.integer_dates:
+                    parts = _integer_date_parts(self.integer_dates[column])
+                    self.feature_names += [f"{column}__{part}" for part in parts]
+                    self.sources += [(column,)] * len(parts)
         used = set(self.columns)
         self.groups = tuple(
             fitted
@@ -337,6 +371,8 @@ class Prep:
         for column, kind in self._plan:
             if kind != "datetime":
                 at += 1
+                if column in self.integer_dates:
+                    at += len(_integer_date_parts(self.integer_dates[column]))
                 continue
             if base[f"f{at + _DATE_PARTS.index('year')}"].nunique() <= 1:
                 off.append(f"f{at + _DATE_PARTS.index('ordinal')}")
@@ -418,6 +454,13 @@ class Prep:
             if kind == "numeric":
                 values = pd.to_numeric(s, errors="coerce").astype(float)
                 out.append(values.replace([np.inf, -np.inf], np.nan))
+                if column in self.integer_dates:
+                    when = _integer_dates(s, self.integer_dates[column])
+                    parts = _integer_date_parts(self.integer_dates[column])
+                    out += [
+                        getattr(when.dt, _DT_ATTRIBUTE.get(part, part)).astype(float)
+                        for part in parts
+                    ]
             elif kind == "duration":
                 out.append(_duration_days(s))
             elif kind == "datetime":
