@@ -1311,6 +1311,73 @@ def test_pivot_is_refused_before_it_is_built():
     assert time.monotonic() - started < 1.0 and peak < 50_000_000
 
 
+def _pivot(df, **params):
+    module = get_builtin("pivot")
+    args = validate_args(module.params, {"index": "k", "column": "c", "value": "v", **params})
+    return module.run(df.copy(), args, ModuleContext(None, None))
+
+
+_PIVOT_ROWS = pd.DataFrame(
+    {
+        "k": [1, 1, 1, 2, 2, 3],
+        "c": ["a", "a", "b", "a", "b", "b"],
+        "v": [1.0, np.nan, 5.0, 2.0, 4.0, np.nan],
+    }
+)
+
+
+@pytest.mark.parametrize("agg", ["sum", "mean", "min", "max", "count"])
+def test_pivot_combines_the_rows_of_a_cell_as_pandas_does(agg):
+    out = _pivot(_PIVOT_ROWS, agg=agg)
+    want = _PIVOT_ROWS.pivot_table(index="k", columns="c", values="v", aggfunc=agg, dropna=False)
+    cells = _PIVOT_ROWS.groupby(["k", "c"]).v.count().unstack()
+    if agg == "sum":  # a cell with nothing to add up stays empty rather than 0
+        want = want.where(cells > 0)
+    if agg == "count":  # a cell with no row at all stays empty
+        want = want.where(_PIVOT_ROWS.groupby(["k", "c"]).size().unstack().notna())
+    assert out.df["k"].tolist() == [1, 2, 3]
+    for c in ("a", "b"):
+        assert out.df[c].tolist() == pytest.approx(want[c].tolist(), nan_ok=True)
+    assert out.notes == ()
+
+
+def test_pivot_keeps_the_first_value_by_default_and_says_which_cells_hold_more_values():
+    rows = _PIVOT_ROWS.assign(v=[1.0, 9.0, 5.0, 2.0, 4.0, np.nan])  # (1, a) holds 1.0 and 9.0
+    out = _pivot(rows)
+    assert list(out.df.columns) == ["k", "a", "b"]
+    assert out.df["a"].tolist() == pytest.approx([1.0, 2.0, np.nan], nan_ok=True)
+    assert out.df["b"].tolist() == pytest.approx([5.0, 4.0, np.nan], nan_ok=True)
+    (note,) = out.notes
+    assert (note["kind"], note["cells_shared"], note["cells"]) == ("pivot_cells_shared", 1, 5)
+    assert "agg" in note["message"] and "1 of 5 cells" in note["message"]
+    assert "2 values" in note["message"]
+    assert _pivot(rows, agg="first").notes == out.notes
+    assert _pivot(rows, agg="sum").notes == ()
+    # a second row whose value is empty holds no second value: there is nothing to lose
+    assert _pivot(_PIVOT_ROWS).notes == ()
+    assert _pivot(rows.drop_duplicates(["k", "c"])).notes == ()
+
+
+def test_pivot_says_how_many_rows_with_an_empty_index_or_column_are_left_out():
+    df = pd.DataFrame(
+        {"k": [1, 2, 3, np.nan], "c": ["a", "a", None, "b"], "v": [1.0, 2.0, 3.0, 4.0]}
+    )
+    for agg in ("first", "sum"):
+        out = _pivot(df, agg=agg)
+        (note,) = out.notes
+        assert (note["kind"], note["rows_left_out"], note["rows"]) == ("pivot_rows_left_out", 2, 4)
+        assert note["index_values_lost"] == 1 and out.df["k"].tolist() == [1.0, 2.0]
+
+
+def test_pivot_refuses_a_value_that_is_not_a_number_for_a_numeric_aggregate():
+    df = pd.DataFrame({"k": [1, 1], "c": ["a", "a"], "v": ["x", "y"]})
+    for agg in ("sum", "mean", "min", "max"):
+        with pytest.raises(ModuleError, match="needs a numeric value column"):
+            _pivot(df, agg=agg)
+    assert _pivot(df, agg="count").df["a"].tolist() == [2]
+    assert _pivot(df).df["a"].tolist() == ["x"]
+
+
 def test_cor_of_too_many_columns_is_refused():
     wide = pd.DataFrame(np.zeros((3, 13_000)), columns=[f"c{i}" for i in range(13_000)])
     started = time.monotonic()
