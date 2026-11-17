@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from pandas.api.indexers import BaseIndexer
 
+from fione.modules import registry
 from fione.modules.expression import evaluate
 from fione.modules.registry import (
     Module,
@@ -195,7 +196,15 @@ def join(df, params, ctx):
         ):  # 7 and "7" are the same key
             left[part] = _as_text(left[part])
             right = right.assign(**{part: _as_text(right[part])})
-    check_cells(len(df), len(df.columns) + len(added))
+    cells = len(df) * (len(df.columns) + len(added))
+    if cells > registry.MAX_OUTPUT_CELLS:
+        raise ModuleError(
+            f"the result has {cells} cells ({len(df)} rows x {len(df.columns)} columns of this"
+            f" dataset + {len(added)} new columns); at most {registry.MAX_OUTPUT_CELLS} cells"
+            " are allowed. Keep fewer columns first: slice this dataset to its key columns (Slice"
+            " columns module) and join the result onward, or add fewer columns from the other"
+            " dataset (name them in 'columns', or take fewer 'stats' when summarizing)"
+        )
     try:
         merged = left.merge(right, how="left", on=parts, indicator=_JOIN_MATCH)
     except ValueError as e:
