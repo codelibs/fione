@@ -241,7 +241,7 @@ def _describe_dataset(ctx: ToolContext, args: dict) -> dict:
     target = _resolve_column(names, args["target"]) if "target" in args else None
     shown = names[:_MAX_COLUMNS]
     read = shown + [target] if target is not None and target not in shown else shown
-    frame = ingest.read_dataset_sample(ctx.storage, dataset, _SAMPLE_ROWS, read)
+    frame = ingest.read_dataset_runs(ctx.storage, dataset, _SAMPLE_ROWS, read)
     profile = profile_dataset(frame, target, sample_rows=_SAMPLE_ROWS)
     result = {
         "dataset": _dataset_block(dataset),
@@ -320,7 +320,7 @@ def _overview(
 def _get_column_stats(ctx: ToolContext, args: dict) -> dict:
     dataset = _dataset(ctx, args["dataset_id"])
     column = _resolve_column([name for name, _ in dataset.schema], args["column"])
-    frame = ingest.read_dataset_sample(ctx.storage, dataset, _SAMPLE_ROWS, [column])
+    frame = ingest.read_dataset_runs(ctx.storage, dataset, _SAMPLE_ROWS, [column])
     col = profile_dataset(frame, sample_rows=_SAMPLE_ROWS).columns[0]
     entry = _column_entry(col, ctx.allow_samples)
     if col.histogram is not None:
@@ -800,16 +800,16 @@ def propose(
     """
     read = columns if target in columns else [*columns, target]
     if profile is None:
-        frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
+        frame = ingest.read_dataset_runs(storage, dataset, sample_rows, read)
         profile = profile_dataset(frame, target, sample_rows=sample_rows)
     else:
         if check is None:  # the sample is read only for the leak check
-            frame = ingest.read_dataset_sample(storage, dataset, sample_rows, read)
+            frame = ingest.read_dataset_runs(storage, dataset, sample_rows, read)
             check = leak_check(frame, profile.columns, target)
         profile = dataclasses.replace(
             profile, leak_suspects=check.suspects, leak_partial=check.partial
         )
-    # the whole target column (one column) decides the task, not just the head of the file
+    # the whole target column (one column) decides the task, not a sample
     y = ingest.read_dataset(storage, dataset, [target])[target]
     if task is None:
         task = infer_task(y)
@@ -827,7 +827,7 @@ def sample_profile(
 ) -> DatasetProfile:
     """The target-independent profile of the sample ``propose`` reads (pass it as its
     ``profile``)."""
-    frame = ingest.read_dataset_sample(storage, dataset, sample_rows, columns)
+    frame = ingest.read_dataset_runs(storage, dataset, sample_rows, columns)
     return profile_dataset(frame, sample_rows=sample_rows)
 
 

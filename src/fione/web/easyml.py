@@ -93,7 +93,7 @@ WHY_HEAVY = 10
 RECENT_JOBS = 10
 TOP_INPUTS = 5
 EVENT_DETAILS = 20
-# The analysis profiles the first rows of every column: about PROFILE_CELLS cells, between
+# The analysis profiles a sample of the rows of every column: about PROFILE_CELLS cells, between
 # PROFILE_MIN_ROWS and PROFILE_MAX_ROWS rows (fewer rows for wider data).
 PROFILE_CELLS = 2_000_000
 PROFILE_MAX_ROWS = 50_000
@@ -223,7 +223,7 @@ def _default_target(names: list[str], kinds: dict[str, str]) -> str:
 
 
 def _profile_rows(dataset: Dataset) -> int:
-    """How many leading rows the analysis profiles: fewer for wide data, so a profile costs
+    """How many rows the analysis profiles: fewer for wide data, so a profile costs
     about ``PROFILE_CELLS`` cells whatever the shape."""
     rows = PROFILE_CELLS // max(1, dataset.n_cols)
     return max(PROFILE_MIN_ROWS, min(PROFILE_MAX_ROWS, rows))
@@ -441,7 +441,7 @@ def _analysis_view(
         target_values=int(found.y.nunique()),
         missing_pct=_pct(sum(missing) / len(missing)) if missing else "0",
         pct=_pct,
-        sample_rows=found.profile.n_rows,  # the rows profiled: the first ones
+        sample_rows=found.profile.n_rows,  # the rows profiled: a sample
         preview=_preview(request, dataset, PREVIEW_ROWS),
         presets=RUNTIME_PRESETS,
         n_inputs=len(form.inputs),

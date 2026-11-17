@@ -433,6 +433,58 @@ def read_dataset_sample(
     return pa.Table.from_batches(batches).slice(0, max_rows).to_pandas()
 
 
+def _runs(rng: np.random.Generator, rows: int, take: int, run: int) -> np.ndarray:
+    """``take`` of ``rows`` positions, in order: runs of ``run`` neighbours, one in each of
+    equal stretches of the rows (all of them over a stretch of the rows when ``take`` is more
+    than half), so rows that sit together stay together."""
+    if 2 * take > rows:
+        return np.sort(rng.choice(rows, take, replace=False))
+    runs = -(-take // run)
+    edges = np.arange(runs + 1)
+    stretch = edges * rows // runs  # the stretch of each run
+    done = edges * take // runs  # the rows taken before each run
+    length = np.diff(done)
+    start = stretch[:-1] + rng.integers(0, np.diff(stretch) - length + 1)
+    return np.repeat(start - done[:-1], length) + np.arange(take)
+
+
+def read_dataset_runs(
+    storage: Storage,
+    dataset: Dataset,
+    max_rows: int = 200_000,
+    columns: list[str] | None = None,
+    *,
+    seed: int = 0,
+    run: int = 100,
+) -> pd.DataFrame:
+    """About ``max_rows`` rows of the whole dataset (all of them if it is smaller), in file
+    order, drawn with ``seed`` as runs of ``run`` neighbouring rows spread over the whole file.
+    A file sorted by time or by group shows all of its periods, not just its first, and rows
+    that sit together (the rows of one id) are still together. The file is read in batches of
+    ``_ROW_GROUP_ROWS`` rows, each keeping its share of the sample, so memory is bounded by one
+    batch and the sample whatever the row groups hold, but the requested ``columns`` of the whole
+    file are read."""
+    rng = np.random.default_rng(seed)
+    with storage.open_read(dataset.key) as f:
+        parquet = pq.ParquetFile(f)
+        meta = parquet.metadata
+        if meta.num_rows <= max_rows:
+            return parquet.read(columns=columns).to_pandas()
+        parts, seen, kept = [], 0, 0
+        for batch in parquet.iter_batches(_ROW_GROUP_ROWS, columns=columns, use_threads=False):
+            rows = batch.num_rows
+            seen += rows
+            take = round(max_rows * seen / meta.num_rows) - kept
+            if take <= 0:
+                continue
+            table = pa.Table.from_batches([batch])
+            if take < rows:
+                table = table.take(_runs(rng, rows, take, run))
+            parts.append(table)
+            kept += take
+    return pa.concat_tables(parts).to_pandas()
+
+
 def _head(parquet: pq.ParquetFile, group: int, rows: int, columns) -> list[pa.RecordBatch]:
     """The first ``rows`` rows of the row group, decoding no more of it than that needs."""
     batches = parquet.iter_batches(rows, row_groups=[group], columns=columns, use_threads=False)
