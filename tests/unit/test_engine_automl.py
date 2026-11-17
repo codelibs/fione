@@ -1531,6 +1531,73 @@ def test_a_column_that_is_not_sorted_or_has_few_or_unique_values_is_not_pointed_
     assert not _sorted_hints(dated.assign(when=dated["when"].dt.strftime("%Y-%m-%d")))
 
 
+def _history_hints(df, **config):
+    events = []
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    _fit(df, events, feature_engineering=False, **options, **config)
+    return [e for e in events if e.data.get("kind") == "missing_history"]
+
+
+def _things_over_time(n_things=60, months=30, rho=0.95, seed=0):
+    """Things (a county, a store) each seen once a month: a level of its own and a drift."""
+    rng = np.random.default_rng(seed)
+    drift = np.zeros((n_things, months))
+    for month in range(1, months):
+        drift[:, month] = rho * drift[:, month - 1] + rng.normal(size=n_things)
+    level = rng.normal(0, 5, size=(n_things, 1))
+    seasonal = 3 * np.sin(2 * np.pi * np.arange(months) / 12)  # the same for every thing
+    months_of = pd.date_range("2020-01-01", periods=months, freq="MS")
+    return pd.DataFrame(
+        {
+            "county": np.repeat(np.arange(n_things), months),
+            "first_day": np.tile(months_of.strftime("%Y-%m-%d"), n_things),
+            "month": np.tile(np.arange(months), n_things),
+            "x": rng.normal(size=n_things * months),
+            "y": (level + drift + seasonal).ravel(),
+        }
+    )
+
+
+def test_things_followed_over_time_with_no_earlier_values_are_pointed_out():
+    df = _things_over_time()
+    (hint,) = _history_hints(df.drop(columns="month"))
+    assert hint.data["columns"] == ["county"]
+    assert hint.data["correlation"] > 0.7
+    assert "Add values from earlier times" in hint.data["message"]
+    (hint,) = _history_hints(df.drop(columns="first_day"), time_column="month")  # a given order
+    assert hint.data["columns"] == ["county"]
+    # the order of the rows does not matter, and a column that is the same for a thing does not help
+    shuffled = df.drop(columns="month").sample(frac=1, random_state=0)
+    assert len(_history_hints(shuffled.assign(size=shuffled["county"] % 7 * 100.0))) == 1
+    assert not _history_hints(df.drop(columns=["first_day", "month"]))  # no order to follow
+
+
+def test_a_column_of_earlier_values_or_a_target_that_does_not_follow_gets_no_such_notice():
+    df = _things_over_time().drop(columns="month")
+    ordered = df.sort_values(["county", "first_day"])
+    last = ordered.groupby("county")["y"].shift(1)
+    assert not _history_hints(ordered.assign(y_lag1=last).sample(frac=1, random_state=0))
+    mean = ordered.groupby("county")["y"].transform(lambda v: v.shift(1).rolling(3).mean())
+    assert not _history_hints(ordered.assign(y_mean3=mean))
+    rng = np.random.default_rng(0)
+    assert not _history_hints(_things_over_time(rho=0.0))  # a level of its own and noise
+    # sales of 50 zip codes on dates: a category with a date, not a thing followed over time
+    houses = pd.DataFrame(
+        {
+            "zip": rng.integers(0, 50, 1_500),
+            "sold": (
+                pd.Timestamp("2020-01-01") + pd.to_timedelta(rng.integers(0, 900, 1_500), "D")
+            ),
+            "x": rng.normal(size=1_500),
+        }
+    )
+    houses["y"] = houses["zip"] * 1.0 + rng.normal(size=1_500)
+    assert not _history_hints(houses.assign(sold=houses["sold"].dt.strftime("%Y-%m-%d")))
+    # a store type seen on every date: few values
+    typed = _things_over_time().drop(columns="month").assign(kind=lambda d: d["county"] % 4)
+    assert not _history_hints(typed.drop(columns="county"))
+
+
 def test_a_short_table_is_not_checked_for_an_ordered_target():
     assert not _ordered_hints(_walk(100))
 
