@@ -1453,3 +1453,10 @@ def test_the_ranking_metric_of_a_quantile_model_is_the_pinball_loss():
     assert models_ui._sort_metric(record) == "pinball"
     record.config = {"sort_metric": "auto"}
     assert models_ui._sort_metric(record) == "rmse"
+
+
+def test_the_ranking_metric_of_an_event_column_model_is_the_concordance():
+    record = SimpleNamespace(
+        task="regression", config={"sort_metric": "auto", "event_column": "event"}
+    )
+    assert models_ui._sort_metric(record) == "concordance"

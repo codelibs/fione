@@ -242,10 +242,12 @@ def test_check_accepts_a_target_it_fits():
 
 def test_resolve_accepts_every_registered_name_for_its_task_only():
     for name, metric in metrics.REGISTRY.items():
-        assert metrics.resolve(name.upper(), metric.task, "sort_metric", 0.5) == name
+        assert (
+            metrics.resolve(name.upper(), metric.task, "sort_metric", 0.5, metric.survival) == name
+        )
         other = "regression" if metric.task == "classification" else "classification"
         with pytest.raises(ConfigError):
-            metrics.resolve(name, other, "sort_metric", 0.5)
+            metrics.resolve(name, other, "sort_metric", 0.5, metric.survival)
 
 
 def test_tied_predictions_give_no_credit_and_do_not_depend_on_the_row_order():
@@ -467,3 +469,21 @@ def test_macro_f1_of_two_classes_averages_both_and_is_tuned_for_both():
     f1_prior = metrics.tune_prior("f1", y, pred)
     assert f1_prior[1] < macro_prior[1]
     assert metrics.value("macro_f1", y, pred, f1_prior) < tuned
+
+
+def test_log1p_skew_is_for_a_skewed_target_the_logarithm_helps():
+    rng = np.random.default_rng(0)
+    money = rng.lognormal(5, 1.5, 3000)
+    assert metrics.log1p_skew(money) == pytest.approx(pd.Series(money).skew())
+    assert metrics.log1p_skew(rng.exponential(10, 3000)) is not None
+    assert metrics.log1p_skew(rng.normal(size=3000) + 10) is None  # not skewed
+    assert metrics.log1p_skew(-money) is None  # negative
+
+
+def test_log1p_skew_spares_a_target_that_is_already_a_logarithm():
+    rng = np.random.default_rng(0)
+    revenue = np.where(rng.random(5000) < 0.05, rng.lognormal(8, 1.5, 5000), 0.0)
+    assert metrics.log1p_skew(revenue) is not None
+    logged = np.log1p(revenue)  # skewed above 1 by its zeros, and log1p leaves that as it is
+    assert pd.Series(logged).skew() > metrics.TARGET_SKEW
+    assert metrics.log1p_skew(logged) is None

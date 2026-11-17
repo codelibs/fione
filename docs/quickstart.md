@@ -159,7 +159,8 @@ small targets as closely as the large ones.
 - Regression: RMSE, MAE, R², MSE, RMSLE, MAPE, RMSPE, SMAPE, median absolute error (`medae`), explained
   variance, correlation (`pearson`), rank correlation (`spearman`), normalized Gini
   (`normalized_gini`), Poisson deviance (`poisson`), quadratic weighted kappa of the rounded
-  predictions (`rounded_qwk`) and, for a quantile (see below), the pinball loss (`pinball`).
+  predictions (`rounded_qwk`), for a quantile (see below), the pinball loss (`pinball`) and, for a
+  time that may be cut short (see below), the concordance (`concordance`).
 
 `balanced_logloss` is the log loss of a task whose classes count alike, however rare one is: each
 class's mean log loss, averaged. It is measured on the probabilities shifted so that every class
@@ -303,6 +304,43 @@ empty values and is left out of the windows of the others. A `window` wider than
 running total (`signal_before1000000_sum`) and `count` the number of earlier rows that hold a
 value; a row with no earlier row, or none that holds a value, stays empty.
 
+## A column computed from other columns
+
+The built-in **Add a calculated column** module (`calc`) adds one column made from the numeric columns
+of the dataset: name the new column (`name`; it must not exist yet) and write how to compute it
+(`expression`, up to 1,000 characters). The other columns and the rows stay as they are, and the new
+column holds decimal numbers. For example `close / close_before1_mean - 1` (a return),
+`price - price_around999999_mean` (a value relative to its group's mean), `flag - flag_lag1` (a change
+from the month before) or `rowsum("flag_*")` (the number of the flags `flag_...` that are set).
+
+An expression is built from:
+
+- numbers, and the names of columns. A name with spaces or symbols, or one that is not a plain word,
+  is written `col("unit price")`. A column must be numeric (a yes/no column counts as 0 and 1).
+- `+ - * / **` and parentheses (`nan` is an empty value, unless a column has that name).
+- comparisons `== != < <= > >=`, which give 1 or 0 (a comparison with an empty value gives 0, and
+  `!=` gives 1), and `&`, `|`, `~` for "and", "or", "not" on such values, which also give 1 or 0 (an
+  empty value is false). Put each comparison in parentheses: `(a > 0) & (b > 0)`.
+- `abs`, `sqrt`, `log`, `log1p`, `exp`, `min2(x, y)` and `max2(x, y)` (the smaller and larger of two
+  values), `clip(x, low, high)`, `isnull(x)` (1 where `x` is empty) and `where(condition, x, y)`
+  (`x` where the condition is true, `y` elsewhere).
+- `rowsum`, `rowmean` and `rowcount` of any number of values on one row, which skip the empty ones:
+  `rowsum(a, b, c)`, or a pattern in quotes for every column whose name matches it (`*` for any
+  characters, also none; it is the only wildcard), such as `rowsum("flag_*_on")`, which gives the number
+  of such flags that are set. `rowsum` of nothing but empty values is 0, `rowmean` is empty, and
+  `rowcount` is the number of values that are not empty.
+
+A result that is infinite is empty: a division by zero (`a / 0`), `log(0)` or an overflow; the job
+reports how many rows had one, and an infinite value in a column counts as empty without a report.
+A column that several patterns of one row function match is read once. The row functions read at most
+10,000 columns and values in all, and the rows times those read is limited like the size of a result
+(150 million cells). An expression also holds a number of columns of intermediate values while it
+runs (a sum written `a+b+c` holds three; `-a+(-a+(...))` nested on the right holds one more for each
+level), and that number plus the dataset's columns times the rows is limited the same way.
+
+Nothing is run but this arithmetic: calls to other functions, attribute access, indexing and the
+like are refused with a message, as are an unknown column or one that is not numeric. An expression can nest to about 100 levels.
+
 ## Learning a skewed target
 
 For a regression target of 0 or more that is skewed (prices, counts, durations) and is
@@ -336,6 +374,30 @@ monotone transform). One model learns one quantile: a band between two levels is
 share of held-out rows below a model's predictions is the check to make on it: it is close to the
 quantile with plenty of rows, and falls short of it in the tails (0.1 and 0.9, say) on a small
 table.
+
+## A time that may be cut short
+
+A target that is the time until an event (a relapse, a failure, a churn) is often only known to be
+at least some value for the rows where the event has not happened yet. Give a column that is 1 where
+the event happened at the target's time and 0 where the row was last seen at that time
+(`event_column` in the API; the target is then a regression, and the column is not a feature). The
+models learn a score that grows with the time, and a prediction is that score: a higher one is a
+longer time, and it is not a time in the target's units.
+
+The score is the probability, by the Kaplan-Meier estimate of all the training rows, that the event
+has happened by the row's time (a row with an event) or by the time it is expected to last (a
+censored row, taken at its time plus what the estimate leaves of the time up to the last event). It
+is computed once from all the rows, as a monotone curve of the times; the validation parts are the
+ones the models do not learn from.
+
+*Automatic* ranking and stopping metrics are then the concordance (`concordance`, which is refused
+without an `event_column`, and the only metric an `event_column` allows): of the pairs of rows where
+one has its event before the other's time (a censored row at the time of an event counts as lasting
+longer), the share that the predictions order the same way, equal predictions counting half (1 is
+perfect, 0.5 is chance). It is computed on the validation
+predictions of all the parts together. The leaderboard and the Metrics tab report it; the other
+metrics, which compare a prediction with the time, are not reported. A quantile and a
+`target_transform` cannot be used with an `event_column`.
 
 ## Data that follows time
 

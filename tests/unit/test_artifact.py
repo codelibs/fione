@@ -553,3 +553,19 @@ def test_a_whole_number_date_column_predicts_the_same_after_a_round_trip(storage
     pd.testing.assert_series_equal(loaded.predict(df), model.predict(df))
     # the model reads the hour of the day: night rows get high values
     assert model.predict(df)[when.hour < 6].mean() > model.predict(df)[when.hour >= 6].mean() + 0.3
+
+
+def test_an_event_column_model_keeps_its_event_column_and_predicts_the_same_after_a_round_trip(
+    storage,
+):
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"a": rng.uniform(size=600)})
+    lasts = rng.exponential(np.exp(-2 * df["a"]))
+    df["t"] = np.minimum(lasts, 1.0)
+    df["ev"] = (lasts <= 1.0).astype(int)
+    config = TrainConfig(target="t", event_column="ev", max_runtime_secs=30, max_models=3)
+    model = AutoML(config).fit(df)
+    save_model(model, storage, PREFIX, SECRET, image_tag="fione:test")
+    loaded = load_model(storage, PREFIX, SECRET)
+    assert loaded.config.event_column == "ev" and "ev" not in loaded.columns
+    pd.testing.assert_series_equal(loaded.predict(df), model.predict(df))

@@ -461,9 +461,10 @@ def _form_values(defaults: dict) -> dict:
 
 
 def _metric_options() -> list[tuple[str, str]]:
-    """``(metric, task)`` for every metric the form offers for a task (not the pinball loss,
-    which needs a quantile the form does not set)."""
-    return [(m, task) for task, names in metrics.ALLOWED.items() for m in names if m != "pinball"]
+    """``(metric, task)`` for every metric the form offers for a task (not the pinball loss and
+    the concordance, which need a quantile or an event column the form does not set)."""
+    unset = {"pinball", "concordance"}
+    return [(m, task) for task, names in metrics.ALLOWED.items() for m in names if m not in unset]
 
 
 def _train_view(

@@ -106,6 +106,7 @@ from fione.engine.search import (
     repeats_for,
     run_family,
 )
+from fione.engine.survival import km_target
 
 FAMILY_ORDER = (
     "LightGBM",
@@ -175,12 +176,20 @@ ORDERED_AUTOCORR = 0.8
 # values each on this many rows or more on average: see ``AutoML._notice_sorted_column``.
 SORTED_VALUES = 20
 SORTED_ROWS = 20
+# A whole-number target of this many different values, each on this many rows or more on
+# average, whose counts do not rise and fall smoothly with the value (the correlation of each
+# count with the next under CODE_SMOOTH, as an age or a count would), may be class codes: see
+# ``AutoML._notice_class_codes``.
+CODE_VALUES = (21, 100)
+CODE_ROWS = 50
+CODE_SMOOTH = 0.5
 
 # A validated fit this good (or this poor) gets a notice: R-squared, or AUC for two classes.
 NEAR_PERFECT_R2 = 0.999
 NO_SKILL_R2 = 0.02
 NEAR_PERFECT_AUC = 0.9995
 NO_SKILL_AUC = 0.55
+ZERO_SHARE = 0.95  # of a target of 0 or more that is exactly 0: the few others decide the score
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -334,6 +343,26 @@ class AutoML:
                 return True
         return False
 
+    def _notice_class_codes(self, y: np.ndarray) -> None:
+        """Say when a target fitted as a regression because ``task`` is ``auto`` looks like class
+        codes: whole numbers, each on many rows, with no smooth shape over the values. Codes are
+        not amounts, so the regression, and the advice for a skewed amount, may not suit them."""
+        values, counts = np.unique(y, return_counts=True)  # in the order of the values
+        if not CODE_VALUES[0] <= len(values) <= CODE_VALUES[1] or len(y) / len(values) < CODE_ROWS:
+            return
+        if (y % 1).any() or counts.min() == counts.max():
+            return
+        if not np.corrcoef(counts[:-1], counts[1:])[0, 1] < CODE_SMOOTH:
+            return
+        self._notice(
+            f"the target holds {len(values)} different whole numbers, each on about "
+            f"{len(y) / len(values):,.0f} rows, and no smooth shape over them, so it is fitted "
+            "as a regression. If they are class codes (a category number, a type id) "
+            "rather than amounts, set task to 'classification'",
+            kind="class_codes",
+            values=len(values),
+        )
+
     def _notice_ordered_target(self, y: np.ndarray) -> None:
         """Say when the target of a row is nearly that of the row before it: the rows are in
         time order, or each has near copies beside it. The validation shuffles the rows, so the
@@ -386,8 +415,9 @@ class AutoML:
     def _fit_quality_notices(self, task: Task, model: TrainedModel) -> None:
         """Say when the validated fit is suspiciously good or no better than the average: a
         column may give the answer away, or the features may not hold it. A quantile is not
-        judged by R-squared or AUC, so it gets neither."""
-        if model.config.quantile is not None:
+        judged by R-squared or AUC, so it gets neither, and nor is a score of a time that may be
+        cut short."""
+        if model.config.quantile is not None or model.config.event_column is not None:
             return
         scores = model.metrics
         if task == "regression":
@@ -463,6 +493,22 @@ class AutoML:
             empty=len(empty),
         )
 
+    def _zero_inflated_notice(self, y: np.ndarray) -> None:
+        """Say when a target of 0 or more is almost always exactly 0: its score rests on the
+        few other rows. A quantile is a level of its own, so it gets none."""
+        if self.config.quantile is not None or len(y) == 0 or y.min() < 0:
+            return
+        share = float((y == 0).mean())
+        if share >= ZERO_SHARE:
+            self._notice(
+                f"{share:.1%} of the target values are exactly 0, so the score rests on the few "
+                "other rows. To find which rows are above 0, make a column that is 1 there and 0 "
+                "elsewhere and classify it; a second model on the rows above 0 can then predict "
+                "how much",
+                kind="zero_inflated",
+                zero_share=share,
+            )
+
     def _target_scale_notices(self, y: np.ndarray, sort_metric: str) -> None:
         """Say when the target's scale and the ranking metric do not go together: a log target
         ranked in the original units, or a skewed one that is learned and ranked as it is. A
@@ -476,11 +522,7 @@ class AutoML:
                 "'rmsle'",
                 kind="log_target_metric",
             )
-        elif (
-            len(y) > 2
-            and y.min() >= 0
-            and (skew := float(pd.Series(y).skew())) > metrics.TARGET_SKEW
-        ):
+        elif (skew := metrics.log1p_skew(y)) is not None:
             self._notice(
                 f"the target is 0 or more and skewed (skewness {skew:.1f}), and a model that "
                 "learns and is ranked on it as it is gives the many small values predictions far "
@@ -503,13 +545,21 @@ class AutoML:
         unknown = [column for column in c.ignored_columns if column not in df.columns]
         if unknown:
             raise ConfigError(f"unknown columns in ignored_columns: {unknown}")
-        X = df.drop(columns=[c.target, *c.ignored_columns])
+        survival = c.event_column is not None
+        if survival and c.event_column not in df.columns:
+            raise ConfigError(f"event column '{c.event_column}' is not in the data")
+        not_features = [c.target, *c.ignored_columns, *([c.event_column] if survival else [])]
+        X = df.drop(columns=not_features)
         target = df[c.target]
         task: Task = infer_task(target) if c.task == "auto" else c.task
         if c.quantile is not None and task != "regression":
             raise ConfigError("quantile needs a regression, but the target is a classification")
-        sort_metric = metrics.resolve(c.sort_metric, task, "sort_metric", c.quantile)
-        stopping_metric = metrics.resolve(c.stopping_metric, task, "stopping_metric", c.quantile)
+        if survival and task != "regression":
+            raise ConfigError("event_column needs a regression, but the target is a classification")
+        sort_metric = metrics.resolve(c.sort_metric, task, "sort_metric", c.quantile, survival)
+        stopping_metric = metrics.resolve(
+            c.stopping_metric, task, "stopping_metric", c.quantile, survival
+        )
         notices: list[Event] = []
         y, classes, nfolds = validate_target(target, task, c.nfolds, notices.append)
         if c.quantile is not None:
@@ -579,16 +629,31 @@ class AutoML:
                 "and in the blend"
             )
         y_seen = y  # the target as the user gave it; ``y`` is what the models learn
+        if survival:
+            # the time and the event flag, in two columns so that a metric reads both; the
+            # curve is that of every training row (it holds no row's own prediction)
+            event = _event_flags(df[c.event_column], c.event_column, y)
+            y_seen = np.column_stack([y, event])
+            y = km_target(y, event)
+            self._notice(
+                f"the prediction is a score from 0 to 1 that grows with '{c.target}': a higher "
+                "score is a longer time, and it is not a time in its units",
+                kind="survival_score",
+                target=c.target,
+            )
         if c.target_transform == "log1p" and task == "classification":
             self._notice("target_transform is ignored for classification")
-        elif c.target_transform == "log1p":
+        elif c.target_transform == "log1p" and not survival:
             if (y <= -1).any():
                 raise ConfigError("target_transform 'log1p' needs target values above -1")
             y = np.log1p(y)
-        if task == "regression":
+        if task == "regression" and not survival:
+            if c.task == "auto" and c.quantile is None:
+                self._notice_class_codes(y_seen)
+            self._zero_inflated_notice(y_seen)
             self._target_scale_notices(y_seen, sort_metric)
         # What is reported and ranked is in the target's own units.
-        original = np.expm1 if y is not y_seen else _same
+        original = np.expm1 if y is not y_seen and not survival else _same
         for field, name in (("sort_metric", sort_metric), ("stopping_metric", stopping_metric)):
             metrics.check(name, y_seen, len(classes), field)
         prior = None
@@ -657,7 +722,7 @@ class AutoML:
             if row_groups is None:
                 self._notice_repeated_values(prep, X)
                 if not dates and not self._notice_sorted_column(prep, X):
-                    if task == "regression":
+                    if task == "regression" and not survival:
                         self._notice_ordered_target(y_seen)
             folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
             first_run = folds[:nfolds]  # reported: the other repeats only judge the search
@@ -692,7 +757,8 @@ class AutoML:
 
         left = deadline.remaining()
         reserve = max(MIN_RESERVE_SECS, RESERVE_SHARE * left)
-        default_stopping = stopping_metric == metrics.automatic(task, c.quantile)
+        # (the search's own score is squared error of the learned score, not the concordance)
+        default_stopping = not survival and stopping_metric == metrics.automatic(task, c.quantile)
         results, logs, reasons, finished, errors = self._search(
             families,
             X,
@@ -767,7 +833,12 @@ class AutoML:
         if tuned or rating_cuts:
             prior = metrics.tune_prior(sort_metric, y_seen[rows], blended)
         try:
-            found = diagnostics(task, y_seen[rows], blended, classes, seed=c.seed, prior=prior)
+            # (the diagnostics read one target column: a survival fit has none in its own units)
+            found = (
+                None
+                if survival
+                else diagnostics(task, y_seen[rows], blended, classes, seed=c.seed, prior=prior)
+            )
         except Exception as e:
             found = None
             self._notice(
@@ -818,7 +889,7 @@ class AutoML:
             class_prior=prior,
             proba_shift=shift,
             target_floor=0.0
-            if task == "regression" and not rating_cuts and y_seen.min() >= 0
+            if task == "regression" and not survival and not rating_cuts and y_seen.min() >= 0
             else None,
         )
         self._fit_quality_notices(task, model)
@@ -886,13 +957,17 @@ class AutoML:
         if not kept or kept == self.families:
             return self.families
         left_out = [name for name in self.families if name not in kept]
+        self._notice_wide_linear_view(left_out, prep, n_rows)
+        return kept
+
+    def _notice_wide_linear_view(self, left_out: list[str], prep: Prep, n_rows: int) -> None:
         self._notice(
             f"{', '.join(left_out)} left out: the one-hot encoded data "
-            f"({n_rows:,} rows x {prep.linear_width:,} columns) would take too much memory",
+            f"({n_rows:,} rows x {prep.linear_width:,} columns = {n_rows * prep.linear_width:,} "
+            f"cells) would take too much memory; the limit is {LINEAR_MAX_CELLS:,} cells",
             kind="families_left_out",
             families=left_out,
         )
-        return kept
 
     def _late_families(self, prep: Prep, X, y, task: Task) -> list[str]:
         """The late families this data suits, whose models would not be too big, and whose view
@@ -900,12 +975,7 @@ class AutoML:
         if len(X) * prep.linear_width > LINEAR_MAX_CELLS:
             left_out = [name for name in self.late if FAMILIES[name].applies(prep, X)]
             if left_out:
-                self._notice(
-                    f"{', '.join(left_out)} left out: the one-hot encoded data "
-                    f"({len(X):,} rows x {prep.linear_width:,} columns) would take too much memory",
-                    kind="families_left_out",
-                    families=left_out,
-                )
+                self._notice_wide_linear_view(left_out, prep, len(X))
             return []
         outputs = int(y.max()) + 1 if task == "classification" else 1
         outputs = 1 if outputs == 2 else outputs
@@ -1267,6 +1337,19 @@ def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
 
 def _same(values: np.ndarray) -> np.ndarray:
     return values
+
+
+def _event_flags(column: pd.Series, name: str, time: np.ndarray) -> np.ndarray:
+    """The 0/1 event flags of ``column`` as floats; ConfigError if they are not 0 or 1 on
+    every row, or the times (``time``) are not 0 or more, or no row has an event."""
+    flags = pd.to_numeric(column, errors="coerce").to_numpy(dtype=float)
+    if not np.isin(flags, (0.0, 1.0)).all():
+        raise ConfigError(f"event column '{name}' must hold only 0 (censored) or 1 (event)")
+    if (time < 0).any():
+        raise ConfigError("the time target must be 0 or more with an event_column")
+    if not flags.any():
+        raise ConfigError(f"event column '{name}' has no event (no row is 1)")
+    return flags
 
 
 def _leaderboard(
