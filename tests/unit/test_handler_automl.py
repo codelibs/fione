@@ -7,6 +7,7 @@ import sys
 import time
 import zipfile
 
+import numpy as np
 import pandas as pd
 import pytest
 from sklearn.datasets import load_iris
@@ -383,3 +384,30 @@ def test_a_failing_rollback_does_not_mask_the_original_error(
     monkeypatch.setattr(LocalStorage, "delete_prefix", fail_cleanup)
     done = run_job(quick_job)
     assert done.status is JobStatus.FAILED and done.message == message
+
+
+def test_a_job_on_a_whole_number_date_column_trains_and_predicts(
+    conn, runner, owner, project, storage, settings
+):
+    rng = np.random.default_rng(0)
+    n = 600
+    when = pd.Timestamp("2014-10-21") + pd.to_timedelta(np.sort(rng.integers(0, 240, n)), unit="h")
+    df = pd.DataFrame({"hour": when.strftime("%y%m%d%H").astype("int64"), "x": rng.normal(size=n)})
+    df["click"] = np.where(rng.random(n) < np.where(when.hour < 6, 0.8, 0.1), "yes", "no")
+    data = add_dataset(conn, storage, project, df, "clicks")
+    config = {"target": "click", "max_runtime_secs": 30, "max_models": 3, "nfolds": 3}
+    done = wait_done(
+        conn, models.submit_training(conn, storage, owner, project.id, data.id, config).id
+    )
+    assert done.status is JobStatus.DONE, done.message
+    record = models.get_model(conn, done.result["model_id"])
+    assert set(record.importance) == {"hour", "x"}  # the parts count for their column
+    kinds = [e.data.get("kind") for _, e in store.events_since(conn, done.id) if e.type == "notice"]
+    assert "time_hint" in kinds
+    trained = models.load_trained(storage, record, load_secret(settings))
+    assert trained.prep.integer_dates == {"hour": "%y%m%d%H"}
+    job = models.submit_batch_predict(conn, owner, project.id, record.id, data.id)
+    predicted = wait_done(conn, job.id)
+    assert predicted.status is JobStatus.DONE, predicted.message
+    out = projects.get_dataset(conn, predicted.result["dataset_id"])
+    assert out.n_rows == n
