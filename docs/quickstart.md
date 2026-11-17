@@ -304,6 +304,43 @@ empty values and is left out of the windows of the others. A `window` wider than
 running total (`signal_before1000000_sum`) and `count` the number of earlier rows that hold a
 value; a row with no earlier row, or none that holds a value, stays empty.
 
+## A column computed from other columns
+
+The built-in **Add a calculated column** module (`calc`) adds one column made from the numeric columns
+of the dataset: name the new column (`name`; it must not exist yet) and write how to compute it
+(`expression`, up to 1,000 characters). The other columns and the rows stay as they are, and the new
+column holds decimal numbers. For example `close / close_before1_mean - 1` (a return),
+`price - price_around999999_mean` (a value relative to its group's mean), `flag - flag_lag1` (a change
+from the month before) or `rowsum("flag_*")` (the number of the flags `flag_...` that are set).
+
+An expression is built from:
+
+- numbers, and the names of columns. A name with spaces or symbols, or one that is not a plain word,
+  is written `col("unit price")`. A column must be numeric (a yes/no column counts as 0 and 1).
+- `+ - * / **` and parentheses (`nan` is an empty value, unless a column has that name).
+- comparisons `== != < <= > >=`, which give 1 or 0 (a comparison with an empty value gives 0, and
+  `!=` gives 1), and `&`, `|`, `~` for "and", "or", "not" on such values, which also give 1 or 0 (an
+  empty value is false). Put each comparison in parentheses: `(a > 0) & (b > 0)`.
+- `abs`, `sqrt`, `log`, `log1p`, `exp`, `min2(x, y)` and `max2(x, y)` (the smaller and larger of two
+  values), `clip(x, low, high)`, `isnull(x)` (1 where `x` is empty) and `where(condition, x, y)`
+  (`x` where the condition is true, `y` elsewhere).
+- `rowsum`, `rowmean` and `rowcount` of any number of values on one row, which skip the empty ones:
+  `rowsum(a, b, c)`, or a pattern in quotes for every column whose name matches it (`*` for any
+  characters, also none; it is the only wildcard), such as `rowsum("flag_*_on")`, which gives the number
+  of such flags that are set. `rowsum` of nothing but empty values is 0, `rowmean` is empty, and
+  `rowcount` is the number of values that are not empty.
+
+A result that is infinite is empty: a division by zero (`a / 0`), `log(0)` or an overflow; the job
+reports how many rows had one, and an infinite value in a column counts as empty without a report.
+A column that several patterns of one row function match is read once. The row functions read at most
+10,000 columns and values in all, and the rows times those read is limited like the size of a result
+(150 million cells). An expression also holds a number of columns of intermediate values while it
+runs (a sum written `a+b+c` holds three; `-a+(-a+(...))` nested on the right holds one more for each
+level), and that number plus the dataset's columns times the rows is limited the same way.
+
+Nothing is run but this arithmetic: calls to other functions, attribute access, indexing and the
+like are refused with a message, as are an unknown column or one that is not numeric. An expression can nest to about 100 levels.
+
 ## Learning a skewed target
 
 For a regression target of 0 or more that is skewed (prices, counts, durations) and is
