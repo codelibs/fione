@@ -115,13 +115,26 @@ def make_folds(
     return list(split.split(np.zeros(len(y)), y, groups))
 
 
-def make_time_folds(order: np.ndarray, y: np.ndarray, task: Task, nfolds: int) -> Folds:
+def make_time_folds(
+    order: np.ndarray,
+    y: np.ndarray,
+    task: Task,
+    nfolds: int,
+    groups: np.ndarray | None = None,
+    few_message: str = "the time column has too few different values to make validation parts",
+) -> Folds:
     """Folds that look forward in time. The rows, ordered by ``order`` (whole numbers, equal for
     rows of the same moment), are cut into ``nfolds + 1`` parts of about the same size; the
     fold ``j`` validates on part ``j`` and trains on the parts before it, so no model learns
     from a later row than the ones it predicts. The first part is never validated. Rows that
     share a value of ``order`` are in the same part, so fewer folds come out when it has few
-    different values."""
+    different values. With ``groups`` (one label per row) a group is ordered by its last row, so
+    all its rows are in one part: no group has rows both in training and in validation, and
+    every group a fold learns from ends no later than the groups it predicts."""
+    if groups is not None:
+        last = np.zeros(int(groups.max()) + 1, dtype=np.int64)
+        np.maximum.at(last, groups, order)
+        order = last[groups]
     n = len(order)
     ranked = np.argsort(order, kind="stable")
     starts = np.searchsorted(order[ranked], order[ranked], side="left")
@@ -129,7 +142,7 @@ def make_time_folds(order: np.ndarray, y: np.ndarray, task: Task, nfolds: int) -
     part[ranked] = np.minimum(starts * (nfolds + 1) // n, nfolds)
     present = np.unique(part)
     if len(present) < 2:
-        raise ConfigError("the time column has too few different values to make validation parts")
+        raise ConfigError(few_message)
     folds = [(np.flatnonzero(part < p), np.flatnonzero(part == p)) for p in present[1:]]
     if task == "classification":
         classes = np.unique(y)

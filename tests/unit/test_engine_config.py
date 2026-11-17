@@ -146,6 +146,10 @@ def test_the_time_column_defaults_to_none_and_must_name_a_column():
         TrainConfig(target="y", time_column="y").validate()
 
 
+def test_a_time_column_and_a_group_column_may_be_used_together():
+    TrainConfig(target="y", time_column="day", cv_group_column="user").validate()
+
+
 def test_the_quantile_defaults_to_none_and_roundtrips_through_the_dict():
     config = TrainConfig(target="y")
     assert config.quantile is None

@@ -128,7 +128,8 @@ class TrainConfig:
     cv_repeats: int | None = None
     # Validate looking forward in time: the rows ordered by this column (a number or a date, which
     # may also be ignored as a feature) are cut into parts, and each fold learns from the parts
-    # before the one it predicts. None: shuffled folds.
+    # before the one it predicts. With cv_group_column too, a group is ordered by its last row and
+    # kept in one part. None: shuffled folds.
     time_column: str | None = None
     # Learn this quantile of the target (a regression, 0 < quantile < 1) instead of its mean:
     # the models fit the pinball loss, and only the families that can do so are searched.
@@ -209,8 +210,6 @@ class TrainConfig:
             raise ConfigError("time_column must name a column or be empty")
         if self.time_column == self.target:
             raise ConfigError("the time column cannot be the target")
-        if self.time_column is not None and group is not None:
-            raise ConfigError("time_column and cv_group_column cannot be used together")
         q = self.quantile
         if q is not None:
             if not isinstance(q, int | float) or isinstance(q, bool) or not 0 < q < 1:

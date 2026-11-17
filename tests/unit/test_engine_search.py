@@ -1106,6 +1106,50 @@ def test_time_folds_keep_rows_of_one_moment_together_and_need_two_parts():
         search.make_time_folds(np.ones(10, dtype=int), np.zeros(10), "regression", 3)
 
 
+def _grouped_times():
+    rng = np.random.default_rng(1)
+    groups = np.repeat(np.arange(40), 6)
+    start = np.repeat(rng.integers(0, 50, 40), 6)
+    order = start + np.tile(np.arange(6), 40)  # a group spans 6 moments
+    shuffled = rng.permutation(len(groups))
+    return order[shuffled], groups[shuffled]
+
+
+def test_time_folds_with_groups_never_split_a_group_and_go_forward_by_its_last_row():
+    order, groups = _grouped_times()
+    y = np.zeros(len(order))
+    folds = search.make_time_folds(order, y, "regression", 4, groups)
+    last = np.array([order[groups == g].max() for g in range(40)])[groups]
+    assert len(folds) == 4
+    for train, valid in folds:
+        assert not set(groups[train]) & set(groups[valid])
+        assert last[train].max() < last[valid].min()
+    # the same rows are predicted as with the time folds of the groups' last rows
+    plain = search.make_time_folds(last, y, "regression", 4)
+    assert all(
+        np.array_equal(a[1], b[1]) and np.array_equal(a[0], b[0])
+        for a, b in zip(folds, plain, strict=True)
+    )
+    assert len(search.covered(folds, len(order))) < len(order)  # the first part is not predicted
+
+
+def test_time_folds_with_groups_that_all_end_together_are_refused_with_the_given_message():
+    groups = np.repeat(np.arange(10), 3)
+    order = np.full(30, 2)
+    with pytest.raises(ConfigError, match="the groups end together"):
+        search.make_time_folds(
+            order, np.zeros(30), "regression", 4, groups, few_message="the groups end together"
+        )
+
+
+def test_time_folds_with_one_group_per_row_are_the_row_time_folds():
+    order = np.random.default_rng(2).permutation(60)
+    y = np.zeros(60)
+    alone = search.make_time_folds(order, y, "regression", 4)
+    grouped = search.make_time_folds(order, y, "regression", 4, np.arange(60))
+    assert all(np.array_equal(a[1], b[1]) for a, b in zip(alone, grouped, strict=True))
+
+
 def test_time_folds_of_a_classification_refuse_a_class_that_comes_late():
     order = np.arange(40)
     y = np.array([0] * 30 + [1] * 10)  # the class 1 first appears after the early parts

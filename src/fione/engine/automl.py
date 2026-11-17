@@ -298,6 +298,23 @@ class AutoML:
             shared=round(shared[column], 2),
         )
 
+    def _notice_lopsided_parts(self, folds, n_rows: int, nfolds: int) -> None:
+        """Say when a part of the time-ordered validation of groups holds far more than its
+        share of the rows: the groups end at about the same time (users present at every
+        origin of a stacked table), so a fold learns from a few of them and predicts most."""
+        sizes = [n_rows - len(covered(folds, n_rows))] + [len(valid) for _, valid in folds]
+        if max(sizes) * (nfolds + 1) <= 2 * n_rows:
+            return
+        self._notice(
+            f"the groups of '{self.config.cv_group_column}' end at about the same time of "
+            f"'{self.config.time_column}', or are few: the {len(sizes)} validation parts hold "
+            f"{', '.join(f'{s:,}' for s in sizes)} rows, so a fold learns from few rows and "
+            "predicts many. Groups that stay over the whole range are validated better with "
+            "the group column alone, without a time column",
+            kind="time_groups_one_part",
+            part_rows=sizes,
+        )
+
     def _notice_sorted_column(self, prep: Prep, X: pd.DataFrame) -> bool:
         """Say when a whole-number column never decreases down the rows and each of its values
         covers many rows (a day number, a period, a group number the file is sorted by): the
@@ -575,7 +592,7 @@ class AutoML:
                 )
             if distinct <= nfolds:
                 repeats = 1  # each group is a fold: every seed gives the same partition
-            if distinct < nfolds:
+            if distinct < nfolds and c.time_column is None:
                 nfolds = distinct
                 notices.append(
                     Event(
@@ -693,7 +710,7 @@ class AutoML:
             dates = [column for column in prep.columns if prep.kind_of(column) == "datetime"]
             # whole numbers that are dates (20141021, 14102100) or Unix times order the rows too
             dates += [column for column in prep.columns if column in prep.integer_dates]
-            if dates and row_groups is None:
+            if dates:
                 self._notice(
                     f"{', '.join(repr(d) for d in dates[:3])} holds dates, and no time_column is "
                     "given, so the validation shuffles the rows. If the model will predict rows "
@@ -712,13 +729,24 @@ class AutoML:
             if row_groups is not None and task == "classification":
                 self._check_classes_in_training(y, folds, classes)
         else:
-            folds = first_run = make_time_folds(_order_codes(df, c.time_column), y, task, nfolds)
+            few = {}
+            if row_groups is not None:
+                few["few_message"] = (
+                    f"the groups of '{c.cv_group_column}' end at too few different values of "
+                    f"'{c.time_column}' to make validation parts (groups that stay over the "
+                    "whole range need the group column without the time column)"
+                )
+            folds = first_run = make_time_folds(
+                _order_codes(df, c.time_column), y, task, nfolds, row_groups, **few
+            )
             self._notice(
                 f"validating on {len(folds)} later parts of the data in order of "
                 f"'{c.time_column}'; the first part is only learned from",
                 kind="time_validation",
                 folds=len(folds),
             )
+            if row_groups is not None:
+                self._notice_lopsided_parts(folds, len(y), nfolds)
         rows = covered(folds, len(y))  # the rows some fold predicts (all but the first part)
         families = self._without_wide_linear_view(prep, len(X))
         # The words are read only from prose columns.

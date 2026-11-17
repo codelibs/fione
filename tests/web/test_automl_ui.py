@@ -522,7 +522,11 @@ def test_the_group_column_is_queued_and_a_bad_one_is_refused(world):
     both = world.client.post(  # the form also orders the rows in time
         url, data=form_for(csrf, cv_group_column="sepal width (cm)"), follow_redirects=False
     )
-    assert both.status_code == 422
+    job_id = int(location(both).rsplit("/", 1)[1])
+    with closing(connect(world.client)) as conn:
+        config = store.get_job(conn, job_id).payload["config"]
+    assert config["cv_group_column"] == "sepal width (cm)"
+    assert config["time_column"] == "petal width (cm)"
     page = world.client.get(url)
     assert 'name="cv_group_column"' in page.text
 
