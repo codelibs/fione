@@ -60,8 +60,8 @@ def test_the_built_in_ids_and_kinds():
     modules = registry.builtin_modules()
     ids = [m.id for m in modules]
     frame_ops = (
-        "calc cbind concat cor cslice fillna floor join lag pivot rbind replace rolling rslice sort"
-        " split tokenize unpivot"
+        "calc cbind concat cor cslice fillna floor join lag pivot rank rbind replace rolling rslice"
+        " sort split tokenize unpivot"
     )
     assert ids == sorted(frame_ops.split()) + [
         "kmeans_predict",
@@ -2322,3 +2322,106 @@ def test_lag_note_names_the_new_column_when_the_name_is_taken():
     )
     notes = _lag_notes(df)
     assert [n["column"] for n in notes] == ["sales_lag1_2"]
+
+
+# --- rank --------------------------------------------------------------------------------------
+
+_RANK_ROWS = pd.DataFrame(
+    {
+        "g": ["a", "a", "a", "a", "b", "b", "c", None],
+        "v": [3.0, 1.0, 3.0, np.nan, 5.0, 5.0, 2.0, 9.0],
+    }
+)
+
+
+def test_rank_percent_matches_pandas_min_rank_within_groups():
+    out, _ = run_op("rank", _RANK_ROWS, {"column": "v", "by": ["g"]})
+    want = _RANK_ROWS.groupby("g").v.rank(method="min", pct=True)
+    pd.testing.assert_series_equal(out["v_rank"], want.rename("v_rank"))
+    # the tied 3s share the smallest rank of the tie: (1 smaller + 1) of 3 values
+    assert out["v_rank"].iloc[0] == out["v_rank"].iloc[2] == pytest.approx(2 / 3)
+    assert out["v_rank"].iloc[1] == pytest.approx(1 / 3)
+    assert np.isnan(out["v_rank"].iloc[3])
+    assert out["v_rank"].iloc[4] == out["v_rank"].iloc[5] == 0.5  # tied 5s
+    assert out["v_rank"].iloc[6] == 1.0  # a group of one
+    assert np.isnan(out["v_rank"].iloc[7])  # no group value
+    assert list(out.columns) == ["g", "v", "v_rank"]
+
+
+def test_rank_without_by_ranks_all_rows_and_leaves_missing_missing():
+    df = pd.DataFrame({"v": [10.0, np.nan, 30.0, 20.0, 20.0]})
+    out, _ = run_op("rank", df, {"column": "v"})
+    assert out["v_rank"].iloc[[0, 2, 3, 4]].tolist() == [0.25, 1.0, 0.5, 0.5]
+    assert np.isnan(out["v_rank"].iloc[1])
+    pd.testing.assert_series_equal(
+        out["v_rank"], df.v.rank(method="min", pct=True).rename("v_rank")
+    )
+
+
+def test_rank_dense_counts_distinct_smaller_values():
+    out, _ = run_op("rank", _RANK_ROWS, {"column": "v", "by": ["g"], "how": "dense"})
+    want = _RANK_ROWS.groupby("g").v.rank(method="dense")
+    pd.testing.assert_series_equal(out["v_dense_rank"], want.rename("v_dense_rank"))
+    assert out["v_dense_rank"].iloc[:3].tolist() == [2.0, 1.0, 2.0]
+
+
+def test_rank_among_ranks_the_group_means_inside_each_by_group():
+    df = pd.DataFrame(
+        {
+            "match": ["m1"] * 5 + ["m2"] * 3,
+            "team": ["x", "x", "y", "z", "z", "x", "x", "y"],
+            "v": [1.0, 3.0, 1.0, 9.0, np.nan, 5.0, 5.0, 5.0],
+        }
+    )
+    out, _ = run_op("rank", df, {"column": "v", "by": ["match"], "among": "team"})
+    # m1: means x=2, y=1, z=9 -> ranks 2/3, 1/3, 1; m2: x=5, y=5 tie -> 1/2 each
+    want = [2 / 3, 2 / 3, 1 / 3, 1.0, 1.0, 0.5, 0.5, 0.5]
+    assert out["v_rank"].tolist() == pytest.approx(want)
+    dense, _ = run_op("rank", df, {"column": "v", "by": ["match"], "among": "team", "how": "dense"})
+    assert dense["v_dense_rank"].tolist() == [2, 2, 1, 3, 3, 1, 1, 1]
+    alone, _ = run_op("rank", df, {"column": "v", "among": "team"})  # means x=3.5, y=3, z=9
+    assert alone["v_rank"].tolist() == pytest.approx(
+        [2 / 3, 2 / 3, 1 / 3, 1, 1, 2 / 3, 2 / 3, 1 / 3]
+    )
+
+
+def test_rank_among_leaves_a_group_without_values_or_a_missing_group_empty():
+    df = pd.DataFrame({"g": ["a"] * 4, "t": ["x", "y", "y", None], "v": [np.nan, 2.0, 4.0, 7.0]})
+    out, _ = run_op("rank", df, {"column": "v", "by": ["g"], "among": "t"})
+    assert out["v_rank"].iloc[1] == out["v_rank"].iloc[2] == 1.0  # the only group with a value
+    assert out["v_rank"].iloc[[0, 3]].isna().all()
+
+
+def test_rank_works_on_nullable_and_empty_frames_and_keeps_names_unique():
+    df = pd.DataFrame({"v": pd.array([3, None, 1], dtype="Int64"), "v_rank": [0, 0, 0]})
+    out, _ = run_op("rank", df, {"column": "v"})
+    assert list(out.columns) == ["v", "v_rank", "v_rank_2"]
+    assert out["v_rank_2"].iloc[[0, 2]].tolist() == [1.0, 0.5]
+    empty, _ = run_op(
+        "rank", pd.DataFrame({"g": ["a"], "v": [1.0]}).iloc[:0], {"column": "v", "by": ["g"]}
+    )
+    assert len(empty) == 0 and "v_rank" in empty.columns
+
+
+@pytest.mark.parametrize(
+    "params, message",
+    [
+        ({"column": "nope"}, "unknown column 'nope'"),
+        ({"column": "g"}, "not numeric"),
+        ({"column": "v", "by": ["v"]}, "different columns"),
+        ({"column": "v", "among": "v"}, "different columns"),
+        ({"column": "v", "by": ["g"], "among": "g"}, "different columns"),
+        ({"column": "v", "by": ["g", "g"]}, "twice"),
+        ({"column": "v", "by": ["nope"]}, "unknown columns"),
+        ({"column": "v", "among": "nope"}, "unknown column 'nope'"),
+    ],
+)
+def test_rank_rejects_what_it_cannot_rank(params, message):
+    with pytest.raises(ModuleError, match=message):
+        run_op("rank", _RANK_ROWS, params)
+
+
+def test_rank_respects_the_cell_cap(monkeypatch):
+    monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 6)
+    with pytest.raises(ModuleError, match="cells"):
+        run_op("rank", pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [1, 2, 3]}), {"column": "a"})

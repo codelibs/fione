@@ -578,6 +578,45 @@ def rolling(df, params, ctx):
     return out
 
 
+def rank(df, params, ctx):
+    """Add the rank of ``column`` within each ``by`` group (all rows when ``by`` is empty): with
+    ``how`` percent, the number of values at most as large as the smallest value tied with the row,
+    divided by the number of values in the group (pandas ``rank(method="min", pct=True)``), so the
+    smallest is 1/n and the largest 1; with dense, 1 for the smallest value, 2 for the next one
+    above it and so on, tied values sharing a rank. With ``among``, the rows of each ``among`` group
+    inside a ``by`` group are first reduced to their mean, and the rank is that of the group's mean
+    among the groups of its ``by`` group; every row of an ``among`` group gets that rank. A row with
+    no value (or no ``by`` or ``among`` value) gets an empty rank and is left out of the others'."""
+    column = require_column(df, params["column"])
+    if not pd.api.types.is_numeric_dtype(df[column]):
+        raise ModuleError(f"column '{column}' is not numeric")
+    by = pick_columns(df, params["by"]) if params["by"] else []
+    among = require_column(df, params["among"]) if params["among"] else ""
+    if len(set(by)) != len(by):
+        raise ModuleError("by cannot name a column twice")
+    if column in by or column == among or among in by:
+        raise ModuleError("column, by and among must be different columns")
+    dense = params["how"] == "dense"
+    check_cells(len(df), len(df.columns) + 1)
+    options = {"method": "dense" if dense else "min", "pct": not dense}
+    if among:
+        means = df.groupby([*by, among], observed=True)[column].mean()
+        if by:
+            means = means.groupby(level=list(range(len(by))), observed=True).rank(**options)
+        else:
+            means = means.rank(**options)
+        found = means.rename("rank").reset_index()
+        values = df[[*by, among]].merge(found, on=[*by, among], how="left")["rank"].to_numpy()
+    elif by:
+        values = df.groupby(by, observed=True)[column].rank(**options).to_numpy()
+    else:
+        values = df[column].rank(**options).to_numpy()
+    name = unique_names(
+        [str(c) for c in df.columns] + [f"{column}_{'dense_' if dense else ''}rank"]
+    )
+    return df.assign(**{name[-1]: values})
+
+
 def calc(df, params, ctx):
     """Add the column ``name``, computed by ``expression`` from the other columns (see
     ``fione.modules.expression``); the rows and the other columns stay as they are."""
@@ -940,6 +979,18 @@ _op(
     unpivot,
 )
 _op("rbind", "Combine rows", {"other_dataset_id": _OTHER}, ("other_dataset_id",), rbind)
+_op(
+    "rank",
+    "Add the rank within a group",
+    {
+        "column": _NAME,
+        "by": _NAMES,
+        "among": {**_NAME, "default": ""},
+        "how": {"type": "string", "enum": ["percent", "dense"], "default": "percent"},
+    },
+    ("column",),
+    rank,
+)
 _op(
     "replace",
     "Replace values",
