@@ -174,3 +174,38 @@ def test_the_pinball_metric_needs_a_quantile(field):
     with pytest.raises(ConfigError, match="pinball metric needs a quantile"):
         TrainConfig(target="y", **{field: "Pinball"}).validate()
     TrainConfig(target="y", quantile=0.2, **{field: "pinball"}).validate()
+
+
+def test_the_event_column_defaults_to_none_and_roundtrips_through_the_dict():
+    config = TrainConfig(target="t")
+    assert config.event_column is None
+    del config.__dict__["event_column"]  # a config saved before the setting
+    assert config.event_column is None
+    saved = TrainConfig(target="t", event_column="e", task="regression").validate()
+    assert TrainConfig.from_dict(saved.to_dict()).event_column == "e"
+    TrainConfig(target="t", event_column="e", sort_metric="Concordance").validate()
+
+
+@pytest.mark.parametrize("event", ["", 3])
+def test_the_event_column_must_name_a_column(event):
+    with pytest.raises(ConfigError, match="event_column must name a column"):
+        TrainConfig(target="t", event_column=event).validate()
+
+
+def test_the_event_column_cannot_be_the_target_or_go_with_other_modes():
+    with pytest.raises(ConfigError, match="event column cannot be the target"):
+        TrainConfig(target="t", event_column="t").validate()
+    with pytest.raises(ConfigError, match="event_column needs a regression"):
+        TrainConfig(target="t", event_column="e", task="classification").validate()
+    with pytest.raises(ConfigError, match="cannot be used together"):
+        TrainConfig(target="t", event_column="e", quantile=0.5).validate()
+    with pytest.raises(ConfigError, match="cannot be used with a target_transform"):
+        TrainConfig(target="t", event_column="e", target_transform="log1p").validate()
+
+
+@pytest.mark.parametrize("field", ["sort_metric", "stopping_metric"])
+def test_concordance_needs_an_event_column_and_an_event_column_only_allows_it(field):
+    with pytest.raises(ConfigError, match="concordance metric needs an event_column"):
+        TrainConfig(target="t", **{field: "concordance"}).validate()
+    with pytest.raises(ConfigError, match="must be auto or concordance"):
+        TrainConfig(target="t", event_column="e", **{field: "rmse"}).validate()

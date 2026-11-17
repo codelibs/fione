@@ -923,3 +923,41 @@ def test_system_status_counts_the_queue(env):
     body = env.client.get("/api/v1/system/status", headers=env.h["viewer"]).json()
     assert body["storage"] == "local" and body["jobs"] == {"queued": 2, "running": 0}
     assert str(env.data_dir) not in str(body)
+
+
+def test_an_event_column_training_job_keeps_the_column_and_predicts_a_score(make_env, monkeypatch):
+    import numpy as np
+    import pandas as pd
+
+    monkeypatch.delenv("FIONE_JOB_HANDLER_MODULES", raising=False)
+    env = make_env(start_runner=True)
+    c, h, p = env.client, env.h, env.p
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"x0": rng.normal(size=400), "x1": rng.normal(size=400)})
+    lasts = rng.exponential(np.exp(-df["x0"]))
+    seen = rng.exponential(2.0, 400)
+    df["t"] = np.minimum(lasts, seen).round(4)
+    df["ev"] = (lasts <= seen).astype(int)
+    dataset = upload(c, p, df.to_csv(index=False).encode(), headers=h["owner"]).json()["id"]
+    config = {"target": "t", "event_column": "ev", "max_runtime_secs": 60, "max_models": 1}
+    r = c.post(
+        f"/api/v1/projects/{p}/jobs/automl",
+        json={"dataset_id": dataset, "config": config},
+        headers=h["owner"],
+    )
+    assert r.status_code == 201, r.text
+    job = wait_job(c, r.json()["id"], h["owner"], timeout=120)
+    assert job["status"] == "done", job
+    model = c.get(f"/api/v1/models/{job['result']['model_id']}", headers=h["owner"]).json()
+    assert model["config"]["event_column"] == "ev" and list(model["metrics"]) == ["concordance"]
+    r = c.post(
+        f"/api/v1/projects/{p}/jobs/batch-predict",
+        json={"model_id": model["id"], "dataset_id": dataset},
+        headers=h["owner"],
+    )
+    done = wait_job(c, r.json()["id"], h["owner"])
+    assert done["status"] == "done", done
+    shown = c.get(
+        f"/api/v1/projects/{p}/datasets/{done['result']['dataset_id']}", headers=h["owner"]
+    )
+    assert [col["name"] for col in shown.json()["schema"]][0] == "predict"

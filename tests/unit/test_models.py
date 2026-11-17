@@ -388,6 +388,8 @@ def test_a_target_the_engine_would_refuse_is_refused_before_a_job_is_queued(
         ({**CONFIG, "decision": "tuned", "sort_metric": "f1"}, "needs a target with two classes"),
         ({**CONFIG, "sort_metric": "top3_accuracy"}, "sort_metric 'top3_accuracy' needs"),
         ({**CONFIG, "quantile": 0.5}, "quantile needs a regression"),
+        ({**CONFIG, "event_column": "nope"}, "event column 'nope' is not in the data"),
+        ({**CONFIG, "event_column": "species"}, "event column cannot be the target"),
         ({**CONFIG, "seed": -1}, "seed must be a whole number from 0 to 4294967295"),
         ({**CONFIG, "seed": 2**32}, "seed must be a whole number from 0 to 4294967295"),
     ],
