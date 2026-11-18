@@ -429,13 +429,13 @@ def test_get_column_stats_rejects_unknown_columns_and_reads_only_that_column(env
     with pytest.raises(ToolError, match="column not found"):
         call(env, "get_column_stats", {"dataset_id": env.dataset.id, "column": "nope"})
     seen = []
-    real = ingest.read_dataset_sample
+    real = ingest.read_dataset_runs
 
     def spy(storage, dataset, max_rows=200_000, columns=None):
         seen.append(columns)
         return real(storage, dataset, max_rows, columns)
 
-    monkeypatch.setattr(ingest, "read_dataset_sample", spy)
+    monkeypatch.setattr(ingest, "read_dataset_runs", spy)
     call(env, "get_column_stats", {"dataset_id": env.dataset.id, "column": "num"})
     assert seen == [["num"]]
 
@@ -1001,18 +1001,56 @@ def test_describe_reads_a_bounded_sample(env, monkeypatch):
 
     monkeypatch.setattr(ingest, "read_dataset", forbidden)
     sizes = []
-    real = ingest.read_dataset_sample
+    real = ingest.read_dataset_runs
 
     def spy(*args, **kwargs):
         frame = real(*args, **kwargs)
         sizes.append(len(frame))
         return frame
 
-    monkeypatch.setattr(ingest, "read_dataset_sample", spy)
+    monkeypatch.setattr(ingest, "read_dataset_runs", spy)
     result = call(env, "describe_dataset", {"dataset_id": ds.id})
     assert sizes == [200_000] and result["profile_rows"] == 200_000
     assert result["dataset"]["n_rows"] == 300_000
-    assert {c["name"]: c["stats"]["max"] for c in result["columns"]}["a"] == 199_999  # the head
+    assert {c["name"]: c["stats"]["max"] for c in result["columns"]}["a"] > 290_000  # not the head
+
+
+def test_a_profile_of_a_file_sorted_by_day_sees_every_day(env):
+    days = np.repeat(np.arange(400), 1_000)  # the leading 200,000 rows hold only 200 days
+    frames = [
+        pd.DataFrame({"day": days[i : i + 50_000], "v": 1.0}) for i in range(0, 400_000, 50_000)
+    ]
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "daily", DatasetType.TRAIN, frames
+    )
+    columns = {
+        c["name"]: c for c in call(env, "describe_dataset", {"dataset_id": ds.id})["columns"]
+    }
+    assert columns["day"]["n_unique"] == 400
+
+
+def test_read_dataset_runs(env):
+    frame = pd.DataFrame({"a": np.arange(5000.0), "b": [str(i) for i in range(5000)]})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "u", DatasetType.TRAIN, [frame[:2000], frame[2000:]]
+    )
+    sample = ingest.read_dataset_runs(env.storage, ds, 1000, ["a"])
+    assert list(sample.columns) == ["a"] and len(sample) == 1000
+    assert sample["a"].is_monotonic_increasing and sample["a"].max() > 4000  # not the head
+    assert (sample["a"] < 2000).sum() == 400  # each group keeps its share
+    assert (np.diff(sample["a"]) == 1).mean() > 0.9  # in runs of neighbours
+    pd.testing.assert_frame_equal(sample, ingest.read_dataset_runs(env.storage, ds, 1000, ["a"]))
+    assert len(ingest.read_dataset_runs(env.storage, ds, 6000)) == 5000
+
+
+def test_a_sample_keeps_the_rows_of_one_id_together(env):
+    ids = np.arange(300_000) // 10  # ten neighbouring rows to an id
+    frames = [pd.DataFrame({"customer_id": ids[i : i + 50_000]}) for i in range(0, 300_000, 50_000)]
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "ids", DatasetType.TRAIN, frames
+    )
+    sample = ingest.read_dataset_runs(env.storage, ds, 100_000)
+    assert len(sample) / sample["customer_id"].nunique() > 8  # rows per id, 10 in the file
 
 
 def test_read_dataset_sample(env):

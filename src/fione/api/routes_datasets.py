@@ -22,13 +22,19 @@ from fione.api.schemas import IdPath, dataset_out
 from fione.data.profile import SCORE_REASONS, leak_check, profile_dataset
 from fione.engine.events import jsonable
 from fione.projects import service
-from fione.projects.ingest import export_csv, ingest_csv, read_dataset_sample
+from fione.projects.ingest import (
+    export_csv,
+    ingest_csv,
+    read_dataset_runs,
+    read_dataset_sample,
+)
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 
 router = APIRouter(prefix="/projects/{project_id}/datasets", tags=["datasets"])
 
 MAX_PREVIEW_ROWS = 200
-# Profiles describe the first rows of a dataset, so a request costs bounded time and memory.
+# Profiles describe a sample of the rows of a dataset spread over all of it, so a request costs
+# bounded memory.
 PROFILE_SAMPLE_ROWS = 100_000
 _MAX_NAME_LEN = 100
 
@@ -192,16 +198,16 @@ def profile(
     request: Request,
     target: str | None = Query(None, max_length=1000),
 ) -> dict:
-    """Profile (EDA) of the first 100,000 rows: kinds, statistics, histograms, correlations
-    and, with ``target``, leak suspects. For the UI, so ``top_values`` (raw cell values)
-    are included, unlike the LLM-facing tools. ``n_rows`` is the whole dataset's row count,
-    ``sample_rows`` the number profiled. Each leak suspect's ``kind`` is ``exact`` (the
-    column is left out of the EasyML defaults) or ``score`` (a warning only: a strong
-    legitimate column can score as high). The leak check, which can take seconds, is kept
+    """Profile (EDA) of a sample of 100,000 rows from across the dataset: kinds, statistics,
+    histograms, correlations and, with ``target``, leak suspects. For the UI, so ``top_values``
+    (raw cell values) are included, unlike the LLM-facing tools. ``n_rows`` is the whole
+    dataset's row count, ``sample_rows`` the number profiled. Each leak suspect's ``kind`` is
+    ``exact`` (the column is left out of the EasyML defaults) or ``score`` (a warning only: a
+    strong legitimate column can score as high). The leak check, which can take seconds, is kept
     per dataset and target in the app's leak-check cache (the UI's), unless its time budget
     ran out. Its entries have keys of their own: this sample is not the one the UI checks."""
     dataset = _dataset(conn, ctx, dataset_id)
-    frame = read_dataset_sample(request.app.state.storage, dataset, max_rows=PROFILE_SAMPLE_ROWS)
+    frame = read_dataset_runs(request.app.state.storage, dataset, PROFILE_SAMPLE_ROWS)
     with service_errors():
         result = profile_dataset(frame)
         if target is not None:
@@ -229,8 +235,8 @@ def column_profile(
     dataset = _dataset(conn, ctx, dataset_id)
     if column not in {name for name, _ in dataset.schema}:
         raise not_found("column not found")
-    frame = read_dataset_sample(
-        request.app.state.storage, dataset, max_rows=PROFILE_SAMPLE_ROWS, columns=[column]
+    frame = read_dataset_runs(
+        request.app.state.storage, dataset, PROFILE_SAMPLE_ROWS, columns=[column]
     )
     return jsonable(asdict(profile_dataset(frame).columns[0]))
 
