@@ -269,8 +269,9 @@ a step of one apart). No row reads its
 own time or a later one, but the module does not know which rows are to be predicted: to give
 the rows to predict their lags, put them in the same dataset (with the target empty) before
 adding the lags. Training refuses a target with missing values, so take the rows to learn from
-with **Slice rows** (such as `month < 34`) before training, and the rows to predict with another
-slice for the prediction. A lag cannot reach beyond the end of the history, so rows to predict
+with **Slice rows** (such as `month < 34`, or `sales is not empty` for the rows where `sales`
+has a value; `is empty` selects the others) before training, and the rows to predict with
+another slice for the prediction. A lag cannot reach beyond the end of the history, so rows to predict
 that lie further ahead than the lag have it empty: a prediction run reports the columns that
 the model learned from filled in and the rows to predict mostly lack, and a model that leans on
 them is not to be trusted.

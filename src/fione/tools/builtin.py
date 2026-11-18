@@ -893,7 +893,11 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
             if col.missing_rate > 0:
                 warnings.append(
                     _warning(
-                        "target_missing", "the target has missing values, which training refuses"
+                        "target_missing",
+                        "the target has missing values, which training refuses; remove those "
+                        "rows with the Slice rows module and the condition "
+                        f"'{clean_text(col.name)} is not empty'",
+                        column=clean_text(col.name),
                     )
                 )
         elif col.name in ignore:

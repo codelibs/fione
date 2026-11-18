@@ -687,6 +687,23 @@ def codes(result):
     return found
 
 
+def test_propose_says_how_to_remove_the_rows_with_an_empty_target(env):
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"x": rng.normal(size=60), "sales": rng.normal(size=60)})
+    frame.loc[::10, "sales"] = np.nan
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "empty", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "sales"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "target_missing" in codes(result)
+    warning = next(w for w in result["warnings"] if w["code"] == "target_missing")
+    assert warning["params"] == {"column": "sales"}
+    assert "'sales is not empty'" in warning["message"]
+
+
 def test_propose_hints_at_settings_that_suit_the_target(env):
     rng = np.random.default_rng(0)
     frame = pd.DataFrame(

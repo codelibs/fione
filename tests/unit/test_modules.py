@@ -232,6 +232,10 @@ CASES = [
     ("rslice", {"row_conditions": "id == 1 | id == 5"}, None, frame(), frame().iloc[[0, 4]]),
     ("rslice", {"row_conditions": "x >= 3.5"}, None, frame(), frame().iloc[[0, 3]]),
     ("rslice", {"row_conditions": "名前 != a"}, None, frame(), frame().iloc[1:]),
+    ("rslice", {"row_conditions": "x is not empty"}, None, frame(), frame().drop(index=2)),
+    ("rslice", {"row_conditions": "x is empty"}, None, frame(), frame().iloc[[2]]),
+    ("rslice", {"row_conditions": "x is empty | id == 1"}, None, frame(), frame().iloc[[0, 2]]),
+    ("rslice", {"row_conditions": "x is not empty & g == u"}, None, frame(), frame().iloc[[0, 4]]),
     ("rslice", {}, None, frame(), frame()),
     # frame_sort.py: by one column; gaps last
     ("sort", {"column": "x", "ascending": False}, None, frame(), frame().iloc[[3, 0, 4, 1, 2]]),
@@ -586,6 +590,7 @@ def test_a_japanese_column_passes_through_the_ops():
         ("replace", {"column": "id", "value": "abc"}, None, "'abc'"),
         ("rslice", {"row_conditions": "id ~ 3"}, None, "cannot read the condition"),
         ("rslice", {"row_conditions": "nope == 3"}, None, "unknown column 'nope'"),
+        ("rslice", {"row_conditions": "nope is empty"}, None, "unknown column 'nope'"),
         ("rslice", {"row_conditions": "id > abc"}, None, "'abc'"),
         ("split", {"train_ratio": 0}, None, "train_ratio"),
         ("tokenize", {"target_column": "nope"}, None, "unknown column 'nope'"),
