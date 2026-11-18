@@ -24,6 +24,48 @@ _DATE_SIGNAL = (
 )
 
 
+# A column name that reads as a time: date, time, day, week, month, year, period, step, tick or
+# epoch as a word of its own (date_id, DayIdx, week_no, years), or its Japanese counterpart.
+_TIME_NAME = re.compile(
+    r"(?i:(?<![a-z])(?:date|time|day|week|month|year|period|step|tick|epoch)s?(?![a-z]))"
+    r"|日付|日数|日目|週|時刻|期間|年月"
+)
+
+
+def is_time_name(name: str) -> bool:
+    """Whether ``name`` reads as a time."""
+    return bool(_TIME_NAME.search(re.sub(r"(?<=[a-z])(?=[A-Z])", "_", name)))
+
+
+# A time word with a counter's suffix (date_id, DayIdx, week_no): the column numbers the days or
+# periods, where a bare time word may be a calendar field or a duration (day, DAYS_BIRTH, Year).
+_TIME_INDEX_NAME = re.compile(
+    r"(?i:(?<![a-z])(?:date|time|day|week|month|year|period|step|tick|epoch)[_ -]?"
+    r"(?:id|idx|index|no|num|number)(?![a-z]))"
+)
+
+# A counter runs through consecutive numbers: its first to its last value span at most this many
+# times its different values, which a measure of time (a duration, a number of days) seldom does.
+COUNTER_SPREAD = 1.5
+
+
+def is_counter_name(name: str) -> bool:
+    """Whether ``name`` is a time word with a counter's suffix (``date_id``, ``DayIdx``)."""
+    return bool(_TIME_INDEX_NAME.search(re.sub(r"(?<=[a-z])(?=[A-Z])", "_", name)))
+
+
+def is_time_counter(
+    name: str, first: int, last: int, distinct: int, *, repeated: bool = False
+) -> bool:
+    """Whether a column named ``name`` of ``distinct`` different whole numbers from ``first`` to
+    ``last`` counts days or periods: it is named like a time and runs through consecutive
+    numbers, a few of them missing. A column whose values repeat over rows (``repeated``) must
+    also be named like a counter, since a year or an age repeats over rows just as well."""
+    if not is_time_name(name) or last - first + 1 > COUNTER_SPREAD * distinct:
+        return False
+    return not repeated or is_counter_name(name)
+
+
 def _spread(values: pd.Series) -> pd.Series:
     """About ``_SAMPLE`` values spread over the whole column: the head of a sorted file is not
     representative."""

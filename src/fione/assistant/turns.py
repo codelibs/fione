@@ -127,7 +127,8 @@ def _acknowledgement(kind: str, result: dict, args: dict | None = None) -> dict:
         summary["dataset_id"] = result.get("dataset_id") or (args or {}).get("dataset_id")
     else:
         summary = {
-            k: config.get(k) for k in ("target", "task", "ignored_columns", "cv_group_column")
+            k: config.get(k)
+            for k in ("target", "task", "ignored_columns", "cv_group_column", "time_column")
         }
     warnings = [w["message"] for w in result.get("warnings") or [] if isinstance(w, dict)]
     return {

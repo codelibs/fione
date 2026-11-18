@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 
 from fione.auth.roles import ProjectAccess, Role, can_access_project, project_access
+from fione.data.frames import is_counter_name, is_time_counter
 from fione.data.profile import (
     SCORE_REASONS,
     ColumnProfile,
@@ -52,7 +53,8 @@ from fione.engine import diagnostics as diag
 from fione.engine import metrics
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.explain import PD_GRID
-from fione.engine.prep import MAX_PROSE, _sorted_labels, infer_task
+from fione.engine.prep import MAX_PROSE, _sorted_labels, infer_task, validate_target
+from fione.engine.search import make_time_folds
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.models import explanations
@@ -690,6 +692,7 @@ RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balan
 # least REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
 REPEATED_ID_GROUPS = 10
 REPEATED_ID_MIN_ROWS = 2  # rows per value, on average
+TIME_REPEATED_VALUES = 20  # different values of a time-named column that repeats over rows
 _IDENTIFIER = re.compile(r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(?![a-z])|番号")
 # Whom the rows are about, as the whole name (a plural, digits or punctuation may follow): a
 # column that names the one the rows concern, not a trait of it (user_age, session_count).
@@ -767,6 +770,53 @@ def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | 
     # A column named like an identifier comes before one named for the entity.
     found.sort(key=lambda col: _IDENTIFIER.search(col.name) is None)
     return found[0] if found else None
+
+
+def time_index_column(profile: DatasetProfile, target: str, n_rows: int) -> ColumnProfile | None:
+    """The first column other than ``target`` that holds a different whole number on every row
+    of the sample the profile rests on (an id column to the profile, with no gap), is named like
+    a time (``date_id``, ``day_idx``) and runs through consecutive numbers over the ``n_rows``
+    rows of the dataset: a day or period counter, which ``time_column`` can use; else None."""
+    return next(
+        (
+            col
+            for col in profile.columns
+            if col.name != target
+            and col.kind == "id"
+            and col.missing_rate == 0
+            and col.span is not None
+            and is_time_counter(col.name, 0, col.span - 1, n_rows)
+        ),
+        None,
+    )
+
+
+def repeated_time_column(
+    ctx: ToolContext, dataset: Dataset, profile: DatasetProfile, target: str
+) -> tuple[str, int] | None:
+    """The first column other than ``target`` with a counter's name (``date_id``) that runs
+    through ``TIME_REPEATED_VALUES`` or more consecutive whole numbers with no missing value,
+    each on two rows or more on average of the whole dataset (the day or period of each row):
+    its name and number of different values; else None. Each candidate is read whole, since the
+    profile's sample of a large file sees only some of its values."""
+    for col in profile.columns:
+        if col.name == target or col.kind == "id" or col.span is None:
+            continue
+        if not is_counter_name(col.name):
+            continue
+        values = ingest.read_dataset(ctx.storage, dataset, [col.name])[col.name]
+        if values.isna().any():
+            continue
+        distinct = int(values.nunique())
+        if (
+            distinct >= TIME_REPEATED_VALUES
+            and dataset.n_rows >= 2 * distinct
+            and is_time_counter(
+                col.name, int(values.min()), int(values.max()), distinct, repeated=True
+            )
+        ):
+            return col.name, distinct
+    return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -853,6 +903,23 @@ def _metric_for(name, y: pd.Series, task: str) -> str:
     return name
 
 
+def _time_order_works(ctx: ToolContext, dataset: Dataset, column: str, found: Proposal) -> bool:
+    """Whether the engine could validate in the order of ``column``: it has no missing value
+    in the whole dataset and, with a classification target, each class has a row before the
+    later parts (``make_time_folds``)."""
+    order = ingest.read_dataset(ctx.storage, dataset, [column])[column]
+    if order.isna().any():
+        return False
+    if found.task != "classification":
+        return True
+    try:
+        y, _, nfolds = validate_target(found.y, found.task, TrainConfig.nfolds)
+        make_time_folds(pd.factorize(order, sort=True)[0], y, found.task, nfolds)
+    except ConfigError:
+        return False
+    return True
+
+
 def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     dataset = _dataset(ctx, args["dataset_id"])
     names = [name for name, _ in dataset.schema]
@@ -880,7 +947,14 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 n=_MAX_COLUMNS,
             )
         )
-    ignore = {col.name for col in found.ignore}
+    time_index = time_index_column(profile, target, dataset.n_rows)
+    if time_index is not None and (
+        "group_column" in args  # the groups would have to end at several different times
+        or not _is_plain(time_index.name)
+        or not _time_order_works(ctx, dataset, time_index.name, found)
+    ):
+        time_index = None
+    ignore = {col.name for col in found.ignore} - {time_index.name if time_index else None}
     for col in profile.columns:
         if col.name == target:
             if col.kind in ("id", "constant"):
@@ -982,6 +1056,36 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 "value are related (the same customer, say), group_column keeps them together "
                 "in validation so the score is not too good",
                 column=column,
+            )
+        )
+    if time_index is not None:
+        overrides["time_column"] = time_index.name
+        column = clean_text(time_index.name)
+        warnings.append(
+            _warning(
+                "time_index",
+                f"column '{column}' holds a different whole number on every row and is named "
+                "like a time, so it is proposed as time_column: the rows are validated in its "
+                "order, later rows after earlier ones. If it is not a time, leave time_column "
+                "empty and leave the column out",
+                column=column,
+            )
+        )
+    if time_index is None and (repeated := repeated_time_column(ctx, dataset, profile, target)):
+        column = clean_text(repeated[0])
+        values, rows = f"{repeated[1]:,}", f"{dataset.n_rows / repeated[1]:.0f}"
+        warnings.append(
+            _warning(
+                "time_index_repeated",
+                f"column '{column}' is named like a time and runs through "
+                f"{values} consecutive whole numbers, each on about "
+                f"{rows} rows, so it may be the day or period "
+                "of each row. If the rows are ordered in time and you will predict later times, "
+                "time_column set to it validates later rows after earlier ones, so the score is "
+                "not too good",
+                column=column,
+                values=values,
+                rows=rows,
             )
         )
     if "sort_metric" in overrides:

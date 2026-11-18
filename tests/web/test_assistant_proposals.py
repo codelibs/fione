@@ -293,14 +293,21 @@ def test_hostile_names_escaped_on_the_card(setup):
         world.client, fake, "ed", world.p, world.ids[world.p]["train"], "species"
     )
     details = {
-        "warnings": [{"code": "leak_other", "message": hostile, "params": {"column": hostile}}],
+        "warnings": [
+            {"code": "leak_other", "message": hostile, "params": {"column": hostile}},
+            {"code": "time_index", "message": hostile, "params": {"column": hostile}},
+        ],
         "ignored_suggestions": [{"column": hostile, "reason": hostile, "code": "id"}],
         "rationale": hostile,
     }
     with closing(connect(world.client)) as conn:
         conn.execute(
-            "UPDATE chat_proposals SET details_json = ? WHERE id = ?",
-            (json.dumps(details), proposal.id),
+            "UPDATE chat_proposals SET details_json = ?, config_json = ? WHERE id = ?",
+            (
+                json.dumps(details),
+                json.dumps({**proposal.config, "time_column": hostile}),
+                proposal.id,
+            ),
         )
     world.login("ed")
     html = world.client.get(f"/projects/{world.p}/assistant?c={proposal.conversation_id}").text

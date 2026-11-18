@@ -97,6 +97,7 @@ class ColumnProfile:
     mean_length: float | None = (
         None  # characters per value, of a ``text`` column the engine reads as prose
     )
+    span: int | None = None  # last - first + 1 of a column of whole numbers (integer type)
 
 
 @dataclass
@@ -202,6 +203,9 @@ def _profile_column(name: str, s: pd.Series) -> ColumnProfile:
         stats, histogram, outlier_rate = _numeric_details(nonnull)
     if kind in ("categorical", "text", "id"):
         top_values = _top_values(counts)
+    span = None
+    if len(nonnull) and pdt.is_integer_dtype(nonnull.dtype):
+        span = int(nonnull.max()) - int(nonnull.min()) + 1
     mean_length = None
     if kind == "text" and is_prose(nonnull):
         mean_length = float(nonnull.astype(str).str.len().mean())
@@ -215,6 +219,7 @@ def _profile_column(name: str, s: pd.Series) -> ColumnProfile:
         top_values=top_values,
         outlier_rate=outlier_rate,
         mean_length=mean_length,
+        span=span,
     )
 
 

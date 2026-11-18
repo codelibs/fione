@@ -1598,6 +1598,84 @@ def test_a_column_of_earlier_values_or_a_target_that_does_not_follow_gets_no_suc
     assert not _history_hints(typed.drop(columns="county"))
 
 
+def _index_hints(df, **config):
+    events = []
+    _fit(
+        df,
+        events,
+        target="y",
+        task="regression",
+        families=["LightGBM"],
+        max_models=1,
+        feature_engineering=False,
+        **config,
+    )
+    return [e for e in events if e.data.get("kind") == "time_index"]
+
+
+def test_a_day_counter_named_like_a_time_is_pointed_out():
+    df = _panel().rename(columns={"day": "date_id"}).assign(date_id=np.arange(1_200))
+    (hint,) = _index_hints(df)
+    assert hint.data["columns"] == ["date_id"]
+    assert "time_column" in hint.data["message"]
+    assert not _index_hints(df, time_column="date_id")
+
+
+def test_a_day_counter_with_a_few_missing_days_is_pointed_out():
+    days = np.delete(np.arange(1_250), [10, 400, 800, 1_000, 1_100])[:1_200]
+    (hint,) = _index_hints(_panel().assign(date_id=days).drop(columns="day"))
+    assert hint.data["columns"] == ["date_id"]
+
+
+def test_a_day_of_each_row_named_like_a_time_is_pointed_out_sorted_or_shuffled():
+    for name in ("date_id", "DayIdx"):
+        df = _panel(2_000).assign(day=np.arange(2_000) // 50).rename(columns={"day": name})
+        shuffled = df.sample(frac=1, random_state=0).reset_index(drop=True)
+        for frame in (df, shuffled):
+            hints = _index_hints(frame) or _sorted_hints(frame)
+            assert [h.data["columns"] for h in hints] == [[name]]
+        (hint,) = _index_hints(shuffled)
+        assert "may be the day or period of each row" in hint.data["message"]
+        assert "If the rows are ordered in time" in hint.data["message"]
+        assert not _index_hints(shuffled, time_column=name)
+
+
+def test_a_time_named_column_with_gaps_or_few_values_is_not_pointed_out_as_a_day_of_each_row():
+    df = _panel(2_000).assign(date_id=np.arange(2_000) // 50 * 5)  # every fifth number
+    assert not _index_hints(df.drop(columns="day"))
+    assert not _index_hints(
+        _panel(2_000).assign(date_id=np.arange(2_000) // 200).drop(columns="day")
+    )
+
+
+def test_a_day_of_each_row_with_missing_values_is_not_pointed_out():
+    df = _panel(2_000).assign(date_id=pd.array(np.arange(2_000) // 50, dtype="Int64"))
+    df.loc[::100, "date_id"] = pd.NA
+    shuffled = df.drop(columns="day").sample(frac=1, random_state=0).reset_index(drop=True)
+    assert not _index_hints(shuffled)
+
+
+def test_a_year_an_age_or_a_calendar_day_that_repeats_over_rows_is_not_pointed_out():
+    for name in ("year_built", "age_in_days", "Year", "day", "days_since_signup"):
+        df = _panel(2_000).assign(day=np.arange(2_000) // 50).rename(columns={"day": name})
+        shuffled = df.sample(frac=1, random_state=0).reset_index(drop=True)
+        assert not _index_hints(shuffled)  # the sorted notice does not stand in for it
+
+
+def test_a_row_number_a_float_or_a_duration_is_not_pointed_out():
+    df = _panel().assign(day=np.arange(1_200))
+    for name in ("id", "index", "row_id", "Id"):
+        assert not _index_hints(df.rename(columns={"day": name}))
+    assert not _index_hints(df.assign(day=df["day"].astype(float)))
+    rng = np.random.default_rng(1)
+    for rows in (30, 2_000):  # a duration: a different whole number on each row, spread wide
+        spread = rng.choice(np.arange(10 * rows), rows, replace=False)
+        for name in ("response_time", "date_id"):
+            assert not _index_hints(
+                _panel(rows).rename(columns={"day": name}).assign(**{name: spread})
+            )
+
+
 def test_a_short_table_is_not_checked_for_an_ordered_target():
     assert not _ordered_hints(_walk(100))
 
