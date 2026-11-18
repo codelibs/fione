@@ -195,6 +195,13 @@ What this release does not do, or does with a catch. Japanese summary at the end
   10,000 rows of the columns the models will read, within 5% of the time and 3 s, so on a table
   of thousands of columns the last ones may not be checked, and without a warning. A column
   named there is not named again by the notice for a near-perfect score.
+- **A regression run scores its most target-like column as a prediction**, in a notice after the
+  fit: the numeric column most correlated with the target, used as it is, scored with the metric
+  that ranks the models, beside the model's score, on the validated rows where the column has a
+  value. It is told when that column was named as a leak suspect (a copy of the target at an
+  earlier time is one) or when the model does not beat it. A column whose squared error is half
+  the target's variance or more is not on its scale and is not scored; a classification, a
+  quantile and a survival fit get none.
 
 ## Deployment
 

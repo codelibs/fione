@@ -2550,6 +2550,61 @@ def test_a_column_that_predicts_the_target_alone_is_named_and_does_not_stop_the_
     assert "near_perfect_fit" not in [e.data.get("kind") for e in events if e.type == "notice"]
 
 
+def _baselines(df, **config):
+    events = []
+    _fit(df, events, families=["LightGBM"], max_models=1, **config)
+    leaks = [e.data for e in events if e.type == "notice" and e.data.get("kind") == "leak_suspects"]
+    found = [e.data for e in events if e.type == "notice" and e.data.get("kind") == "baseline"]
+    return found, leaks
+
+
+def test_a_copy_of_the_target_at_an_earlier_time_is_scored_as_the_prediction_beside_the_model():
+    rng = np.random.default_rng(0)
+    walk = 100 + np.cumsum(rng.normal(size=800))
+    df = pd.DataFrame({"y_lag1": np.r_[np.nan, walk[:-1]], "x": rng.normal(size=800), "y": walk})
+    (found,), (leak,) = _baselines(df, target="y", feature_engineering=False)
+    assert leak["columns"] == ["y_lag1"]  # a near copy is still named as a leak suspect
+    assert found["column"] == "y_lag1" and found["metric"] == "rmse"
+    # the rows where the column has a value: the first has none
+    assert found["baseline_score"] == pytest.approx(np.sqrt(np.mean(np.diff(walk) ** 2)))
+    assert "799 validated rows" in found["message"] and "scores rmse" in found["message"]
+    assert np.isfinite(found["model_score"])
+    assert ("does not beat 'y_lag1'" in found["message"]) == (
+        found["model_score"] >= found["baseline_score"]
+    )
+
+
+def test_a_target_learned_as_log1p_is_scored_in_its_own_units_like_the_column():
+    rng = np.random.default_rng(0)
+    walk = 100 + np.cumsum(rng.normal(size=800))
+    df = pd.DataFrame({"y_lag1": np.r_[np.nan, walk[:-1]], "x": rng.normal(size=800), "y": walk})
+    (found,), _ = _baselines(df, target="y", feature_engineering=False, target_transform="log1p")
+    assert found["baseline_score"] == pytest.approx(np.sqrt(np.mean(np.diff(walk) ** 2)))
+    assert 0.5 < found["model_score"] < 5  # rmse in the units of y, not of log1p(y)
+
+
+def test_a_column_is_scored_when_it_is_not_a_suspect_only_if_the_model_does_not_beat_it():
+    rng = np.random.default_rng(0)
+    a, b = rng.normal(size=1_000), rng.normal(size=1_000)
+    beaten = pd.DataFrame({"a": a, "b": b, "y": a + 0.5 * b})  # the model learns both columns
+    assert _baselines(beaten, target="y") == ([], [])
+    # the best guess is the column itself: a model's estimate of it is noisier
+    noisy = pd.DataFrame({"a": 2 * a, "b": b, "y": 2 * a + rng.normal(size=1_000)})
+    (found,), leaks = _baselines(noisy, target="y")
+    assert leaks == [] and found["column"] == "a"
+    assert "does not beat 'a'" in found["message"]
+
+
+def test_a_column_off_the_scale_of_the_target_or_a_classification_gets_no_baseline():
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=1_000)
+    scaled = pd.DataFrame({"a": a, "b": rng.normal(size=1_000), "y": 10 * a})
+    assert _baselines(scaled, target="y")[0] == []
+    flag = pd.DataFrame({"a": a, "y": (a > 0).astype(int)})
+    assert _baselines(flag, target="y")[0] == []
+    assert _baselines(scaled, target="y", quantile=0.5)[0] == []
+
+
 def test_a_table_without_a_leak_gets_no_leak_notice():
     assert _leak_notices(_binary(600), target="y") == []
 

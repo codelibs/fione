@@ -202,6 +202,11 @@ NO_SKILL_R2 = 0.02
 NEAR_PERFECT_AUC = 0.9995
 NO_SKILL_AUC = 0.55
 ZERO_SHARE = 0.95  # of a target of 0 or more that is exactly 0: the few others decide the score
+# The validated rows are scored once more with the numeric column most correlated with the target
+# used as the prediction, as it is, when its squared error is less than this share of the target's
+# variance (it is on the target's scale): see ``AutoML._notice_baseline``.
+BASELINE_ON_SCALE = 0.5
+BASELINE_MIN_ROWS = 30
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -509,6 +514,48 @@ class AutoML:
             columns=[s.column for s in shown],
             reasons=[s.reason for s in shown],
             count=len(found),
+        )
+
+    def _notice_baseline(
+        self, X: pd.DataFrame, y: np.ndarray, rows: np.ndarray, blended: np.ndarray, metric: str
+    ) -> None:
+        """Say what the numeric column most correlated with the target scores as the prediction,
+        as it is, next to the model, on the validated rows where the column has a value and with
+        the metric that ranks the models. It is told when the column was named as a leak suspect
+        (a copy of the target at an earlier time is one, and the model may not beat it) and when
+        the model does not beat it. A column off the target's scale is no prediction of it, so
+        it is not scored. Advisory: a check that fails changes nothing."""
+        try:
+            numeric = X.select_dtypes("number").iloc[rows].reset_index(drop=True)
+            column = numeric.corrwith(pd.Series(y)).abs().idxmax()
+            guess = numeric[column].to_numpy("float64", na_value=np.nan)
+            present = np.isfinite(guess)
+            truth, guess, model = y[present], guess[present], blended[present]
+            if len(truth) < BASELINE_MIN_ROWS or (
+                np.mean((truth - guess) ** 2) >= BASELINE_ON_SCALE * truth.var()
+            ):
+                return
+            copy = metrics.value(metric, truth, guess)
+            ours = metrics.value(metric, truth, model)
+        except Exception:
+            return
+        better = ours > copy if metric in metrics.HIGHER_IS_BETTER else ours < copy
+        if not (np.isfinite(copy) and np.isfinite(ours)) or (better and column not in self._leaked):
+            return
+        self._notice(
+            f"on the {len(truth):,} validated rows where {column!r} has a value, using it as the "
+            f"prediction as it is scores {metric} {copy:.4g}, and the model scores {ours:.4g}"
+            + (
+                ""
+                if better
+                else f": the model does not beat {column!r}, so if it holds the target at an "
+                "earlier time, or a near copy of it, that is the score to beat"
+            ),
+            kind="baseline",
+            column=column,
+            metric=metric,
+            baseline_score=float(copy),
+            model_score=float(ours),
         )
 
     def _fit_quality_notices(self, task: Task, model: TrainedModel) -> None:
@@ -994,6 +1041,8 @@ class AutoML:
             if task == "regression" and not survival and not rating_cuts and y_seen.min() >= 0
             else None,
         )
+        if task == "regression" and not survival and c.quantile is None and not rating_cuts:
+            self._notice_baseline(X, y_seen[rows], rows, blended, sort_metric)
         self._fit_quality_notices(task, model)
         self._event(
             "finished",
