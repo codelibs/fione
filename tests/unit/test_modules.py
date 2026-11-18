@@ -503,6 +503,20 @@ def test_join_refuses_repeated_keys_unknown_columns_and_a_missing_dataset():
         run_op("join", df, {"other_dataset_id": 1, "key": "id"})
 
 
+def test_join_over_the_cell_cap_names_the_counts_and_how_to_make_it_smaller(monkeypatch):
+    monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 20)
+    df = pd.DataFrame({"id": [1, 2, 3], "a": [1, 2, 3], "b": [1, 2, 3]})
+    other = pd.DataFrame({"id": [1, 2, 3], **{c: [1, 2, 3] for c in "wxyz"}})
+    args = {"other_dataset_id": 1, "key": "id"}
+    with pytest.raises(ModuleError, match="21 cells") as error:
+        run_op("join", df, args, other)
+    text = str(error.value)
+    assert "3 rows x 3 columns of this dataset + 4 new columns" in text
+    assert "Slice columns" in text and "'columns'" in text
+    out, _ = run_op("join", df, {**args, "columns": ["w", "x", "y"]}, other)  # 3 x 6 fits
+    assert out.shape == (3, 6)
+
+
 def test_join_by_several_key_columns_matches_the_whole_key():
     df = pd.DataFrame({"shop": [1, 1, 2, 2, None], "item": [5, 6, 5, 6, 5]})
     other = pd.DataFrame({"s": [1, 2, 2], "i": ["5", "5", "6"], "n": [10, 20, 30]})
