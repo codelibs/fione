@@ -449,6 +449,16 @@ column is given, a notice points this out, since the score
 of shuffled parts is then probably better than on later dates. The models read such a whole-number
 column as a number and also as its year, month, day, day of the week and, with an hour or a
 Unix time, hour of the day.
+A notice also points this out for a whole-number column named like a time that runs through 20 or
+more consecutive numbers (a few may be missing), in a sorted file or a shuffled one. With each
+value on one row, a name such as `date`, `day` or `week_no` is enough (a counter of days or
+periods). With each value on many rows (the day or period of each row), the name must be a
+counter's: a time word and `id`, `idx`, `index`, `no` or `num` (`date_id`, `day_idx`), since a
+year, an age or a day of the month repeats over rows too. The notice is conditional on the rows
+being ordered in time. When each value is on one row, the assistant proposes the column as "Order of the rows in
+time" instead of leaving it out as an ID, unless the classes could not all be validated in that
+order. When values repeat, it only warns and sets nothing. A time column turns the search for
+derived features off, so a run with the proposed column does not try them.
 
 The first part is only learned from. The scores, the ensemble weights, the diagnostics and the
 cross-validation predictions cover the other parts; a row of the first part has no prediction

@@ -53,6 +53,10 @@
     <dt>{{ t('train.f.cv_group_column') }}</dt>
     <dd>{{ c.cv_group_column }}</dd>
     {% endif %}
+    {% if c.time_column %}
+    <dt>{{ t('train.f.time_column') }}</dt>
+    <dd>{{ c.time_column }}</dd>
+    {% endif %}
     {% if c.ignored_columns %}
     <dt>{{ t('assistant.proposal.ignored') }}</dt>
     <dd>{{ c.ignored_columns | join(", ") }}</dd>

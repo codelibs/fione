@@ -832,6 +832,167 @@ def test_other_names_are_not(name):
     assert not builtin._ID_NAME.search(name)
 
 
+def _daily(env, name, days=None, rows=60):
+    rng = np.random.default_rng(0)
+    days = np.arange(rows) if days is None else days
+    frame = pd.DataFrame(
+        {name: days, "x": rng.normal(size=rows), "label": rng.integers(0, 2, rows)}
+    )
+    return ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "daily", DatasetType.TRAIN, [frame]
+    )
+
+
+@pytest.mark.parametrize("name", ["date_id", "day_idx", "week_no", "Day", "dateId"])
+def test_propose_orders_by_a_day_counter_instead_of_leaving_it_out(env, name):
+    ds = _daily(env, name)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"]["time_column"] == name
+    assert name not in result["config"]["ignored_columns"]
+    assert "time_index" in codes(result)
+    assert name not in [s["column"] for s in result["ignored_suggestions"]]
+
+
+def test_propose_orders_by_a_day_counter_with_a_few_days_missing(env):
+    ds = _daily(env, "date_id", np.delete(np.arange(66), [5, 20, 30, 41, 50, 60]))
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"]["time_column"] == "date_id"
+
+
+def test_propose_only_warns_about_a_time_named_column_that_repeats_over_rows(env):
+    days = np.arange(2_000) // 50
+    ds = _daily(env, "date_id", np.random.default_rng(2).permutation(days), 2_000)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"]["time_column"] is None  # a duration looks alike
+    assert "time_index_repeated" in codes(result)
+    warning = next(w for w in result["warnings"] if w["code"] == "time_index_repeated")
+    assert warning["params"] == {"column": "date_id", "values": "40", "rows": "50"}
+
+
+@pytest.mark.parametrize("name", ["year_built", "age_in_days", "Year", "day"])
+def test_propose_does_not_warn_about_a_year_an_age_or_a_calendar_day_that_repeats_over_rows(
+    env, name
+):
+    days = np.arange(2_000) // 50
+    ds = _daily(env, name, np.random.default_rng(2).permutation(days), 2_000)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"]["time_column"] is None
+    assert "time_index_repeated" not in codes(result)
+
+
+@pytest.mark.parametrize("periods", [300, 3_000, 6_000])
+def test_propose_warns_about_a_sorted_file_larger_than_the_sample_with_a_period_per_row_group(
+    env, periods
+):
+    rows = 300_000
+    ds = _daily(env, "date_id", np.arange(rows) * periods // rows, rows)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "time_index_repeated" in codes(result)
+
+
+def test_propose_does_not_order_by_a_day_counter_next_to_a_group_column(env):
+    rows = 1_000
+    frame = pd.DataFrame(
+        {
+            "date_id": np.arange(rows),
+            "customer": [f"c{i % 50}" for i in range(rows)],  # every group ends in the last part
+            "x": np.random.default_rng(0).normal(size=rows),
+            "label": np.random.default_rng(1).integers(0, 2, rows),
+        }
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "grouped", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(
+            env,
+            "propose_training_config",
+            {"dataset_id": ds.id, "target": "label", "group_column": "customer"},
+        )
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"].get("time_column") is None
+    assert "time_index" not in codes(result)
+
+
+def test_propose_leaves_out_a_day_counter_with_missing_values(env):
+    days = pd.array(np.arange(2_000) // 50, dtype="Int64")
+    days[::100] = pd.NA
+    ds = _daily(env, "date_id", days, 2_000)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"]["time_column"] is None
+    assert "time_index_repeated" not in codes(result)
+
+
+def test_propose_counts_the_values_of_a_shuffled_file_larger_than_the_sample(env):
+    rows = 300_000
+    days = np.random.default_rng(3).permutation(np.arange(rows) // 5)  # 60,000 days, 5 rows each
+    ds = _daily(env, "date_id", days, rows)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    warning = next(w for w in result["warnings"] if w["code"] == "time_index_repeated")
+    assert warning["params"] == {"column": "date_id", "values": "60,000", "rows": "5"}
+
+
+def test_propose_keeps_the_old_way_when_the_classes_cannot_be_validated_in_time_order(env):
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"date_id": np.arange(40), "x": rng.normal(size=40)})
+    frame["label"] = (frame["date_id"] >= 30).astype(int)  # no class 1 before the later parts
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "late", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"]["time_column"] is None
+    assert "date_id" in result["config"]["ignored_columns"]
+
+
+@pytest.mark.parametrize("rows", [30, 2_000])
+def test_propose_does_not_take_a_duration_for_a_day_counter(env, rows):
+    spread = np.random.default_rng(1).choice(np.arange(10 * rows), rows, replace=False)
+    ds = _daily(env, "response_time", spread, rows)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"]["time_column"] is None
+    assert "time_index" not in codes(result)
+
+
+@pytest.mark.parametrize("name", ["id", "Id", "index", "row_id", "user_id", "idle"])
+def test_propose_still_leaves_a_row_id_out(env, name):
+    ds = _daily(env, name)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"]["time_column"] is None
+    assert name in result["config"]["ignored_columns"]
+    assert "time_index" not in codes(result)
+
+
 def test_propose_sets_the_group_column_the_user_chose(env, grouped):
     ds = grouped()
     base = {"dataset_id": ds.id, "target": "label"}
@@ -1795,3 +1956,22 @@ def test_a_column_named_like_an_identifier_comes_before_one_named_for_the_entity
         ).name
         == "device"
     )
+
+
+def test_a_day_counter_is_found_from_a_sample_of_a_larger_file():
+    """The profile rests on a sample (one row in five here); the counter runs through the rows
+    of the whole file, a duration spread wide does not."""
+    rng = np.random.default_rng(0)
+    rows = 100_000
+    sample = np.sort(rng.choice(rows, 20_000, replace=False))
+    frame = pd.DataFrame(
+        {
+            "date_id": sample,
+            "response_time": rng.choice(10 * rows, 20_000, replace=False),
+            "x": rng.normal(size=20_000),
+        }
+    )
+    profile = profile_dataset(frame)
+    assert profile.n_rows == 20_000
+    assert builtin.time_index_column(profile, "x", rows).name == "date_id"
+    assert builtin.time_index_column(profile, "x", 20_000) is None  # the sample's rows alone

@@ -15,7 +15,13 @@ from sklearn.datasets import (
 )
 
 from fione.data import profile as profile_module
-from fione.data.frames import change_column_type, is_day_first, parse_datetimes
+from fione.data.frames import (
+    change_column_type,
+    is_day_first,
+    is_time_counter,
+    is_time_name,
+    parse_datetimes,
+)
 from fione.data.profile import (
     CORRELATED,
     LEAK_STRONG,
@@ -1030,3 +1036,36 @@ def test_training_leak_suspects_stops_profiling_when_the_time_is_up():
     ticks = itertools.count(0.0, 1.0)  # each look at the clock is one second
     assert [s.column for s in training_leak_suspects(X, y)] == ["a"]
     assert training_leak_suspects(X, y, time_budget=1.0, clock=lambda: next(ticks)) == []
+
+
+@pytest.mark.parametrize(
+    "name", ["date_id", "DayIdx", "week_no", "Day", "dateId", "time", "years", "step_2", "日付"]
+)
+def test_names_that_read_as_a_time(name):
+    assert is_time_name(name)
+
+
+@pytest.mark.parametrize(
+    "name", ["id", "Id", "index", "row_id", "user_id", "idx", "weekday", "timestamp", "updated"]
+)
+def test_names_that_do_not_read_as_a_time(name):
+    assert not is_time_name(name)
+
+
+@pytest.mark.parametrize("name", ["date_id", "DayIdx", "week_no", "dateId", "time_id", "month num"])
+def test_a_counter_that_repeats_over_rows_is_named_like_a_counter(name):
+    assert is_time_counter(name, 0, 99, 100, repeated=True)
+
+
+@pytest.mark.parametrize("name", ["Day", "YearBuilt", "AGE_DAYS", "years", "time", "days_since"])
+def test_a_time_word_alone_is_a_counter_only_when_each_value_is_on_one_row(name):
+    assert is_time_counter(name, 0, 99, 100)
+    assert not is_time_counter(name, 0, 99, 100, repeated=True)
+
+
+def test_an_id_column_of_whole_numbers_has_the_span_of_its_values():
+    df = pd.DataFrame(
+        {"a": np.arange(5, 45), "b": [f"k{i}" for i in range(40)], "c": np.arange(40.0)}
+    )
+    spans = {c.name: c.span for c in profile_dataset(df).columns}
+    assert spans == {"a": 40, "b": None, "c": None}

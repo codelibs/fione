@@ -85,6 +85,7 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
+from fione.data.frames import is_time_counter
 from fione.data.profile import training_leak_suspects
 from fione.engine import metrics
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
@@ -474,6 +475,53 @@ class AutoML:
             kind="time_groups_one_part",
             part_rows=sizes,
         )
+
+    def _notice_time_index(self, prep: Prep, X: pd.DataFrame) -> bool:
+        """Say when a whole-number column named like a time (date_id, day_idx, week_no) runs
+        through consecutive numbers (a few may be missing), at least SORTED_VALUES of them: a
+        day or period counter, or the day or period of each row. The shuffled validation does
+        not use their order."""
+        for column in prep.columns:
+            values = X[column]
+            if (
+                prep.kind_of(column) != "numeric"
+                or not pd.api.types.is_integer_dtype(values)
+                or values.isna().any()  # a time column cannot have missing values
+            ):
+                continue
+            distinct = values.nunique()
+            if (
+                distinct < SORTED_VALUES
+                or 1 < len(X) / distinct < 2
+                or not is_time_counter(
+                    column,
+                    int(values.min()),
+                    int(values.max()),
+                    distinct,
+                    repeated=distinct < len(X),
+                )
+            ):
+                continue
+            if distinct == len(X):
+                message = (
+                    f"{column!r} holds each whole number on one row and is named like a time, so "
+                    "the rows may be one per day or period. No time_column is given, so the "
+                    "validation shuffles the rows. If the model will predict later times, the "
+                    "score is probably better than it will be; name that column as time_column "
+                    "to validate on later parts"
+                )
+            else:
+                message = (
+                    f"{column!r} is named like a time and runs through {distinct:,} consecutive "
+                    f"whole numbers, each on about {len(X) / distinct:.0f} rows, so it may be the "
+                    "day or period of each row. No time_column is given, so the validation "
+                    "shuffles the rows. If the rows are ordered in time and the model will "
+                    "predict later times, the score is probably better than it will be; name "
+                    "that column as time_column to validate on later parts"
+                )
+            self._notice(message, kind="time_index", columns=[column])
+            return True
+        return False
 
     def _notice_sorted_column(self, prep: Prep, X: pd.DataFrame) -> bool:
         """Say when a whole-number column never decreases down the rows and each of its values
@@ -924,7 +972,11 @@ class AutoML:
                 )
             if row_groups is None:
                 self._notice_repeated_values(prep, X)
-                if not dates and not self._notice_sorted_column(prep, X):
+                if (
+                    not dates
+                    and not self._notice_sorted_column(prep, X)
+                    and not self._notice_time_index(prep, X)
+                ):
                     if task == "regression" and not survival:
                         self._notice_ordered_target(y_seen)
             folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
