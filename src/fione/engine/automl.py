@@ -6,7 +6,8 @@ spec 5.1/5.7) and spends it in phases:
 1. Checks, the choice of derived features (``fione.engine.features``; at most
    ``FEATURE_SHARE`` of the time, or ``FEATURE_MIN_SECS`` of a short run, and off with
    ``feature_engineering=False``), ``Prep.fit``, the check for a column that gives the target
-   away on its own (a notice; at most ``LEAK_SHARE`` of the time and ``LEAK_SECS``)
+   away on its own, or in a difference between two dates (a notice; at most ``LEAK_SHARE`` of
+   the time and ``LEAK_SECS``)
    and the folds (a ``cv_group_column`` keeps the rows of a group in one fold, in the search and
    in the choice of derived features alike): measured, not otherwise budgeted. Call the time left
    after them L.
@@ -93,7 +94,7 @@ from fione.engine.diagnostics import diagnostics
 from fione.engine.ensemble import caruana
 from fione.engine.events import Event, EventSink, jsonable
 from fione.engine.families import FAMILIES, MAX_ROUNDS, FamilySpec
-from fione.engine.features import select_groups
+from fione.engine.features import DateDifferences, select_groups
 from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep, Task, infer_task, validate_target
 from fione.engine.search import (
@@ -162,6 +163,9 @@ DROPPED_SHOWN = 5  # names of left-out columns in the notice
 LEAK_SHARE = 0.05
 LEAK_SECS = 3.0
 LEAK_SHOWN = 5
+# The differences between two dates are checked for a leak too (an end date that is only known
+# afterwards gives the length of a trip, though neither date does alone), on this many rows.
+LEAK_ROWS = 10_000
 # A text column of at least this many different values, each on this many rows or more on
 # average, may name rows that belong together (see ``AutoML._notice_repeated_values``).
 REPEATED_LEVELS = 100
@@ -620,6 +624,63 @@ class AutoML:
             count=len(found),
         )
 
+    def _notice_derived_leaks(
+        self, prep: Prep, X: pd.DataFrame, target: pd.Series, secs: float
+    ) -> None:
+        """Name the adopted differences between two dates that give the target away (an end
+        date that is only known afterwards, minus the start date, is the length): neither date
+        does alone, so ``_notice_leaks`` does not see them. Same check, on at most ``LEAK_ROWS``
+        rows and within ``secs``; a feature made of a column already named is left out. It only
+        warns; a check that fails changes nothing."""
+        groups = [g for g in prep.groups if isinstance(g, DateDifferences)]
+        if not groups:
+            return
+        start = time.monotonic()
+        try:
+            if len(X) > LEAK_ROWS:
+                rows = np.sort(np.random.default_rng(0).choice(len(X), LEAK_ROWS, replace=False))
+                X, target = X.iloc[rows], target.iloc[rows]
+            made: dict[str, tuple[str, tuple[str, ...]]] = {}
+            parts = []
+            for group in groups:
+                derived = group.transform(X)
+                for name, sources in zip(group.names, group.sources, strict=True):
+                    if not self._leaked.intersection(sources):
+                        made[name] = (group.label, sources)
+                        parts.append(derived[name].rename(name))
+            if not parts:
+                return
+            found = training_leak_suspects(
+                pd.concat(parts, axis=1),
+                target,
+                time_budget=max(secs - (time.monotonic() - start), 0.0),
+            )
+        except Exception:  # an advisory check must not stop a training run
+            return
+        if not found:
+            return
+        shown = found[:LEAK_SHOWN]
+        listing = ", ".join(
+            f"{s.column!r} (made of {' and '.join(repr(c) for c in made[s.column][1])}, "
+            f"{made[s.column][0]}; {s.reason})"
+            for s in shown
+        )
+        more = len(found) - len(shown)
+        columns = list(dict.fromkeys(c for s in shown for c in made[s.column][1]))
+        self._leaked.update(columns)  # the importance is by input column: named once
+        self._notice(
+            f"{len(found)} derived {'feature' if len(found) == 1 else 'features'} may give the "
+            f"answer away: {listing}" + (f" and {more} more" if more > 0 else "") + ". The "
+            "model leans on columns that together give the target, and at least one of them is "
+            "probably not known when the model is used; check that every input is known at that "
+            "time, and leave out one of the columns each is made of",
+            kind="leak_suspects",
+            columns=columns,
+            features=[s.column for s in shown],
+            reasons=[s.reason for s in shown],
+            count=len(found),
+        )
+
     def _notice_baseline(
         self, X: pd.DataFrame, y: np.ndarray, rows: np.ndarray, blended: np.ndarray, metric: str
     ) -> None:
@@ -953,8 +1014,11 @@ class AutoML:
         prep = Prep().fit(X, groups)
         self._notice_dropped_columns(prep, X)
         self._leaked = set()
-        self._notice_leaks(
-            prep, X, target, min(LEAK_SECS, LEAK_SHARE * max(deadline.remaining(), 0.0))
+        leak_secs = min(LEAK_SECS, LEAK_SHARE * max(deadline.remaining(), 0.0))
+        leak_start = time.monotonic()
+        self._notice_leaks(prep, X, target, leak_secs)
+        self._notice_derived_leaks(
+            prep, X, target, max(leak_secs - (time.monotonic() - leak_start), 0.0)
         )
         dates: list[str] = []
         if c.time_column is None:

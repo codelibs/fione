@@ -2756,6 +2756,74 @@ def test_the_leak_notice_names_a_bounded_number_of_columns():
     assert "and 3 more" in found["message"]
 
 
+def _trips(n=2_000, noise=0.0, seed=0):
+    """A start and an end date, and the length between them as the target (plus ``noise``)."""
+    rng = np.random.default_rng(seed)
+    start = pd.Timestamp("2024-01-01") + pd.to_timedelta(rng.integers(0, 10**7, n), unit="s")
+    secs = rng.integers(60, 3_600, n).astype(float)
+    return pd.DataFrame(
+        {
+            "start": start,
+            "finish": start + pd.to_timedelta(secs, unit="s"),
+            "count": rng.integers(1, 5, n),
+            "distance": rng.gamma(2.0, 2.0, n),
+            "length": secs + rng.normal(0, noise, n) if noise else secs,
+        }
+    )
+
+
+def _derived_leaks(df, **config):
+    return [n for n in _leak_notices(df, target="length", **config) if "features" in n]
+
+
+def test_two_dates_whose_difference_is_the_target_are_named_together():
+    events = []
+    _fit(_trips(), events, families=["LightGBM"], target="length", max_models=1)
+    notices = [e.data for e in events if e.type == "notice"]
+    (found,) = [n for n in notices if "features" in n and n["kind"] == "leak_suspects"]
+    # named once: the near-perfect score does not name one of the two again
+    assert "near_perfect_fit" not in [n["kind"] for n in notices]
+    assert sorted(found["columns"]) == ["finish", "start"]
+    assert found["features"] == ["start - finish"]
+    assert (
+        "'start' and 'finish'" in found["message"]
+        and "differences between dates" in (found["message"])
+    )
+
+
+def test_dates_written_as_text_are_named_too():
+    df = _trips()
+    df["start"] = df["start"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    df["finish"] = df["finish"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    (found,) = _derived_leaks(df)
+    assert sorted(found["columns"]) == ["finish", "start"]
+
+
+def test_an_adopted_date_difference_that_does_not_give_the_target_is_not_named():
+    df = _trips()
+    rng = np.random.default_rng(1)
+    # helped by the length between the dates, but far from a copy of it
+    df["length"] = 0.3 * df["length"] + rng.normal(0, 300, len(df)) + 50 * df["distance"]
+    events = []
+    _fit(df, events, families=["LightGBM"], target="length", max_models=1)
+    notices = [e.data for e in events if e.type == "notice"]
+    adopted = [n for n in notices if n["kind"] == "features"]
+    assert adopted and "differences between dates" in adopted[0]["message"]  # it was checked
+    assert not [n for n in notices if "features" in n and n["kind"] == "leak_suspects"]
+
+
+def test_a_table_without_derived_features_does_not_pay_for_the_derived_leak_check(monkeypatch):
+    calls = []
+    real = automl_module.training_leak_suspects
+    monkeypatch.setattr(
+        automl_module,
+        "training_leak_suspects",
+        lambda *a, **k: calls.append(1) or real(*a, **k),
+    )
+    _leak_notices(_binary(600), target="y", feature_engineering=False)
+    assert len(calls) == 1  # the columns' own check only
+
+
 def test_a_leak_check_that_raises_does_not_stop_the_fit(monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError("boom")
