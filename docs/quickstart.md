@@ -275,6 +275,15 @@ that lie further ahead than the lag have it empty: a prediction run reports the 
 the model learned from filled in and the rows to predict mostly lack, and a model that leans on
 them is not to be trusted.
 
+A table of things followed over time (a column of at least 20 values, each on 5 rows or more,
+seen once at each time of a date column or of the `time_column`) whose target follows its own
+value at the previous time (correlation 0.7 or more once the mean of each thing and of each time
+are taken off) while no numeric column tells the target at least 0.8 of that well gets a notice:
+the model sees each row alone, and the module above adds what the same thing did earlier. A thing
+named by several columns together (a shop and an item), a time that is not a date or the
+`time_column`, a table of over 200 columns, a classification, a quantile and a survival fit get
+none.
+
 ## Statistics of nearby values
 
 For a signal or a sensor, the rows next to a row often say more than the row: a level that

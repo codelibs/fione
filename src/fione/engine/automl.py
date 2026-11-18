@@ -184,6 +184,18 @@ CODE_VALUES = (21, 100)
 CODE_ROWS = 50
 CODE_SMOOTH = 0.5
 
+# A column of at least this many different values, each on this many rows or more on average, that
+# a time column puts in order may name things followed over time (a store, a county, a patient):
+# see ``AutoML._notice_history_missing``. The target of each row is compared with that of the row
+# before it of the same value, once the mean of the value and of the time are taken off, and a
+# column that tells the target at least HISTORY_COVERED of as well counts as the same help.
+HISTORY_VALUES = 20
+HISTORY_ROWS = 5
+HISTORY_PERSISTENCE = 0.7
+HISTORY_COVERED = 0.8
+HISTORY_SAMPLE_ROWS = 50_000
+HISTORY_COLUMNS = 200  # a wider table is not looked at
+
 # A validated fit this good (or this poor) gets a notice: R-squared, or AUC for two classes.
 NEAR_PERFECT_R2 = 0.999
 NO_SKILL_R2 = 0.02
@@ -229,6 +241,53 @@ def _shared_values(X: pd.DataFrame, column: str) -> float:
     groups = X.groupby(column, sort=False, dropna=False)
     constant = [(groups[c].nunique(dropna=False) <= 1).mean() for c in others]
     return float(np.mean(constant))
+
+
+def _centered(values: np.ndarray, *groups: np.ndarray) -> np.ndarray:
+    """``values`` with the mean of each group taken off in turn (a missing value is skipped)."""
+    for codes in groups:
+        present = ~np.isnan(values)
+        total = np.bincount(codes, np.where(present, values, 0.0))
+        values = values - (total / np.maximum(np.bincount(codes, present), 1))[codes]
+    return values
+
+
+def _correlation(a: np.ndarray, b: np.ndarray) -> float:
+    """The correlation of ``a`` and ``b`` on the rows where both are present, 0 if undefined."""
+    both = ~np.isnan(a) & ~np.isnan(b)
+    if both.sum() < 30 or a[both].std() == 0 or b[both].std() == 0:
+        return 0.0
+    return float(np.corrcoef(a[both], b[both])[0, 1])
+
+
+def _persistence(X: pd.DataFrame, y: np.ndarray, order: np.ndarray, column: str) -> float | None:
+    """How much the target of a row follows that of the row before it of the same value of
+    ``column`` (in the order of ``order``), once the mean of the value and of the time are taken
+    off, when no numeric column tells the target at least ``HISTORY_COVERED`` of that well in the
+    same terms; ``None`` when ``column`` does not name things seen once at each time, or the
+    target does not follow."""
+    codes = pd.factorize(X[column], use_na_sentinel=False)[0]
+    if len(X) > HISTORY_SAMPLE_ROWS:  # whole values, so that the rows before stay
+        keep = np.flatnonzero(codes < max(1, (codes.max() + 1) * HISTORY_SAMPLE_ROWS // len(X)))
+        X, y, order, codes = X.iloc[keep], y[keep], order[keep], codes[keep]
+    rows = np.lexsort((order, codes))
+    codes, order, y = codes[rows], order[rows], y[rows]
+    follows = np.r_[False, codes[1:] == codes[:-1]]
+    if (follows & np.r_[False, order[1:] == order[:-1]]).sum() > 0.05 * follows.sum():
+        return None  # one value seen several times at one time: a category, not a thing over time
+    off = _centered(y, codes, order)
+    before = np.r_[np.nan, off[:-1]]
+    follow = _correlation(np.where(follows, off, np.nan), before)
+    if follow < HISTORY_PERSISTENCE:
+        return None
+    for other in X.columns:
+        if other != column and pd.api.types.is_numeric_dtype(X[other]):
+            column_off = _centered(
+                X[other].to_numpy("float64", na_value=np.nan)[rows], codes, order
+            )
+            if abs(_correlation(column_off, off)) >= HISTORY_COVERED * follow:
+                return None
+    return follow
 
 
 class AutoML:
@@ -296,6 +355,46 @@ class AutoML:
             kind="repeated_values",
             columns=[column],
             shared=round(shared[column], 2),
+        )
+
+    def _notice_missing_history(
+        self, df: pd.DataFrame, X: pd.DataFrame, y: np.ndarray, time_column: str | None
+    ) -> None:
+        """Say when the rows are things followed over time (a store, a county, a patient: a
+        column whose values each come back on many rows, once at each time of ``order``), the
+        target of a row follows that of the row before it of the same thing, and no column
+        tells the target as well: every row is learned and predicted alone, and what the same
+        thing did at earlier times is not in the table. It says nothing of a table with a
+        column that holds earlier values, or of one whose things are named by several columns
+        together. Advisory: a check that fails changes nothing."""
+        if time_column is None or X.shape[1] > HISTORY_COLUMNS:
+            return
+        found = {}
+        try:
+            order = _order_codes(df, time_column)
+            for column in X.columns:
+                values = X[column]
+                if column == time_column or pd.api.types.is_float_dtype(values):
+                    continue
+                if HISTORY_VALUES <= values.nunique() <= len(X) / HISTORY_ROWS:
+                    follow = _persistence(X, y, order, column)
+                    if follow is not None:
+                        found[column] = follow
+        except Exception:
+            return
+        if not found:
+            return
+        column = max(found, key=found.__getitem__)
+        self._notice(
+            f"the target of a row follows that of the row before it of the same {column!r} "
+            f"(correlation {found[column]:.2f} once the mean of each {column!r} and of each time "
+            "are taken off), and no column of the table tells the target as well. The model "
+            f"sees each row alone, so it cannot use what a {column!r} did at earlier times. To "
+            "give it those values, add them with the Add values from earlier times module "
+            "(lag), or the Add statistics of nearby values module (rolling), before training",
+            kind="missing_history",
+            columns=[column],
+            correlation=round(found[column], 2),
         )
 
     def _notice_lopsided_parts(self, folds, n_rows: int, nfolds: int) -> None:
@@ -706,6 +805,7 @@ class AutoML:
         self._notice_leaks(
             prep, X, target, min(LEAK_SECS, LEAK_SHARE * max(deadline.remaining(), 0.0))
         )
+        dates: list[str] = []
         if c.time_column is None:
             dates = [column for column in prep.columns if prep.kind_of(column) == "datetime"]
             # whole numbers that are dates (20141021, 14102100) or Unix times order the rows too
@@ -747,6 +847,8 @@ class AutoML:
             )
             if row_groups is not None:
                 self._notice_lopsided_parts(folds, len(y), nfolds)
+        if task == "regression" and not survival and c.quantile is None:
+            self._notice_missing_history(df, X, y_seen, c.time_column or next(iter(dates), None))
         rows = covered(folds, len(y))  # the rows some fold predicts (all but the first part)
         families = self._without_wide_linear_view(prep, len(X))
         # The words are read only from prose columns.
