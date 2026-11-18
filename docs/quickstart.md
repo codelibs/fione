@@ -313,6 +313,20 @@ empty values and is left out of the windows of the others. A `window` wider than
 running total (`signal_before1000000_sum`) and `count` the number of earlier rows that hold a
 value; a row with no earlier row, or none that holds a value, stays empty.
 
+## The rank within a group
+
+A value is often meaningful only against the others of its group: a player's damage compared
+with the rest of the match. The built-in **Add the rank within a group** module (`rank`) adds
+one column, `column_rank`: name the numeric `column` and the group each row belongs to (`by`;
+all rows form one group if it is empty). The rank is the number of values in the group that are
+smaller than the row's value, plus one, divided by the number of values in the group, so the
+smallest is 1/n, the largest is 1, and tied values share the lowest rank of the tie (a
+group of one gets 1). With `how` set to `dense`, `column_dense_rank` is 1 for the smallest
+value, 2 for the next one above it, and so on, tied values sharing a rank. With `among` (a column
+inside each `by` group, such as the team inside a match), each `among` group is first reduced to the mean of `column`, and the rank is that of the group's mean among the
+groups of its `by` group, so every row of a team gets its team's rank in the match. A row with no value
+(or no `by` or `among` value) gets an empty rank and is left out of the others' ranks. The rank is computed from the rows of the dataset it is added to.
+
 ## A column computed from other columns
 
 The built-in **Add a calculated column** module (`calc`) adds one column made from the numeric columns
