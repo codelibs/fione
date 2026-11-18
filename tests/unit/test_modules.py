@@ -761,8 +761,9 @@ def test_validate_output_rejects(value, message):
 def test_validate_output_caps_the_size(monkeypatch):
     assert registry.MAX_OUTPUT_CELLS == 150_000_000
     monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 4)
-    with pytest.raises(ModuleError, match="4 cells"):
+    with pytest.raises(ModuleError, match="4 cells") as error:
         validate_output(pd.DataFrame({"a": [1, 2, 3], "b": [1, 2, 3]}))
+    assert "Slice columns" in str(error.value) and "fewer rows" in str(error.value)
 
 
 # --- the shared flat-schema validator --------------------------------------------------------

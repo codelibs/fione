@@ -93,7 +93,9 @@ def check_cells(rows: int, columns: int) -> None:
     cells = rows * columns
     if cells > MAX_OUTPUT_CELLS:
         raise ModuleError(
-            f"the result has {cells} cells; at most {MAX_OUTPUT_CELLS} cells are allowed"
+            f"the result has {cells} cells; at most {MAX_OUTPUT_CELLS} cells are allowed."
+            " Keep fewer columns first (for example with the Slice columns module) or use fewer"
+            " rows"
         )
 
 
