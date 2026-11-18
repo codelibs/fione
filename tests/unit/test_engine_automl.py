@@ -2147,6 +2147,58 @@ def test_no_repeated_values_notice_with_a_group_column_or_for_values_that_do_not
     assert "repeated_values" not in _kinds(events)
 
 
+def _sized_groups(n_groups=250, seed=0, values=None):
+    """Rows of groups of 2 to 30 rows: the id says nothing, but the size of the group sets y."""
+    rng = np.random.default_rng(seed)
+    sizes = rng.integers(2, 30, n_groups)
+    names = values if values is not None else [f"id-{i:05d}" for i in range(n_groups)]
+    df = pd.DataFrame({"group": np.repeat(names, sizes), "x": rng.normal(size=sizes.sum())})
+    df["y"] = np.repeat(sizes, sizes) / 30 + 0.05 * df["x"]
+    return df
+
+
+@pytest.mark.parametrize("group", [None, "group"])
+def test_a_model_that_reads_how_often_an_id_occurs_says_new_values_look_rare(group):
+    events = []
+    _fit(
+        _sized_groups(),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        cv_group_column=group,
+    )
+    notice = next(e.data for e in events if e.data.get("kind") == "frequency_encoded_values")
+    assert notice["columns"] == ["group"] and notice["values"] == 250
+    assert notice["importance"] > 0.5
+    assert "rarest" in notice["message"] and "ignored_columns" in notice["message"]
+
+
+def test_no_frequency_notice_for_an_ignored_id_a_unique_id_words_or_few_values():
+    events = []
+    _fit(
+        _sized_groups(),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        ignored_columns=["group"],
+    )
+    assert "frequency_encoded_values" not in _kinds(events)
+    unique = _sized_groups().assign(group=lambda d: [f"row{i}" for i in range(len(d))])
+    events = []
+    _fit(unique, events, families=["LightGBM"], target="y", max_models=1)
+    assert "frequency_encoded_values" not in _kinds(events)
+    events = []  # many values that are words, not codes: how common a brand is says something
+    words = ["".join(chr(97 + int(d)) for d in f"{i:03d}") + "name" for i in range(250)]
+    _fit(_sized_groups(values=words), events, families=["LightGBM"], target="y", max_models=1)
+    assert "frequency_encoded_values" not in _kinds(events)
+    events = []  # 30 values, below the point where a text column is read by its frequency
+    few = _sized_groups(values=[f"c{i % 30}" for i in range(250)])
+    _fit(few, events, families=["LightGBM"], target="y", max_models=1)
+    assert "frequency_encoded_values" not in _kinds(events)
+
+
 def _skill_frame(kind, n=600, seed=0):
     rng = np.random.default_rng(seed)
     df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})

@@ -168,6 +168,12 @@ REPEATED_ROWS = 20
 REPEATED_SHARED = 0.8  # of the other columns, constant within a value, for the rows to look alike
 REPEATED_SAMPLE_ROWS = 50_000
 REPEATED_COLUMNS = 40  # other columns looked at
+# A frequency-encoded column of codes (see ``_codes``) whose values each come back on this many rows
+# or more on average, and that holds at least this share of the importance: see
+# ``AutoML._notice_frequency_encoded_values``.
+FREQUENCY_ROWS = 3
+FREQUENCY_IMPORTANCE = 0.05
+CODE_LENGTH = 8  # characters of a value that reads as a code
 # A regression target whose neighbouring rows are this alike (correlation of each value with the
 # next): see ``AutoML._notice_ordered_target``.
 ORDERED_MIN_ROWS = 200
@@ -295,6 +301,14 @@ def _persistence(X: pd.DataFrame, y: np.ndarray, order: np.ndarray, column: str)
     return follow
 
 
+def _codes(values) -> bool:
+    """Whether the ``values`` of a text column read as codes, not words (an id, a hash): at least
+    ``CODE_LENGTH`` characters with a digit and no space, in nine of ten values."""
+    text = pd.Series(list(values), dtype="str")
+    code = text.str.len().ge(CODE_LENGTH) & text.str.contains(r"\d") & ~text.str.contains(r"\s")
+    return bool(code.mean() >= 0.9)
+
+
 class AutoML:
     def __init__(
         self,
@@ -400,6 +414,48 @@ class AutoML:
             kind="missing_history",
             columns=[column],
             correlation=round(found[column], 2),
+        )
+
+    def _notice_frequency_encoded_values(
+        self, prep: Prep, X: pd.DataFrame, importance: pd.Series
+    ) -> None:
+        """Say when the model leans on an id or a group code that is read as how often each value
+        occurs (``Prep`` does so above ``HIGH_CARDINALITY`` values). The share of each value is
+        counted over all the training rows, so the validation rows already have their true share,
+        while a value the model has not seen gets the share of the rarest one: the rows of a new
+        group all look like a tiny group, which the validation cannot show."""
+        found = []
+        try:
+            for column, values in prep.frequencies.items():
+                rows = int(X[column].notna().sum())
+                share = float(importance.get(column, 0.0))
+                if (
+                    rows >= FREQUENCY_ROWS * len(values)
+                    and share >= FREQUENCY_IMPORTANCE
+                    and _codes(values)
+                ):
+                    found.append((share, column, len(values), rows))
+        except Exception:
+            return
+        if not found:
+            return
+        found.sort(reverse=True)
+        share, column, values, rows = found[0]
+        others = [c for _, c, _, _ in found[1:DROPPED_SHOWN]]
+        self._notice(
+            f"{column!r} holds codes: {values:,} different values, each on about "
+            f"{rows / values:.0f} rows, and the model reads it as how often each value occurs "
+            f"({share:.0%} of what it relies on). A value the model has not seen gets the share "
+            "of the rarest value, so rows of a new value look like they come from a very small "
+            "group, and the validation "
+            "counts every value over all the training rows, so it cannot show how the model does "
+            "on rows of new values. If the rows you will predict have other values, leave the "
+            "column out of the inputs (ignored_columns)"
+            + (f". Other columns like it: {', '.join(repr(c) for c in others)}" if others else ""),
+            kind="frequency_encoded_values",
+            columns=[column, *others],
+            values=values,
+            importance=round(share, 2),
         )
 
     def _notice_lopsided_parts(self, folds, n_rows: int, nfolds: int) -> None:
@@ -1043,6 +1099,7 @@ class AutoML:
         )
         if task == "regression" and not survival and c.quantile is None and not rating_cuts:
             self._notice_baseline(X, y_seen[rows], rows, blended, sort_metric)
+        self._notice_frequency_encoded_values(prep, X, model.feature_importance)
         self._fit_quality_notices(task, model)
         self._event(
             "finished",

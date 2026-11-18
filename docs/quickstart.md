@@ -479,7 +479,13 @@ belong together (the same customer, patient or store) and the data you will pred
 ones, a random split puts rows of one customer on both sides, and the score looks better than it
 is. Choose that column as "Keep related rows together by" (`cv_group_column` in the API): the
 rows with one value then always stay in the same validation fold, in the search and in the choice
-of derived features alike. The column is still an input unless you leave it out. A missing value
+of derived features alike. The column is still an input unless you leave it out
+(`ignored_columns`), and a column of more than 200 different values is read as how often each
+value occurs, counted over all the training rows. A group the model has not seen gets the share of the
+rarest value, so its rows look like a very small group, and the validation, whose groups were
+counted too, cannot show that: leave the group column out when the rows to predict hold other groups.
+A training run says so when such a column holds codes (values of 8 characters or more with a digit
+and no space) on about 3 rows or more each, and holds at least 5% of what the model relies on. A missing value
 counts as one group, and with fewer groups than folds the number of folds is lowered to the
 number of groups (at least two groups are needed). A class that occurs in so few groups that
 some fold's training rows lack it is refused, with the column named. The analysis page and the
