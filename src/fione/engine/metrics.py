@@ -488,6 +488,9 @@ RELATIVE_ERRORS = {"mape": 1, "rmspe": 2}
 # The regression metrics that measure an error in the target's own units, as it is given: a model
 # that learns log1p(y) is still ranked on them in those units.
 ORIGINAL_UNITS = frozenset({"rmse", "mse", "mae", "medae", "r2", "explained_variance"})
+# The relative or logarithmic errors that nothing weights: the models learn the target as it is
+# with squared error unless it is given as log1p (``RELATIVE_ERRORS`` are weighted instead).
+UNWEIGHTED_RELATIVE = frozenset({"smape", "rmsle"})
 # The correlations: they do not depend on the scale of the predictions, so they rank the models
 # that learn the target as it is as well as an error in its own units does.
 CORRELATIONS = frozenset({"pearson", "spearman"})

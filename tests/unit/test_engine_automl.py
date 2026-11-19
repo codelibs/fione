@@ -2158,11 +2158,14 @@ def test_derived_features_are_not_tried_on_a_table_wider_than_the_limit(monkeypa
     ("transform", "metric", "kind"),
     [
         ("none", "rmse", "skewed_target"),
-        ("none", "rmsle", None),
-        ("none", "mape", None),
+        ("none", "rmsle", "skewed_target"),
+        ("none", "smape", "skewed_target"),
+        ("none", "mape", None),  # weighted by its rows instead
+        ("none", "rmspe", None),
         ("log1p", "rmse", "log_target_metric"),
         ("log1p", "mae", "log_target_metric"),
         ("log1p", "rmsle", None),
+        ("log1p", "smape", None),
     ],
 )
 def test_a_skewed_target_and_a_log_target_are_pointed_at_the_metric_that_fits(
@@ -2230,6 +2233,25 @@ def test_a_target_that_is_not_skewed_gets_no_scale_notice():
     events = []
     df = _positive().assign(y=lambda d: d["a"] + 0.1 * d["b"])
     _fit(df, events, families=["LightGBM"], target="y", max_models=1)
+    kinds = [e.data.get("kind") for e in events if e.type == "notice"]
+    assert "skewed_target" not in kinds
+
+
+@pytest.mark.parametrize("metric", ["smape", "rmsle"])
+def test_a_relative_metric_on_a_skewed_target_learned_as_it_is_says_to_use_log1p(metric):
+    events = []
+    df = _positive().assign(y=lambda d: d["y"] * 1000)  # on a scale where log1p changes it
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1, sort_metric=metric)
+    found = [e.data for e in events if e.data.get("kind") == "skewed_target"]
+    assert len(found) == 1
+    assert f"target_transform to 'log1p' to learn it as the '{metric}' error" in found[0]["message"]
+
+
+@pytest.mark.parametrize("metric", ["smape", "rmsle"])
+def test_a_relative_metric_on_a_target_that_is_not_skewed_gets_no_scale_notice(metric):
+    events = []
+    df = _positive().assign(y=lambda d: d["a"] + 0.1 * d["b"] + 10)
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1, sort_metric=metric)
     kinds = [e.data.get("kind") for e in events if e.type == "notice"]
     assert "skewed_target" not in kinds
 
