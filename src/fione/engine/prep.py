@@ -41,17 +41,29 @@ MAX_LEVELS = 20_000  # values with a column of their own in the levels view, per
 MAX_NATIVE_LEVELS = 1_000_000  # a frequency column with more values is no categorical to CatBoost
 NATIVE_REPEAT = 0.9  # ... nor one with more values than this share of its rows (an id)
 _LETTERS = re.compile(r"[^\W\d_]+")  # runs of letters, so a timestamp or a code has no words
+CALENDAR = True  # whether a new Prep reads the day (1 to 366) and the week of the year of dates
 # ordinal: seconds since the Unix epoch; the hour is added for columns that carry a time of day
-_DATE_PARTS = ("year", "month", "day", "dayofweek", "ordinal")
+_DATE_PARTS = ("year", "month", "day", "dayofweek", "dayofyear", "week", "ordinal")
+_CALENDAR_PARTS = ("dayofyear", "week")  # the parts a Prep fitted before they were added lacks
 _EPOCH = pd.Timestamp("1970-01-01")
-_DT_ATTRIBUTE = {"dayofweek": "day_of_week"}  # feature part -> its Series.dt attribute
 
 
-def _integer_date_parts(fmt: str) -> tuple[str, ...]:
+def _date_part(when: pd.Series, part: str) -> pd.Series:
+    """One part of the datetimes ``when`` as a float (missing for a missing date)."""
+    if part == "ordinal":
+        return (when - _EPOCH).dt.total_seconds()
+    if part == "week":
+        return when.dt.isocalendar().week.astype(float)
+    attribute = {"dayofweek": "day_of_week", "dayofyear": "day_of_year"}.get(part, part)
+    return getattr(when.dt, attribute).astype(float)
+
+
+def _integer_date_parts(fmt: str, calendar: bool = True) -> tuple[str, ...]:
     """The parts of a whole-number date column besides the number itself: the day parts, and the
     hour when the format has one."""
     timed = "H" in fmt or fmt.startswith("unix")
-    return ("year", "month", "day", "dayofweek") + (("hour",) if timed else ())
+    days = ("year", "month", "day", "dayofweek") + (_CALENDAR_PARTS if calendar else ())
+    return days + (("hour",) if timed else ())
 
 
 def _repeats(s: pd.Series) -> bool:
@@ -257,6 +269,7 @@ class Prep:
     dayfirst: tuple = ()  # date string columns that put the day before the month
     integer_dates: dict = {}  # whole-number date column -> its format (``integer_date_format``)
     timed: tuple = ()  # date columns that carry a time of day
+    calendar: bool = False  # the views hold the day and week of the year of dates (old: no)
     _unseen: dict = {}  # frequency column -> share given to a value not seen in training (old: 0)
     _no_trend: tuple = ()  # view columns the linear view leaves out (see ``_fit_no_trend``)
     _level_at: dict = {}  # levels view column (``f3_l``) -> the input column it reads
@@ -268,6 +281,7 @@ class Prep:
         self.dayfirst = ()
         self.integer_dates = {}
         self.timed = ()
+        self.calendar = CALENDAR
         self._plan: list[
             tuple[str, str]
         ] = []  # (column, kind), kind: numeric/datetime/frequency/category/duration
@@ -333,14 +347,14 @@ class Prep:
             ):
                 self._level_at[f"f{len(self.feature_names)}_l"] = column
             if kind == "datetime":
-                parts = _DATE_PARTS + (("hour",) if column in self.timed else ())
+                parts = self._date_parts(column)
                 self.feature_names += [f"{column}__{part}" for part in parts]
                 self.sources += [(column,)] * len(parts)
             else:
                 self.feature_names.append(column)
                 self.sources.append((column,))
                 if column in self.integer_dates:
-                    parts = _integer_date_parts(self.integer_dates[column])
+                    parts = _integer_date_parts(self.integer_dates[column], self.calendar)
                     self.feature_names += [f"{column}__{part}" for part in parts]
                     self.sources += [(column,)] * len(parts)
         used = set(self.columns)
@@ -359,6 +373,12 @@ class Prep:
         self._fit_linear(base, numbers)
         return self
 
+    def _date_parts(self, column: str) -> tuple[str, ...]:
+        """The features of a date column, in order (a Prep fitted before the day and the week of the
+        year were added has neither)."""
+        parts = tuple(p for p in _DATE_PARTS if self.calendar or p not in _CALENDAR_PARTS)
+        return parts + (("hour",) if column in self.timed else ())
+
     def _fit_no_trend(self, base: pd.DataFrame) -> None:
         """The seconds-since-epoch part of a date column whose year is the same on every training
         row. Within one year it is a straight line through month and day, so a linear model
@@ -372,11 +392,12 @@ class Prep:
             if kind != "datetime":
                 at += 1
                 if column in self.integer_dates:
-                    at += len(_integer_date_parts(self.integer_dates[column]))
+                    at += len(_integer_date_parts(self.integer_dates[column], self.calendar))
                 continue
-            if base[f"f{at + _DATE_PARTS.index('year')}"].nunique() <= 1:
-                off.append(f"f{at + _DATE_PARTS.index('ordinal')}")
-            at += len(_DATE_PARTS) + (column in self.timed)
+            parts = self._date_parts(column)
+            if base[f"f{at + parts.index('year')}"].nunique() <= 1:
+                off.append(f"f{at + parts.index('ordinal')}")
+            at += len(parts)
         self._no_trend = tuple(off)
 
     def _fit_linear(self, base: pd.DataFrame, numbers: pd.DataFrame) -> None:
@@ -456,19 +477,13 @@ class Prep:
                 out.append(values.replace([np.inf, -np.inf], np.nan))
                 if column in self.integer_dates:
                     when = _integer_dates(s, self.integer_dates[column])
-                    parts = _integer_date_parts(self.integer_dates[column])
-                    out += [
-                        getattr(when.dt, _DT_ATTRIBUTE.get(part, part)).astype(float)
-                        for part in parts
-                    ]
+                    parts = _integer_date_parts(self.integer_dates[column], self.calendar)
+                    out += [_date_part(when, part) for part in parts]
             elif kind == "duration":
                 out.append(_duration_days(s))
             elif kind == "datetime":
                 when = _datetimes(s, column in self.dayfirst)
-                out += [when.dt.year, when.dt.month, when.dt.day, when.dt.day_of_week]
-                out.append((when - _EPOCH).dt.total_seconds())
-                if column in self.timed:
-                    out.append(when.dt.hour.astype(float))
+                out += [_date_part(when, part) for part in self._date_parts(column)]
             elif kind == "frequency":
                 values = _as_str(s)
                 encoded = values.map(self.frequencies[column]).astype(float)

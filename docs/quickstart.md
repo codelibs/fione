@@ -456,8 +456,10 @@ When a column holds dates, or whole numbers that are dates (20141021, or 1410210
 month, day and hour) or Unix times (seconds or milliseconds between 2000 and 2100), and no time
 column is given, a notice points this out, since the score
 of shuffled parts is then probably better than on later dates. The models read such a whole-number
-column as a number and also as its year, month, day, day of the week and, with an hour or a
-Unix time, hour of the day.
+column as a number and also as its year, month, day, day of the week, day of the year, week of
+the year and, with an hour or a Unix time, hour of the day. A column of dates (or of text a date
+can be read from) is read the same way, and as the seconds since 1970 too, with or without a
+time column.
 A notice also points this out for a whole-number column named like a time that runs through 20 or
 more consecutive numbers (a few may be missing), in a sorted file or a shuffled one. With each
 value on one row, a name such as `date`, `day` or `week_no` is enough (a counter of days or
@@ -541,7 +543,7 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
 - rows: the number of missing values and of zeros; with 10 number columns or more also the
   mean, median, maximum and standard deviation of the row's numbers that are neither zero nor
   missing, after a signed log so that columns of different scales weigh alike;
-- dates: hour, minute, week, quarter, day of the year, weekend, and the seconds between date
+- dates: hour, minute, quarter, weekend, and the seconds between date
   columns;
 - numbers: sums, differences, products and ratios of the few most useful number columns, their
   means within each of the three most useful small categories (and the difference from it),

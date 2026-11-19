@@ -374,20 +374,29 @@ class RowStatistics(Group):
 
 
 class DateParts(Group):
-    """Hour, minute, week, quarter, day of the year and weekend flag of date columns."""
+    """Hour, minute, week, quarter, day of the year and weekend flag of date columns; the day and
+    the week of the year are left to the base view when it holds them."""
 
     _PARTS = ("hour", "minute", "week", "quarter", "dayofyear", "is_weekend")
     # class-level defaults: models pickled before them still load
     _dayfirst: frozenset = frozenset()
     _base_hours: frozenset = frozenset()
+    _base_calendar: bool = False
 
-    def __init__(self, columns: list[str], base_hours=()):
-        """``base_hours``: the columns whose hour the base view already holds."""
+    def __init__(self, columns: list[str], base_hours=(), base_calendar=False):
+        """``base_hours``: the columns whose hour the base view already holds; ``base_calendar``:
+        whether it holds the day and the week of the year of every date."""
         self.label, self.columns = "more parts of dates", tuple(columns)
         self._base_hours = frozenset(base_hours)
+        self._base_calendar = base_calendar
 
     def _parts(self, column):
-        return [p for p in self._PARTS if not (p == "hour" and column in self._base_hours)]
+        return [
+            p
+            for p in self._PARTS
+            if not (p == "hour" and column in self._base_hours)
+            and not (p in ("week", "dayofyear") and self._base_calendar)
+        ]
 
     def _fit(self, X):
         self._dayfirst = frozenset(c for c in self.columns if is_day_first(X[c]))
@@ -400,9 +409,11 @@ class DateParts(Group):
             if "hour" in self._parts(c):
                 out[f"{c}__hour"] = when.dt.hour
             out[f"{c}__minute"] = when.dt.minute
-            out[f"{c}__week"] = when.dt.isocalendar().week
+            if "week" in self._parts(c):
+                out[f"{c}__week"] = when.dt.isocalendar().week
             out[f"{c}__quarter"] = when.dt.quarter
-            out[f"{c}__dayofyear"] = when.dt.day_of_year
+            if "dayofyear" in self._parts(c):
+                out[f"{c}__dayofyear"] = when.dt.day_of_year
             out[f"{c}__is_weekend"] = (when.dt.day_of_week >= 5).astype(float).where(when.notna())
         return pd.DataFrame(out, index=df.index).astype(float)
 
@@ -722,7 +733,7 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
     if len(prep.numeric_columns) >= MIN_STATISTIC_COLUMNS:  # early: the gate may run out of time
         found.append(RowStatistics(prep.numeric_columns))
     if dates:
-        found.append(DateParts(dates, prep.timed))
+        found.append(DateParts(dates, prep.timed, prep.calendar))
     if len(dates) > 1:
         found.append(DateDifferences(dates[:MAX_PAIR_COLUMNS]))
     if small and numbers:
