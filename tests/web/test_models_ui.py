@@ -1460,3 +1460,17 @@ def test_the_ranking_metric_of_an_event_column_model_is_the_concordance():
         task="regression", config={"sort_metric": "auto", "event_column": "event"}
     )
     assert models_ui._sort_metric(record) == "concordance"
+
+
+def test_the_history_leaves_out_the_median_variants_whose_score_is_a_pinball_loss():
+    from types import SimpleNamespace
+
+    from fione.web.models_ui import _history
+
+    def trial(family, score):
+        return {"family": family, "trial": 0, "state": "complete", "score": score}
+
+    record = SimpleNamespace(trials=[trial("LightGBM", 3.0), trial("LightGBM_L1", 0.9)])
+    chart = _history(record, "en")
+    assert [s["name"] for s in chart["series"]] == ["LightGBM"]
+    assert chart["line"]["points"] == [[1, 3.0]]

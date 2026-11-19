@@ -154,6 +154,12 @@ that error (weight 1 / |y| or 1 / y², capped at the 99th percentile; with `targ
 `log1p`, the weight allows for the log), in the training and in the blend, so the models fit the
 small targets as closely as the large ones.
 
+With a regression ranking metric of `mae` or `medae` (and no quantile), the search also tries
+LightGBM_L1, XGBoost_L1 and CatBoost_L1, the boosting models trained to predict the median
+instead of the mean, which suits a target with large outliers. They run after the other
+models, in the search time left for them, and the blend gives them weight only where they
+improve it on the ranking metric.
+
 - Classification: log loss, AUC, accuracy, average precision (`aucpr`), Gini, lift of the top 10%
   (`lift_top_group`), balanced accuracy, error rate (`misclassification`), mean error per class
   (`mean_per_class_error`), F1, macro F1 (`macro_f1`), precision, recall, MCC, kappa, quadratic weighted kappa (`qwk`),

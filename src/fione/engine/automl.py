@@ -18,13 +18,17 @@ spec 5.1/5.7) and spends it in phases:
    ``Family#2`` and ``Family#3``.
    After them come the *late* families (``LATE_ORDER``: LinearWide, for data with categorical
    columns that the linear view cuts short, and the variants of TextLinear, for data with
-   prose). When any applies, ``LATE_SHARE`` of the search time is kept for them, taken from
+   prose), and for a regression ranked by MAE or MEDAE with no ``quantile``, the L1 variants
+   of the boosting families (``MEDIAN_ORDER``: LightGBM_L1, XGBoost_L1, CatBoost_L1, which learn
+   the median; each after the family it varies). When any applies, ``LATE_SHARE`` of the search
+   time is kept for them, taken from
    the base families' shares (scaled to 0.85) except TextLinear's, which is as without them.
    The late families get what is left of the search time (that and what the base families
    leave), never the time of the later phases:
    each one the search time still left times its ``LATE_WEIGHTS`` share among the late families
    not yet run, and only when its first trial is expected to fit in that share (``cost`` times
-   the first trial of its reference family: TextLinear, or Linear for LinearWide). A late
+   the first trial of its reference family: TextLinear, Linear for LinearWide, the boosting
+   family itself for its L1 variant). A late
    family that does not apply to the data is not run and changes nothing; one that does not
    improve the ensemble gets weight 0 from ``caruana``.
    With few rows the folds are drawn again, with other seeds, ``repeats_for`` times (or
@@ -134,12 +138,26 @@ FAMILY_WEIGHTS = {
 QUANTILE_FAMILIES = tuple(f for f in FAMILY_ORDER if FAMILIES[f].quantile_objective)
 # Run after the others, in the search time they leave (see the module docstring); each only
 # when the data suits it (``FamilySpec.applies``) and a model of it would not be too big.
-LATE_ORDER = ("LinearWide", "TextLinearChar", "TextLinearPlain", "TextLinearWide")
+# The L1 variants of the boosting families are late candidates for a regression ranked by MAE
+# or MEDAE (``MEDIAN_METRICS``) with no quantile: the squared error the others learn is not the
+# loss they are ranked by, and on a heavy-tailed target the median predicts better.
+MEDIAN_ORDER = ("LightGBM_L1", "XGBoost_L1", "CatBoost_L1")
+MEDIAN_METRICS = frozenset({"mae", "medae"})
+LATE_ORDER = (
+    "LinearWide",
+    "TextLinearChar",
+    "TextLinearPlain",
+    "TextLinearWide",
+    *MEDIAN_ORDER,
+)
 LATE_WEIGHTS = {
-    "LinearWide": 1 / 6,
-    "TextLinearChar": 5 / 12,
-    "TextLinearPlain": 5 / 24,
-    "TextLinearWide": 5 / 24,
+    "LinearWide": 1 / 12,
+    "TextLinearChar": 5 / 24,
+    "TextLinearPlain": 5 / 48,
+    "TextLinearWide": 5 / 48,
+    "LightGBM_L1": 1 / 4,
+    "XGBoost_L1": 1 / 8,
+    "CatBoost_L1": 1 / 8,
 }
 LATE_SHARE = 0.15  # of the search time is kept for the late families, when any applies
 # The first trial of a base family may take up to this share of the search time left, if that is
@@ -343,7 +361,10 @@ class AutoML:
                 )
             families = list(families or QUANTILE_FAMILIES)
         self.families = [f for f in FAMILY_ORDER if families is None or f in families]
-        self.late = [f for f in LATE_ORDER if families is None or f in families]
+        self.late = [
+            f for f in LATE_ORDER if f not in MEDIAN_ORDER and (families is None or f in families)
+        ]
+        self.median = [f for f in MEDIAN_ORDER if families is None or f in families]
         self._leaked: set[str] = set()  # the columns ``_notice_leaks`` named in this fit
 
     def _event(self, type: str, **data) -> None:
@@ -736,6 +757,7 @@ class AutoML:
         blended: np.ndarray,
         metric: str,
         quantile: float | None,
+        median_ran: bool = False,
     ) -> bool:
         """Say when the model does not beat, by ``CONSTANT_MARGIN``, a constant on the validated
         rows, in the metric that ranks the models: the median of the training part of each fold
@@ -766,7 +788,7 @@ class AutoML:
         reason = (
             "the inputs may hold little of what this target needs, or the target is mostly noise, "
             "so more rows, other inputs or another target transform may help"
-            if quantile is not None
+            if quantile is not None or median_ran
             else "the models learn the average, which a skewed target moves away from the "
             "median that this metric rewards (the quantile setting of the API at 0.5 learns the "
             "median directly), or the inputs hold little of what this target needs"
@@ -1136,6 +1158,15 @@ class AutoML:
         families = [f for f in families if f != "TextLinear" or prep.prose] or families
         # An explicit list of late families only is run as it is, like TextLinear above.
         late = self._late_families(prep, X, y, task) if families else self.late
+        # The L1 variants run when asked for, or for a regression ranked by an absolute error.
+        median = task == "regression" and not survival and c.quantile is None
+        if self.median and self.explicit and not median:
+            raise ConfigError(
+                f"{', '.join(self.median)} learn the median of a regression with no quantile and "
+                "no event column"
+            )
+        if median and (self.explicit or sort_metric in MEDIAN_METRICS):
+            late = [*late, *self.median]
         families = [*families, *late]
 
         left = deadline.remaining()
@@ -1278,7 +1309,10 @@ class AutoML:
         if task == "regression" and not survival and c.quantile is None and not rating_cuts:
             self._notice_baseline(X, y_seen[rows], rows, blended, sort_metric)
         self._notice_frequency_encoded_values(prep, X, model.feature_importance)
-        said = self._notice_constant(y_seen, rows, first_run, blended, sort_metric, c.quantile)
+        median_ran = any(member.spec.median for member in members)
+        said = self._notice_constant(
+            y_seen, rows, first_run, blended, sort_metric, c.quantile, median_ran
+        )
         # (the constant is the verdict of a ranking by an absolute error, not the R-squared)
         judged = sort_metric in CONSTANT_METRICS and (
             c.quantile is None or sort_metric == "pinball"

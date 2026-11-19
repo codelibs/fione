@@ -38,9 +38,11 @@ TARGETS = {"binary": "good", "multiclass": "判定", "regression": "value"}
 
 
 # Every family, heaviest first, summing to 1.
+# (the L1 variants of the boosting families explain like the families they vary)
+FAMILY_NAMES = [name for name in FAMILIES if not FAMILIES[name].median]
 MIXED_WEIGHTS = {
-    name: (len(FAMILIES) - i) / (len(FAMILIES) * (len(FAMILIES) + 1) / 2)
-    for i, name in enumerate(FAMILIES)
+    name: (len(FAMILY_NAMES) - i) / (len(FAMILY_NAMES) * (len(FAMILY_NAMES) + 1) / 2)
+    for i, name in enumerate(FAMILY_NAMES)
 }
 HOSTILE = ["<b>x</b>", "幅", "BiasTerm", "contrib_x"]
 
@@ -97,8 +99,9 @@ def _fit(task: str) -> TrainedModel:
     frame = _task_frame(task, _frame())
     model = AutoML(config).fit(frame)
     for name in LATE_ORDER:
-        model.cv_models[name] = _late_models(model, frame, name)
-    missing = sorted(set(FAMILIES) - set(model.cv_models))
+        if name in FAMILY_NAMES:
+            model.cv_models[name] = _late_models(model, frame, name)
+    missing = sorted(set(FAMILY_NAMES) - set(model.cv_models))
     assert not missing, f"families missing from cv_models: {missing}"
     return model
 
@@ -263,7 +266,7 @@ def test_saabas_matches_the_tree(kind):
 
 
 @pytest.mark.parametrize("task", TASKS)
-@pytest.mark.parametrize("family", list(FAMILIES))
+@pytest.mark.parametrize("family", FAMILY_NAMES)
 def test_family_contributions_are_additive(task, family):
     fit = _fit(task)
     model = _with_members(fit, [(family, 1.0, fit.cv_models[family])])
@@ -397,7 +400,7 @@ def test_awkward_rows_are_additive(task):
     X.loc[X.index[3], "when"] = "2023-03-01 12:00:00"
     X.loc[X.index[4], "when"] = "not a date"
     X.loc[X.index[5], "when"] = None
-    folds = [(name, 1 / len(FAMILIES), fit.cv_models[name]) for name in FAMILIES]
+    folds = [(name, 1 / len(FAMILY_NAMES), fit.cv_models[name]) for name in FAMILY_NAMES]
     _assert_additive(_with_members(fit, folds), X)
     _assert_additive(fit, X)
 

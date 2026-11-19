@@ -29,6 +29,9 @@ from fione.engine.search import (
     score,
 )
 
+# The L1 variants learn the median of a regression, and are tested with it (test_engine_late).
+FAMILY_NAMES = [name for name in FAMILIES if not FAMILIES[name].median]
+
 TRIAL_KEYS = {"family", "trial", "score", "params", "elapsed", "best_so_far"}
 
 
@@ -125,7 +128,7 @@ def test_n_threads_uses_few_threads_on_small_data():
     assert n_threads(1_000_000) >= n_threads(1_300)
 
 
-@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("name", FAMILY_NAMES)
 def test_fit_with_expired_deadline_raises(name):
     X, y = _classification(200, 5)
     prep, y, _ = _setup(X, y)
@@ -149,7 +152,7 @@ def _calibrated(spec, X_tr, y_tr) -> tuple[float, float]:
     return max(0.5, 3 * UNIT_SAFETY * unit), max(2.0, 4 * unit)
 
 
-@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("name", FAMILY_NAMES)
 def test_fit_stops_at_deadline_with_usable_model(name):
     X, y = _classification(50_000, 30)
     prep, y, _ = _setup(X, y)
@@ -182,14 +185,14 @@ def test_fit_refuses_to_start_a_unit_that_cannot_finish(slow):
     assert len(slow.starts) == 1
 
 
-@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("name", FAMILY_NAMES)
 def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
     X, y = _classification(1_000, 6)
     prep, y, _ = _setup(X, y)
     spec = FAMILIES[name]("classification", 2)
     view = getattr(prep, spec.view)(X)
     model = spec.fit_full(spec.defaults, view, y, Deadline(30), rounds=7)
-    one_step = {name: 1 for name in FAMILIES if "Linear" in name}  # fitted in one go: no rounds
+    one_step = {name: 1 for name in FAMILY_NAMES if "Linear" in name}  # fitted in one go: no rounds
     full = Forest.n_trees if issubclass(FAMILIES[name], Forest) else 7
     assert spec.rounds(model) == one_step.get(name, full)
     assert spec.predict(model, view).shape == (1_000, 2)
@@ -200,7 +203,7 @@ def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
 
 # The linear families are excluded: one fit takes far less than the shortest calibrated budget,
 # so it finishes.
-@pytest.mark.parametrize("name", [name for name in FAMILIES if "Linear" not in name])
+@pytest.mark.parametrize("name", [name for name in FAMILY_NAMES if "Linear" not in name])
 def test_fit_full_raises_when_it_cannot_finish(name):
     X, y = _classification(50_000, 30)
     prep, y, _ = _setup(X, y)
@@ -276,7 +279,7 @@ def test_every_trial_emits_an_event_with_the_listed_keys():
         json.dumps(e.data, allow_nan=False)
 
 
-@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("name", FAMILY_NAMES)
 def test_classification_oof_holds_probabilities_and_models_pickle(name, tmp_path):
     X, y = _classification(300, 5)
     prep, y, folds = _setup(X, y)
@@ -688,7 +691,7 @@ def test_same_seed_gives_same_best_score():
     assert scores[0] == pytest.approx(scores[1], abs=1e-9)
 
 
-@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("name", FAMILY_NAMES)
 def test_fewer_than_fifty_rows_with_five_folds(name):
     X, y = _classification(40, 4)
     prep, y, folds = _setup(X, y)
@@ -730,7 +733,7 @@ def test_thirty_rows_with_small_class_reduces_folds_and_trains():
     assert len(result.models) == 3
 
 
-@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("name", FAMILY_NAMES)
 def test_awkward_feature_columns_train_with_every_family(name):
     rng = np.random.default_rng(0)
     n = 6_000
@@ -771,7 +774,7 @@ def test_all_families_finish_within_a_ten_second_budget():
     budget = Deadline(10)
     X, y = _classification(50_000, 30)
     prep, y, folds = _setup(X, y)
-    names = list(FAMILIES)
+    names = FAMILY_NAMES
     for i, name in enumerate(names):
         share = budget.child(budget.remaining() / (len(names) - i))
         try:
@@ -784,7 +787,7 @@ def test_all_families_finish_within_a_ten_second_budget():
 
 
 @pytest.mark.timing
-@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("name", FAMILY_NAMES)
 def test_two_second_budget_returns_or_raises_without_hanging(name):
     X, y = _classification(50_000, 30)
     prep, y, folds = _setup(X, y)
@@ -858,7 +861,7 @@ def _returns_or_raises_within(name, X, y, prep, budget, slack):
 
 
 @pytest.mark.timing
-@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("name", FAMILY_NAMES)
 def test_wide_data_does_not_blow_a_two_second_budget(wide, name):
     X, prep, binary, _ = wide
     _returns_or_raises_within(name, X, binary, prep, budget=2, slack=1.0)

@@ -880,7 +880,7 @@ def test_keyboard_interrupt_is_not_swallowed(monkeypatch):
 # --- empty frames -------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", list(FAMILIES))
+@pytest.mark.parametrize("name", [name for name in FAMILIES if not FAMILIES[name].median])
 @pytest.mark.parametrize("task", ["classification", "regression"])
 def test_predicting_no_rows_returns_empty_results_quietly(name, task, capfd):
     df = _binary(200)
