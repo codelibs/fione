@@ -12,6 +12,7 @@ from fione.engine.features import (
     CategoryFrequency,
     CategoryPairs,
     ClusterDistances,
+    CodeParts,
     DateDifferences,
     DateParts,
     GroupMeans,
@@ -1111,3 +1112,102 @@ def test_id_parts_skip_fields_that_act_as_a_row_index():
     group = IdParts(["user", "mixed"]).fit(X)
     assert group.names == ["mixed__part2", "mixed__group_size"]
     assert group.transform(X.head(1)).columns.tolist() == group.names
+
+
+def _code_frame(n=400, length=6, seed=0):
+    rng = np.random.default_rng(seed)
+    letters = np.array(list("ABCDEFG"))
+    codes = ["".join(r) for r in rng.choice(letters, (n, length))]
+    return pd.DataFrame({"code": codes, "x": rng.normal(size=n)})
+
+
+def test_code_parts_read_characters_distinct_characters_and_the_longest_repeat():
+    X = _code_frame()
+    group = CodeParts(["code"]).fit(X)
+    assert group.names == [f"code__char{i}" for i in range(1, 7)] + [
+        "code__distinct_chars",
+        "code__most_repeated_char",
+    ]
+    assert group.sources == [("code",)] * 8
+    out = group.transform(pd.DataFrame({"code": ["ABCDEF", "GGGAAB", "AAAAAA", "BABABA"]}))
+    assert out.iloc[0].tolist() == [0, 1, 2, 3, 4, 5, 6, 1]  # characters by rank, all different
+    assert out.iloc[1].tolist() == [6, 6, 6, 0, 0, 1, 3, 3]
+    assert out.iloc[2]["code__distinct_chars"] == 1 and out.iloc[2]["code__most_repeated_char"] == 6
+    assert out.iloc[3]["code__distinct_chars"] == 2 and out.iloc[3]["code__most_repeated_char"] == 3
+
+
+def test_code_parts_give_missing_for_unseen_characters_other_lengths_and_missing_values():
+    X = _code_frame()
+    group = CodeParts(["code"]).fit(X)
+    new = pd.DataFrame({"code": ["ABCDEZ", "ABC", None, "ABCDEFG", "abcdef", "GFEDCB"]})
+    out = group.transform(new)
+    assert out["code__char5"].iloc[0] == 4 and np.isnan(out["code__char6"].iloc[0])  # Z unseen
+    assert out["code__distinct_chars"].iloc[0] == 6  # counted on the value itself
+    assert out.iloc[1:3].isna().all().all()  # other length, missing
+    assert out.iloc[3].isna().all()
+    assert out.iloc[4].drop(["code__distinct_chars", "code__most_repeated_char"]).isna().all()
+    assert out.iloc[5].tolist() == [6, 5, 4, 3, 2, 1, 6, 1]
+    for i in range(len(new)):  # one row at a time gives the same values
+        pd.testing.assert_frame_equal(group.transform(new.iloc[[i]]), out.iloc[[i]])
+    assert len(group.transform(new.head(0))) == 0
+
+
+def test_code_parts_read_the_first_positions_of_a_long_code_only():
+    X = _code_frame(length=20)
+    group = CodeParts(["code"]).fit(X)
+    assert len(group.names) == features.MAX_CODE_POSITIONS + 2
+    assert "code__char17" not in group.names
+    tail = group.transform(pd.DataFrame({"code": ["A" * 16 + "BCDE"]}))
+    assert tail["code__distinct_chars"].iloc[0] == 5  # the whole code, not its first positions
+    assert tail["code__most_repeated_char"].iloc[0] == 16
+
+
+def test_code_length_needs_a_common_length_within_range_and_no_spaces():
+    length = features._code_length
+    assert length(pd.Series([f"AB{i:04d}" for i in range(300)])) == 6
+    assert length(pd.Series(["AB1"] * 5 + ["QWERTYU"] * 5)) is None  # half of each
+    assert length(pd.Series([f"AB{i:04d}" for i in range(99)] + ["x"])) == 6  # 99 %
+    assert length(pd.Series([f"AB{i:04d}" for i in range(90)] + ["x"] * 10)) is None
+    assert length(pd.Series([f"A{i:01d}" for i in range(9)])) is None  # two characters
+    assert length(pd.Series(["A" * 33] * 20)) is None  # too long
+    assert length(pd.Series([f"A B{i:03d}" for i in range(20)])) is None  # a space
+    assert length(pd.Series([None] * 20)) is None
+
+
+def test_code_parts_are_offered_for_nearly_unique_codes_of_one_length_only():
+    X = _code_frame()
+    prep = Prep().fit(X)
+    assert prep.kind_of("code") == "frequency"
+    found = [g for g in features.candidates(prep, X, ["x"]) if isinstance(g, CodeParts)]
+    assert [g.columns for g in found] == [("code",)]
+    skipped = {
+        "varying length": X.assign(code=[c[: 3 + i % 4] for i, c in enumerate(X["code"])]),
+        "few levels": X.assign(code=[c[:2] + "AB"[i % 2] for i, c in enumerate(X["code"])]),
+        "structured text (fields)": X.assign(code=[f"{i:03d}_{i % 7}" for i in range(len(X))]),
+        "structured text (letters and digits)": X.assign(
+            code=[f"AB{i:04d}" for i in range(len(X))]
+        ),
+        "spaces": X.assign(code=[f"the {c} fox jumps" for c in X["code"]]),
+    }
+    for reason, frame in skipped.items():
+        labels = [g.label for g in features.candidates(Prep().fit(frame), frame, ["x"])]
+        assert "characters of codes" not in labels, reason
+
+
+def test_code_parts_come_before_the_generic_groups_and_leave_other_candidates_alone():
+    X = _code_frame()
+    prep = Prep().fit(X)
+    labels = [g.label for g in features.candidates(prep, X, ["x"])]
+    assert labels[0] == "characters of codes"
+    bare = X.drop(columns=["code"])
+    others = [g.label for g in features.candidates(Prep().fit(bare), bare, ["x"])]
+    assert labels[1:] == others  # the other candidates stay as they are
+
+
+def test_code_parts_pickle_with_a_prep_and_transform_alike():
+    X = _code_frame()
+    prep = Prep().fit(X, [CodeParts(["code"])])
+    clone = pickle.loads(pickle.dumps(prep))  # noqa: S301 - a frame this test built
+    for view in ("tree", "dense", "catboost", "linear"):
+        pd.testing.assert_frame_equal(getattr(prep, view)(X), getattr(clone, view)(X))
+    assert not prep.linear(X.head(1)).isna().any().any()
