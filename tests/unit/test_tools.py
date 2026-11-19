@@ -687,6 +687,44 @@ def codes(result):
     return found
 
 
+@pytest.mark.parametrize(
+    ("need", "args", "warned"),
+    [
+        (5200, {}, True),  # a third of the time the data needs
+        (2701, {}, True),  # just over 1.5 times the 30 minutes proposed
+        (2700, {}, False),
+        (1800, {}, False),  # the proposal is not capped
+        (60, {}, False),
+        (5200, {"max_runtime_secs": 7200}, False),  # the time limit was chosen
+    ],
+)
+def test_propose_warns_when_the_run_time_is_capped_far_below_what_the_data_needs(
+    env, monkeypatch, need, args, warned
+):
+    frame = pd.DataFrame({"x": range(1000), "label": [0, 1] * 500})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "big", DatasetType.TRAIN, [frame]
+    )
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", need / (1000 * builtin.TRIALS_WANTED))
+    try:
+        result = call(
+            env, "propose_training_config", {"dataset_id": ds.id, "target": "label", **args}
+        )
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert ("runtime_short" in codes(result)) is warned
+    if warned and not args:
+        assert result["config"]["max_runtime_secs"] == 1800
+        warning = next(w for w in result["warnings"] if w["code"] == "runtime_short")
+        assert warning["params"] == {"need": f"{math.ceil(need / 60)}", "limit": 30}
+
+
+def test_a_table_of_900k_rows_and_32_columns_needs_over_one_and_a_half_times_the_cap():
+    dataset = SimpleNamespace(n_rows=900_000, n_cols=32)
+    need = builtin.runtime_need_secs(dataset)
+    assert need > builtin.MAX_RUNTIME_SECS * builtin.RUNTIME_SHORT_FACTOR  # about 84 minutes
+
+
 def test_propose_says_how_to_remove_the_rows_with_an_empty_target(env):
     rng = np.random.default_rng(0)
     frame = pd.DataFrame({"x": rng.normal(size=60), "sales": rng.normal(size=60)})

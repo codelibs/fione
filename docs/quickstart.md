@@ -471,6 +471,11 @@ dates (20 or more different dates over 30 days to 50 years, no missing value, in
 more, not a birth date) when it proposes no time column, since the date may order the rows in time. A time column turns the search for
 derived features off, so a run with the proposed column does not try them.
 
+When the data needs more than 1.5 times the longest time the assistant proposes (30 minutes), which
+holds from about 15 million cells (rows times columns) on, its proposal warns that many models may
+be cut by time and each kind tried with few settings. A longer `max_runtime_secs` is allowed, and so
+is training on a part of the rows (made with **Split into train, valid and test**).
+
 The first part is only learned from. The scores, the ensemble weights, the diagnostics and the
 cross-validation predictions cover the other parts; a row of the first part has no prediction
 (empty in the kept predictions, fold -1 in the fold assignment). The final models learn
