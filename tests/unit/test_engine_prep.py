@@ -238,9 +238,73 @@ def test_the_hour_is_not_repeated_by_the_date_parts_group():
     from fione.engine.features import DateParts
 
     df = pd.DataFrame({"n": RNG.normal(size=300), "stamp": _stamps()})
-    prep = Prep().fit(df, groups=[DateParts(["stamp"], base_hours=("stamp",))])
+    prep = Prep().fit(df, groups=[DateParts(["stamp"], base_hours=("stamp",), base_calendar=True)])
     assert len(prep.feature_names) == len(set(prep.feature_names))
     assert "stamp__hour" in prep.feature_names and "stamp__week" in prep.feature_names
+
+
+def _part(prep, df, part, column="d"):
+    return prep.tree(df)[f"f{prep.feature_names.index(f'{column}__{part}')}"].tolist()
+
+
+def test_the_day_and_the_week_of_the_year_are_base_features_of_dates():
+    days = pd.Series(["2023-12-31", "2024-01-01", "2024-02-29", "2024-12-31", None])
+    df = pd.DataFrame({"n": [1.0, 2.0, 3.0, 4.0, 5.0], "d": pd.to_datetime(days)})
+    prep = Prep().fit(df)
+    at = prep.feature_names.index("d__dayofweek")
+    assert prep.feature_names[at + 1 : at + 3] == ["d__dayofyear", "d__week"]
+    assert _part(prep, df, "dayofyear")[:4] == [365, 1, 60, 366]  # a leap year has a 366th day
+    assert _part(prep, df, "week")[:4] == [52, 1, 9, 1]  # ISO weeks: 31 December 2024 is in week 1
+    assert np.isnan(_part(prep, df, "dayofyear")[4]) and np.isnan(_part(prep, df, "week")[4])
+    new = pd.DataFrame({"n": [0.0], "d": ["2025-03-01"]})  # a batch of text dates to predict
+    assert _part(prep, new, "dayofyear") == [60] and _part(prep, new, "week") == [9]
+
+
+def test_the_day_of_the_year_of_date_strings_follows_the_day_first_reading():
+    df = pd.DataFrame({"n": RNG.normal(size=300), "stamp": _stamps()})
+    prep = Prep().fit(df)
+    one = pd.DataFrame({"n": [0.0], "stamp": ["03-11-2012 10:00"]})
+    assert _part(prep, one, "dayofyear", "stamp") == [308]  # 3 November 2012, a leap year
+    assert _part(prep, one, "week", "stamp") == [44]
+
+
+def test_whole_number_dates_have_the_day_and_the_week_of_the_year_too():
+    ints = pd.Series(pd.date_range("2014-10-21", periods=300).strftime("%Y%m%d").astype(int))
+    prep = Prep().fit(pd.DataFrame({"n": RNG.normal(size=300), "d": ints}))
+    assert "d__dayofyear" in prep.feature_names
+    new = pd.DataFrame({"n": [0.0], "d": [20140301]})
+    assert _part(prep, new, "dayofyear") == [60] and _part(prep, new, "week") == [9]
+
+
+def test_the_date_parts_group_does_not_repeat_the_day_and_the_week_of_the_year():
+    from fione.engine.features import DateParts
+
+    df = pd.DataFrame({"n": RNG.normal(size=300), "stamp": _stamps()})
+    group = DateParts(["stamp"], base_hours=("stamp",), base_calendar=True)
+    names = group.fit(df).names
+    assert "stamp__dayofyear" not in names and "stamp__week" not in names
+    assert "stamp__is_weekend" in names
+    assert {"stamp__dayofyear", "stamp__week"} <= set(DateParts(["stamp"]).fit(df).names)
+
+
+def test_a_prep_fitted_before_the_calendar_parts_still_predicts_with_its_own_columns(monkeypatch):
+    monkeypatch.setattr("fione.engine.prep.CALENDAR", False)
+    ints = pd.Series(pd.date_range("2014-10-21", periods=300).strftime("%Y%m%d%H").astype(int))
+    df = pd.DataFrame({"n": RNG.normal(size=300), "stamp": _stamps(), "i": ints})
+    old = Prep().fit(df)
+    monkeypatch.undo()
+    del old.__dict__["calendar"]  # what a model saved before had no record of
+    loaded = pickle.loads(pickle.dumps(old))
+    assert not any(n.endswith(("__dayofyear", "__week")) for n in loaded.feature_names)
+    assert prep_width(loaded, df) == len(loaded.feature_names)
+    assert loaded.dense(df.head(3)).shape[1] == len(loaded.feature_names)
+    assert loaded.linear(df.head(3)).shape[1] == loaded.linear_width
+    # and the same data is read the new way by a new fit, which has two columns more per date
+    assert len(Prep().fit(df).feature_names) == len(loaded.feature_names) + 4
+
+
+def prep_width(prep, df):
+    return prep.tree(df).shape[1]
 
 
 def test_a_prep_pickled_without_dayfirst_still_loads():
@@ -719,16 +783,18 @@ def test_a_whole_number_date_column_keeps_its_number_and_gets_the_parts_of_the_d
     prep = Prep().fit(X)
     assert prep.kind_of("hour") == "numeric" and prep.integer_dates == {"hour": "%y%m%d%H"}
     names = [n for n in prep.feature_names if n.startswith("hour")]
-    assert names == ["hour", *(f"hour__{p}" for p in ("year", "month", "day", "dayofweek", "hour"))]
+    parts = ("year", "month", "day", "dayofweek", "dayofyear", "week", "hour")
+    assert names == ["hour", *(f"hour__{p}" for p in parts)]
     tree = prep.tree(X)
     assert tree.shape[1] == len(prep.feature_names) == len(prep.sources)
-    assert tree.iloc[:, 1:6].to_numpy().tolist() == [
-        [t.year, t.month, t.day, t.day_of_week, t.hour] for t in when
+    assert tree.iloc[:, 1:8].to_numpy().tolist() == [
+        [t.year, t.month, t.day, t.day_of_week, t.day_of_year, t.isocalendar().week, t.hour]
+        for t in when
     ]
     # rows to predict: a missing value, a number that is no date and a float column
     new = pd.DataFrame({"hour": [14102103.0, np.nan, 14139999.0], "x": [0.0, 0.0, 0.0]})
-    parts = prep.tree(new).iloc[:, 1:6]
-    assert parts.iloc[0].tolist() == [2014, 10, 21, 1, 3]
+    parts = prep.tree(new).iloc[:, 1:8]
+    assert parts.iloc[0].tolist() == [2014, 10, 21, 1, 294, 43, 3]
     assert parts.iloc[1:].isna().all().all()
 
 
@@ -752,6 +818,8 @@ def test_a_date_only_and_a_unix_column_get_parts_and_other_whole_numbers_get_non
         "day__month",
         "day__day",
         "day__dayofweek",
+        "day__dayofyear",
+        "day__week",
     ]
     assert "unix__hour" in prep.feature_names
     assert not [n for n in prep.feature_names if n.startswith(("id__", "count__"))]
