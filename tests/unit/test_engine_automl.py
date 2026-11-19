@@ -2929,3 +2929,76 @@ def test_a_table_with_empty_and_constant_columns_is_checked_without_error():
     df = _skill_frame("leak").assign(empty=np.nan, const=1.0, text=None)
     (found,) = _leak_notices(df, target="y")
     assert found["columns"] == ["a"]
+
+
+def _noisy(task, n):
+    rng = np.random.default_rng(3)
+    df = pd.DataFrame(rng.normal(size=(n, 10)), columns=[f"x{i}" for i in range(10)])
+    df["y"] = rng.integers(0, 2, n) if task == "classification" else rng.normal(size=n)
+    return df
+
+
+def _small_data(events):
+    return [
+        e.data for e in events if e.type == "notice" and e.data.get("kind") == "small_data_optimism"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("task", "wording"),
+    [
+        ("classification", "AUC can be 0.05 to 0.15 too high"),
+        ("regression", "error can be too low"),
+    ],
+)
+def test_a_fit_on_a_few_hundred_rows_among_many_trials_says_the_score_is_too_good(task, wording):
+    events = []
+    _fit(_noisy(task, 200), events, families=["LightGBM", "Linear"], target="y", max_models=25)
+    (found,) = _small_data(events)
+    assert found["rows"] == 200 and found["trials"] >= automl_module.SMALL_DATA_TRIALS
+    assert "validated on only 200 rows" in found["message"] and wording in found["message"]
+
+
+def test_a_multiclass_fit_on_a_few_rows_says_the_score_is_too_high_without_a_number():
+    df = _noisy("classification", 240).assign(y=lambda d: np.arange(len(d)) % 3)
+    events = []
+    _fit(df, events, families=["LightGBM", "Linear"], target="y", max_models=25)
+    (found,) = _small_data(events)
+    assert "the validation score can be too high" in found["message"]
+
+
+def test_a_fit_on_many_rows_or_with_few_trials_says_nothing_of_small_data():
+    events = []
+    _fit(_noisy("classification", 5_000), events, families=["LightGBM"], target="y", max_models=25)
+    assert not _small_data(events)
+    events = []
+    _fit(_noisy("classification", 200), events, families=["LightGBM"], target="y", max_models=5)
+    assert not _small_data(events)
+
+
+def test_the_small_data_notice_comes_with_no_skill_and_gives_way_to_a_near_perfect_fit(monkeypatch):
+    monkeypatch.setattr(automl_module, "SMALL_DATA_TRIALS", 1)  # one trial is enough here
+    events = []
+    _fit(_skill_frame("noise", n=280), events, families=["LightGBM"], target="y", max_models=1)
+    kinds = [e.data.get("kind") for e in events if e.type == "notice"]
+    assert "no_skill" in kinds and "small_data_optimism" in kinds
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"a": rng.normal(size=300), "b": rng.normal(size=300)})
+    df["y"] = df["a"] + df["b"] + 0.001 * rng.normal(size=300)
+    events = []
+    _fit(df, events, families=["LightGBM", "Linear"], target="y", max_models=2)
+    kinds = [e.data.get("kind") for e in events if e.type == "notice"]
+    assert "near_perfect_fit" in kinds and "small_data_optimism" not in kinds
+
+
+def test_a_quantile_fit_on_a_few_rows_gets_no_small_data_notice():
+    events = []
+    model = _fit(
+        _noisy("regression", 200),
+        events,
+        families=["LightGBM"],
+        target="y",
+        quantile=0.5,
+        max_models=25,
+    )
+    assert len(model.trials) >= automl_module.SMALL_DATA_TRIALS and not _small_data(events)

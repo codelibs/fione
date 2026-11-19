@@ -230,6 +230,10 @@ NEAR_PERFECT_R2 = 0.999
 NO_SKILL_R2 = 0.02
 NEAR_PERFECT_AUC = 0.9995
 NO_SKILL_AUC = 0.55
+# A fit validated on this many rows or fewer, picked among at least
+# ``SMALL_DATA_TRIALS`` finished trials, gets a notice: see ``AutoML._notice_small_data``.
+SMALL_DATA_ROWS = 300
+SMALL_DATA_TRIALS = 20
 ZERO_SHARE = 0.95  # of a target of 0 or more that is exactly 0: the few others decide the score
 # The validated rows are scored once more with the numeric column most correlated with the target
 # used as the prediction, as it is, when its squared error is less than this share of the target's
@@ -806,13 +810,14 @@ class AutoML:
 
     def _fit_quality_notices(
         self, task: Task, model: TrainedModel, constant_said: bool = False
-    ) -> None:
+    ) -> bool:
         """Say when the validated fit is suspiciously good or no better than the average: a
         column may give the answer away, or the features may not hold it. A quantile is not
         judged by R-squared or AUC, so it gets neither, and nor is a score of a time that may be
-        cut short. The average is not named again when ``constant_said``."""
+        cut short. The average is not named again when ``constant_said``. Returns whether a
+        too-good score was said (or had been said already, of a column)."""
         if model.config.quantile is not None or model.config.event_column is not None:
-            return
+            return False
         scores = model.metrics
         if task == "regression":
             skill, low, high = scores.get("r2"), NO_SKILL_R2, NEAR_PERFECT_R2
@@ -821,13 +826,13 @@ class AutoML:
             skill, low, high = scores.get("auc"), NO_SKILL_AUC, NEAR_PERFECT_AUC
             name = "auc"
         else:
-            return
+            return False
         if skill is None or not np.isfinite(skill):
-            return
+            return False
         if skill >= high:
             top = model.feature_importance.index[0]
             if top in self._leaked:  # named already, by ``_notice_leaks``
-                return
+                return True
             self._notice(
                 f"the validation {name} is {skill:.4f}, as good as it gets: a column may give the "
                 f"answer away (the most used one is {top!r}) and not be known when the model is "
@@ -836,7 +841,8 @@ class AutoML:
                 column=top,
                 score=float(skill),
             )
-        elif (
+            return True
+        if (
             skill <= low
             and not constant_said
             and not self._ranked_off_scale(task, model)
@@ -850,6 +856,31 @@ class AutoML:
                 kind="no_skill",
                 score=float(skill),
             )
+        return False
+
+    def _notice_small_data(self, task: Task, model: TrainedModel, rows: int, trials: int) -> None:
+        """Say that a score from few rows and many trials is too good: every trial is scored on
+        the same rows, so the best of them (and the blend of the best) is picked for its luck on
+        them, and repeating the fit can score differently. Not for a quantile or a survival fit,
+        which the fit-quality notices skip too."""
+        if model.config.quantile is not None or model.config.event_column is not None:
+            return
+        if rows > SMALL_DATA_ROWS or trials < SMALL_DATA_TRIALS:
+            return
+        if task == "regression":
+            off = "the validation error can be too low"
+        elif len(model.classes_ or []) == 2:
+            off = "the validation AUC can be 0.05 to 0.15 too high"
+        else:
+            off = "the validation score can be too high"
+        self._notice(
+            f"validated on only {rows} rows and picked among {trials} trials: {off}, and the "
+            "same fit repeated can differ by about as much; trust a held-back test set more "
+            "than this score",
+            kind="small_data_optimism",
+            rows=rows,
+            trials=trials,
+        )
 
     @staticmethod
     def _ranked_off_scale(task: Task, model: TrainedModel) -> bool:
@@ -1317,7 +1348,9 @@ class AutoML:
         judged = sort_metric in CONSTANT_METRICS and (
             c.quantile is None or sort_metric == "pinball"
         )
-        self._fit_quality_notices(task, model, constant_said=said or judged)
+        too_good = self._fit_quality_notices(task, model, constant_said=said or judged)
+        if not too_good:  # a score that good is the news, whatever the rows
+            self._notice_small_data(task, model, len(rows), finished)
         self._event(
             "finished",
             stop_reason=stop_reason,
