@@ -944,23 +944,34 @@ class AutoML:
 
     def _target_scale_notices(self, y: np.ndarray, sort_metric: str) -> None:
         """Say when the target's scale and the ranking metric do not go together: a log target
-        ranked in the original units, or a skewed one that is learned and ranked as it is. A
-        quantile is learned as it is on purpose, so it gets none."""
-        if self.config.quantile is not None or sort_metric not in metrics.ORIGINAL_UNITS:
+        ranked in the original units, or a skewed one that is learned as it is while it is ranked
+        in the original units or by a relative error that nothing weights. A quantile is learned
+        as it is on purpose, so it gets none."""
+        original = sort_metric in metrics.ORIGINAL_UNITS
+        if self.config.quantile is not None or not (
+            original or sort_metric in metrics.UNWEIGHTED_RELATIVE
+        ):
             return
         if self.config.target_transform == "log1p":
-            self._notice(
-                f"the models learn the target as log1p, but sort_metric '{sort_metric}' ranks "
-                "them in the target's own units; to rank on the log scale, set sort_metric to "
-                "'rmsle'",
-                kind="log_target_metric",
-            )
+            if original:
+                self._notice(
+                    f"the models learn the target as log1p, but sort_metric '{sort_metric}' "
+                    "ranks them in the target's own units; to rank on the log scale, set "
+                    "sort_metric to 'rmsle'",
+                    kind="log_target_metric",
+                )
         elif (skew := metrics.log1p_skew(y)) is not None:
+            advice = (
+                "if the score you care about is a relative or logarithmic error (such as "
+                "RMSLE), set target_transform to 'log1p' and sort_metric to 'rmsle'"
+                if original
+                else f"set target_transform to 'log1p' to learn it as the '{sort_metric}' "
+                "error is measured"
+            )
             self._notice(
                 f"the target is 0 or more and skewed (skewness {skew:.1f}), and a model that "
-                "learns and is ranked on it as it is gives the many small values predictions far "
-                "from them; if the score you care about is a relative or logarithmic error "
-                "(such as RMSLE), set target_transform to 'log1p' and sort_metric to 'rmsle'",
+                "learns it as it is gives the many small values predictions far from them; "
+                + advice,
                 kind="skewed_target",
                 skewness=skew,
             )
