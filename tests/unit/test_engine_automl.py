@@ -1610,6 +1610,84 @@ def test_a_time_column_validates_on_later_rows_and_is_stricter_than_shuffled_fol
     assert ordered.predict(df).shape == (len(df),)  # a model is still fitted on every row
 
 
+def _daily(days):
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"x": rng.normal(size=days)})
+    df["day"] = pd.Timestamp("2020-01-01") + pd.to_timedelta(np.arange(days), unit="D")
+    df["y"] = df["x"] + np.sin(np.arange(days) / 58) + rng.normal(scale=0.1, size=days)
+    return df
+
+
+def _time_notices(df, **config):
+    events = []
+    options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
+    _fit(df, events, time_column="day", **options, **config)
+    kinds = ("time_validation", "time_short_history")
+    return {k: [e for e in events if e.data.get("kind") == k] for k in kinds}
+
+
+def test_the_time_validation_notice_gives_the_rows_and_days_of_each_part():
+    (notice,) = _time_notices(_daily(1095))["time_validation"]
+    assert notice.data["part_rows"] == [183, 182, 183, 182, 183, 182]
+    assert notice.data["part_days"][0] == 183
+    message = notice.data["message"]
+    assert "183 rows" in message and "182 to 183 rows" in message and "6 months" in message
+    numbered = _daily(600).assign(day=np.arange(600))  # not a date: rows only
+    (notice,) = _time_notices(numbered)["time_validation"]
+    assert notice.data["part_days"] is None
+    assert notice.data["part_rows"] == [100] * 6
+    assert "days" not in notice.data["message"] and "months" not in notice.data["message"]
+
+
+def test_a_text_time_column_is_read_as_dates():
+    df = _daily(1095).assign(day=lambda d: d["day"].dt.strftime("%Y-%m-%d"))
+    notices = _time_notices(df)
+    assert notices["time_validation"][0].data["part_days"][0] == 183
+    assert notices["time_short_history"]
+
+
+def test_a_first_part_of_less_than_a_year_of_a_long_series_warns_of_a_pessimistic_start():
+    (warning,) = _time_notices(_daily(1095))["time_short_history"]  # 6 parts of half a year
+    assert warning.data["first_part_days"] == 183
+    assert warning.data["days"] == 1095
+    assert warning.data["folds"] == 5
+    assert "nfolds" in warning.data["message"]
+
+
+def test_the_short_history_warning_is_quiet_when_it_does_not_apply():
+    assert not _time_notices(_daily(365))["time_short_history"]  # no year to learn from at all
+    numbered = _daily(1095).assign(day=np.arange(1095))
+    assert not _time_notices(numbered)["time_short_history"]  # not a date
+    # with 2 folds the first part is a third of the rows and nothing smaller than nfolds exists
+    assert not _time_notices(_daily(1000), nfolds=2)["time_short_history"]
+    assert not _time_notices(_daily(1461), nfolds=2)["time_short_history"]
+
+
+def test_the_short_history_warning_has_its_thresholds_at_two_years_and_one_year():
+    # the dates must span more than 730 days
+    assert not _time_notices(_daily(730))["time_short_history"]
+    assert _time_notices(_daily(731))["time_short_history"]
+    # the first part (of 4, with 3 folds) must span less than 365 days
+    assert not _time_notices(_daily(1460), nfolds=3)["time_short_history"]  # 365 days
+    (warning,) = _time_notices(_daily(1456), nfolds=3)["time_short_history"]  # 364 days
+    assert warning.data["first_part_days"] == 364
+
+
+def test_the_time_parts_of_groups_are_told_by_the_folds_that_come_out():
+    df = _daily(1100).assign(g=lambda d: np.arange(len(d)) // 55)  # 20 groups, 55 days each
+    notices = _time_notices(df, cv_group_column="g")
+    (parts,) = notices["time_validation"]
+    assert parts.data["folds"] == 5 and parts.data["part_rows"][0] == 220
+    assert "nan" not in parts.data["message"].lower() and "NaT" not in parts.data["message"]
+    (warning,) = notices["time_short_history"]
+    assert warning.data["folds"] == 5
+    # three groups of 300 days: 2 folds come out of nfolds=5, and no smaller nfolds exists
+    df = _daily(900).assign(g=lambda d: np.arange(len(d)) // 300)
+    notices = _time_notices(df, cv_group_column="g")
+    assert notices["time_validation"][0].data["folds"] == 2
+    assert not notices["time_short_history"]
+
+
 def test_a_date_column_without_a_time_column_is_pointed_out_once_and_not_with_one():
     df = _trend(400)
     df["when"] = (pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")).dt.strftime(

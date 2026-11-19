@@ -230,6 +230,11 @@ HISTORY_PERSISTENCE = 0.7
 HISTORY_COVERED = 0.8
 HISTORY_SAMPLE_ROWS = 50_000
 HISTORY_COLUMNS = 200  # a wider table is not looked at
+# A time-ordered validation whose first part spans less than SEASON_DAYS, of dates that span more
+# than TWO_SEASONS_DAYS: the first folds learn from less than one yearly cycle, see
+# ``AutoML._notice_time_parts``.
+SEASON_DAYS = 365
+TWO_SEASONS_DAYS = 2 * SEASON_DAYS
 
 # A validated fit this good (or this poor) gets a notice: R-squared, or AUC for two classes.
 NEAR_PERFECT_R2 = 0.999
@@ -498,6 +503,52 @@ class AutoML:
             columns=[column, *others],
             values=values,
             importance=round(share, 2),
+        )
+
+    def _notice_time_parts(self, times: pd.Series, folds, n_rows: int) -> None:
+        """Say how the rows are cut for the time-ordered validation: the rows (and, for a date
+        column, the days) of the first part, which is only learned from, and of each validation
+        part. Warn when dates span over two years and the first part spans less than a year: the
+        first folds learn from less than one yearly cycle, so their scores may be pessimistic.
+        A date column is one of date type or text read as dates; a numeric column (whole-number
+        dates and Unix times too) is not, so it gives the rows only and no warning."""
+        column = self.config.time_column
+        parts = [np.setdiff1d(np.arange(n_rows), covered(folds, n_rows))] + [v for _, v in folds]
+        rows = [len(part) for part in parts]
+        dates = times if pd.api.types.is_datetime64_any_dtype(times) else None
+        days = None
+        if dates is not None:
+            days = [(dates.iloc[p].max() - dates.iloc[p].min()).days + 1 for p in parts]
+        message = (
+            f"validating on {len(folds)} later parts of the data in order of '{column}'; the "
+            f"first part is only learned from. It holds {rows[0]:,} rows"
+            + (f" ({_span_text(days[0])})" if days else "")
+            + ", and each validation part holds "
+            + _range_text(rows[1:], lambda n: f"{n:,}")
+            + " rows"
+            + (f" ({_range_text(days[1:], _span_text)})" if days else "")
+        )
+        self._notice(
+            message, kind="time_validation", folds=len(folds), part_rows=rows, part_days=days
+        )
+        if dates is None:
+            return
+        whole = (dates.max() - dates.min()).days + 1
+        # with 2 folds (the least) the first part is a third of the rows: no smaller nfolds exists
+        # (fewer folds than nfolds come out when groups or equal times end together)
+        if len(folds) <= 2 or days[0] >= SEASON_DAYS or whole <= TWO_SEASONS_DAYS:
+            return
+        self._notice(
+            f"the first part of the time-ordered validation spans {_span_text(days[0])} while "
+            f"'{column}' spans {_span_text(whole)}: the first folds learn from less than one "
+            "year, so a seasonal pattern may not be learned there, and "
+            "their scores may be pessimistic. The mean of the folds can hide this: a smaller "
+            f"nfolds (now {len(folds)}) cuts the rows into fewer and longer parts, so the first "
+            "part holds more history",
+            kind="time_short_history",
+            first_part_days=days[0],
+            days=whole,
+            folds=len(folds),
         )
 
     def _notice_lopsided_parts(self, folds, n_rows: int, nfolds: int) -> None:
@@ -1188,15 +1239,10 @@ class AutoML:
                     f"'{c.time_column}' to make validation parts (groups that stay over the "
                     "whole range need the group column without the time column)"
                 )
-            folds = first_run = make_time_folds(
-                _order_codes(df, c.time_column), y, task, nfolds, row_groups, **few
-            )
-            self._notice(
-                f"validating on {len(folds)} later parts of the data in order of "
-                f"'{c.time_column}'; the first part is only learned from",
-                kind="time_validation",
-                folds=len(folds),
-            )
+            times = _time_values(df, c.time_column)
+            order = pd.factorize(times, sort=True)[0].astype(np.int64)
+            folds = first_run = make_time_folds(order, y, task, nfolds, row_groups, **few)
+            self._notice_time_parts(times, folds, len(y))
             if row_groups is not None:
                 self._notice_lopsided_parts(folds, len(y), nfolds)
         if task == "regression" and not survival and c.quantile is None:
@@ -1836,9 +1882,8 @@ def _refit(
         return None, e
 
 
-def _order_codes(df: pd.DataFrame, column: str) -> np.ndarray:
-    """Whole numbers that put the rows in the order of ``column`` (a number, a date, or text a
-    date can be read from), equal for equal values."""
+def _time_values(df: pd.DataFrame, column: str) -> pd.Series:
+    """The values of ``column`` as numbers or dates (text a date can be read from is parsed)."""
     if column not in df.columns:
         raise ConfigError(f"time column '{column}' is not in the data")
     values = df[column]
@@ -1851,7 +1896,28 @@ def _order_codes(df: pd.DataFrame, column: str) -> np.ndarray:
             raise ConfigError(
                 f"time column '{column}' must hold numbers or dates it can order by"
             ) from None
-    return pd.factorize(values, sort=True)[0].astype(np.int64)
+    return values
+
+
+def _order_codes(df: pd.DataFrame, column: str) -> np.ndarray:
+    """Whole numbers that put the rows in the order of ``column`` (a number, a date, or text a
+    date can be read from), equal for equal values."""
+    return pd.factorize(_time_values(df, column), sort=True)[0].astype(np.int64)
+
+
+def _span_text(days: int) -> str:
+    """A number of days in words: days up to 3 months, then months, then years."""
+    if days <= 90:
+        return f"{days} days"
+    if days < 2 * 365:
+        return f"about {round(days / 30.4)} months"
+    return f"about {days / 365:.1f} years"
+
+
+def _range_text(values: list[int], say: Callable[[int], str]) -> str:
+    """``say`` of the lowest and highest value: one text when they are alike."""
+    low, high = say(min(values)), say(max(values))
+    return low if low == high else f"{low} to {high}"
 
 
 def _spread(values: np.ndarray, rows: np.ndarray, n: int) -> np.ndarray:
