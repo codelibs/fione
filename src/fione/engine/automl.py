@@ -768,8 +768,8 @@ class AutoML:
             "so more rows, other inputs or another target transform may help"
             if quantile is not None
             else "the models learn the average, which a skewed target moves away from the "
-            "median that this metric rewards (setting quantile to 0.5 learns the median "
-            "directly), or the inputs hold little of what this target needs"
+            "median that this metric rewards (the quantile setting of the API at 0.5 learns the "
+            "median directly), or the inputs hold little of what this target needs"
         )
         self._notice(
             f"the validated {metric} is {ours:.4g} against {kept:.4g} from predicting the {what} "
@@ -1279,7 +1279,11 @@ class AutoML:
             self._notice_baseline(X, y_seen[rows], rows, blended, sort_metric)
         self._notice_frequency_encoded_values(prep, X, model.feature_importance)
         said = self._notice_constant(y_seen, rows, first_run, blended, sort_metric, c.quantile)
-        self._fit_quality_notices(task, model, constant_said=said)
+        # (the constant is the verdict of a ranking by an absolute error, not the R-squared)
+        judged = sort_metric in CONSTANT_METRICS and (
+            c.quantile is None or sort_metric == "pinball"
+        )
+        self._fit_quality_notices(task, model, constant_said=said or judged)
         self._event(
             "finished",
             stop_reason=stop_reason,

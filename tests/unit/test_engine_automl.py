@@ -2574,7 +2574,17 @@ def test_a_skewed_target_with_skill_in_squared_error_loses_to_the_median_in_mae_
     _fit(df, events, families=["LightGBM"], target="y", max_models=1, sort_metric="mae")
     found = [e.data for e in events if e.type == "notice" and e.data.get("kind") in KIND_CONSTANT]
     assert [n["kind"] for n in found] == ["no_better_than_constant"]  # not the R-squared notice
-    assert "quantile to 0.5" in found[0]["message"]
+    assert "quantile setting of the API at 0.5" in found[0]["message"]
+
+
+def test_a_fit_ranked_by_mae_that_beats_the_median_gets_no_r_squared_notice():
+    rng = np.random.default_rng(0)
+    n = 4_000
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    df["y"] = 1.5 * df["a"] + rng.standard_t(1.3, n)  # a tiny R-squared, a real gain in MAE
+    events = []
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1, sort_metric="mae")
+    assert not [e for e in events if e.data.get("kind") in KIND_CONSTANT]
 
 
 def test_a_quantile_fit_ranked_by_mae_is_not_compared_to_the_median():
