@@ -42,6 +42,7 @@ absolute error than the mean. They are late candidates too, for a regression ran
 MEDAE.
 """
 
+import copy
 import time
 from typing import ClassVar
 
@@ -101,6 +102,7 @@ class FamilySpec:
     quantile_objective: ClassVar[bool] = False  # True: can learn a quantile of the target
     seeded: ClassVar[bool] = True  # False: the same fit gives the same model, whatever the seed
     median: ClassVar[bool] = False  # True: learns the median (level 0.5) unless a level is given
+    shrinkable: ClassVar[bool] = False  # True: the first trees of a fitted model are a model too
 
     def __init__(
         self,
@@ -497,6 +499,7 @@ class Forest(FamilySpec):
     classifier: ClassVar[type]
     regressor: ClassVar[type]
     extra: ClassVar[dict] = {}  # constructor arguments that make the family what it is
+    shrinkable = True
 
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         cls = self.classifier if self.classification else self.regressor
@@ -533,10 +536,20 @@ class Forest(FamilySpec):
     def rounds(self, model) -> int:
         return len(model.estimators_)
 
-    def size_bytes(self, model) -> int:
+    def tree_sizes(self, model) -> list[int]:
         # sklearn stores 64 bytes per node plus a float64 value per output and class.
         trees = [estimator.tree_ for estimator in model.estimators_]
-        return sum(tree.node_count * (64 + 8 * tree.value[0].size) for tree in trees)
+        return [tree.node_count * (64 + 8 * tree.value[0].size) for tree in trees]
+
+    def size_bytes(self, model) -> int:
+        return sum(self.tree_sizes(model))
+
+    def cut(self, model, keep: int):
+        """A copy of the forest with its first ``keep`` trees (a forest averages its trees, so
+        any prefix predicts like a smaller forest); ``model`` and its trees are not changed."""
+        cut = copy.copy(model)
+        cut.estimators_ = model.estimators_[:keep]
+        return cut.set_params(n_estimators=keep)
 
     def importance(self, model) -> np.ndarray:
         return np.asarray(model.feature_importances_, dtype=float)

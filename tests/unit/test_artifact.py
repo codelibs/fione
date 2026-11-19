@@ -92,6 +92,22 @@ def test_round_trip_predictions_are_equal(saved, storage):
     assert all(member.weight > 0 for member in loaded.members)
 
 
+def test_a_forest_cut_to_its_first_trees_round_trips(iris, storage):
+    _, test = iris
+    train = load_iris(as_frame=True).frame.drop(test.index)
+    train["target"] = train["target"].map({0: "setosa", 1: "versicolor", 2: "virginica"})
+    config = TrainConfig(target="target", max_runtime_secs=60, max_models=1, seed=0)
+    model = AutoML(config, families=["ExtraTrees"]).fit(train)
+    for member in model.members:
+        member.models = [member.spec.cut(forest, 7) for forest in member.models]
+    save_model(model, storage, PREFIX, SECRET, image_tag="fione:test")
+    loaded = load_model(storage, PREFIX, SECRET)
+    for member in loaded.members:
+        assert all(len(f.estimators_) == 7 == f.n_estimators for f in member.models)
+    pd.testing.assert_frame_equal(loaded.predict_proba(test), model.predict_proba(test))
+    assert np.allclose(loaded.predict_proba(test).sum(axis=1), 1)
+
+
 def test_manifest_describes_the_model(saved, storage):
     model, _, manifest = saved
     assert manifest.format_version == 1

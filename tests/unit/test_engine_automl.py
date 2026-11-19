@@ -736,11 +736,153 @@ def test_oversized_member_is_dropped_and_weights_renormalised(monkeypatch):
     assert model.members[0].weight == pytest.approx(1.0)
     board = model.leaderboard.set_index("family")
     assert board.loc["ExtraTrees", "weight"] == 0 and board.loc["LightGBM", "weight"] == 1
-    assert any("ExtraTrees" in e.data["message"] for e in events if e.type == "notice")
+    (note,) = [
+        e.data["message"] for e in events if e.type == "notice" and "dropped" in e.data["message"]
+    ]
+    assert note.startswith("ExtraTrees dropped from the ensemble: its model would take about ")
+    assert "(limit 40 MB); alone it scored " in note and ", the ensemble " in note  # the cost
+
+
+def _cut_forest_data():
+    return _binary(600, seed=3, flip_y=0.1)
+
+
+def _forest_weights(monkeypatch, weights):
+    monkeypatch.setattr(automl_module, "caruana", lambda oof, *a, **k: dict(weights))
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+
+
+def test_a_forest_over_the_size_limit_is_cut_to_its_first_trees(monkeypatch):
+    _forest_weights(monkeypatch, {"ExtraTrees": 1.0})
+    df = _cut_forest_data()
+    full = _fit(df, families=["ExtraTrees"], target="y", max_models=1)
+    (forest,) = full.members
+    (whole,) = forest.models
+    size, trees = forest.spec.size_bytes(whole), len(whole.estimators_)
+    monkeypatch.setattr(automl_module, "SIZE_CAP", int(size * 0.6))
+    events = []
+    model = _fit(df, events, families=["ExtraTrees"], target="y", max_models=1)
+    (member,) = model.members
+    (cut,) = member.models
+    k = len(cut.estimators_)
+    assert trees * 0.4 < k < trees * 0.6 + 1 and cut.n_estimators == k
+    assert member.spec.size_bytes(cut) <= automl_module.SIZE_CAP
+    assert member.weight == pytest.approx(1.0)
+    proba = model.predict_proba(df).to_numpy()
+    assert np.allclose(proba.sum(axis=1), 1) and np.isfinite(proba).all()
+    (note,) = [
+        e.data["message"] for e in events if e.type == "notice" and "trees" in e.data["message"]
+    ]
+    assert note.startswith(f"ExtraTrees was cut to {k} of {trees} trees to fit the size limit: ")
+    assert not any("dropped" in e.data["message"] for e in events if e.type == "notice")
+
+
+def test_a_cut_forest_predicts_like_the_forest_of_those_trees(monkeypatch):
+    _forest_weights(monkeypatch, {"ExtraTrees": 1.0})
+    df = _cut_forest_data()
+    (whole,) = _fit(df, families=["ExtraTrees"], target="y", max_models=1).members
+    expected = whole.models[0]
+    monkeypatch.setattr(automl_module, "SIZE_CAP", int(whole.spec.size_bytes(expected) * 0.5))
+    model = _fit(df, families=["ExtraTrees"], target="y", max_models=1)
+    (cut,) = model.members[0].models
+    view = model.prep.tree(df)
+    X = view.to_numpy(np.float32)
+    first = np.mean([t.predict_proba(X) for t in expected.estimators_[: len(cut.estimators_)]], 0)
+    assert np.allclose(cut.predict_proba(view), first)
+
+
+def test_forests_are_cut_to_fit_the_members_together(monkeypatch):
+    _forest_weights(monkeypatch, {"LightGBM": 0.6, "ExtraTrees": 0.4})
+    df = _cut_forest_data()
+    model = _fit(df, families=["LightGBM", "ExtraTrees"], target="y", max_models=2)
+    sizes = {m.spec.name: m.spec.size_bytes(m.models[0]) for m in model.members}
+    total = int(sizes["LightGBM"] + sizes["ExtraTrees"] * 0.5)
+    monkeypatch.setattr(automl_module, "TOTAL_SIZE_CAP", total)
+    events = []
+    model = _fit(df, events, families=["LightGBM", "ExtraTrees"], target="y", max_models=2)
+    assert [m.spec.name for m in model.members] == ["LightGBM", "ExtraTrees"]
+    assert [m.weight for m in model.members] == pytest.approx([0.6, 0.4])
+    assert sum(m.spec.size_bytes(x) for m in model.members for x in m.models) <= total
+    notes = [e.data["message"] for e in events if e.type == "notice"]
+    assert any(n.startswith("ExtraTrees was cut to ") and "together" in n for n in notes)
+
+
+def test_cutting_a_forest_leaves_the_forest_it_was_cut_from_whole():
+    from sklearn.ensemble import ExtraTreesClassifier
+
+    X, y = make_classification(200, 6, random_state=0)
+    whole = ExtraTreesClassifier(20, random_state=0).fit(X, y)
+    before = whole.predict_proba(X)
+    cut = ExtraTrees("classification", 2).cut(whole, 5)
+    assert len(cut.estimators_) == cut.n_estimators == 5
+    assert len(whole.estimators_) == whole.n_estimators == 20
+    assert np.array_equal(whole.predict_proba(X), before)
+    assert cut.estimators_[0] is whole.estimators_[0]  # the trees are shared, not copied
+
+
+def test_the_fold_models_the_members_were_cut_from_stay_whole(monkeypatch):
+    _forest_weights(monkeypatch, {"ExtraTrees": 1.0})
+    monkeypatch.setattr(ExtraTrees, "refit", False)  # the member is its five fold models
+    df = _cut_forest_data()
+    kwargs = {"families": ["ExtraTrees"], "target": "y", "max_models": 1, "keep_cv_models": True}
+    full = _fit(df, **kwargs)
+    (member,) = full.members
+    size = sum(member.spec.size_bytes(m) for m in member.models)
+    monkeypatch.setattr(automl_module, "SIZE_CAP", int(size * 0.6))
+    model = _fit(df, **kwargs)
+    (member,) = model.members
+    assert len(member.models) == 5 and all(len(m.estimators_) < 100 for m in member.models)
+    folds = model.cv_models["ExtraTrees"]
+    assert all(len(m.estimators_) == m.n_estimators == 100 for m in folds)  # as scored in CV
+
+
+def test_a_forest_already_cut_is_dropped_rather_than_cut_again(monkeypatch):
+    _forest_weights(monkeypatch, {"RandomForest": 0.6, "ExtraTrees": 0.4})
+    df = _cut_forest_data()
+    families = ["RandomForest", "ExtraTrees"]
+    model = _fit(df, families=families, target="y", max_models=2)
+    sizes = {m.spec.name: m.spec.size_bytes(m.models[0]) for m in model.members}
+    monkeypatch.setattr(automl_module, "SIZE_CAP", int(sizes["ExtraTrees"] * 0.9))
+    monkeypatch.setattr(automl_module, "TOTAL_SIZE_CAP", int(sum(sizes.values()) * 0.5))
+    events = []
+    model = _fit(df, events, families=families, target="y", max_models=2)
+    notes = [e.data["message"] for e in events if e.type == "notice"]
+    cuts = [n for n in notes if n.startswith("ExtraTrees was cut")]
+    assert len(cuts) == 1
+    assert "ExtraTrees" not in [m.spec.name for m in model.members]
+    assert any(n.startswith("ExtraTrees dropped") and "together" in n for n in notes)
+
+
+def test_a_forest_that_cannot_be_cut_enough_is_dropped_with_what_it_scored(monkeypatch):
+    _forest_weights(monkeypatch, {"LightGBM": 0.5, "ExtraTrees": 0.5})
+    df = _cut_forest_data()
+    model = _fit(df, families=["LightGBM", "ExtraTrees"], target="y", max_models=2)
+    sizes = {m.spec.name: m.spec.size_bytes(m.models[0]) for m in model.members}
+    # the forest would have to lose more than 80% of its trees to fit the total
+    monkeypatch.setattr(automl_module, "TOTAL_SIZE_CAP", int(sizes["LightGBM"] * 1.01))
+    events = []
+    model = _fit(df, events, families=["LightGBM", "ExtraTrees"], target="y", max_models=2)
+    assert [m.spec.name for m in model.members] == ["LightGBM"]
+    notes = [e.data["message"] for e in events if e.type == "notice"]
+    (dropped,) = [n for n in notes if n.startswith("ExtraTrees dropped")]
+    assert "together" in dropped and "alone it scored logloss " in dropped
+    assert not any("was cut" in n for n in notes)
+
+
+def test_a_member_that_is_not_a_forest_is_never_cut(monkeypatch):
+    _forest_weights(monkeypatch, {"LightGBM": 0.5, "XGBoost": 0.5})
+    monkeypatch.setattr(automl_module, "SIZE_CAP", 1)
+    events = []
+    model = _fit(
+        _cut_forest_data(), events, families=["LightGBM", "XGBoost"], target="y", max_models=2
+    )
+    assert len(model.members) == 1  # the heaviest is kept although it is over
+    notes = [e.data["message"] for e in events if e.type == "notice"]
+    assert any("dropped" in n for n in notes) and not any("was cut" in n for n in notes)
 
 
 def test_members_are_dropped_lightest_first_until_they_fit_together(monkeypatch):
-    weights = {"LightGBM": 0.5, "XGBoost": 0.3, "ExtraTrees": 0.2}
+    weights = {"LightGBM": 0.5, "XGBoost": 0.3, "CatBoost": 0.2}
     monkeypatch.setattr(automl_module, "caruana", lambda oof, *a, **k: weights)
     for family in FAMILIES.values():
         monkeypatch.setattr(family, "size_bytes", lambda self, model: 35 * 1024**2)
@@ -749,7 +891,7 @@ def test_members_are_dropped_lightest_first_until_they_fit_together(monkeypatch)
     assert [m.spec.name for m in model.members] == ["LightGBM", "XGBoost"]  # 70 MB together
     assert [m.weight for m in model.members] == pytest.approx([0.625, 0.375])
     notices = [e.data["message"] for e in events if e.type == "notice"]
-    assert any(n.startswith("ExtraTrees dropped") and "together" in n for n in notices)
+    assert any(n.startswith("CatBoost dropped") and "together" in n for n in notices)
 
 
 def test_when_every_member_is_oversized_the_heaviest_is_kept(monkeypatch):

@@ -276,6 +276,20 @@ def test_family_contributions_are_additive(task, family):
     assert c.values.dtype == np.float64
 
 
+@pytest.mark.parametrize("task", TASKS)
+@pytest.mark.parametrize("family", ["RandomForest", "ExtraTrees"])
+def test_a_forest_cut_to_its_first_trees_explains_like_a_smaller_forest(task, family):
+    fit = _fit(task)
+    spec = _spec(fit, family)
+    models = [spec.cut(m, len(m.estimators_) // 3) for m in fit.cv_models[family][:2]]
+    for model in models:
+        assert len(model.estimators_) == model.n_estimators
+    cut = _with_members(fit, [(family, 1.0, models)])
+    c = _assert_additive(cut, _features())
+    whole = _with_members(fit, [(family, 1.0, fit.cv_models[family][:2])])
+    assert not np.allclose(c.values, contributions(whole, _features()).values)
+
+
 @pytest.mark.parametrize("task", ["binary", "multiclass"])
 def test_mixed_ensemble_refit_like_and_fold_fallback(task):
     fit = _fit(task)
