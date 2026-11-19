@@ -969,6 +969,132 @@ def test_propose_keeps_the_old_way_when_the_classes_cannot_be_validated_in_time_
     assert "date_id" in result["config"]["ignored_columns"]
 
 
+def _dated(
+    env,
+    days=400,
+    rows=2_000,
+    *,
+    missing=False,
+    strings=True,
+    name="when",
+    late=False,
+    who=False,
+    dayfirst=False,
+):
+    """A table of ``rows`` rows with a column of ``days`` different consecutive dates (``late``:
+    the label is 1 only on the last tenth of them; ``who``: a text column to keep together)."""
+    rng = np.random.default_rng(0)
+    dates = pd.Series(
+        pd.Timestamp("2020-01-01") + pd.to_timedelta(rng.integers(0, days, rows), unit="D")
+    )
+    label = rng.integers(0, 2, rows)
+    if late:
+        label = (dates > dates.quantile(0.9)).astype(int).to_numpy()
+    if missing:
+        dates[::50] = pd.NaT
+    columns = {
+        name: dates.dt.strftime("%d/%m/%Y" if dayfirst else "%Y-%m-%d").where(dates.notna())
+        if strings
+        else dates,
+        "x": rng.normal(size=rows),
+        "label": label,
+    }
+    if who:
+        columns["who"] = [f"c{i % 40}" for i in range(rows)]
+    frame = pd.DataFrame(columns)
+    return ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "dated", DatasetType.TRAIN, [frame]
+    )
+
+
+def _propose_dated(env, **kwargs):
+    args = {"group_column": "who"} if kwargs.pop("group", False) else {}
+    ds = _dated(env, **kwargs)
+    try:
+        return call(
+            env, "propose_training_config", {"dataset_id": ds.id, "target": "label", **args}
+        )
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+
+
+@pytest.mark.parametrize("strings", [True, False])
+def test_propose_only_warns_about_a_date_column_that_may_order_the_rows(env, strings):
+    result = _propose_dated(env, strings=strings)
+    assert result["config"]["time_column"] is None
+    warning = next(w for w in result["warnings"] if w["code"] == "time_hint")
+    assert warning["params"] == {"column": "when"}
+    assert "when" not in result["config"]["ignored_columns"]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"days": 10},  # too few different dates
+        {"days": 25},  # fewer than 30 days from the first to the last
+        {"rows": 200, "days": 100},  # too few rows to be a series
+        {"missing": True},  # time_column refuses a missing value
+        {"name": "date_of_birth"},  # an attribute of the rows, not the time they are in
+        {"days": 20_000},  # over 50 years: an attribute, not a series
+        {"dayfirst": True},  # text the engine cannot read as dates (13/01/2020)
+        {"late": True},  # a class that only appears late cannot be validated in that order
+        {"group": True, "who": True},  # the groups would have to end at several different times
+    ],
+)
+def test_propose_is_silent_about_a_date_column_that_cannot_order_the_rows(env, kwargs):
+    assert "time_hint" not in codes(_propose_dated(env, **kwargs))
+
+
+def test_propose_is_silent_about_dates_without_a_date_column_the_target_or_a_counter(env):
+    ds = _daily(env, "date_id", rows=2_000)  # a counter is proposed as time_column instead
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert result["config"]["time_column"] == "date_id"
+    assert "time_hint" not in codes(result)
+    ds = _daily(env, "age", np.random.default_rng(2).integers(0, 90, 2_000), 2_000)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "time_hint" not in codes(result)
+
+
+def test_propose_does_not_warn_about_the_date_column_that_is_the_target(env):
+    ds = _dated(env)
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "when"})
+    except ToolError:
+        return  # a date target is refused
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "time_hint" not in codes(result)
+
+
+def test_propose_names_a_time_counter_and_not_a_date_column_when_both_repeat(env):
+    rows = 2_000
+    days = np.random.default_rng(2).permutation(np.arange(rows) // 50)
+    frame = pd.DataFrame(
+        {
+            "date_id": days,
+            "when": (pd.Timestamp("2020-01-01") + pd.to_timedelta(days, unit="D")).strftime(
+                "%Y-%m-%d"
+            ),
+            "label": np.random.default_rng(1).integers(0, 2, rows),
+        }
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "both", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "time_index_repeated" in codes(result)
+    assert "time_hint" not in codes(result)
+
+
 @pytest.mark.parametrize("rows", [30, 2_000])
 def test_propose_does_not_take_a_duration_for_a_day_counter(env, rows):
     spread = np.random.default_rng(1).choice(np.arange(10 * rows), rows, replace=False)

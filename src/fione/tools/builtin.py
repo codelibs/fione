@@ -693,6 +693,14 @@ RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balan
 REPEATED_ID_GROUPS = 10
 REPEATED_ID_MIN_ROWS = 2  # rows per value, on average
 TIME_REPEATED_VALUES = 20  # different values of a time-named column that repeats over rows
+# A date column that may order the rows in time: at least this many different dates, rows and
+# days from the first to the last (a column of birth dates or of one day does not).
+TIME_DATE_VALUES = 20
+TIME_DATE_ROWS = 300
+TIME_DATE_DAYS = 30
+TIME_DATE_MAX_DAYS = 365 * 50  # a column of dates over more years is an attribute, not a series
+# A column of birth dates is an attribute of the rows, not the time they are in.
+_BIRTH_NAME = re.compile(r"(?i)birth|dob|born|生年|誕生")
 _IDENTIFIER = re.compile(r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(?![a-z])|番号")
 # Whom the rows are about, as the whole name (a plural, digits or punctuation may follow): a
 # column that names the one the rows concern, not a trait of it (user_age, session_count).
@@ -819,6 +827,39 @@ def repeated_time_column(
     return None
 
 
+def date_time_column(
+    ctx: ToolContext, dataset: Dataset, profile: DatasetProfile, target: str
+) -> tuple[str, pd.Series] | None:
+    """The first plain-named column of dates other than ``target`` with no missing
+    value, ``TIME_DATE_VALUES`` or more different dates and ``TIME_DATE_DAYS`` or more days from
+    the first to the last, in a dataset of ``TIME_DATE_ROWS`` rows or more: the column that may
+    order the rows in time, which ``time_column`` can use (its name and its dates); else None.
+    A column of birth dates or of dates over more than ``TIME_DATE_MAX_DAYS`` days is left out.
+    Each candidate is read whole."""
+    if dataset.n_rows < TIME_DATE_ROWS:
+        return None
+    for col in profile.columns:
+        if (
+            col.name == target
+            or col.kind != "datetime"
+            or col.missing_rate > 0
+            or col.n_unique < TIME_DATE_VALUES
+            or not _is_plain(col.name)
+            or _BIRTH_NAME.search(col.name)
+        ):
+            continue
+        values = ingest.read_dataset(ctx.storage, dataset, [col.name])[col.name]
+        try:  # as the engine reads a time column (``_order_codes``): text it cannot read is refused
+            dates = pd.to_datetime(values)
+        except (ValueError, TypeError):
+            continue
+        if dates.isna().any() or dates.nunique() < TIME_DATE_VALUES:
+            continue
+        if TIME_DATE_DAYS <= (dates.max() - dates.min()).days <= TIME_DATE_MAX_DAYS:
+            return col.name, dates
+    return None
+
+
 @dataclasses.dataclass(frozen=True)
 class Proposal:
     """What a training proposal rests on, with the dataset's raw column names."""
@@ -907,7 +948,11 @@ def _time_order_works(ctx: ToolContext, dataset: Dataset, column: str, found: Pr
     """Whether the engine could validate in the order of ``column``: it has no missing value
     in the whole dataset and, with a classification target, each class has a row before the
     later parts (``make_time_folds``)."""
-    order = ingest.read_dataset(ctx.storage, dataset, [column])[column]
+    return _order_works(found, ingest.read_dataset(ctx.storage, dataset, [column])[column])
+
+
+def _order_works(found: Proposal, order: pd.Series) -> bool:
+    """``_time_order_works`` for the values ``order`` (dates, parsed) themselves."""
     if order.isna().any():
         return False
     if found.task != "classification":
@@ -1071,7 +1116,10 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 column=column,
             )
         )
-    if time_index is None and (repeated := repeated_time_column(ctx, dataset, profile, target)):
+    repeated = None
+    if time_index is None:
+        repeated = repeated_time_column(ctx, dataset, profile, target)
+    if repeated:
         column = clean_text(repeated[0])
         values, rows = f"{repeated[1]:,}", f"{dataset.n_rows / repeated[1]:.0f}"
         warnings.append(
@@ -1086,6 +1134,23 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 column=column,
                 values=values,
                 rows=rows,
+            )
+        )
+    elif (
+        time_index is None
+        and "group_column" not in args  # the groups would have to end at several different times
+        and (date := date_time_column(ctx, dataset, profile, target))
+        and _order_works(found, date[1])
+    ):
+        column = clean_text(date[0])
+        warnings.append(
+            _warning(
+                "time_hint",
+                f"column '{column}' holds dates, so it may order the rows in time. If you will "
+                "predict later dates, time_column set to it validates later rows after earlier "
+                "ones, so the score is not too good; it turns the search for derived features "
+                "off",
+                column=column,
             )
         )
     if "sort_metric" in overrides:
