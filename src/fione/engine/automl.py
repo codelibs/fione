@@ -218,6 +218,11 @@ ZERO_SHARE = 0.95  # of a target of 0 or more that is exactly 0: the few others 
 # variance (it is on the target's scale): see ``AutoML._notice_baseline``.
 BASELINE_ON_SCALE = 0.5
 BASELINE_MIN_ROWS = 30
+# The ranking metrics of a regression with a constant that is best for them, and a model that
+# beats that constant by less than this share of its loss gets a notice: see
+# ``AutoML._notice_constant``.
+CONSTANT_METRICS = frozenset({"mae", "medae", "pinball"})
+CONSTANT_MARGIN = 0.01
 SEARCH_SHARE = 0.65
 RESERVE_SHARE = 0.15
 MIN_RESERVE_SECS = 0.5
@@ -723,11 +728,67 @@ class AutoML:
             model_score=float(ours),
         )
 
-    def _fit_quality_notices(self, task: Task, model: TrainedModel) -> None:
+    def _notice_constant(
+        self,
+        y: np.ndarray,
+        rows: np.ndarray,
+        folds: Folds,
+        blended: np.ndarray,
+        metric: str,
+        quantile: float | None,
+    ) -> bool:
+        """Say when the model does not beat, by ``CONSTANT_MARGIN``, a constant on the validated
+        rows, in the metric that ranks the models: the median of the training part of each fold
+        (for ``mae`` and ``medae``), or its ``quantile`` (for the pinball loss), which no model
+        that has learned nothing beats. R-squared does not say it for these metrics (a model can
+        have a positive one and a worse error than the median, as with a heavy-tailed target).
+        Returns whether it was said. Advisory: a check that fails changes nothing."""
+        if metric not in CONSTANT_METRICS or (quantile is not None and metric != "pinball"):
+            return False  # a quantile fit aims at another quantity than the median
+        try:
+            level = quantile if metric == "pinball" else 0.5
+            constant = np.full(len(rows), np.nan)
+            for train, valid in folds:
+                constant[np.searchsorted(rows, valid)] = np.quantile(y[train], level)
+            truth = y[rows]
+            seen = np.isfinite(constant)
+            if seen.sum() < BASELINE_MIN_ROWS:
+                return False
+            kept = metrics.loss(metric, truth[seen], constant[seen], quantile=quantile)
+            ours = metrics.loss(metric, truth[seen], blended[seen], quantile=quantile)
+        except Exception:
+            return False
+        if not (np.isfinite(kept) and np.isfinite(ours)) or kept <= 0:
+            return False
+        if ours < (1 - CONSTANT_MARGIN) * kept:
+            return False
+        what = f"{level:g} quantile" if metric == "pinball" else "median"
+        reason = (
+            "the inputs may hold little of what this target needs, or the target is mostly noise, "
+            "so more rows, other inputs or another target transform may help"
+            if quantile is not None
+            else "the models learn the average, which a skewed target moves away from the "
+            "median that this metric rewards (setting quantile to 0.5 learns the median "
+            "directly), or the inputs hold little of what this target needs"
+        )
+        self._notice(
+            f"the validated {metric} is {ours:.4g} against {kept:.4g} from predicting the {what} "
+            f"of the training rows every time, which it does not beat by {CONSTANT_MARGIN:.0%}: "
+            f"{reason}; a score this close to a constant can swing by chance between runs",
+            kind="no_better_than_constant",
+            metric=metric,
+            model_score=float(ours),
+            constant_score=float(kept),
+        )
+        return True
+
+    def _fit_quality_notices(
+        self, task: Task, model: TrainedModel, constant_said: bool = False
+    ) -> None:
         """Say when the validated fit is suspiciously good or no better than the average: a
         column may give the answer away, or the features may not hold it. A quantile is not
         judged by R-squared or AUC, so it gets neither, and nor is a score of a time that may be
-        cut short."""
+        cut short. The average is not named again when ``constant_said``."""
         if model.config.quantile is not None or model.config.event_column is not None:
             return
         scores = model.metrics
@@ -755,6 +816,7 @@ class AutoML:
             )
         elif (
             skill <= low
+            and not constant_said
             and not self._ranked_off_scale(task, model)
             and not self._ranked_by_a_clear_correlation(task, model)
         ):
@@ -1216,7 +1278,8 @@ class AutoML:
         if task == "regression" and not survival and c.quantile is None and not rating_cuts:
             self._notice_baseline(X, y_seen[rows], rows, blended, sort_metric)
         self._notice_frequency_encoded_values(prep, X, model.feature_importance)
-        self._fit_quality_notices(task, model)
+        said = self._notice_constant(y_seen, rows, first_run, blended, sort_metric, c.quantile)
+        self._fit_quality_notices(task, model, constant_said=said)
         self._event(
             "finished",
             stop_reason=stop_reason,

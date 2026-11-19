@@ -2550,6 +2550,86 @@ def test_a_quantile_fit_with_no_skill_does_not_say_so_in_r_squared():
     assert not [e for e in events if e.data.get("kind") in KIND_QUALITY]
 
 
+@pytest.mark.parametrize(
+    "options",
+    [{"sort_metric": "mae"}, {"sort_metric": "medae"}, {"quantile": 0.5}, {"quantile": 0.9}],
+)
+def test_a_fit_no_better_than_a_constant_in_its_ranking_metric_says_so(options):
+    events = []
+    df = _skill_frame("noise", n=2000)
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1, **options)
+    found = [e.data for e in events if e.type == "notice" and e.data.get("kind") in KIND_CONSTANT]
+    assert [n["kind"] for n in found] == ["no_better_than_constant"]
+    assert found[0]["model_score"] >= 0.99 * found[0]["constant_score"]
+    assert found[0]["metric"] == ("pinball" if "quantile" in options else options["sort_metric"])
+
+
+def test_a_skewed_target_with_skill_in_squared_error_loses_to_the_median_in_mae_and_says_why():
+    rng = np.random.default_rng(0)
+    n = 3_000
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    chance = 1 / (1 + np.exp(-(2 * df["a"] - 3.2)))  # mostly zeros; the odds of a value follow a
+    df["y"] = np.where(rng.random(n) < chance, rng.gamma(2, 5, n), 0.0)
+    events = []
+    _fit(df, events, families=["LightGBM"], target="y", max_models=1, sort_metric="mae")
+    found = [e.data for e in events if e.type == "notice" and e.data.get("kind") in KIND_CONSTANT]
+    assert [n["kind"] for n in found] == ["no_better_than_constant"]  # not the R-squared notice
+    assert "quantile to 0.5" in found[0]["message"]
+
+
+def test_a_quantile_fit_ranked_by_mae_is_not_compared_to_the_median():
+    events = []
+    _fit(
+        _skill_frame("noise", n=2000),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        quantile=0.9,
+        sort_metric="mae",
+    )
+    assert "no_better_than_constant" not in _kinds(events)
+
+
+@pytest.mark.parametrize(
+    "options", [{"sort_metric": "mae"}, {"quantile": 0.5}, {"sort_metric": "rmse"}]
+)
+def test_a_fit_that_beats_the_constant_gets_no_notice_of_it(options):
+    events = []
+    _fit(_skill_frame("good"), events, families=["LightGBM"], target="y", max_models=1, **options)
+    assert "no_better_than_constant" not in _kinds(events)
+
+
+def test_the_constant_notice_replaces_the_no_skill_notice_and_rmse_keeps_that_one():
+    said = {}
+    for metric in ("mae", "rmse"):
+        events = []
+        model = _fit(
+            _skill_frame("noise", n=2000),
+            events,
+            families=["LightGBM"],
+            target="y",
+            max_models=1,
+            sort_metric=metric,
+        )
+        assert model.metrics["r2"] <= automl_module.NO_SKILL_R2  # no_skill would say it
+        said[metric] = [k for k in _kinds(events) if k in KIND_CONSTANT]
+    assert said == {"mae": ["no_better_than_constant"], "rmse": ["no_skill"]}
+
+
+def test_a_target_that_is_mostly_one_value_is_not_said_to_be_no_better_than_that_constant():
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"a": rng.normal(size=1500), "b": rng.normal(size=1500)})
+    df["y"] = np.where(df["a"] < 0.26, 0.0, 1.0 + df["a"])  # the median is 0, and "a" says when
+    for metric in ("medae", "mae"):
+        events = []
+        _fit(df, events, families=["LightGBM"], target="y", max_models=1, sort_metric=metric)
+        assert "no_better_than_constant" not in _kinds(events)
+
+
+KIND_CONSTANT = ("no_skill", "no_better_than_constant")
+
+
 def _survival_frame(n=1_500, seed=0):
     """Exponential times whose rate grows with x0 (and a little with x1), cut short at a random
     time: about a third of the rows are censored. ``ev`` is the event flag."""

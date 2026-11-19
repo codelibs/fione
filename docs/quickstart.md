@@ -136,7 +136,10 @@ questions about your data and models in plain language, use [the assistant](assi
 A training run also says when its validated score is suspicious: an R-squared of 0.999 or more
 (or an AUC of 0.9995 or more for two classes) usually means a column gives the answer away and
 will not be known when the model is used, and an R-squared of 0.02 or less (or an AUC of 0.55 or
-less) means the model is hardly better than the average.
+less) means the model is hardly better than the average. When the ranking metric is `mae`,
+`medae` or `pinball`, the run says so as well when its validated error is less than 1% better
+than predicting the median (or the quantile) of the training rows every time, since an
+R-squared does not show that for a heavy-tailed target.
 
 "Ranking metric" orders the leaderboard; "Stopping metric" decides whether a try improved
 (`sort_metric` and `stopping_metric` in the API; *Automatic* is log loss for classification and
