@@ -682,6 +682,9 @@ TRIALS_WANTED = 30
 SECS_PER_TEXT_CHAR = 1e-5
 MAX_RUNTIME_SECS = 1800
 MIN_RUNTIME_SECS = 120
+# The proposal warns when the run time it proposes is capped at MAX_RUNTIME_SECS and the data
+# needs more than this many times that: the models are then cut by time and searched little.
+RUNTIME_SHORT_FACTOR = 1.5
 # Skew above which a target of 0 or more is suggested for target_transform="log1p". On every
 # regression set measured with RMSLE that skewed 0.5 or more, the logarithm helped or held; 1.0
 # keeps the tip off targets that are nearly symmetric.
@@ -1177,6 +1180,20 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         ).validate()
     except ConfigError as e:
         raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
+    need = runtime_need_secs(dataset, profile)
+    if "max_runtime_secs" not in args and need > config.max_runtime_secs * RUNTIME_SHORT_FACTOR:
+        need_minutes, limit_minutes = math.ceil(need / 60), config.max_runtime_secs // 60
+        warnings.append(
+            _warning(
+                "runtime_short",
+                f"the data needs about {need_minutes} minutes to try enough models, but the "
+                f"proposed max_runtime_secs is {limit_minutes} minutes: models may be cut by "
+                "time and each kind tried with few settings. A larger max_runtime_secs is "
+                "allowed; so is training on a part of the rows",
+                need=f"{need_minutes:,}",
+                limit=limit_minutes,
+            )
+        )
     notes = args.get("notes")
     return {
         "proposal": True,
