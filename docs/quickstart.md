@@ -538,6 +538,13 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   one feature per field, the number for a numeric field and how common the value is otherwise,
   and the number of training rows that share the first field (the size of a group). A value not
   seen in training gives a missing feature, not zero. This group is tried last;
+- codes: a string column (two of them at most) with more than 200 distinct values that is not
+  structured text (letters mixed with digits, several words, identifier fields) and whose values
+  (the first 1,000 non-missing ones are judged) have, on at least 99 % of them, the same length
+  of 3 to 32 characters, none of them with a space (`QJIFGKBCCD`), gets the character at each of its first 16 positions as a number (its rank among the characters of the
+  training rows), the number of distinct characters, and how often the most repeated character
+  occurs. A character not seen in training, a value of another length and a missing value give
+  missing features. This group is tried right after the words and shapes of text columns;
 - rows: the number of missing values and of zeros; with 10 number columns or more also the
   mean, median, maximum and standard deviation of the row's numbers that are neither zero nor
   missing, after a signed log so that columns of different scales weigh alike;

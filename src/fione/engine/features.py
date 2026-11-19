@@ -3,7 +3,7 @@
 A ``Group`` is a family of derived numeric features that read raw input columns: shape, tokens
 and topics of text columns, how much two text columns share, frequencies of categories,
 row-wise counts and statistics, date parts and differences, pairwise arithmetic of numbers,
-group means, frequencies of category pairs, parts of structured identifiers.
+group means, frequencies of category pairs, parts of structured identifiers, characters of codes.
 ``Prep.fit`` fits the groups it is given on the training features alone, so they never see the
 target: a model can be scored on out-of-fold predictions without leaking, however many groups exist.
 
@@ -92,6 +92,10 @@ ID_SHARE = 0.95  # of the values must split into the same number of fields
 MAX_ID_COLUMNS = 2  # identifier columns that get parts
 ID_UNIQUE = 0.5  # a field with more distinct values per row than this acts as a row index
 ID_GROUPED = 0.9  # the first field gives a group size only when it has fewer distinct values
+CODE_LENGTHS = (3, 32)  # fewest and most characters of a code
+CODE_SHARE = 0.99  # of the values must have the length of the code
+MAX_CODE_COLUMNS = 2  # code columns that get characters
+MAX_CODE_POSITIONS = 16  # characters of a code read one by one
 MAX_GROUP_CATEGORIES = 50  # levels of a category that group means are taken over
 MIN_GROUP_ROWS = 5  # rows a level needs for its mean
 _WORD = re.compile(r"[^\W_]+")  # runs of letters and digits
@@ -669,6 +673,80 @@ class IdParts(Group):
         return pd.DataFrame(out, index=df.index).astype(float)
 
 
+def _code_length(s: pd.Series) -> int | None:
+    """The length of the values of a string column made of codes of one length ("QJIFGKBCCD"):
+    at least ``CODE_SHARE`` of the values have it, it lies within ``CODE_LENGTHS``, and no value
+    has a space."""
+    values = _as_str(s.dropna().head(1000))
+    if not len(values) or values.str.contains(r"\s").any():
+        return None
+    sizes = values.str.len().value_counts(normalize=True)
+    length = int(sizes.index[0])
+    if sizes.iloc[0] < CODE_SHARE or not CODE_LENGTHS[0] <= length <= CODE_LENGTHS[1]:
+        return None
+    return length
+
+
+class CodeParts(Group):
+    """The characters of codes of one length that are nearly unique per row (a string of ten
+    letters that no other row shares): the character at each of the first ``MAX_CODE_POSITIONS``
+    positions as a number (the rank among the characters of the training rows, so that a
+    character they did not have is missing), the number of distinct characters, and how often the
+    most repeated character occurs. A value of another length or a missing one is missing in
+    every part."""
+
+    def __init__(self, columns: list[str]):
+        self.label, self.columns = "characters of codes", tuple(columns)
+
+    @staticmethod
+    def _points(s: pd.Series, length: int) -> tuple[np.ndarray, np.ndarray]:
+        """The code points of the values of ``length`` characters (a row per value) and the
+        rows of ``s`` that have them."""
+        s = _as_str(s)
+        rows = (s.str.len() == length).to_numpy()
+        values = np.array(s[rows].tolist(), dtype=f"U{length}")
+        return values.view(np.uint32).reshape(len(values), length), rows
+
+    def _fit(self, X):
+        self._lengths, self._alphabets, self._sources = {}, {}, {}
+        for c in self.columns:
+            length = _code_length(X[c])
+            if length is None:
+                continue
+            self._lengths[c] = length
+            self._alphabets[c] = np.unique(self._points(X[c], length)[0])
+            positions = min(length, MAX_CODE_POSITIONS)
+            for i in range(positions):
+                self._sources[f"{c}__char{i + 1}"] = (c,)
+            self._sources[f"{c}__distinct_chars"] = (c,)
+            self._sources[f"{c}__most_repeated_char"] = (c,)
+
+    def _compute(self, df):
+        out = {}
+        for c, length in self._lengths.items():
+            points, rows = self._points(df[c], length)
+            alphabet = self._alphabets[c]
+            read = points[:, :MAX_CODE_POSITIONS]
+            ranks = np.searchsorted(alphabet, read)
+            seen = alphabet[np.minimum(ranks, len(alphabet) - 1)] == read
+            ranks = np.where(seen, ranks, np.nan)
+            ordered = np.sort(points, axis=1)
+            run, longest = np.ones(len(points)), np.ones(len(points))
+            for j in range(1, length):
+                run = np.where(ordered[:, j] == ordered[:, j - 1], run + 1, 1)
+                longest = np.maximum(longest, run)
+            parts = {
+                f"{c}__char{i + 1}": ranks[:, i] for i in range(min(length, MAX_CODE_POSITIONS))
+            }
+            parts[f"{c}__distinct_chars"] = 1 + (ordered[:, 1:] != ordered[:, :-1]).sum(axis=1)
+            parts[f"{c}__most_repeated_char"] = longest
+            for name, values in parts.items():
+                column = np.full(len(df), np.nan)
+                column[rows] = values
+                out[name] = column
+        return pd.DataFrame(out, index=df.index).astype(float)
+
+
 def _repeats(s: pd.Series) -> bool:
     """Whether a number column has many distinct values of which some occur more than once."""
     values = _number(s).dropna()
@@ -716,6 +794,15 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
         pairs = None
     for column in by_rank(text)[:MAX_TEXT_COLUMNS]:
         found += [TextTokens(column), TextShape(column)]
+    # Codes of one length that are nearly unique are frequency encoded and nothing else: their
+    # characters come early, being worth more than the generic groups after them.
+    codes = [
+        c
+        for c in by_rank(strings)
+        if kinds[c] == "frequency" and _code_length(X[c]) and c not in text
+    ]
+    if codes:
+        found.append(CodeParts(codes[:MAX_CODE_COLUMNS]))
     if categories:
         found.append(CategoryFrequency(categories))
     found.append(RowCounts(columns, prep.numeric_columns))
