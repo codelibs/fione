@@ -739,6 +739,11 @@ class DeepLearning(FamilySpec):
 TEXT_WORDS = 30_000  # words and word pairs kept per text column
 TEXT_WORDS_WIDE = 100_000  # the same in TextLinearWide (more made the log loss worse)
 TEXT_CHARS = 100_000  # character n-grams kept per text column in TextLinearChar
+# What counts as a word of a text: a run of letters, digits and underscores of any length, or one
+# punctuation mark or symbol alone. Commas, semicolons, dashes, quotes and one-letter words tell
+# how a sentence is written (the author of a line, a shouting tweet); sklearn's own pattern
+# (``(?u)\b\w\w+\b``) drops them. An apostrophe splits a word ("don't" is "don", "'", "t").
+TEXT_TOKEN = r"(?u)\b\w+\b|[^\w\s]"
 TEXT_CHAR_BUDGET = 5_000_000  # characters of text above which TextLinearChar is not tried
 # Mean characters per space-separated token above which a column counts as written without
 # spaces: a sentence is then one "word" and the character n-grams are far too many.
@@ -855,7 +860,9 @@ class TextLinear(FamilySpec):
         return {"C": trial.suggest_float("C", 1e-2, 1e3, log=True)}
 
     def _vectorizers(self, texts: pd.Series) -> list[TfidfVectorizer]:
-        found = [_tfidf(texts, max_features=self.words, ngram_range=(1, 2))]
+        found = [
+            _tfidf(texts, max_features=self.words, ngram_range=(1, 2), token_pattern=TEXT_TOKEN)
+        ]
         if self.chars:
             found.append(
                 _tfidf(texts, max_features=self.chars, analyzer="char_wb", ngram_range=(2, 5))

@@ -1231,6 +1231,34 @@ def test_text_linear_fits_the_words_once_per_training_set():
     assert spec.importance(model).argmax() == 0 and spec.size_bytes(model) > 0
 
 
+def test_text_linear_words_keep_each_punctuation_mark_and_one_letter_words():
+    from fione.engine.families import TextLinear, TextLinearChar
+
+    texts = pd.Series(["I am, a fool; 2 cats - don't ($5)!"] * 2)
+    (words,) = TextLinear("classification", 3)._vectorizers(texts)
+    vocabulary = {w for w in words.vocabulary_ if " " not in w}  # the single tokens
+    # Punctuation marks and symbols are words of their own, as are one-letter words and numbers.
+    assert {"i", "a", "2", "5", ",", ";", "-", "(", ")", "$", "!", "'"} <= vocabulary
+    assert {"am", "fool", "cats", "don"} <= vocabulary
+    assert "t" in vocabulary  # an apostrophe splits a word: "don't" is "don", "'", "t"
+    assert "i am" in words.vocabulary_ and "fool ;" in words.vocabulary_  # pairs span the marks
+    chars = TextLinearChar("classification", 3)._vectorizers(texts)[1]
+    assert chars.analyzer == "char_wb"  # the character n-grams read the text as it is
+
+
+def test_text_linear_separates_texts_that_differ_only_in_punctuation():
+    from fione.engine.families import TextLinear
+    from fione.engine.prep import Prep
+
+    texts = ["a b c d"] * 30 + ["a, b; c - d!"] * 30
+    X = pd.DataFrame({"post": [t + " one two three four five" for t in texts]})
+    y = np.array([0] * 30 + [1] * 30)
+    view = Prep().fit(X).text(X)
+    spec = TextLinear("classification", 2)
+    model = spec.fit({"C": 10.0}, view, y, None, None, search.Deadline(60))
+    assert (spec.predict(model, view).argmax(axis=1) == y).all()
+
+
 def test_text_linear_fits_with_few_blas_threads(monkeypatch):
     from contextlib import contextmanager
 
