@@ -36,6 +36,7 @@ from fione.engine import diagnostics
 from fione.engine import explain as engine_explain
 from fione.engine import metrics as engine_metrics
 from fione.engine.artifact import UntrustedArtifactError
+from fione.engine.automl import MEDIAN_ORDER
 from fione.engine.config import ConfigError, TrainConfig
 from fione.jobs import store
 from fione.jobs.store import JobStatus
@@ -314,6 +315,8 @@ def _history(record: ModelRecord, lang: str) -> dict | None:
         if score is None:
             continue
         family = str(row.get("family", ""))
+        if family in MEDIAN_ORDER:  # its score is a pinball loss, not the squared error
+            continue
         series.setdefault(family, []).append([index, round(score, 6)])
         labels.append(f"{family} #{index}")
         values.append(round(score, 6))

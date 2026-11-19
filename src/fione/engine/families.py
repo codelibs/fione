@@ -35,6 +35,11 @@ fold, so its predictions out of fold are honest.
 TextLinearWide, TextLinearChar and TextLinearPlain are variants of TextLinear for the late
 phase of the search (``fione.engine.automl``): more words, word and character n-grams, and the
 text view without the derived features. They differ from it only in what they read.
+
+LightGBM_L1, XGBoost_L1 and CatBoost_L1 are the boosting families with an L1 objective: they
+learn the median of the target, which a heavy-tailed target makes a better prediction for the
+absolute error than the mean. They are late candidates too, for a regression ranked by MAE or
+MEDAE.
 """
 
 import time
@@ -70,6 +75,7 @@ SMALL_DATA_ROWS = 20_000
 SMALL_DATA_THREADS = 4
 PROBE_ROWS = 20_000
 UNIT_SAFETY = 1.2
+MEDIAN = 0.5  # the level of the L1 variants
 
 
 def n_threads(n_rows: int) -> int:
@@ -94,6 +100,7 @@ class FamilySpec:
     refit: ClassVar[bool] = True  # False: the final model is the average of the fold models
     quantile_objective: ClassVar[bool] = False  # True: can learn a quantile of the target
     seeded: ClassVar[bool] = True  # False: the same fit gives the same model, whatever the seed
+    median: ClassVar[bool] = False  # True: learns the median (level 0.5) unless a level is given
 
     def __init__(
         self,
@@ -103,6 +110,7 @@ class FamilySpec:
         n_jobs: int = 1,
         quantile: float | None = None,
     ):
+        quantile = MEDIAN if quantile is None and self.median else quantile
         if quantile is not None and not self.quantile_objective:
             raise ConfigError(f"{self.name} cannot learn a quantile")
         self.quantile = quantile  # the level of the regression's pinball loss; None: the mean
@@ -986,6 +994,31 @@ class TextLinearPlain(TextLinear):
         return super().applies(prep, X) and bool(prep.groups)
 
 
+class _MedianVariant:
+    """A boosting family that learns the median (an L1 objective) instead of the mean. It is a
+    late candidate for a regression ranked by MAE or MEDAE, and it runs after the family it
+    varies, ``reference``, taking about as long."""
+
+    median = True
+    cost = 1.0
+    keeps_share = False  # the family it varies runs in the base time, like the others
+
+
+class LightGBML1(_MedianVariant, LightGBM):
+    name = "LightGBM_L1"
+    reference = "LightGBM"
+
+
+class XGBoostL1(_MedianVariant, XGBoost):
+    name = "XGBoost_L1"
+    reference = "XGBoost"
+
+
+class CatBoostL1(_MedianVariant, CatBoost):
+    name = "CatBoost_L1"
+    reference = "CatBoost"
+
+
 FAMILIES: dict[str, type[FamilySpec]] = {
     spec.name: spec
     for spec in (
@@ -1001,5 +1034,8 @@ FAMILIES: dict[str, type[FamilySpec]] = {
         TextLinearChar,
         TextLinearPlain,
         LinearWide,
+        LightGBML1,
+        XGBoostL1,
+        CatBoostL1,
     )
 }

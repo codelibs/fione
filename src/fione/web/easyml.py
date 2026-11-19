@@ -34,6 +34,7 @@ from fione.auth.roles import ProjectAccess, Role
 from fione.data.profile import LEAK_STRONG, SCORE_REASONS, LeakCheck, leak_code
 from fione.engine import explain
 from fione.engine.artifact import MODEL_FILE, UntrustedArtifactError, read_manifest
+from fione.engine.automl import MEDIAN_ORDER
 from fione.engine.config import TargetError, TrainConfig
 from fione.engine.prep import validate_target
 from fione.jobs import store
@@ -666,7 +667,8 @@ def _job_view(request: Request, conn, ctx: Ctx, job: Job) -> dict:
     pid = ctx.project.id
     budget = progress = None
     trials = [e for _, e in events if e.type == "trial"]
-    scores = [e.data.get("best_so_far") for e in trials]
+    # (the median variants score a pinball loss: not on the scale of the others)
+    scores = [e.data.get("best_so_far") for e in trials if e.data.get("family") not in MEDIAN_ORDER]
     scores = [s for s in scores if isinstance(s, int | float) and math.isfinite(s)]
     next_url = back_url = None
     if job.kind == "automl":

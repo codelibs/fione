@@ -9,8 +9,8 @@ import pytest
 
 from fione.engine import automl as automl_module
 from fione.engine import explain, search
-from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, AutoML
-from fione.engine.config import TrainConfig
+from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, MEDIAN_ORDER, AutoML
+from fione.engine.config import ConfigError, Deadline, NoModelError, TrainConfig
 from fione.engine.ensemble import caruana
 from fione.engine.families import FAMILIES, TextLinear
 from fione.engine.features import TextShape
@@ -18,7 +18,7 @@ from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep
 
 # The variants of TextLinear; LinearWide, the other late family, is tested in test_engine_levels.
-TEXT_LATE = tuple(name for name in LATE_ORDER if name != "LinearWide")
+TEXT_LATE = tuple(name for name in LATE_ORDER if name != "LinearWide" and name not in MEDIAN_ORDER)
 CLASSES = ["food", "law", "space"]
 
 
@@ -585,3 +585,102 @@ def test_late_families_without_the_reference_result_are_not_blamed_on_time(monke
     # TextLinear has no model (and says why); the variants have no estimate to be judged by.
     notices = _notices(monkeypatch, {"TextLinear"}, [*FAMILY_ORDER, *TEXT_LATE])
     assert [n["family"] for n in notices] == ["TextLinear"]
+
+
+# --- the L1 variants of the boosting families ----------------------------------------------
+
+
+def _heavy_tailed(n=600, seed=0):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    df["y"] = 3 * df["a"] + rng.standard_t(1.5, size=n)
+    return df
+
+
+def _searched(monkeypatch, df, families=None, **config):
+    """The families ``AutoML.fit`` hands to the search (which is stopped there)."""
+    seen = []
+
+    def spy(self, names, *args, **kwargs):
+        seen.append(names)
+        raise NoModelError("stopped")
+
+    monkeypatch.setattr(AutoML, "_search", spy)
+    with pytest.raises(NoModelError):
+        _fit(df, families=families, target="y", **config)
+    return seen[0]
+
+
+@pytest.mark.parametrize("metric", ["mae", "medae"])
+def test_the_l1_variants_are_late_candidates_of_a_regression_ranked_by_an_absolute_error(
+    monkeypatch, metric
+):
+    names = _searched(monkeypatch, _heavy_tailed(), sort_metric=metric)
+    base = [name for name in FAMILY_ORDER if name != "TextLinear"]  # no prose here
+    assert names == [*base, *MEDIAN_ORDER]
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"sort_metric": "rmse"},
+        {},  # auto: RMSE
+        {"sort_metric": "mae", "quantile": 0.5},  # a quantile is learned by the base families
+        {"sort_metric": "mae", "families": ["LightGBM"]},
+    ],
+)
+def test_the_l1_variants_are_not_searched_otherwise(monkeypatch, config):
+    names = _searched(monkeypatch, _heavy_tailed(), **config)
+    assert not set(names) & set(MEDIAN_ORDER)
+
+
+def test_the_l1_variants_are_not_searched_for_a_classification(monkeypatch):
+    df = _heavy_tailed().assign(y=lambda d: (d["y"] > 0).astype(int))
+    names = _searched(monkeypatch, df, sort_metric="accuracy")
+    assert not set(names) & set(MEDIAN_ORDER)
+
+
+def test_the_constant_notice_does_not_blame_the_average_when_a_median_member_ran():
+    rng = np.random.default_rng(0)
+    n = 2_000
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    df["y"] = rng.standard_t(1.3, n)  # no signal at all
+    events = []
+    config = TrainConfig(target="y", sort_metric="mae", max_models=1, max_runtime_secs=600)
+    AutoML(config, events.append, families=["LightGBM_L1"]).fit(df)
+    notices = [e.data for e in events if e.type == "notice"]
+    found = [n for n in notices if n.get("kind") == "no_better_than_constant"]
+    assert found and "learn the average" not in found[0]["message"]
+
+
+def test_naming_an_l1_variant_for_a_classification_is_refused_up_front():
+    df = _heavy_tailed().assign(y=lambda d: (d["y"] > 0).astype(int))
+    with pytest.raises(ConfigError, match="LightGBM_L1"):
+        _fit(df, families=["LightGBM_L1"], target="y", sort_metric="accuracy")
+
+
+@pytest.mark.parametrize("name", MEDIAN_ORDER)
+def test_an_l1_variant_learns_the_median_not_the_mean(name):
+    # Three rows in ten are far above the rest: the mean is near 300, the median is 10.
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({"a": rng.normal(size=1_000)})
+    y = np.where(rng.uniform(size=1_000) < 0.3, 1_000.0, 10.0)
+    spec = FAMILIES[name]("regression", 0)
+    assert spec.quantile == 0.5
+    model = spec.fit(spec.defaults, X[:700], y[:700], X[700:], y[700:], Deadline(60))
+    assert np.median(spec.predict(model, X[700:])) < 50
+    base = FAMILIES[name.removesuffix("_L1")]("regression", 0)
+    assert base.quantile is None
+
+
+def test_a_model_with_l1_members_predicts_after_it_is_saved_and_loaded(tmp_path):
+    import joblib
+
+    df = _heavy_tailed()
+    model = _fit(df, families=list(MEDIAN_ORDER), sort_metric="mae", target="y", max_models=6)
+    assert {m.spec.name for m in model.members} <= set(MEDIAN_ORDER)
+    assert model.members and set(model.trials["family"]) == set(MEDIAN_ORDER)
+    joblib.dump(model, tmp_path / "model.joblib")
+    loaded = joblib.load(tmp_path / "model.joblib")  # a file this test wrote itself
+    assert np.allclose(loaded.predict(df), model.predict(df))
+    assert abs(np.median(model.predict(df)) - np.median(df["y"])) < 1.5
