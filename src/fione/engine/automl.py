@@ -52,12 +52,17 @@ spec 5.1/5.7) and spends it in phases:
    includes ``fione.engine.diagnostics`` on the blended OOF predictions (at most 200,000 rows).
 
 Members whose final models are estimated (``FamilySpec.size_bytes``) above ``SIZE_CAP`` are
-dropped, with a ``notice``, then the lightest-weighted ones until all together fit in
+cut when they are forests, to their first trees (at least ``MIN_TREE_SHARE`` of them, the
+same share in each of the member's models), and dropped otherwise or when that is not enough,
+with a ``notice`` that says what the member scored alone in CV and what the ensemble scored.
+Then the lightest-weighted ones are cut or dropped the same way until all together fit in
 ``TOTAL_SIZE_CAP``, and the weights are renormalised; if that would drop every member, the
-heaviest-weighted one is kept. ``cv_score``, ``cv_std`` and ``metrics`` come from the fold
-models' OOF predictions, blended with the final weights. The returned model holds neither the
-fold models nor the OOF arrays unless ``keep_cv_*`` asks; ``keep_cv_models`` keeps every
-family's fold models and so works against the artifact size goal (spec 5.2).
+heaviest-weighted one is kept. The weights are those chosen on the full forests' predictions,
+slightly off for a cut forest but still valid. ``cv_score``, ``cv_std`` and ``metrics`` come
+from the fold models' OOF predictions, blended with the final weights. The returned model
+holds neither the fold models nor the OOF arrays unless ``keep_cv_*`` asks;
+``keep_cv_models`` keeps every family's fold models and so works against the artifact size
+goal (spec 5.2).
 
 When ``should_stop()`` turns true, the search ends, nothing is refit, and the members keep
 their fold models; the model has ``stop_reason == "cancelled"``. ``NoModelError`` is raised when
@@ -84,6 +89,7 @@ advanced use).
 """
 
 import json
+import math
 import time
 from collections.abc import Callable
 
@@ -261,6 +267,7 @@ BAG_SEED_STEP = 7919
 BAG_SEED_SPACE = 2**31 - 1
 SIZE_CAP = 40 * 1024**2  # per member
 TOTAL_SIZE_CAP = 90 * 1024**2  # all members: the artifact target is 100 MB (spec 5.2)
+MIN_TREE_SHARE = 0.2  # a forest over a size cap is cut to at least this share of its trees
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
 TRIAL_COLUMNS = ["family", "trial", "state", "score", "elapsed", "params"]
 
@@ -1254,14 +1261,15 @@ class AutoML:
         }
         pick = max if sort_metric in metrics.HIGHER_IS_BETTER else min
         # (a tuned decision has no threshold yet: these progress scores count at argmax)
+        ensemble_score = metrics.value(
+            sort_metric, y_seen[rows], original(_blend(oof, weights)), prior, c.quantile
+        )
         self._event(
             "ensemble",
             sort_metric=sort_metric,
             weights=weights,
             scores=scores,
-            ensemble_score=metrics.value(
-                sort_metric, y_seen[rows], original(_blend(oof, weights)), prior, c.quantile
-            ),
+            ensemble_score=ensemble_score,
             best_single=pick(
                 {k: v for k, v in scores.items() if np.isfinite(v)} or scores, key=scores.get
             ),
@@ -1269,7 +1277,15 @@ class AutoML:
 
         refit = deadline.child(deadline.remaining() - reserve)
         members, refit_secs = self._members(
-            results, weights, X, y, prep, Clock(refit, self.should_stop), weight, stop_reason
+            results,
+            weights,
+            X,
+            y,
+            prep,
+            Clock(refit, self.should_stop),
+            weight,
+            stop_reason,
+            (sort_metric, scores, ensemble_score),
         )
         if self.should_stop():
             stop_reason = "cancelled"
@@ -1585,12 +1601,49 @@ class AutoML:
             return "error"
         return "no_improvement"  # each family stagnated (or used the trials it was allotted)
 
-    def _drop(self, member: Member, why: str) -> None:
+    def _drop(self, member: Member, why: str, ranked=None) -> None:
         name = member.key or member.spec.name  # "LightGBM#2" for a runner-up
+        metric, scores, ensemble = ranked or ("", {}, float("nan"))
+        alone = scores.get(name, float("nan"))
+        if np.isfinite(alone) and np.isfinite(ensemble):
+            why += f"; alone it scored {metric} {alone:.4g} in CV, the ensemble {ensemble:.4g}"
         self._notice(f"{name} dropped from the ensemble: {why}", family=member.spec.name)
 
-    def _members(self, results, weights, X, y, prep, clock, weight, stop_reason):
-        """Final members, heaviest first, and the refit time per family."""
+    def _cut(self, member: Member, size: int, budget: int, why: str) -> int | None:
+        """Cut a forest member to its first trees so that its models take at most ``budget``
+        bytes, the same share of the trees in each model. The member gets copies of its models:
+        the fold models and the models of the search stay whole. Returns the new size, or None
+        (and leaves the member as it is) when the member is not a forest or would keep less
+        than ``MIN_TREE_SHARE`` of its trees."""
+        spec, models = member.spec, member.models
+        if not spec.shrinkable or budget <= 0:
+            return None
+        cumulative = [np.cumsum(spec.tree_sizes(m)) for m in models]
+        share = budget / size
+        for _ in range(20):  # the trees differ in size: look again at the size really kept
+            keep = [max(1, int(len(c) * share)) for c in cumulative]
+            kept_size = sum(int(c[k - 1]) for c, k in zip(cumulative, keep, strict=True))
+            if kept_size <= budget:
+                break
+            share *= budget / kept_size * 0.99
+        else:
+            return None
+        if any(
+            k < math.ceil(MIN_TREE_SHARE * len(c)) for c, k in zip(cumulative, keep, strict=True)
+        ):
+            return None
+        member.models = [spec.cut(m, k) for m, k in zip(models, keep, strict=True)]
+        name = member.key or spec.name
+        self._notice(
+            f"{name} was cut to {sum(keep)} of {sum(len(c) for c in cumulative)} trees "
+            f"to fit the size limit: {why}",
+            family=spec.name,
+        )
+        return kept_size
+
+    def _members(self, results, weights, X, y, prep, clock, weight, stop_reason, ranked=None):
+        """Final members, heaviest first, and the refit time per family. ``ranked`` is the ranking
+        metric, each candidate's CV score and the ensemble's, for the notice of a dropped member."""
         ahead = self.config.time_column is not None
         views: dict[str, pd.DataFrame] = {}
         chosen = sorted((n for n in results if weights[n] > 0), key=lambda n: -weights[n])
@@ -1630,20 +1683,30 @@ class AutoML:
             result, models = results[name], members_of[name]
             size = sum(result.spec.size_bytes(m) for m in models)
             candidates.append((Member(result.spec, weights[name], models, name), size))
-        kept = [(member, size) for member, size in candidates if size <= SIZE_CAP]
+        kept, cut_once = [], set()
         for member, size in candidates:
+            why = f"its model would take about {_mb(size)} (limit {_mb(SIZE_CAP)})"
             if size > SIZE_CAP:
-                self._drop(
-                    member, f"its model would take about {_mb(size)} (limit {_mb(SIZE_CAP)})"
-                )
+                size = self._cut(member, size, SIZE_CAP, why)
+                if size is None:
+                    self._drop(member, why, ranked)
+                    continue
+                cut_once.add(member.key)
+            kept.append((member, size))
         while len(kept) > 1 and sum(size for _, size in kept) > TOTAL_SIZE_CAP:
             together = sum(size for _, size in kept)
-            member, _ = kept.pop()  # the lightest weight
-            self._drop(
-                member,
+            member, size = kept.pop()  # the lightest weight
+            why = (
                 f"the members would take about {_mb(together)} together "
-                f"(limit {_mb(TOTAL_SIZE_CAP)})",
+                f"(limit {_mb(TOTAL_SIZE_CAP)})"
             )
+            room = TOTAL_SIZE_CAP - (together - size)  # what the others leave it
+            # (a forest is cut once: a second cut could leave it less than MIN_TREE_SHARE)
+            cut = None if member.key in cut_once else self._cut(member, size, room, why)
+            if cut is None:
+                self._drop(member, why, ranked)
+            else:
+                kept.append((member, cut))
         if not kept:
             kept = [candidates[0]]
             self._notice(
