@@ -466,7 +466,9 @@ counter's: a time word and `id`, `idx`, `index`, `no` or `num` (`date_id`, `day_
 year, an age or a day of the month repeats over rows too. The notice is conditional on the rows
 being ordered in time. When each value is on one row, the assistant proposes the column as "Order of the rows in
 time" instead of leaving it out as an ID, unless the classes could not all be validated in that
-order. When values repeat, it only warns and sets nothing. A time column turns the search for
+order. When values repeat, it only warns and sets nothing. It also only warns about a column of
+dates (20 or more different dates over 30 days to 50 years, no missing value, in 300 rows or
+more, not a birth date) when it proposes no time column, since the date may order the rows in time. A time column turns the search for
 derived features off, so a run with the proposed column does not try them.
 
 The first part is only learned from. The scores, the ensemble weights, the diagnostics and the
