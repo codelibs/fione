@@ -150,7 +150,10 @@ When you ask for a training ("train a model to predict species"), the assistant 
 and shows a **Training proposal** card: the dataset, the column to predict, the task, the time
 limit (each with a plain reason), the columns it suggests leaving out, and what to check. The
 reasons and the things to check are written in plain words in the language of the page, not as
-technical terms. People who can edit the project
+technical terms. When the project already has a test or prediction dataset, the card also
+warns about columns the model would learn from that those datasets lack, because predicting
+needs every column the model learned from. A dataset that shares no column with the training
+data is taken for another table and not compared. People who can edit the project
 press **Start training** (the job starts exactly as shown, once) or **Dismiss**. Viewers see the
 card without buttons. A decided proposal is final; open the job from its card.
 

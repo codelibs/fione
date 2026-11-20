@@ -925,6 +925,9 @@ def sample_profile(
     return profile_dataset(frame, sample_rows=sample_rows)
 
 
+_MAX_ABSENT_SHOWN = 5  # columns named by the warning that the test data lacks, the rest counted
+
+
 def _warning(code: str, message: str, **params) -> dict:
     """A proposal's warning: ``message`` is English for the model; the card translates the
     ``code`` with its ``params``."""
@@ -966,6 +969,46 @@ def _order_works(found: Proposal, order: pd.Series) -> bool:
     except ConfigError:
         return False
     return True
+
+
+def _columns_not_in_test(
+    ctx: ToolContext, dataset: Dataset, names: list[str], target: str, ignored: list[str]
+) -> dict | None:
+    """The warning for the columns the model would learn from that no test or predict dataset of
+    the project has, or None. Predicting needs every column the model learned from, under its
+    exact name, so a column one of those datasets has is not reported. A dataset that has none
+    of the columns is another table, not the data to predict, and is not compared."""
+    if dataset.type != DatasetType.TRAIN:
+        return None
+    left_out = {target, *ignored}
+    features = [n for n in names if n not in left_out]
+    later = [
+        have
+        for other in projects.list_datasets(ctx.conn, dataset.project_id)
+        if other.type in (DatasetType.TEST, DatasetType.PREDICT)
+        and (have := {name for name, _ in other.schema}).intersection(features)
+    ]
+    absent = [n for n in features if not any(n in have for have in later)] if later else []
+    if not absent:
+        return None
+    shown = ", ".join(clean_text(n) for n in absent[:_MAX_ABSENT_SHOWN])
+    if len(absent) <= _MAX_ABSENT_SHOWN:
+        return _warning(
+            "columns_not_in_test",
+            f"the test or predict data of this project lacks the columns {shown}; predicting "
+            "needs every column the model learns from, so leave these columns out of the "
+            "training, or add them to the test data",
+            columns=shown,
+        )
+    more = len(absent) - _MAX_ABSENT_SHOWN
+    return _warning(
+        "columns_not_in_test_more",
+        f"the test or predict data of this project lacks the columns {shown} and {more} more; "
+        "predicting needs every column the model learns from, so leave these columns out of "
+        "the training, or add them to the test data",
+        columns=shown,
+        more=more,
+    )
 
 
 def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
@@ -1058,6 +1101,8 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         warnings.append(
             _warning("leak_partial", "the leak check ran out of time; some columns were not scored")
         )
+    if absent := _columns_not_in_test(ctx, dataset, names[:_MAX_COLUMNS], target, ignored):
+        warnings.append(absent)
     if is_skewed_target(found.y, task):
         warnings.append(
             _warning(
