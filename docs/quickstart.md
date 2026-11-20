@@ -542,7 +542,11 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   description: how many words they share, their share of all the words and of the shorter text,
   the difference and ratio of the word counts, and whether the first word, the last word, the
   numbers or all the words are the same;
-- categories: how common each is, and how common each pair is;
+- categories: how common each is, and how common each pair is; with two or more columns that
+  have more than 50 distinct values and where at least 30 % of the rows share their value with
+  another row (a customer number, a surname, a balance that repeats with the customer), how
+  common each pair of the three with the most values is, which counts how often one entity
+  occurs even when no single column does;
 - identifiers: a string column (two of them at most) with at least 12 distinct values and no
   spaces, whose values (the first 1,000 non-missing ones are judged) split by `_`, `/`, `-`, `:`
   or `.` into the same two to four fields on at least 95 % of them (`0001_01`, `B/0/P`), gets
@@ -576,7 +580,9 @@ training row. A text column in which nearly every value is a number and a unit o
 time (`2 years`, `3 weeks`, `10 days`, with at least three different values) is read by the
 models as a number of days.
 
-Each group is tried on a small LightGBM over rows it samples, and kept only if the loss drops
+Each group is tried on a small LightGBM over rows it samples (the frequencies of categories, of pairs and
+of repeated numbers, and the search for columns that name an entity, read all the training rows, so
+that a sample does not thin out the repeats), and kept only if the loss drops
 over paired cross-validation folds by more than three standard errors and by 0.1 % on average,
 with at least 70 % of the folds improving, and the kept groups together pass a last check on
 other folds of the same rows. The gate gets a tenth of the run time (a short run gives it 30 seconds, but never more than 30 % of the run); when that is not enough for every group, it stops judging in time for the last check of the groups it has kept, and the groups it did not reach are marked as not judged. The groups tried,

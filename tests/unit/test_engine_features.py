@@ -1211,3 +1211,211 @@ def test_code_parts_pickle_with_a_prep_and_transform_alike():
     for view in ("tree", "dense", "catboost", "linear"):
         pd.testing.assert_frame_equal(getattr(prep, view)(X), getattr(clone, view)(X))
     assert not prep.linear(X.head(1)).isna().any().any()
+
+
+def _entities(n_entities, size, seed=0):
+    """Rows of entities that each occur ``size`` times, named by an id and a surname that
+    neither identifies an entity alone."""
+    rng = np.random.default_rng(seed)
+    ids = np.repeat(np.arange(n_entities), size)
+    return pd.DataFrame(
+        {
+            "cid": ids + 1000,
+            "surname": [f"name{i % 151}" for i in ids],
+            "x": rng.normal(size=len(ids)),
+        }
+    ).sample(frac=1, random_state=seed, ignore_index=True)
+
+
+def test_an_entity_key_needs_more_than_the_levels_of_a_category_and_a_share_of_repeats():
+    def column(levels_repeated, singles):
+        return pd.Series(
+            [*np.repeat(np.arange(levels_repeated), 2), *range(10_000, 10_000 + singles)]
+        )
+
+    # 50 levels in all is a small category; 51 is not.
+    assert not features._entity_key(pd.Series(np.tile(np.arange(50), 4)))
+    assert features._entity_key(pd.Series(np.tile(np.arange(51), 4)))
+    # 300 of 1,000 rows share their value (0.3); 290 do not make it.
+    assert features._entity_key(column(150, 700))
+    assert not features._entity_key(column(145, 710))
+    assert not features._entity_key(pd.Series(np.arange(1000)))  # nothing repeats
+    assert not features._entity_key(pd.Series([None] * 100))
+
+
+def test_candidates_offer_pairs_of_repeated_values_only_for_two_entity_columns():
+    X = _entities(300, 6)
+    labels = [g.label for g in features.candidates(Prep().fit(X), X, ["x"])]
+    assert "frequencies of repeated pairs" in labels
+    group = next(
+        g
+        for g in features.candidates(Prep().fit(X), X, ["x"])
+        if g.label == "frequencies of repeated pairs"
+    )
+    assert set(group.columns) == {"cid", "surname"}
+    for kept in (["cid", "x"], ["surname", "x"]):  # one entity column alone has no pair
+        one = X[kept]
+        labels = [g.label for g in features.candidates(Prep().fit(one), one, ["x"])]
+        assert "frequencies of repeated pairs" not in labels
+    unique = X.assign(cid=np.arange(len(X)), surname=[f"s{i}" for i in range(len(X))])
+    labels = [g.label for g in features.candidates(Prep().fit(unique), unique, ["x"])]
+    assert "frequencies of repeated pairs" not in labels
+
+
+def test_candidates_pair_the_entity_columns_with_the_most_levels():
+    X = _entities(300, 6)
+    X["code"] = X["cid"] % 60  # repeated, 60 levels: fewer than the id
+    X["town"] = X["cid"] % 80
+    X["more"] = X["cid"] % 70
+    group = next(
+        g
+        for g in features.candidates(Prep().fit(X), X, ["x"])
+        if g.label == "frequencies of repeated pairs"
+    )
+    assert len(group.columns) == features.MAX_ENTITY_COLUMNS
+    assert group.columns[0] == "cid" and "code" not in group.columns
+
+
+def test_candidates_find_entity_columns_in_all_rows_that_a_sample_thins_out():
+    rng = np.random.default_rng(0)
+    n = 300_000
+    ids = np.repeat(np.arange(n // 3), 3)  # an entity occurs 3 times
+    X = pd.DataFrame(
+        {
+            "cid": ids + 1000,
+            "surname": [f"name{i % 151}" for i in ids],
+            "x": rng.normal(size=n),
+        }
+    )
+    sample = X.sample(20_000, random_state=0).reset_index(drop=True)
+    assert not features._entity_key(sample["cid"])  # a sample shows 1 row in 8 of an entity again
+    assert features._entity_key(X["cid"])
+
+    def pairs(*args):
+        found = features.candidates(Prep().fit(sample), sample, ["x"], *args)
+        return [g for g in found if g.label == "frequencies of repeated pairs"]
+
+    assert pairs() == []  # without the rows, as before: only the surname repeats in the sample
+    (group,) = pairs(X)
+    assert set(group.columns) == {"cid", "surname"}
+
+
+def test_candidates_leave_duration_columns_out_of_the_entity_columns():
+    rng = np.random.default_rng(0)
+    n = 3000
+    ids = rng.integers(0, 200, n)
+    X = pd.DataFrame(
+        {
+            "cid": ids + 1000,
+            "stay": [f"{i % 90 + 1} days" for i in ids],  # a duration with 90 levels that repeat
+            "x": rng.normal(size=n),
+        }
+    )
+    prep = Prep().fit(X)
+    assert "stay" in prep.duration_columns
+    labels = [g.label for g in features.candidates(prep, X, ["x"])]
+    assert "frequencies of repeated pairs" not in labels  # only the id is left
+    X["town"] = [f"town{i % 120}" for i in ids]
+    found = features.candidates(Prep().fit(X), X, ["x"])
+    (group,) = [g for g in found if g.label == "frequencies of repeated pairs"]
+    assert set(group.columns) == {"cid", "town"}
+
+
+class _Spy(features.Group):
+    """A group that records how many rows it was fitted on."""
+
+    def __init__(self, label, density):
+        self.label, self.columns, self.density, self.fitted_on = label, ("x",), density, []
+
+    def _fit(self, X):
+        self.fitted_on.append(len(X))
+        self._sources = {"spy": ("x",)}
+
+    def _compute(self, df):
+        return pd.DataFrame({"spy": df["x"].to_numpy() * 2.0}, index=df.index)
+
+
+def test_the_gate_fits_groups_that_count_rows_on_all_rows_and_the_others_on_the_sample():
+    # About 130,000 rows of entities that occur 4 or 8 times (6 on average).
+    X = pd.concat(
+        [_entities(10_800, 4), _entities(10_800, 8, seed=1).assign(cid=lambda d: d.cid + 50_000)],
+        ignore_index=True,
+    )
+    X = X.sample(frac=1, random_state=0, ignore_index=True)
+    y = (np.arange(len(X)) % 2).astype(int)
+    sample = np.sort(np.random.default_rng(1).choice(len(X), 20_000, replace=False))
+    Xs, ys = X.iloc[sample].reset_index(drop=True), y[sample]
+    gate = features._Gate(Xs, ys, "classification", 5, 0, all_rows=X)
+    counting, plain = _Spy("counting", True), _Spy("plain", False)
+    gate.fitted(counting), gate.fitted(plain)
+    assert gate.fitted(counting).fitted_on == [len(X)]
+    assert gate.fitted(plain).fitted_on == [len(Xs)]
+    pairs = CategoryPairs(["cid", "surname"], "pairs")
+    name = "cid x surname frequency"
+    share = gate.fitted(pairs).transform(Xs)[name]
+    assert set(np.round(share * len(X))) == {
+        4.0,
+        8.0,
+    }  # the entity's rows of all, not of the sample
+    thin = features._Gate(Xs, ys, "classification", 5, 0).fitted(pairs).transform(Xs)[name]
+    assert thin.mean() * len(Xs) < 2  # a sample shows an entity once or twice, not 6 times
+
+
+def test_select_groups_hands_the_gate_all_the_rows_also_after_it_shrinks(monkeypatch):
+    rows = []
+
+    class Recording(features._Gate):
+        def __init__(self, X, *args, **kwargs):
+            super().__init__(X, *args, **kwargs)
+            rows.append((len(X), len(self.all_rows)))
+
+        def secs(self, groups):
+            return 10.0
+
+    monkeypatch.setattr(features, "_Gate", Recording)
+    monkeypatch.setattr(features, "GATE_ROWS", 600)
+    monkeypatch.setattr(features, "GATE_MIN_ROWS", 100)
+    X, y = people(1000)
+    select_groups(X, y, "classification", 5, 0, Deadline(60))
+    assert len(rows) == 2 and rows[0][0] == 600 and rows[1][0] < 600
+    assert [n for _, n in rows] == [1000, 1000]
+
+
+def test_the_gate_adopts_pairs_of_repeated_values_when_the_size_of_an_entity_explains_the_label(
+    monkeypatch,
+):
+    monkeypatch.setattr(features, "GATE_ROWS", 3000)
+    rng = np.random.default_rng(0)
+    sizes = rng.choice([1, 2, 10], 4000, p=[0.5, 0.3, 0.2])
+    ids = np.repeat(np.arange(len(sizes)), sizes)
+    X = pd.DataFrame(
+        {
+            "cid": ids + 1000,
+            "surname": [f"name{i % 151}" for i in ids],
+            "x": rng.normal(size=len(ids)),
+        }
+    )
+    y = (np.repeat(sizes, sizes) >= 10).astype(int)
+    flip = rng.random(len(y)) < 0.05
+    y = np.where(flip, 1 - y, y)
+    assert len(X) > 3 * 3000 / 2
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    assert "frequencies of repeated pairs" in {v.group for v in verdicts if v.adopted}
+
+
+def test_category_pairs_with_a_label_pickle_through_prep_and_keep_it():
+    X = pd.concat([_entities(60, 2), _entities(40, 5, seed=1).assign(cid=lambda d: d.cid + 5000)])
+    group = CategoryPairs(["cid", "surname"], "frequencies of repeated pairs")
+    prep = Prep().fit(X, [group])
+    clone = pickle.loads(pickle.dumps(prep))  # noqa: S301 - a frame this test built
+    assert [g.label for g in clone.groups] == ["frequencies of repeated pairs"]
+    pd.testing.assert_frame_equal(prep.tree(X), clone.tree(X))
+    assert prep.sources[-1] == ("cid", "surname")
+
+
+def test_groups_pickled_before_density_existed_still_load_and_count_rows_as_before():
+    assert all("density" not in vars(g) for g in (CategoryFrequency(["c"]), ValueFrequency(["b"])))
+    for group in (CategoryPairs(["a", "b"]), CategoryFrequency(["a"]), ValueFrequency(["a"])):
+        loaded = pickle.loads(pickle.dumps(group))  # noqa: S301 - a group this test built
+        assert "density" not in vars(loaded) and loaded.density
+    assert not features.Group.density and not TextShape("t").density

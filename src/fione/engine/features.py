@@ -3,7 +3,8 @@
 A ``Group`` is a family of derived numeric features that read raw input columns: shape, tokens
 and topics of text columns, how much two text columns share, frequencies of categories,
 row-wise counts and statistics, date parts and differences, pairwise arithmetic of numbers,
-group means, frequencies of category pairs, parts of structured identifiers, characters of codes.
+group means, frequencies of category pairs and of pairs of repeated values, parts of structured
+identifiers, characters of codes.
 ``Prep.fit`` fits the groups it is given on the training features alone, so they never see the
 target: a model can be scored on out-of-fold predictions without leaking, however many groups exist.
 
@@ -15,11 +16,15 @@ and the kept groups together pass a last check on other folds of the same rows. 
 candidates cost little (a rejected group is dropped after one repeat of folds if it does not
 help at all), and the whole gate is bounded by a deadline: groups not yet confirmed by the last
 check when it runs out are not kept, so the search stops judging groups while the time left
-still covers that check. The reference model does not sample columns, since that
-would reward any added column. Groups, not single features, are judged, which limits the
-number of comparisons. The folds
-differ from the search's, but the rows are the same, so the cross-validation scores of the
-search stay slightly optimistic; the report on the model lists every group's gain.
+still covers that check. The frequencies of categories, of pairs and of repeated numbers are
+fitted on all the training rows, not on the sample, and the columns that name an entity are looked
+for in all of them: a sample of 20,000 rows of a table in which an entity occurs six times in
+130,000 shows it once, so a frequency read from it would not be the one the model gets. That
+reading is not bounded by the check's deadline; it takes seconds for a million rows. The reference
+model does not sample columns, since that would reward any added column. Groups, not single
+features, are judged, which limits the number of comparisons. The folds differ from the search's,
+but the rows are the same, so the cross-validation scores of the search stay slightly optimistic;
+the report on the model lists every group's gain.
 
 Derived features count for their source columns in importances and contributions: a feature
 with several sources splits its share equally among them.
@@ -97,6 +102,10 @@ CODE_SHARE = 0.99  # of the values must have the length of the code
 MAX_CODE_COLUMNS = 2  # code columns that get characters
 MAX_CODE_POSITIONS = 16  # characters of a code read one by one
 MAX_GROUP_CATEGORIES = 50  # levels of a category that group means are taken over
+ENTITY_SHARE = (
+    0.3  # of the rows must share their value with another row for a column to name entities
+)
+MAX_ENTITY_COLUMNS = 3  # such columns (the ones with the most levels) whose pairs are counted
 MIN_GROUP_ROWS = 5  # rows a level needs for its mean
 _WORD = re.compile(r"[^\W_]+")  # runs of letters and digits
 _TOKEN = re.compile(r"[^\W\d_]+")  # runs of letters, so "C85" gives "c" and "PC 17599" gives "pc"
@@ -114,6 +123,7 @@ class Group:
 
     label: str
     columns: tuple[str, ...]
+    density = False  # the features count rows, so what a sample of the rows shows is thinner
 
     def fit(self, X: pd.DataFrame) -> "Group":
         self._fit(X)
@@ -302,6 +312,8 @@ class TextTopics(Group):
 class CategoryFrequency(Group):
     """The share of the training rows with the same category, for each categorical column; a
     category not seen in training gets the share of the rarest one."""
+
+    density = True
 
     _unseen: dict = {}  # class-level default: groups pickled before it existed still load (0)
 
@@ -505,6 +517,8 @@ class ValueFrequency(Group):
     """The share of the training rows that have exactly the same number (a fare shared by a
     family, a price point), for number columns that repeat their values."""
 
+    density = True
+
     def __init__(self, columns: list[str]):
         self.label, self.columns = "frequencies of repeated numbers", tuple(columns)
 
@@ -572,10 +586,12 @@ class CategoryPairs(Group):
     """The share of the training rows with the same pair of categories; a pair not seen in
     training gets the share of the rarest one."""
 
+    density = True
+
     _unseen: dict = {}  # class-level default: groups pickled before it existed still load (0)
 
-    def __init__(self, columns: list[str]):
-        self.label, self.columns = "frequencies of category pairs", tuple(columns)
+    def __init__(self, columns: list[str], label: str = "frequencies of category pairs"):
+        self.label, self.columns = label, tuple(columns)
         self._pairs = list(itertools.combinations(columns, 2))
 
     def _key(self, df, a, b):
@@ -764,6 +780,16 @@ def _repeats(s: pd.Series) -> bool:
     return 10 <= values.nunique() < 0.9 * len(values)
 
 
+def _entity_key(s: pd.Series) -> bool:
+    """Whether a column names entities that occur on several rows (a customer, a household): more
+    levels than a small category has, and at least ``ENTITY_SHARE`` of the rows have a value that
+    occurs again."""
+    values = (s if pd.api.types.is_numeric_dtype(s) else _as_str(s)).dropna()
+    if values.nunique() <= MAX_GROUP_CATEGORIES:
+        return False
+    return bool(values.duplicated(keep=False).mean() >= ENTITY_SHARE)
+
+
 def _structured(s: pd.Series) -> bool:
     """Whether a string column has parts to read: values of several words, or letters mixed with
     digits (a name, a ticket, a cabin), not a single word that is only a category."""
@@ -775,10 +801,13 @@ def _structured(s: pd.Series) -> bool:
     return bool((several | mixed).mean() >= TEXT_MIN_STRUCTURED)
 
 
-def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
+def candidates(
+    prep: Prep, X: pd.DataFrame, ranked: list[str], all_rows: pd.DataFrame | None = None
+) -> list[Group]:
     """The groups worth judging for these columns, in the order the gate tries them.
     ``ranked`` lists the input columns, the most useful first, to pick the few that pairwise
-    groups combine."""
+    groups combine. ``all_rows`` holds the rows ``X`` was sampled from: only the columns that name
+    an entity are looked for in it, since a sample shows too few repeats of an entity."""
     order = {column: i for i, column in enumerate(ranked)}
     columns = prep.columns
 
@@ -829,6 +858,23 @@ def candidates(prep: Prep, X: pd.DataFrame, ranked: list[str]) -> list[Group]:
         found += [NumberPairs(op, numbers) for op in NumberPairs._OPS]
     if len(small) > 1:
         found.append(CategoryPairs(small[:4]))
+    # Columns that name an entity seen on several rows (an id, a surname, an amount that repeats
+    # with it) identify it only together: how often the pair occurs is the size of the entity,
+    # which neither column shows.
+    seen = X if all_rows is None else all_rows
+    entities = sorted(
+        (
+            c
+            for c in columns
+            if kinds[c] in ("category", "frequency", "numeric")
+            and c not in durations
+            and X[c].nunique() > MAX_GROUP_CATEGORIES
+            and _entity_key(seen[c])
+        ),
+        key=lambda c: -seen[c].nunique(),
+    )
+    if len(entities) > 1:
+        found.append(CategoryPairs(entities[:MAX_ENTITY_COLUMNS], "frequencies of repeated pairs"))
     repeated = [c for c in by_rank(prep.numeric_columns) if _repeats(X[c])]
     if repeated:
         found.append(ValueFrequency(repeated[:MAX_PAIR_COLUMNS]))
@@ -869,9 +915,18 @@ class _Gate:
     """Paired fold-wise losses of the reference model on a sample of the rows."""
 
     def __init__(
-        self, X, y, task: Task, nfolds: int, seed: int, out_of_time=lambda: False, groups=None
+        self,
+        X,
+        y,
+        task: Task,
+        nfolds: int,
+        seed: int,
+        out_of_time=lambda: False,
+        groups=None,
+        all_rows=None,
     ):
         self.X, self.y, self.task, self.seed, self.groups = X, y, task, seed, groups
+        self.all_rows = X if all_rows is None else all_rows  # what groups that count rows read
         self.out_of_time = out_of_time
         self._cache: dict[tuple, np.ndarray] = {}
         self._fitted: dict[str, Group] = {}
@@ -909,7 +964,9 @@ class _Gate:
     def fitted(self, group: Group) -> Group:
         """``group`` fitted on the gate's rows, once however many views read it."""
         if group.label not in self._fitted:
-            self._fitted[group.label] = copy.copy(group).fit(self.X)
+            self._fitted[group.label] = copy.copy(group).fit(
+                self.all_rows if group.density else self.X
+            )
         return self._fitted[group.label]
 
     def losses(self, groups: list[Group], repeats: range) -> np.ndarray:
@@ -1016,6 +1073,8 @@ def select_groups(
             None if row_groups is None else row_groups[rows],
         )
 
+    all_rows = X
+
     def new_gate(X, y, row_groups):
         return _Gate(
             X,
@@ -1025,6 +1084,7 @@ def select_groups(
             (seed + GATE_SEED_OFFSET) % GATE_SEED_SPACE,
             lambda: deadline.expired() or should_stop(),
             row_groups,
+            all_rows,
         )
 
     if len(X) > GATE_ROWS:
@@ -1034,7 +1094,7 @@ def select_groups(
     verdicts: list[Verdict] = []
     pool: list[Group] = []
     try:
-        pool = candidates(Prep().fit(X), X, gate.ranked())
+        pool = candidates(Prep().fit(X), X, gate.ranked(), all_rows)
         current = gate.losses([], range(1))
         # When the time covers too few repeats of the folds to judge the groups, fewer rows do it
         # faster (a repeat takes about as long as the rows are many).
