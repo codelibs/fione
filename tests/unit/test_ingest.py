@@ -468,3 +468,123 @@ def test_read_dataset_rows_reads_a_page_from_the_row_groups_that_hold_it(
     assert ingest.read_dataset_rows(storage, dataset, 343, 10)["s"].tolist() == [
         f"v{i}" for i in range(343, 350)
     ]
+
+
+def test_numbers_with_thousands_separators_are_numbers(conn, storage, project):
+    data = (
+        'a,b,c,d,e,f\n"1,234","1,234.5","0,123","1,23","12,345",x\n'
+        '"16,853",7,"0,456","1,234","1,234,567",y\n,"2,000.25","0,789","5,000",,z\n'
+    )
+    ds, df = load(conn, storage, project, data.encode())
+    assert dict(ds.schema) == {
+        "a": "int64",
+        "b": "double",
+        "c": "string",
+        "d": "string",
+        "e": "int64",
+        "f": "string",
+    }
+    assert df["a"].tolist()[:2] == [1234, 16853] and df["a"].isna().tolist() == [False, False, True]
+    assert df["b"].tolist() == [1234.5, 7.0, 2000.25]
+    assert df["e"].tolist()[:2] == [12345, 1234567]
+    assert df["c"].tolist() == ["0,123", "0,456", "0,789"]  # a decimal comma stays text
+
+
+def test_thousands_separators_are_read_only_in_a_comma_delimited_file(conn, storage, project):
+    ds, df = load(conn, storage, project, b'a;b\n"12,500";1\n"3,750";2\n')
+    assert dict(ds.schema)["a"] == "string" and df["a"].tolist() == ["12,500", "3,750"]
+
+
+def test_thousands_separated_whole_numbers_beyond_int64_stay_text(conn, storage, project):
+    ds, df = load(conn, storage, project, b'a\n"99,999,999,999,999,999,999"\n"1,000"\n')
+    assert dict(ds.schema)["a"] == "string"
+
+
+@pytest.mark.parametrize(
+    ("values", "dtype", "numbers"),
+    [
+        (['"-1,234"', '"1,234.50"', '"2,000"'], "double", [-1234.0, 1234.5, 2000.0]),
+        (['"+2,000"', '"1,000"'], "string", None),  # a plus sign is not read
+        (['"1,200"', "950", "NA"], "int64", [1200, 950, None]),  # one separator is enough
+        (['"1,200"', "NA", '"3,000"'], "int64", [1200, None, 3000]),
+        (['"1,234"', "7", '"0.5"'], "double", [1234.0, 7.0, 0.5]),
+        (['"123,456"', '"234,567"'], "int64", [123456, 234567]),  # an identifier reads as a number
+        (['"(1,234)"', '"1,000"'], "string", None),
+        (['"$1,234"', '"1,000"'], "string", None),
+        (['"1,234 "', '"1,000"'], "string", None),
+        (['"12,34"', '"1,000"'], "string", None),
+        (['"1,23,456"', '"1,000"'], "string", None),  # Indian grouping
+        (['"1,2"', '"1,5"'], "string", None),  # a decimal comma
+        (['"1,5"', '"1,000"'], "string", None),
+        (['"0,123"', '"1,000"'], "string", None),
+        (['"007"', '"1,000"'], "string", None),  # a code with a leading zero
+        (['"1,000,00"', '"1,000"'], "string", None),
+        (["950", "1200"], "int64", [950, 1200]),  # plain numbers were numbers already
+    ],
+)
+def test_thousands_separator_cases(conn, storage, project, values, dtype, numbers):
+    data = "a\n" + "\n".join(values) + "\n"
+    ds, df = load(conn, storage, project, data.encode())
+    assert dict(ds.schema)["a"] == dtype
+    if numbers is not None:
+        assert [None if pd.isna(v) else v for v in df["a"].tolist()] == numbers
+    else:
+        assert df["a"].tolist() == [v.strip('"') if v else None for v in values]
+
+
+@pytest.mark.parametrize("delimiter", [b"\t", b"|"])
+def test_thousands_separators_stay_text_in_other_delimited_files(conn, storage, project, delimiter):
+    data = (
+        b"a"
+        + delimiter
+        + b"b\n"
+        + b'"12,500"'
+        + delimiter
+        + b"1\n"
+        + b'"3,750"'
+        + delimiter
+        + b"2\n"
+    )
+    ds, _ = load(conn, storage, project, data)
+    assert dict(ds.schema)["a"] == "string"
+
+
+def test_thousands_separated_numbers_in_a_frame_batch_are_untouched(conn, storage, project):
+    ds = ingest.ingest_batches(
+        storage,
+        conn,
+        project.id,
+        "frame",
+        DatasetType.TRAIN,
+        [pd.DataFrame({"a": ["1,234", "5,000"]})],
+    )
+    assert dict(ds.schema)["a"] == "string"
+
+
+def test_thousands_separators_are_found_across_batches(conn, storage, project, monkeypatch):
+    monkeypatch.setattr(ingest, "_ROW_GROUP_ROWS", 3)
+    rows = [
+        ("1", "5", "9", "NA"),
+        ("2", "6", "8", "NA"),
+        ("3", "7", "7", "NA"),
+        ("4", "8", "6", "NA"),
+        ("5", "9", "5", "1"),
+        ("6", "10", "4", "NA"),
+        ("7", "11", "3", "NA"),
+        ("8", "12", "2", "2"),
+        ("9", "13", "1", "NA"),
+        ('"1,000"', '"99,999,999,999,999,999,999"', '"1,200"', '"4,500"'),
+    ]
+    data = "a,b,c,d\n" + "\n".join(",".join(r) for r in rows) + "\n"
+    ds, df = load(conn, storage, project, data.encode())
+    assert dict(ds.schema) == {"a": "int64", "b": "string", "c": "int64", "d": "int64"}
+    assert df["a"].tolist() == [1, 2, 3, 4, 5, 6, 7, 8, 9, 1000]  # a separator in the last batch
+    assert df["c"].tolist() == [9, 8, 7, 6, 5, 4, 3, 2, 1, 1200]
+    assert df["b"].iloc[-1] == "99,999,999,999,999,999,999"  # an overflow in the last batch
+    assert df["d"].isna().sum() == 7 and df["d"].iloc[-1] == 4500  # nulls kept
+
+
+def test_thousands_separated_column_with_empty_cells(conn, storage, project):
+    ds, df = load(conn, storage, project, b'a,b\n"1,200",1\n,2\n950,3\n"",4\n')
+    assert dict(ds.schema)["a"] == "int64"
+    assert [None if pd.isna(v) else v for v in df["a"].tolist()] == [1200, None, 950, None]

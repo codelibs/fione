@@ -4,7 +4,14 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
-from predict_models import LABELS, binary, classifier, features, regressor
+from predict_models import (
+    LABELS,
+    binary,
+    classifier,
+    features,
+    regressor,
+    thousands_text_regressor,
+)
 
 from fione.engine import explain
 from fione.predict import PredictInputError, batch, batch_predict, predict_chunks
@@ -412,3 +419,26 @@ def test_no_notice_for_a_handful_of_rows_or_a_model_without_the_training_fill(re
     old.prep = copy.copy(reg.prep)
     del old.prep.fill  # a model pickled before the fill was kept: the class default, nothing known
     assert batch.emptier_notice(old, features(40).assign(x=np.nan)) is None
+
+
+def test_a_column_learned_as_thousands_separated_text_but_read_as_numbers_is_refused():
+    model = thousands_text_regressor()
+    text = features(10).assign(color=["1,200", "2,500", "13,000", *["2,500"] * 7])
+    assert len(batch_predict(model, text)) == 10
+    numbers = features(10).assign(color=[1200, 2500, 13000, *[2500] * 7])
+    with pytest.raises(PredictInputError) as e:
+        batch_predict(model, numbers)
+    assert str(e.value) == (
+        "column 'color' was learned as text with thousands separators (such as '1,200'), but "
+        "the file now reads it as numbers: train the model again on the current upload"
+    )
+
+
+def test_a_numeric_column_given_thousands_separated_text_is_refused(reg):
+    df = features(10).astype({"x": object})
+    df["x"] = ["1,500", *["2,500"] * 9]
+    with pytest.raises(PredictInputError) as e:
+        batch_predict(reg, df)
+    assert str(e.value) == (
+        "column 'x' must hold numbers, but has values such as ['1,500', '2,500']"
+    )

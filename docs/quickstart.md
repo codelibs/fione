@@ -570,6 +570,12 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   how common each repeated value is, and k-means clusters with the distance to the cluster
   centre.
 
+A column of a comma-delimited CSV in which every value is a number written with thousands
+separators (`16,853`, `-1,234.5`; plain digits may be mixed in, and at least one value must have
+a separator) is read as a number on upload. A column with any other value stays text, such as
+`0,123`, `1,23`, `1,23,456`, `(1,234)` or `$1,234`, or `007` next to separated numbers, and so
+does every column of a file delimited by `;`, a tab or `|`, where a comma may be a decimal one.
+
 Date features need a column of dates. ISO dates are detected on upload; a column of other date
 strings (`25-12-2024 09:00`, `Mar 5, 2024`) is recognised when a model is trained, and its
 dates are read with the day first when some first field is above 12 and no second field is
