@@ -201,9 +201,9 @@ blend's fractions, before the cut points.
 ## Choosing the predicted class
 
 A classification model predicts the class with the largest probability. When one class is much
-rarer than the others and the score treats every class alike (balanced accuracy, macro recall),
-set "Choosing the predicted class" to *Adjust for class sizes* (`decision: "balanced"` in the
-API). The predicted label is then the class whose probability is largest relative to its share of
+rarer than the others and the score treats every class alike (balanced accuracy, macro recall,
+macro F1), set "Choosing the predicted class" to *Adjust for class sizes* (`decision: "balanced"`
+in the API). The predicted label is then the class whose probability is largest relative to its share of
 the training data, so rare classes are predicted more often. The probabilities do not change;
 the accuracy and the confusion matrix of the training result, batch prediction, Fione Serving
 and the explanation follow the same rule. It cannot be combined with "Balance the classes",

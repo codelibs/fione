@@ -41,6 +41,8 @@ import pandas as pd
 from fione.auth.roles import ProjectAccess, Role, can_access_project, project_access
 from fione.data.frames import is_counter_name, is_time_counter, parse_datetimes
 from fione.data.profile import (
+    DETERMINES,
+    PREDICTS_ALONE,
     SCORE_REASONS,
     ColumnProfile,
     DatasetProfile,
@@ -695,6 +697,7 @@ RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balan
 # least REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
 REPEATED_ID_GROUPS = 10
 REPEATED_ID_MIN_ROWS = 2  # rows per value, on average
+REPEATED_ID_FEW_ROWS = 20  # rows per value, on average, from which the fit's own check takes over
 TIME_REPEATED_VALUES = 20  # different values of a time-named column that repeats over rows
 # A date column that may order the rows in time: at least this many different dates, rows and
 # days from the first to the last (a column of birth dates or of one day does not).
@@ -780,7 +783,27 @@ def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | 
     ]
     # A column named like an identifier comes before one named for the entity.
     found.sort(key=lambda col: _IDENTIFIER.search(col.name) is None)
-    return found[0] if found else None
+    if found:
+        return found[0]
+    # Whatever it is named, a column of values that each come back on a few rows (under
+    # ``REPEATED_ID_FEW_ROWS``, which the fit's own check of repeated values leaves to this one) and
+    # that gives the target away on its own (its value fixes the target, or nearly) ties rows that
+    # share the target together. Whole-number codes are left to the name rule: a number may be a
+    # count or a code that fixes the target for another reason.
+    alone = {s.column for s in profile.leak_suspects if s.reason in (PREDICTS_ALONE, DETERMINES)}
+    return next(
+        (
+            col
+            for col in profile.columns
+            if col.name in alone
+            and col.kind in ("categorical", "text")
+            and col.n_unique >= REPEATED_ID_GROUPS
+            and REPEATED_ID_MIN_ROWS * col.n_unique
+            <= profile.n_rows
+            < REPEATED_ID_FEW_ROWS * col.n_unique
+        ),
+        None,
+    )
 
 
 def time_index_column(profile: DatasetProfile, target: str, n_rows: int) -> ColumnProfile | None:
@@ -1113,7 +1136,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
             _warning(
                 "rare_class",
                 f"the rarest class is {share:.1%} of the rows; if the score treats every class "
-                "alike (such as balanced accuracy), decision 'balanced' may help",
+                "alike (such as balanced accuracy or macro F1), decision 'balanced' may help",
                 share=f"{max(share * 100, 0.1):.1f}",
             )
         )
