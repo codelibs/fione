@@ -18,7 +18,7 @@ spec 5.1/5.7) and spends it in phases:
    ``Family#2`` and ``Family#3``.
    After them come the *late* families (``LATE_ORDER``: LinearWide, for data with categorical
    columns that the linear view cuts short, and the variants of TextLinear, for data with
-   prose), and for a regression ranked by MAE or MEDAE with no ``quantile``, the L1 variants
+   prose), and for a regression ranked by MAE, MEDAE or SMAPE with no ``quantile``, the L1 variants
    of the boosting families (``MEDIAN_ORDER``: LightGBM_L1, XGBoost_L1, CatBoost_L1, which learn
    the median; each after the family it varies). When any applies, ``LATE_SHARE`` of the search
    time is kept for them, taken from
@@ -144,11 +144,11 @@ FAMILY_WEIGHTS = {
 QUANTILE_FAMILIES = tuple(f for f in FAMILY_ORDER if FAMILIES[f].quantile_objective)
 # Run after the others, in the search time they leave (see the module docstring); each only
 # when the data suits it (``FamilySpec.applies``) and a model of it would not be too big.
-# The L1 variants of the boosting families are late candidates for a regression ranked by MAE
-# or MEDAE (``MEDIAN_METRICS``) with no quantile: the squared error the others learn is not the
-# loss they are ranked by, and on a heavy-tailed target the median predicts better.
+# The L1 variants of the boosting families are late candidates for a regression ranked by MAE,
+# MEDAE or SMAPE (``MEDIAN_METRICS``) with no quantile: the squared error the others learn is not
+# the loss they are ranked by, and on a heavy-tailed target the median predicts better.
 MEDIAN_ORDER = ("LightGBM_L1", "XGBoost_L1", "CatBoost_L1")
-MEDIAN_METRICS = frozenset({"mae", "medae"})
+MEDIAN_METRICS = frozenset({"mae", "medae", "smape"})
 LATE_ORDER = (
     "LinearWide",
     "TextLinearChar",

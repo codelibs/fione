@@ -611,7 +611,7 @@ def _searched(monkeypatch, df, families=None, **config):
     return seen[0]
 
 
-@pytest.mark.parametrize("metric", ["mae", "medae"])
+@pytest.mark.parametrize("metric", ["mae", "medae", "smape"])
 def test_the_l1_variants_are_late_candidates_of_a_regression_ranked_by_an_absolute_error(
     monkeypatch, metric
 ):
@@ -626,6 +626,7 @@ def test_the_l1_variants_are_late_candidates_of_a_regression_ranked_by_an_absolu
         {"sort_metric": "rmse"},
         {},  # auto: RMSE
         {"sort_metric": "mae", "quantile": 0.5},  # a quantile is learned by the base families
+        {"sort_metric": "smape", "quantile": 0.5},
         {"sort_metric": "mae", "families": ["LightGBM"]},
     ],
 )
