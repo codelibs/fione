@@ -2,6 +2,7 @@ import dataclasses
 import json
 import logging
 import math
+import string
 from types import SimpleNamespace
 
 import numpy as np
@@ -740,6 +741,171 @@ def test_propose_says_how_to_remove_the_rows_with_an_empty_target(env):
     warning = next(w for w in result["warnings"] if w["code"] == "target_missing")
     assert warning["params"] == {"column": "sales"}
     assert "'sales is not empty'" in warning["message"]
+
+
+def _propose_with_later_data(env, later, train_columns=("x", "z", "Age", "label"), **args):
+    """The proposal for a train dataset next to the datasets of ``later`` ({type: [columns]})."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({c: rng.normal(size=60) for c in train_columns})
+    made = [
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "train", DatasetType.TRAIN, [frame]
+        )
+    ]
+    for i, (kind, columns) in enumerate(later):
+        other = pd.DataFrame({c: rng.normal(size=5) for c in columns})
+        made.append(
+            ingest.ingest_batches(env.storage, env.conn, env.project.id, f"t{i}", kind, [other])
+        )
+    try:
+        return call(
+            env,
+            "propose_training_config",
+            {"dataset_id": made[0].id, "target": "label", **args},
+        )
+    finally:
+        for dataset in made:
+            projects.delete_dataset(env.conn, env.storage, dataset.id)
+
+
+def _absent_columns(result):
+    found = [w for w in result["warnings"] if w["code"].startswith("columns_not_in_test")]
+    return found[0] if found else None
+
+
+def test_propose_names_the_columns_the_test_data_lacks(env):
+    result = _propose_with_later_data(env, [(DatasetType.TEST, ["x", "label"])])
+    codes(result)  # both languages translate the code
+    warning = _absent_columns(result)
+    assert warning["code"] == "columns_not_in_test"
+    assert warning["params"] == {"columns": "z, Age"}
+
+
+@pytest.mark.parametrize(
+    "later",
+    [
+        [],
+        [(DatasetType.TEST, ["x", "z", "Age"])],  # the test data has all the columns
+        [(DatasetType.TEST, ["x", "z", "Age", "id"])],  # and may have more
+        [(DatasetType.TEST, ["x", "z", "Age", "label"]), (DatasetType.TRAIN, ["x"])],
+    ],
+)
+def test_propose_is_silent_when_the_test_data_has_every_column(env, later):
+    assert _absent_columns(_propose_with_later_data(env, later)) is None
+
+
+def test_propose_does_not_miss_the_target_in_the_test_data(env):
+    result = _propose_with_later_data(env, [(DatasetType.PREDICT, ["x", "z", "Age"])])
+    assert _absent_columns(result) is None
+
+
+def test_propose_does_not_warn_about_a_column_the_proposal_leaves_out(env):
+    # "id" is an id column the proposal ignores, so the test data does not need it
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"id": range(60), "x": rng.normal(size=60), "label": rng.normal(size=60)})
+    train = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "train", DatasetType.TRAIN, [frame]
+    )
+    test = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "test", DatasetType.TEST, [frame[["x"]]]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": train.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+        projects.delete_dataset(env.conn, env.storage, train.id)
+    assert "id" in result["config"]["ignored_columns"]
+    assert _absent_columns(result) is None
+
+
+def test_propose_warns_only_about_columns_absent_from_every_test_dataset(env):
+    later = [(DatasetType.TEST, ["x", "z"]), (DatasetType.PREDICT, ["x", "Age"])]
+    assert _absent_columns(_propose_with_later_data(env, later)) is None
+    later = [(DatasetType.TEST, ["x"]), (DatasetType.PREDICT, ["x", "Age"])]
+    assert _absent_columns(_propose_with_later_data(env, later))["params"] == {"columns": "z"}
+
+
+def test_propose_compares_the_names_exactly_as_predicting_does(env):
+    result = _propose_with_later_data(env, [(DatasetType.TEST, ["x", "z", "age ", "label"])])
+    assert _absent_columns(result)["params"] == {"columns": "Age"}
+
+
+def test_propose_counts_the_columns_beyond_the_few_it_names(env):
+    columns = [f"c{i}" for i in range(9)]
+    result = _propose_with_later_data(
+        env, [(DatasetType.TEST, ["keep"])], train_columns=[*columns, "keep", "label"]
+    )
+    warning = _absent_columns(result)
+    assert warning["code"] == "columns_not_in_test_more"
+    assert warning["params"] == {"columns": "c0, c1, c2, c3, c4", "more": 4}
+    assert "c5" not in warning["message"] and "4 more" in warning["message"]
+    codes(result)  # both languages translate the code
+
+
+@pytest.mark.parametrize(
+    ("n_absent", "code", "params"),
+    [
+        (5, "columns_not_in_test", {"columns": "c0, c1, c2, c3, c4"}),
+        (6, "columns_not_in_test_more", {"columns": "c0, c1, c2, c3, c4", "more": 1}),
+    ],
+)
+def test_propose_names_up_to_five_columns_and_counts_the_rest(env, n_absent, code, params):
+    columns = [f"c{i}" for i in range(n_absent)]
+    result = _propose_with_later_data(
+        env, [(DatasetType.TEST, ["keep"])], train_columns=[*columns, "keep", "label"]
+    )
+    warning = _absent_columns(result)
+    assert (warning["code"], warning["params"]) == (code, params)
+
+
+def test_propose_is_silent_for_a_test_dataset_with_the_columns_of_the_train_dataset(env):
+    # what the Split module makes: the same columns, the target included
+    result = _propose_with_later_data(env, [(DatasetType.TEST, ["x", "z", "Age", "label"])])
+    assert _absent_columns(result) is None
+
+
+def test_propose_ignores_a_test_dataset_without_columns(env):
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"x": rng.normal(size=60), "label": rng.normal(size=60)})
+    train = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "train", DatasetType.TRAIN, [frame]
+    )
+    empty = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "empty", DatasetType.TEST, [pd.DataFrame(index=[0])]
+    )
+    try:
+        assert empty.schema == []
+        result = call(env, "propose_training_config", {"dataset_id": train.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, empty.id)
+        projects.delete_dataset(env.conn, env.storage, train.id)
+    assert _absent_columns(result) is None
+
+
+def test_propose_ignores_a_test_dataset_that_shares_no_column_with_the_train_dataset(env):
+    result = _propose_with_later_data(env, [(DatasetType.TEST, ["store", "region"])])
+    assert _absent_columns(result) is None
+
+
+def test_propose_compares_only_the_test_datasets_that_share_a_column_with_the_train_dataset(env):
+    later = [(DatasetType.TEST, ["store", "region"]), (DatasetType.PREDICT, ["x", "z", "label"])]
+    result = _propose_with_later_data(env, later)
+    assert _absent_columns(result)["params"] == {"columns": "Age"}
+
+
+def test_propose_still_warns_when_a_related_test_dataset_lacks_columns(env):
+    result = _propose_with_later_data(env, [(DatasetType.TEST, ["x"])])
+    assert _absent_columns(result)["params"] == {"columns": "z, Age"}
+
+
+@pytest.mark.parametrize(
+    ("code", "placeholders"),
+    [("columns_not_in_test", {"columns"}), ("columns_not_in_test_more", {"columns", "more"})],
+)
+def test_the_missing_column_warnings_show_their_figures_in_both_languages(code, placeholders):
+    for lang in i18n.LANGUAGES:
+        template = i18n.catalog(lang)[f"assistant.warn.{code}"]
+        assert {f for _, f, _, _ in string.Formatter().parse(template) if f} == placeholders
 
 
 def test_propose_hints_at_settings_that_suit_the_target(env):
