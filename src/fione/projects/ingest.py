@@ -181,7 +181,7 @@ def _ints_fit_float64(text: pa.Array) -> bool:
     ints = pc.filter(text, pc.match_substring_regex(text, r"^[+-]?[0-9]+$"))
     try:
         bounds = pc.min_max(ints.cast(pa.int64())).as_py()
-    except pa.ArrowInvalid:  # beyond int64
+    except pa.ArrowInvalid:  # more digits than an int64 holds
         return False
     if bounds["min"] is None:
         return True
@@ -226,6 +226,70 @@ def _widen_columns(
         name: pa.float64() if name in int_columns and name not in float_fails else pa.string()
         for name in fails
     }
+
+
+# 1,234 and 1,234,567.8 (no leading zero), or plain digits without leading zeros
+THOUSANDS_NUMBER = r"^-?([1-9][0-9]{0,2}(,[0-9]{3})+|0|[1-9][0-9]*)(\.[0-9]+)?$"
+
+
+def _thousands_columns(parquet: Path, schema: pa.Schema) -> dict[str, pa.DataType]:
+    """The text columns of ``parquet`` whose values are all numbers written with thousands
+    separators (``16,853``, ``1,234,567.5``; plain digits may be mixed in), with the number type
+    each reads as: int64, or float64 when a value has a fraction. At least one value must show
+    a separator, so ``0,123`` (a decimal comma) and other text stay text, as do whole numbers
+    beyond int64."""
+    names = [f.name for f in schema if pa.types.is_string(f.type)]
+    if not names:
+        return {}
+    candidate = {name: [False, False] for name in names}  # [separator seen, fraction seen]
+    with pq.ParquetFile(parquet) as file:
+        for batch in file.iter_batches(batch_size=_ROW_GROUP_ROWS, columns=names):
+            if not candidate:
+                break
+            for name in list(candidate):
+                values = pc.drop_null(batch.column(batch.schema.get_field_index(name)))
+                if not len(values):
+                    continue
+                if not pc.all(pc.match_substring_regex(values, THOUSANDS_NUMBER)).as_py():
+                    del candidate[name]
+                    continue
+                seen = candidate[name]
+                seen[0] = seen[0] or pc.any(pc.match_substring(values, ",")).as_py()
+                seen[1] = seen[1] or pc.any(pc.match_substring(values, ".")).as_py()
+                if not seen[1]:
+                    try:
+                        pc.replace_substring(values, ",", "").cast(pa.int64())
+                    except pa.ArrowInvalid:  # more digits than an int64 holds
+                        del candidate[name]
+    return {
+        name: pa.float64() if fraction else pa.int64()
+        for name, (separator, fraction) in candidate.items()
+        if separator
+    }
+
+
+def _read_thousands(parquet: Path, schema: pa.Schema) -> pa.Schema:
+    """Rewrite ``parquet`` with its thousands-separated number columns as numbers; returns the
+    schema of the result (``schema`` itself when there are none)."""
+    found = _thousands_columns(parquet, schema)
+    if not found:
+        return schema
+    typed = pa.schema([(f.name, found.get(f.name, f.type)) for f in schema])
+    out = parquet.with_suffix(".numbers")
+    try:
+        with pq.ParquetFile(parquet) as file, pq.ParquetWriter(out, typed) as writer:
+            for batch in file.iter_batches(batch_size=_ROW_GROUP_ROWS):
+                columns = [
+                    pc.replace_substring(batch.column(i), ",", "").cast(found[f.name])
+                    if f.name in found
+                    else batch.column(i)
+                    for i, f in enumerate(schema)
+                ]
+                writer.write_table(pa.Table.from_arrays(columns, schema=typed))
+        out.replace(parquet)
+    finally:
+        out.unlink(missing_ok=True)
+    return typed
 
 
 def _convert(
@@ -279,6 +343,8 @@ def ingest_csv(
         encoding, delimiter = _inspect(raw)
         try:
             n_rows, schema = _convert(raw, parquet, encoding, delimiter, block_size)
+            if delimiter == ",":  # elsewhere a comma may be a decimal one: 12,500 is 12.5
+                schema = _read_thousands(parquet, schema)
         except (pa.ArrowInvalid, UnicodeDecodeError) as e:
             raise IngestError(f"could not parse the CSV: {e}") from e
         if n_rows == 0:

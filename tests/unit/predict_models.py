@@ -55,5 +55,15 @@ def regressor() -> TrainedModel:
     return _fit("value", "判定")
 
 
+@cache
+def thousands_text_regressor() -> TrainedModel:
+    """``color`` as text of numbers with thousands separators, as an older upload kept it."""
+    frame = training_frame()
+    frame["color"] = frame["color"].map(
+        dict(zip(COLORS, ["1,200", "2,500", "13,000"], strict=True))
+    )
+    return _fit("value", "判定", frame)
+
+
 def features(n: int = 20, seed: int = 1) -> pd.DataFrame:
     return training_frame(n, seed).drop(columns=["判定", "value"])
