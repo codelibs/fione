@@ -81,8 +81,18 @@ def test_all_null_is_constant_with_full_missing_rate():
     assert col.n_unique == 0
 
 
-def test_single_value_plus_nulls_is_constant():
-    assert _kind(pd.Series(["a", None, "a", None])) == "constant"
+def test_single_value_plus_nulls_is_a_flag_not_constant():
+    # Yes or blank: the gaps tell the rows apart, as the engine's own rule does
+    for values in (["Yes", None, "Yes", None], [1.0, None, 1.0, None], [True, None, True, None]):
+        assert _kind(pd.Series(values)) == "categorical"
+    p = profile_dataset(pd.DataFrame({"flag": ["Yes", None] * 30, "same": ["Yes"] * 60}))
+    assert [(c.name, c.kind) for c in p.columns] == [("flag", "categorical"), ("same", "constant")]
+    assert _col(p, "flag").top_values == [("Yes", 30)] and _col(p, "flag").missing_rate == 0.5
+
+
+def test_a_flag_on_two_rows_that_match_the_target_is_not_a_leak():
+    df = pd.DataFrame({"y": [1, 0, 1, 0] * 25, "flag": [1.0, None, 1.0] + [None] * 97})
+    assert profile_dataset(df, target="y").leak_suspects == []
 
 
 def test_bool_is_categorical():
