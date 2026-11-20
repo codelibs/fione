@@ -2294,6 +2294,63 @@ def test_a_column_named_like_an_identifier_comes_before_one_named_for_the_entity
     )
 
 
+def test_a_column_that_names_the_target_of_a_few_rows_each_is_found_by_its_values_not_its_name():
+    """Households of three rows share their label: a column of codes, named for nothing, that
+    gives the label away on its own is the group to keep together. Where the label does not follow
+    the code, or the code is on many rows (a strong category), it is not."""
+    rng = np.random.default_rng(0)
+    n = 600
+    codes = np.array([f"a{h:04x}" for h in np.repeat(np.arange(n // 3), 3)])
+    label = np.repeat(rng.integers(0, 3, n // 3), 3)
+    frame = pd.DataFrame({"x": rng.normal(size=n), "hogar": codes, "label": label})
+    found = builtin.repeated_id_column(profile_dataset(frame, "label"), "label")
+    assert found is not None and found.name == "hogar"
+    shuffled = frame.assign(label=rng.permutation(label))
+    assert builtin.repeated_id_column(profile_dataset(shuffled, "label"), "label") is None
+    many = frame.assign(
+        hogar=np.repeat([f"a{h:04x}" for h in range(20)], n // 20),
+        label=np.repeat(rng.integers(0, 3, 20), n // 20),
+    )
+    assert builtin.repeated_id_column(profile_dataset(many, "label"), "label") is None
+
+
+def test_the_repeated_id_warning_names_the_column_found_by_its_values(env):
+    rng = np.random.default_rng(0)
+    n = 600
+    label = np.repeat(rng.integers(0, 3, n // 3), 3)
+    frame = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "other": [f"b{i % 7}" for i in range(n)],
+            "hogar": [f"a{h:04x}" for h in np.repeat(np.arange(n // 3), 3)],
+            "label": label,
+        }
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "households", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+        warning = next(w for w in result["warnings"] if w["code"] == "repeated_id")
+        assert warning["params"]["column"] == "hogar" and "'hogar'" in warning["message"]
+        assert result["config"]["cv_group_column"] is None  # a hint, not a choice
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+
+
+def test_a_continuous_target_does_not_make_a_repeated_column_an_id():
+    rng = np.random.default_rng(0)
+    n = 600
+    frame = pd.DataFrame(
+        {
+            "hogar": [f"a{h:04x}" for h in np.repeat(np.arange(n // 3), 3)],
+            "x": rng.normal(size=n),
+            "label": rng.normal(size=n),
+        }
+    )
+    assert builtin.repeated_id_column(profile_dataset(frame, "label"), "label") is None
+
+
 def test_a_day_counter_is_found_from_a_sample_of_a_larger_file():
     """The profile rests on a sample (one row in five here); the counter runs through the rows
     of the whole file, a duration spread wide does not."""
