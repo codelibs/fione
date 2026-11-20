@@ -14,6 +14,7 @@ from sklearn.datasets import (
     make_regression,
 )
 
+from fione.data import frames
 from fione.data import profile as profile_module
 from fione.data.frames import (
     change_column_type,
@@ -984,6 +985,123 @@ def test_day_first_dates_are_read_by_their_fields():
     assert parse_datetimes(month_first).tolist()[1] == pd.Timestamp("2024-02-10")
     assert not is_day_first(pd.Series(["2024-10-02", "2024-12-25"]))  # ISO
     assert not is_day_first(pd.Series(["01-02-2024", "03-04-2024"]))  # no field above 12
+
+
+@pytest.fixture
+def today_is_2026_06_15(monkeypatch):
+    monkeypatch.setattr(frames, "_now", lambda: pd.Timestamp("2026-06-15"))
+
+
+def test_dates_with_a_two_digit_year_are_dates_of_the_past(today_is_2026_06_15):
+    short = pd.Series(["2/20/15", "5/1/68", "3/3/71", "12/31/99", "1/1/00", "7/4/38"] * 3)
+    assert _kind(short) == "datetime"
+    assert parse_datetimes(short).tolist()[:6] == [
+        pd.Timestamp(d)
+        for d in (
+            "2015-02-20",
+            "1968-05-01",
+            "1971-03-03",
+            "1999-12-31",
+            "2000-01-01",
+            "1938-07-04",
+        )
+    ]
+
+
+def test_a_two_digit_year_moves_back_a_century_only_over_a_year_after_today(today_is_2026_06_15):
+    dates = ["1/1/26", "12/31/26", "6/16/27", "6/17/27", "1/1/28", "1/1/25", "12/31/68"]
+    years = parse_datetimes(pd.Series(dates * 3)).dt.year.tolist()[:7]
+    assert years == [2026, 2026, 2027, 1927, 1928, 2025, 1968]  # up to 2027-06-16 is kept
+
+
+def test_a_two_digit_year_is_read_alike_at_every_hour_of_the_day(monkeypatch):
+    dates = pd.Series(["6/15/26 18:00", "6/16/27 23:00", "6/17/27 01:00"] * 3)
+    for now in ("2026-06-15 00:00", "2026-06-15 10:00", "2026-06-15 23:59"):
+        monkeypatch.setattr(frames, "_now", lambda now=now: pd.Timestamp(now))
+        assert parse_datetimes(dates).dt.year.tolist()[:3] == [2026, 2027, 1927]
+    monkeypatch.setattr(frames, "_now", lambda: pd.Timestamp("2026-06-16 00:01"))
+    assert parse_datetimes(dates).dt.year.tolist()[:3] == [2026, 2027, 2027]  # a day later
+
+
+def test_a_year_of_four_digits_is_never_moved(today_is_2026_06_15):
+    future = pd.Series(["12/31/2040", "1/1/2030", "2/20/15", "5/1/1938", "3/3/71"] * 3)
+    assert parse_datetimes(future).dt.year.tolist()[:5] == [2040, 2030, 2015, 1938, 1971]
+
+
+def test_two_digit_years_with_a_time_a_dot_or_a_zone_are_read_alike(today_is_2026_06_15):
+    assert parse_datetimes(
+        pd.Series(["25.12.68 10:30", "02.10.15", "30.1.28"])
+    ).dt.year.tolist() == [
+        1968,
+        2015,
+        1928,
+    ]
+    zoned = pd.Series(["6/1/68 10:00 +0100", "6/1/15 10:00 +0900"])
+    assert parse_datetimes(zoned).dt.year.tolist() == [1968, 2015]
+
+
+def test_two_digit_years_keep_the_order_of_the_fields(today_is_2026_06_15):
+    day_first = pd.Series(["25/12/68", "02/10/15", "13/01/99"] * 3)
+    assert is_day_first(day_first)
+    assert parse_datetimes(day_first).tolist()[:3] == [
+        pd.Timestamp(d) for d in ("1968-12-25", "2015-10-02", "1999-01-13")
+    ]
+    month_first = pd.Series(["12/25/68", "02/10/15"] * 3)
+    assert not is_day_first(month_first)
+    assert parse_datetimes(month_first).tolist()[:2] == [
+        pd.Timestamp("1968-12-25"),
+        pd.Timestamp("2015-02-10"),
+    ]
+
+
+def test_columns_of_codes_that_are_not_dates_are_not_read_as_two_digit_years():
+    rng = np.random.default_rng(0)
+    for make in (
+        lambda: f"{rng.integers(1, 5)}.{rng.integers(0, 60)}.{rng.integers(0, 200)}",  # version
+        lambda: f"{rng.integers(1, 255)}.{rng.integers(1, 255)}.{rng.integers(1, 255)}",  # address
+        lambda: f"{rng.integers(1, 31)}/{rng.integers(1, 31)}/{rng.integers(10, 99)}",  # code
+        lambda: f"{rng.integers(0, 12)}/{rng.integers(0, 12)}/{rng.integers(10, 99)}",  # score
+        lambda: f"{rng.integers(1, 9)}/{rng.integers(2, 9)}",  # fraction
+    ):
+        assert _kind(pd.Series([make() for _ in range(80)])) != "datetime"
+
+
+def test_small_triples_of_scores_and_ratios_are_not_dates_but_spread_dates_are():
+    rng = np.random.default_rng(0)
+    for sep in "-/.":
+        triples = [f"{rng.integers(1, 10)}{sep}{rng.integers(1, 10)}{sep}{rng.integers(20, 40)}"]
+        triples += [f"{rng.integers(1, 10)}{sep}{rng.integers(1, 10)}{sep}34" for _ in range(99)]
+        assert _kind(pd.Series(triples)) != "datetime"  # 3-1-20, 4/5/22, 1/2/34
+        days = [f"{rng.integers(1, 13)}{sep}{rng.integers(1, 29)}{sep}{rng.integers(0, 99):02d}"]
+        days += [f"{rng.integers(1, 13)}{sep}{rng.integers(1, 29)}{sep}15" for _ in range(99)]
+        assert _kind(pd.Series(days)) == "datetime"  # a day above 12 in most of the values
+
+
+def test_the_spread_of_days_gates_only_the_two_digit_year_signal():
+    rng = np.random.default_rng(0)
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d.%m.%Y"):  # four-digit years, every day at most 12
+        days = pd.Timestamp("2015-01-01") + pd.to_timedelta(rng.integers(0, 12, 100), unit="D")
+        days += pd.to_timedelta(30 * rng.integers(0, 12, 100), unit="D")
+        days = days[days.day <= 12]
+        assert len(days) >= 20
+        assert _kind(pd.Series(days.strftime(fmt))) == "datetime"
+    mixed = [f"{rng.integers(1, 13)}/{rng.integers(1, 13)}/{rng.choice(['2015', '2016'])}"] * 30
+    mixed += ["3/4/15"] * 2  # a few two-digit years in a column that has the signal anyway
+    assert _kind(pd.Series(mixed)) == "datetime"
+
+
+def test_dates_of_the_first_twelve_days_of_months_with_a_two_digit_year_are_not_detected():
+    rng = np.random.default_rng(0)
+    values = [f"{rng.integers(1, 13)}/{rng.integers(1, 13)}/15" for _ in range(100)]
+    assert _kind(pd.Series(values)) != "datetime"  # no day above 12: a month, a day, or a ratio?
+    values[::3] = [f"{rng.integers(1, 13)}/{rng.integers(13, 29)}/15" for _ in values[::3]]
+    assert _kind(pd.Series(values)) == "datetime"  # a third of them have one
+
+
+def test_a_column_of_two_and_four_digit_years_is_one_column_of_dates(today_is_2026_06_15):
+    mixed = pd.Series(["2/20/15", "3/3/1971", "5/1/68", "7/4/2010"] * 5)
+    assert _kind(mixed) == "datetime"
+    assert parse_datetimes(mixed).dt.year.tolist()[:4] == [2015, 1971, 1968, 2010]
 
 
 def test_reading_dates_does_not_depend_on_the_batch_or_the_order_of_values():

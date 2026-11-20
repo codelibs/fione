@@ -7,6 +7,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+from fione.data import frames
 from fione.data.frames import is_day_first, looks_like_dates, parse_datetimes
 from fione.engine.config import ConfigError, TargetError
 from fione.engine.events import Event, EventSink
@@ -274,10 +275,12 @@ class Prep:
     _no_trend: tuple = ()  # view columns the linear view leaves out (see ``_fit_no_trend``)
     _level_at: dict = {}  # levels view column (``f3_l``) -> the input column it reads
     _native_at: dict = {}  # catboost view column (``f3``) -> frequency column it reads as text
+    _date_now = None  # when a model that reads two-digit years was fitted (old: today's clock)
     fill: dict = {}  # input column -> share of the training rows that have a value (old: none)
 
     def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
         self.dropped: list[str] = []
+        self._date_now = None
         self.dayfirst = ()
         self.integer_dates = {}
         self.timed = ()
@@ -298,6 +301,8 @@ class Prep:
                 or _holds_date_strings(s)
             ):
                 self._plan.append((column, "datetime"))
+                if self._date_now is None and frames.has_two_digit_year(s):
+                    self._date_now = frames._now()  # a year read as of today is read so again
                 if is_day_first(s):
                     self.dayfirst += (column,)
                 when = _datetimes(s, column in self.dayfirst)
@@ -465,6 +470,10 @@ class Prep:
         return [column for column, kind in self._plan if kind == "numeric"]
 
     def _base(self, df: pd.DataFrame) -> pd.DataFrame:
+        with frames.reference_date(self._date_now):
+            return self._read(df)
+
+    def _read(self, df: pd.DataFrame) -> pd.DataFrame:
         """Numeric features as float, categorical ones as strings (NaN when missing)."""
         missing = [c for c, _ in self._plan if c not in df.columns]
         if missing:

@@ -9,6 +9,7 @@ from sklearn.datasets import load_breast_cancer, load_iris, make_classification,
 from sklearn.metrics import r2_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
+from fione.data import frames
 from fione.engine import automl as automl_module
 from fione.engine import metrics, search
 from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, AutoML
@@ -1644,6 +1645,12 @@ def test_a_text_time_column_is_read_as_dates():
     notices = _time_notices(df)
     assert notices["time_validation"][0].data["part_days"][0] == 183
     assert notices["time_short_history"]
+
+
+def test_a_text_time_column_reads_a_two_digit_year_as_a_year_of_the_past(monkeypatch):
+    monkeypatch.setattr(frames, "_now", lambda: pd.Timestamp("2026-06-15"))
+    df = pd.DataFrame({"when": ["2/20/15", "5/1/68", "3/3/71", "1/1/00"]})
+    assert automl_module._order_codes(df, "when").tolist() == [3, 0, 1, 2]
 
 
 def test_a_first_part_of_less_than_a_year_of_a_long_series_warns_of_a_pessimistic_start():

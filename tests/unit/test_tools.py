@@ -1231,6 +1231,13 @@ def test_propose_only_warns_about_a_date_column_that_may_order_the_rows(env, str
     assert "when" not in result["config"]["ignored_columns"]
 
 
+def test_propose_reads_day_first_dates_as_the_engine_does(env):
+    result = _propose_dated(env, dayfirst=True)  # 13/01/2020 is a date, the 13th of January
+    assert next(w for w in result["warnings"] if w["code"] == "time_hint")["params"] == {
+        "column": "when"
+    }
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -1240,7 +1247,6 @@ def test_propose_only_warns_about_a_date_column_that_may_order_the_rows(env, str
         {"missing": True},  # time_column refuses a missing value
         {"name": "date_of_birth"},  # an attribute of the rows, not the time they are in
         {"days": 20_000},  # over 50 years: an attribute, not a series
-        {"dayfirst": True},  # text the engine cannot read as dates (13/01/2020)
         {"late": True},  # a class that only appears late cannot be validated in that order
         {"group": True, "who": True},  # the groups would have to end at several different times
     ],

@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from fione.data import frames
 from fione.engine.config import ConfigError, TargetError
 from fione.engine.prep import LINEAR_LEVELS, Prep, infer_task, integer_date_format, validate_target
 
@@ -203,6 +204,33 @@ def test_date_strings_become_date_parts_and_read_day_first():
     # one row of a later batch: the day-first reading is the one found when fitting
     one = prep.tree(pd.DataFrame({"n": [0.0], "stamp": ["03-11-2012 10:00"]}))
     assert one["f2"].tolist() == [11] and one["f3"].tolist() == [3]  # month, day
+
+
+def _two_digit_dates():
+    rng = np.random.default_rng(0)
+    old = pd.Timestamp("1940-01-01") + pd.to_timedelta(rng.integers(0, 20000, 200), unit="D")
+    return pd.DataFrame({"when": ["4/7/28", "2/20/15", *old.strftime("%m/%d/%y")[2:]]})
+
+
+def test_two_digit_years_are_read_as_of_the_day_the_model_was_fitted_on(monkeypatch):
+    X = _two_digit_dates()
+    monkeypatch.setattr(frames, "_now", lambda: pd.Timestamp("2026-11-20"))
+    prep = Prep().fit(X)
+    assert prep.kind_of("when") == "datetime"
+    before = prep.tree(X)
+    monkeypatch.setattr(frames, "_now", lambda: pd.Timestamp("2028-01-20"))  # 4/7/28 is now ahead
+    assert frames.parse_datetimes(X["when"]).dt.year[0] == 2028
+    pd.testing.assert_frame_equal(prep.tree(X), before)  # still the 1928 it was fitted with
+
+
+def test_the_date_is_kept_only_for_two_digit_years_and_old_models_read_today():
+    iso = pd.DataFrame({"when": pd.date_range("2024-01-01", periods=60).strftime("%Y-%m-%d")})
+    assert Prep().fit(iso)._date_now is None
+    assert Prep().fit(_two_digit_dates())._date_now is not None
+    prep = pickle.loads(pickle.dumps(Prep().fit(_two_digit_dates())))
+    del prep.__dict__["_date_now"]  # a model pickled before the date was kept
+    assert prep._date_now is None
+    prep.tree(_two_digit_dates())
 
 
 def test_date_strings_month_first_and_iso_are_not_read_day_first():

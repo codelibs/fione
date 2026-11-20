@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 
 from fione.auth.roles import ProjectAccess, Role, can_access_project, project_access
-from fione.data.frames import is_counter_name, is_time_counter
+from fione.data.frames import is_counter_name, is_time_counter, parse_datetimes
 from fione.data.profile import (
     SCORE_REASONS,
     ColumnProfile,
@@ -852,10 +852,7 @@ def date_time_column(
         ):
             continue
         values = ingest.read_dataset(ctx.storage, dataset, [col.name])[col.name]
-        try:  # as the engine reads a time column (``_order_codes``): text it cannot read is refused
-            dates = pd.to_datetime(values)
-        except (ValueError, TypeError):
-            continue
+        dates = parse_datetimes(values)  # as the engine reads a time column (``_order_codes``)
         if dates.isna().any() or dates.nunique() < TIME_DATE_VALUES:
             continue
         if TIME_DATE_DAYS <= (dates.max() - dates.min()).days <= TIME_DATE_MAX_DAYS:
