@@ -96,7 +96,7 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
-from fione.data.frames import is_time_counter
+from fione.data.frames import is_time_counter, parse_datetimes
 from fione.data.profile import training_leak_suspects
 from fione.engine import metrics
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
@@ -1890,12 +1890,9 @@ def _time_values(df: pd.DataFrame, column: str) -> pd.Series:
     if values.isna().any():
         raise ConfigError(f"time column '{column}' has missing values")
     if not (pd.api.types.is_numeric_dtype(values) or pd.api.types.is_datetime64_any_dtype(values)):
-        try:
-            values = pd.to_datetime(values)
-        except (ValueError, TypeError):
-            raise ConfigError(
-                f"time column '{column}' must hold numbers or dates it can order by"
-            ) from None
+        values = parse_datetimes(values)  # as the date features are read: two-digit years too
+        if values.isna().any():
+            raise ConfigError(f"time column '{column}' must hold numbers or dates it can order by")
     return values
 
 

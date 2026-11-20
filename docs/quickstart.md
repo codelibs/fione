@@ -573,7 +573,7 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
 Date features need a column of dates. ISO dates are detected on upload; a column of other date
 strings (`25-12-2024 09:00`, `Mar 5, 2024`) is recognised when a model is trained, and its
 dates are read with the day first when some first field is above 12 and no second field is
-(`02-10-2012` is then the 2nd of October), otherwise with the month first. Independently of
+(`02-10-2012` is then the 2nd of October), otherwise with the month first. A two-digit year more than a year after today is read as the previous century (`5/1/68` is 1968; a model keeps the day it was trained on for this), and `d/m/yy` dates are recognised only when a day above 12 is in a quarter of the values. Independently of
 this option, the linear model and the neural network log-transform non-negative numbers
 that are strongly skewed. A training run names the columns it leaves out because they hold one value, or none, on every
 training row. A text column in which nearly every value is a number and a unit of

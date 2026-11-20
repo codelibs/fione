@@ -1,5 +1,8 @@
 import re
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Literal
 
 import numpy as np
@@ -11,12 +14,22 @@ ColumnType = Literal["numeric", "categorical", "text", "datetime"]
 _JAPANESE_DATE = re.compile(r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日?")
 _YEAR_FIRST = re.compile(r"^\s*\d{4}\D")
 _DAY_MONTH = re.compile(r"^\s*(\d{1,2})[-/.](\d{1,2})[-/.]\d{2,4}")
+_TWO_DIGIT_DATE = re.compile(r"^\s*\d{1,2}[/.-]\d{1,2}[/.-]\d{2}(?![\d/.-])")
 _SAMPLE = 1000
 _MIN_PARSED = 0.95
 _MIN_VALUES = 5
 _MIN_SIGNAL = 0.5
 _PLAIN_NUMBER = r"^\s*(?:[-+]?\d+(?:\.\d+)?|\d+/\d+)\s*$"
 _YEAR_SIGNAL = r"(?<!\d)(?:19|20)\d{2}(?!\d)|\d{4}年"
+# A date with the year in two digits (2/20/15), and one of them with a field above 12 (a day):
+# a column of such dates has the signal of a year only when many values have a day above 12, which
+# scores and ratios (3-1-20) do not have.
+_TWO_DIGIT_YEAR = r"(?<![\d/.-])\d{1,2}[/.-]\d{1,2}[/.-]\d{2}(?![\d:/.-])"
+_WIDE_FIELD = (
+    r"(?<![\d/.-])(?:(?:1[3-9]|2\d|3[01])[/.-]\d{1,2}|\d{1,2}[/.-](?:1[3-9]|2\d|3[01]))"
+    r"[/.-]\d{2}(?![\d:/.-])"
+)
+_MIN_SPREAD = 0.25
 _DATE_SIGNAL = (
     _YEAR_SIGNAL + r"|(?i:\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
     r"|\d+月"
@@ -91,7 +104,12 @@ def looks_like_dates(nonnull: pd.Series, need_year: bool = False) -> bool:
         return False
     sample = _spread(nonnull).astype(str)
     signal = _YEAR_SIGNAL if need_year else _DATE_SIGNAL
-    if sample.str.contains(signal, regex=True).mean() < (_MIN_PARSED if need_year else _MIN_SIGNAL):
+    needed = _MIN_PARSED if need_year else _MIN_SIGNAL
+    signalled = sample.str.contains(signal, regex=True)
+    if signalled.mean() < needed and not (
+        (signalled | sample.str.contains(_TWO_DIGIT_YEAR, regex=True)).mean() >= needed
+        and sample.str.contains(_WIDE_FIELD, regex=True).mean() >= _MIN_SPREAD
+    ):
         return False
     plain = sample.str.match(_PLAIN_NUMBER)
     parsed = parse_datetimes(sample)
@@ -125,6 +143,52 @@ def parse_datetimes(s: pd.Series, dayfirst: bool | None = None) -> pd.Series:
     except (ValueError, TypeError):  # "Mixed timezones detected"
         out = _read(s, dayfirst, utc=True)
     out.index = index
+    return _past_century(out, s.set_axis(index))
+
+
+def _now() -> pd.Timestamp:
+    """The clock of ``_past_century`` (a function so that a test can set it)."""
+    return pd.Timestamp.now()
+
+
+_reference: ContextVar[pd.Timestamp | None] = ContextVar("reference_date", default=None)
+
+
+@contextmanager
+def reference_date(now: pd.Timestamp | None) -> Iterator[None]:
+    """Read two-digit years as of ``now`` (the date a model was fitted on) instead of today;
+    None: as of today."""
+    token = _reference.set(now)
+    try:
+        yield
+    finally:
+        _reference.reset(token)
+
+
+def has_two_digit_year(s: pd.Series) -> bool:
+    """Whether some string of ``s`` is a date with the year in two digits (``2/20/15``)."""
+    if pd.api.types.is_datetime64_any_dtype(s.dtype) or pd.api.types.is_numeric_dtype(s.dtype):
+        return False
+    return bool(s.dropna().astype(str).str.match(_TWO_DIGIT_DATE).any())
+
+
+def _past_century(out: pd.Series, s: pd.Series) -> pd.Series:
+    """``out`` with the dates whose strings ``s`` give the year in two digits (``2/20/15``) moved
+    back 100 years when they are more than a year after today: the parser reads 27 to 68 as 2027
+    to 2068, but a column of such dates holds the years up to now (a film of 1938 is not one of
+    2038). A date up to a year ahead is kept, since schedules and forecasts exist, and so a
+    reading does not change from one day to the next; it still changes when a date a little over a
+    year ahead comes within the year as time passes. Dates with four-digit years are left as they
+    are, the future ones too."""
+    short = s.astype(str).str.match(_TWO_DIGIT_DATE).fillna(False).to_numpy(bool)
+    cutoff = (_reference.get() or _now()).normalize() + pd.Timedelta(
+        days=366
+    )  # the whole day, whatever the hour
+    cutoff = cutoff.tz_localize(out.dt.tz) if out.dt.tz else cutoff
+    future = short & (out.dt.normalize() > cutoff).to_numpy(bool)
+    if future.any():
+        out = out.copy()
+        out[future] = out[future] - pd.DateOffset(years=100)
     return out
 
 
