@@ -38,8 +38,8 @@ text view without the derived features. They differ from it only in what they re
 
 LightGBM_L1, XGBoost_L1 and CatBoost_L1 are the boosting families with an L1 objective: they
 learn the median of the target, which a heavy-tailed target makes a better prediction for the
-absolute error than the mean. They are late candidates too, for a regression ranked by MAE or
-MEDAE.
+absolute error than the mean. They are late candidates too, for a regression ranked by MAE,
+MEDAE or SMAPE.
 """
 
 import copy
