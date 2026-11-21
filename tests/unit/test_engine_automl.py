@@ -313,7 +313,7 @@ def test_max_models_caps_the_completed_trials():
     model = _fit(_binary(), events, target="y", max_models=2)
     assert model.stop_reason == "max_models"
     assert len(model.trials) == 2 == sum(e.type == "trial" for e in events)
-    assert list(model.trials["family"]) == ["LightGBM", "CatBoost"]  # priority order
+    assert list(model.trials["family"]) == ["Linear", "LightGBM"]  # priority order
 
 
 def test_no_improvement_ends_a_family_early():
@@ -923,7 +923,7 @@ def _boom(self, *args, **kwargs):
 def test_a_crashing_family_is_skipped_with_a_notice(monkeypatch):
     monkeypatch.setattr(XGBoost, "_fit", _boom)
     events = []
-    model = _fit(_binary(300), events, target="y", max_models=4)
+    model = _fit(_binary(300), events, target="y", max_models=5)
     assert "XGBoost" not in set(model.leaderboard["family"])
     assert {"LightGBM", "CatBoost", "ExtraTrees"} <= set(model.leaderboard["family"])
     errors = _errors(events, "family_error")
@@ -1059,7 +1059,7 @@ def test_cancelling_after_the_first_family_returns_its_fold_models(monkeypatch):
         should_stop=lambda: any(e.type == "family_done" for e in events),
     )
     assert model.stop_reason == "cancelled"
-    assert [m.spec.name for m in model.members] == ["LightGBM"]
+    assert [m.spec.name for m in model.members] == ["Linear"]
     assert len(model.members[0].models) == 5  # no refit
     assert events[-1].type == "finished"
 

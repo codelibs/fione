@@ -69,13 +69,13 @@ their fold models; the model has ``stop_reason == "cancelled"``. ``NoModelError`
 no family completed a trial, because of the cancellation or because the budget is too small.
 
 The first trial of a base family may take up to ``FIRST_TRIAL_SHARE`` of the search time left
-when that is more than the family's share: the families come in order of priority, the better
-ones finish a trial (on a large table one takes minutes, and a trial cut short by a small
-share scores worse), and those after them get what remains. Later trials stay within the
-share. A family whose first trial does not fit even then (a text model fits all its data in one
-unit and cannot be cut short) has no model; a ``notice`` says that the trial did not finish and
-the least its folds need. The late families that are not run for lack of time are named in one
-``notice``.
+when that is more than the family's share: the cheap linear family comes first, then the
+boosting ones by priority, and each finishes a trial (on a large table one takes minutes, and a
+trial cut short by a small share scores worse), those after it getting what remains. Later
+trials stay within the share. A family whose first trial does not fit even then (a text model
+fits all its data in one unit and cannot be cut short) has no model; a ``notice`` says that the
+trial did not finish and the least its folds need. The late families that are not run for lack
+of time are named in one ``notice``.
 
 A family that raises (a library failure) is skipped with a ``notice`` of kind ``family_error``,
 keeping its best trial so far; a refit that raises falls back to the fold models with a
@@ -121,6 +121,7 @@ from fione.engine.search import (
 from fione.engine.survival import km_target
 
 FAMILY_ORDER = (
+    "Linear",
     "LightGBM",
     "TextLinear",
     "CatBoost",
@@ -128,7 +129,6 @@ FAMILY_ORDER = (
     "RandomForest",
     "ExtraTrees",
     "DeepLearning",
-    "Linear",
 )
 FAMILY_WEIGHTS = {
     "LightGBM": 0.176,
@@ -1575,8 +1575,9 @@ class AutoML:
                     skipped.append(name)
                 continue
             # A base family's first trial may take more than the family's share (up to
-            # ``FIRST_TRIAL_SHARE`` of the time left): the families come in order of priority,
-            # and the better ones finish a trial, while those after them get what remains.
+            # ``FIRST_TRIAL_SHARE`` of the time left): the cheap linear family comes first, then
+            # the boosting ones by priority, each finishing a trial while those after it get
+            # what remains.
             allowed = share if late else max(share, FIRST_TRIAL_SHARE * left)
             try:
                 result = run_family(
