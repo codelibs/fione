@@ -547,6 +547,13 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   another row (a customer number, a surname, a balance that repeats with the customer), how
   common each pair of the three with the most values is, which counts how often one entity
   occurs even when no single column does;
+- integer codes: a numeric column of whole numbers with more than 30 distinct values and at least
+  3 rows per value on average (an account, a department number) is read also as a category when
+  its values' target means differ beyond noise and the numeric order of the values explains at
+  most 30 % of that difference (an age or a price, whose neighbours are alike, stays a number
+  only). At most 10 columns, the ones the order explains least, get how common each value is, and
+  CatBoost and LinearWide read the value itself as a category. This is judged on the sampled
+  rows by that order, not by the validation, and is skipped with a group column for validation;
 - identifiers: a string column (two of them at most) with at least 12 distinct values and no
   spaces, whose values (the first 1,000 non-missing ones are judged) split by `_`, `/`, `-`, `:`
   or `.` into the same two to four fields on at least 95 % of them (`0001_01`, `B/0/P`), gets
