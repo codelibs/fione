@@ -2,7 +2,9 @@
 
 Kind inference (first matching rule wins; ``n`` = non-null values, ``u`` = distinct ones):
 
-1. ``constant``: ``u <= 1`` (all-null columns, and every column of a single-row frame).
+1. ``constant``: ``u == 0``, or ``u == 1`` on every row (all-null columns, and every column of a
+   single-row frame). One value on some rows and missing on the others is a flag (``Yes`` or
+   blank), a ``categorical`` column: the gaps tell the rows apart.
 2. ``categorical``: bool and ``category`` dtypes.
 3. ``datetime``: datetime64 dtype; also string/object columns, judged on a deterministic spread
    sample of at most 1000 non-null values (at least 5 required), where at least 95% parse as
@@ -133,10 +135,12 @@ def _as_float(s: pd.Series) -> np.ndarray:
     return np.where(np.isfinite(arr), arr, np.nan)
 
 
-def _infer_kind(nonnull: pd.Series, n_unique: int) -> Kind:
+def _infer_kind(nonnull: pd.Series, n_unique: int, n_missing: int = 0) -> Kind:
     n = len(nonnull)
-    if n_unique <= 1:
+    if n_unique == 0 or (n_unique == 1 and not n_missing):
         return "constant"
+    if n_unique == 1:
+        return "categorical"
     dtype = nonnull.dtype
     if pdt.is_bool_dtype(dtype) or isinstance(dtype, pd.CategoricalDtype):
         return "categorical"
@@ -197,7 +201,7 @@ def _profile_column(name: str, s: pd.Series) -> ColumnProfile:
     counts = nonnull.value_counts(sort=False)
     counts = counts[counts > 0]  # category dtype lists unused categories with a zero count
     n_unique = len(counts)
-    kind = _infer_kind(nonnull, n_unique)
+    kind = _infer_kind(nonnull, n_unique, len(s) - len(nonnull))
     stats = histogram = top_values = outlier_rate = None
     if kind in ("numeric", "categorical") and _is_plain_numeric(nonnull.dtype):
         stats, histogram, outlier_rate = _numeric_details(nonnull)
@@ -263,7 +267,8 @@ def _leak_reason(
     if not paired.any():
         return None
     sp, tp = s[paired], t[paired]
-    if _same_values(sp, tp):
+    # a column that has a value on a few rows only is not a copy of the target on those
+    if paired.sum() >= min(_LEAK_MIN_ROWS, int(t.notna().sum())) and _same_values(sp, tp):
         return IDENTICAL, 1.0
     if t_float is not None and _is_plain_numeric(s.dtype):
         x, y = _as_float(sp), t_float[paired]

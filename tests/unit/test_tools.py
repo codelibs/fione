@@ -1433,8 +1433,123 @@ def test_more_than_200_columns_are_summarized(env):
     assert all(c["name"] != "c299" for c in result["columns"])
     proposal = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "c299"})
     assert proposal["config"]["target"] == "c299"
-    assert any("first 200" in w["message"] for w in proposal["warnings"])
-    assert "many_columns" in codes(proposal)
+    assert "many_columns" not in codes(proposal)  # a proposal examines far more than is listed
+
+
+def test_a_proposal_names_the_columns_it_did_not_examine(env, monkeypatch):
+    monkeypatch.setattr(builtin, "_PROPOSE_MAX_COLUMNS", 250)
+    rng = np.random.default_rng(1)
+    frame = pd.DataFrame({f"c{i:03d}": rng.choice(["a", "b"], 60) for i in range(300)})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "wide", DatasetType.TRAIN, [frame]
+    )
+    proposal = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "c299"})
+    warning = next(w for w in proposal["warnings"] if w["code"] == "many_columns")
+    assert warning["params"] == {"n": "250", "more": "50"}
+    assert "first 250 columns" in warning["message"] and "other 50" in warning["message"]
+
+
+def test_an_id_and_a_constant_column_past_the_200th_are_found_by_a_proposal(env):
+    rng = np.random.default_rng(3)
+    frame = pd.DataFrame({f"c{i:03d}": rng.choice(["a", "b"], 60) for i in range(300)})
+    frame["row_id"] = np.arange(60)
+    frame["same"] = "x"
+    frame["y"] = rng.choice(["p", "q"], 60)
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "wide", DatasetType.TRAIN, [frame]
+    )
+    proposal = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    assert {"row_id", "same"} <= set(proposal["config"]["ignored_columns"])
+    assert "many_columns" not in codes(proposal)
+
+
+def test_thousands_of_constant_columns_are_not_all_listed_but_an_id_past_them_is(env):
+    names = [f"c{i:04d}" for i in range(3000)]
+    frame = pd.DataFrame(np.ones((40, 3000), dtype=np.int8), columns=names)
+    frame["row_id"] = np.arange(40)
+    frame["y"] = np.arange(40) % 2
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "consts", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    ignored = result["config"]["ignored_columns"]
+    assert "row_id" in ignored and len(ignored) == builtin._MAX_IGNORED_LISTED
+    warning = next(w for w in result["warnings"] if w["code"] == "constants_left_out")
+    assert warning["params"] == {"n": "2,801"}  # 3000 constants, 199 of them listed
+    assert len(json.dumps(result)) <= MAX_RESULT_BYTES
+
+
+def test_thousands_of_id_columns_do_not_make_the_proposal_too_large(env):
+    rng = np.random.default_rng(5)
+    frame = pd.DataFrame(
+        {f"i{i:04d}": rng.permutation(60) for i in range(3000)} | {"y": np.arange(60) % 2}
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "ids", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    assert len(result["config"]["ignored_columns"]) == builtin._MAX_IGNORED_LISTED
+    warning = next(w for w in result["warnings"] if w["code"] == "ids_not_listed")
+    assert warning["params"] == {"n": "2,800"}
+    assert len(json.dumps(result)) <= MAX_RESULT_BYTES
+
+
+def test_columns_of_one_value_left_out_of_the_list_are_not_asked_of_the_test_data(env):
+    names = [f"c{i:03d}" for i in range(300)]
+    train = pd.DataFrame(np.ones((40, 300), dtype=np.int8), columns=names)
+    train["x"] = np.arange(40) % 7
+    train["y"] = np.arange(40) % 2
+    first = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "train", DatasetType.TRAIN, [train]
+    )
+    ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "test", DatasetType.TEST, [train[["x"]]]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": first.id, "target": "y"})
+    assert not [c for c in codes(result) if c.startswith("columns_not_in_test")]
+
+
+def test_a_target_of_one_value_and_blanks_is_still_called_constant(env):
+    frame = pd.DataFrame({"x": np.arange(40), "y": ["Yes", None] * 20})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "flag-target", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    assert "target_constant" in codes(result) and "target_missing" in codes(result)
+
+
+def test_a_proposal_of_a_wide_table_reads_fewer_rows(env, monkeypatch):
+    read = []
+    real = builtin.propose
+    monkeypatch.setattr(builtin, "propose", lambda *a, **k: read.append(a[4]) or real(*a, **k))
+    frame = pd.DataFrame(np.arange(60 * 30).reshape(60, 30), columns=[f"c{i}" for i in range(30)])
+    frame["y"] = np.arange(60) % 2
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "wide", DatasetType.TRAIN, [frame]
+    )
+    call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    monkeypatch.setattr(builtin, "_PROPOSE_CELLS", 31 * 5_000)
+    call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    monkeypatch.setattr(builtin, "_PROPOSE_CELLS", 31 * 100)
+    call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    assert read == [builtin._SAMPLE_ROWS, 5_000, 100]
+
+
+def test_a_column_of_one_value_and_blanks_is_not_proposed_as_ignored(env):
+    rng = np.random.default_rng(4)
+    frame = pd.DataFrame(
+        {
+            "flag": rng.choice(["Yes", None], 200),
+            "same": "x",
+            "empty": [None] * 200,
+            "y": rng.choice(["p", "q"], 200),
+        }
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "flags", DatasetType.TRAIN, [frame]
+    )
+    proposal = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    assert set(proposal["config"]["ignored_columns"]) == {"same", "empty"}
 
 
 def test_a_wide_dataset_is_described_by_an_overview_within_the_size_cap(env):

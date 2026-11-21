@@ -150,7 +150,10 @@ When you ask for a training ("train a model to predict species"), the assistant 
 and shows a **Training proposal** card: the dataset, the column to predict, the task, the time
 limit (each with a plain reason), the columns it suggests leaving out, and what to check. The
 reasons and the things to check are written in plain words in the language of the page, not as
-technical terms. When the project already has a test or prediction dataset, the card also
+technical terms. The card examines up to 5,000 columns (a wider table is read with fewer rows)
+and says when there are more. It lists at most 200 columns to leave out, ids first; it counts the
+others: columns that hold one value in the rows examined, which training leaves out by itself,
+and ids beyond the 200, which stay in the training unless you ignore them. When the project already has a test or prediction dataset, the card also
 warns about columns the model would learn from that those datasets lack, because predicting
 needs every column the model learned from. A dataset that shares no column with the training
 data is taken for another table and not compared. People who can edit the project

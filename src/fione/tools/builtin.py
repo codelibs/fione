@@ -53,6 +53,7 @@ from fione.data.profile import (
 )
 from fione.engine import diagnostics as diag
 from fione.engine import metrics
+from fione.engine.automl import FEATURE_MAX_COLUMNS
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.explain import PD_GRID
 from fione.engine.prep import MAX_PROSE, _sorted_labels, infer_task, validate_target
@@ -68,7 +69,11 @@ from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.tools import link_names
 from fione.tools.registry import Tool, ToolContext, ToolError, clean_text, fits, register
 
-_MAX_COLUMNS = 200
+_MAX_COLUMNS = 200  # columns a dataset description lists
+_PROPOSE_MAX_COLUMNS = FEATURE_MAX_COLUMNS  # columns a training proposal examines
+# ids are always listed in a proposal's config, which is never cut; columns of one value, which
+# training leaves out itself, only while the list stays this long
+_MAX_IGNORED_LISTED = 200
 # Said in a result, where the model is looking when it chooses its next call: a small model asked
 # for a proposal otherwise answers in text far more often than it calls the tool.
 _NEXT_AFTER_DESCRIBE = (
@@ -87,6 +92,9 @@ _NEXT_TO_JOIN = (
 )
 _OVERVIEW_GAPS = 20  # columns named in an overview as the ones with the most missing values
 _SAMPLE_ROWS = 200_000
+# a proposal reads about as many cells as a description of 200 columns does: fewer rows of a
+# wider table (8,000 rows at the most columns it examines)
+_PROPOSE_CELLS = _SAMPLE_ROWS * _MAX_COLUMNS
 _TOP_CORRELATIONS = 10
 _TOP_VALUES = 10
 _VALUE_CHARS = 50
@@ -1037,7 +1045,9 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     target = _resolve_column(names, args["target"])
     if not _is_plain(target):
         raise ToolError("the target column name is not plain text and cannot be proposed")
-    found = propose(ctx.storage, dataset, target, names[:_MAX_COLUMNS])
+    columns = names[:_PROPOSE_MAX_COLUMNS]
+    rows = min(_SAMPLE_ROWS, _PROPOSE_CELLS // max(1, len(columns)))
+    found = propose(ctx.storage, dataset, target, columns, rows)
     profile, task = found.profile, found.task
 
     warnings: list[dict] = []
@@ -1050,12 +1060,15 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 f"this is a {dataset.type.value} dataset; training needs a train dataset",
             )
         )
-    if len(names) > _MAX_COLUMNS:
+    if len(names) > _PROPOSE_MAX_COLUMNS:
+        more = len(names) - _PROPOSE_MAX_COLUMNS
         warnings.append(
             _warning(
                 "many_columns",
-                f"only the first {_MAX_COLUMNS} columns were examined",
-                n=_MAX_COLUMNS,
+                f"only the first {_PROPOSE_MAX_COLUMNS:,} columns were examined; the id, "
+                f"constant, leak, repeated id and time checks did not see the other {more:,}",
+                n=f"{_PROPOSE_MAX_COLUMNS:,}",
+                more=f"{more:,}",
             )
         )
     time_index = time_index_column(profile, target, dataset.n_rows)
@@ -1066,13 +1079,19 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     ):
         time_index = None
     ignore = {col.name for col in found.ignore} - {time_index.name if time_index else None}
+    id_names = [c.name for c in profile.columns if c.name in ignore and c.kind == "id"]
+    listed_ids = set(id_names[:_MAX_IGNORED_LISTED])
+    unlisted_ids = len(id_names) - len(listed_ids)  # these stay in the training
+    constant_room = _MAX_IGNORED_LISTED - len(listed_ids)
+    left_out: list[str] = []  # columns of one value that training leaves out itself, not listed
     for col in profile.columns:
         if col.name == target:
-            if col.kind in ("id", "constant"):
+            kind = "constant" if col.n_unique <= 1 else col.kind  # blanks do not make it vary
+            if kind in ("id", "constant"):
                 warnings.append(
                     _warning(
-                        f"target_{col.kind}",
-                        f"the target looks like a {col.kind} column; check the choice",
+                        f"target_{kind}",
+                        f"the target looks like a {kind} column; check the choice",
                     )
                 )
             if col.missing_rate > 0:
@@ -1085,7 +1104,12 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                         column=clean_text(col.name),
                     )
                 )
+        elif col.name in ignore and col.kind == "constant" and constant_room <= 0:
+            left_out.append(col.name)
+        elif col.name in ignore and col.kind == "id" and col.name not in listed_ids:
+            continue
         elif col.name in ignore:
+            constant_room -= col.kind == "constant"
             suggestions.append(
                 {"column": clean_text(col.name), "reason": f"{col.kind} column", "code": col.kind}
             )
@@ -1117,11 +1141,29 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         reason = f"possible target leak: {reason}"
         suggestions.append({"column": name, "reason": reason, "code": code})
         warnings.append(_warning(code, f"column '{name}': {reason}", column=name))
+    if unlisted_ids:
+        warnings.append(
+            _warning(
+                "ids_not_listed",
+                f"{unlisted_ids:,} more columns look like ids and are not in ignored_columns, "
+                "so training uses them; ignore them by hand if they name rows",
+                n=f"{unlisted_ids:,}",
+            )
+        )
+    if left_out:
+        warnings.append(
+            _warning(
+                "constants_left_out",
+                f"{len(left_out):,} more columns hold one value on every row examined and are "
+                "not listed in ignored_columns; training leaves such columns out itself",
+                n=f"{len(left_out):,}",
+            )
+        )
     if profile.leak_partial:
         warnings.append(
             _warning("leak_partial", "the leak check ran out of time; some columns were not scored")
         )
-    if absent := _columns_not_in_test(ctx, dataset, names[:_MAX_COLUMNS], target, ignored):
+    if absent := _columns_not_in_test(ctx, dataset, columns, target, [*ignored, *left_out]):
         warnings.append(absent)
     if is_skewed_target(found.y, task):
         warnings.append(
@@ -1154,7 +1196,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     if "group_column" in args:
         group = args["group_column"]
         try:
-            group = _resolve_column(names[:_MAX_COLUMNS], group)
+            group = _resolve_column(columns, group)
         except ToolError:
             raise ToolError("group_column is not a column of the dataset") from None
         if group == target or not _is_plain(group):
