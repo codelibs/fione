@@ -700,6 +700,9 @@ RUNTIME_SHORT_FACTOR = 1.5
 # keeps the tip off targets that are nearly symmetric.
 TARGET_SKEW = metrics.TARGET_SKEW
 RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balanced"
+# ... and only when the class is also under this fraction of an even share (1 / classes): with
+# many classes every one of them is under RARE_CLASS_SHARE, rare or not.
+RARE_CLASS_EVEN = 0.5
 # A column named like an identifier (id, user_id, userId, 顧客ID, 番号) or like whom the rows are
 # about (subject, patient, customer, query, ... alone) that holds each value in several rows, at
 # least REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
@@ -754,13 +757,15 @@ def is_skewed_target(y: pd.Series, task: str) -> bool:
 
 
 def rare_class_share(y: pd.Series, task: str) -> float | None:
-    """The share of the rarest class when it is under ``RARE_CLASS_SHARE`` (where
-    ``decision="balanced"`` may pay), else None."""
+    """The share of the rarest class when it is under ``RARE_CLASS_SHARE`` and under
+    ``RARE_CLASS_EVEN`` of an even share, 1 / classes (where ``decision="balanced"`` may pay),
+    else None."""
     y = y.dropna()
     if task != "classification" or y.nunique() < 2:
         return None
     share = float(y.value_counts(normalize=True).min())
-    return share if share < RARE_CLASS_SHARE else None
+    rare = share < RARE_CLASS_SHARE and share < RARE_CLASS_EVEN / y.nunique()
+    return share if rare else None
 
 
 def recommended_metric(y: pd.Series, task: str) -> str:

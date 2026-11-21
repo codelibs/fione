@@ -943,6 +943,19 @@ def test_propose_hints_at_settings_that_suit_the_target(env):
     assert explicit["config"]["sort_metric"] == "auto"
 
 
+def test_a_class_is_rare_against_an_even_share_of_the_classes():
+    share = builtin.rare_class_share
+    balanced = pd.Series(np.repeat(np.arange(99), 10))  # 1% each: no class is rare
+    assert share(balanced, "classification") is None
+    assert share(pd.Series(np.repeat(np.arange(11), 5)), "classification") is None
+    four = pd.Series(["a"] * 50 + ["b"] * 30 + ["c"] * 15 + ["d"] * 5)  # 5% against 25% even
+    assert share(four, "classification") == 0.05
+    lopsided = pd.Series(np.repeat(np.arange(20), 10).tolist() + [20] * 2)  # 1% against 4.8%
+    assert share(lopsided, "classification") == pytest.approx(2 / 202)
+    assert share(pd.Series([0] * 95 + [1] * 5), "classification") == 0.05  # two classes
+    assert share(pd.Series([0] * 85 + [1] * 15), "classification") is None
+
+
 def test_the_recommended_metric_follows_the_problem():
     rare = pd.Series([0] * 95 + [1] * 5)
     assert builtin.recommended_metric(rare, "classification") == "aucpr"

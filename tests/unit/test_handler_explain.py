@@ -541,7 +541,9 @@ def test_catboost_predicts_on_its_spec_threads():
 def test_the_contribution_rows_shrink_for_wide_multiclass(
     conn, run_job, owner, project, record, monkeypatch
 ):
-    cells = len(classifier().classes_) * len(classifier().prep.sources)
+    cells = len(classifier().classes_) * explain._width(
+        classifier(), len(classifier().prep.sources)
+    )
     monkeypatch.setattr(explain, "CELLS", cells * 40)
     done = run_job(submit(conn, owner, project, record))
     assert done.status is JobStatus.DONE, done.message
@@ -550,7 +552,7 @@ def test_the_contribution_rows_shrink_for_wide_multiclass(
 
 def test_the_curve_rows_shrink_for_wide_models(conn, run_job, owner, project, record, monkeypatch):
     """The stored curves keep rows x grid x columns within the cell cap, as requests do."""
-    width = explain.PD_GRID * len(classifier().columns)
+    width = explain.PD_GRID * explain._width(classifier(), len(classifier().columns), False)
     monkeypatch.setattr(explain, "CELLS", width * 30)
     assert explain.pd_rows(classifier(), explain.PD_ROWS, explain.PD_GRID) == 30
     done = run_job(submit(conn, owner, project, record))

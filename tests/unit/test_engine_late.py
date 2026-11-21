@@ -104,6 +104,17 @@ def test_late_families_get_a_share_of_the_search_time_left(monkeypatch):
     assert shares["TextLinearWide"] == pytest.approx(100, rel=0.01)
 
 
+def test_linear_runs_first_so_slow_boosting_trials_cannot_starve_it(monkeypatch):
+    # Linear's trials are cheap and, on few rows of many classes, the strongest; the boosting
+    # families' first trials can take the whole search time, leaving it nothing.
+    assert FAMILY_ORDER[0] == "Linear"
+    calls = _schedule(monkeypatch, reference_secs=0.1, late=())
+    weights = automl_module.FAMILY_WEIGHTS
+    name, share, _ = calls[0]
+    assert name == "Linear"
+    assert share == pytest.approx(100 * weights["Linear"] / sum(weights.values()), rel=0.01)
+
+
 def test_a_share_of_the_search_time_is_kept_for_the_late_families(monkeypatch):
     weights = automl_module.FAMILY_WEIGHTS
     share = automl_module.LATE_SHARE
@@ -565,12 +576,13 @@ def test_a_first_trial_may_take_half_of_the_time_left_but_a_late_family_gets_its
         search.Deadline(100), None, None,
     )  # fmt: skip
     # No time passes, so the base families have 85 s each time: half of it, 42.5 s, is more than
-    # any share (LightGBM's is 0.176 x 85 s).
+    # any share (LightGBM's is 0.176 of what is left for the families after Linear).
     share, first = firsts["LightGBM"]
-    assert share == pytest.approx(0.176 * 85, rel=0.02) and first == pytest.approx(42.5, rel=0.02)
-    # Linear is last: its share is all that is left (85 s), more than half of it.
-    assert firsts["Linear"][0] == pytest.approx(85, rel=0.02)
-    assert firsts["Linear"][1] == pytest.approx(85, rel=0.02)
+    assert share == pytest.approx(0.176 / (1 - 0.048) * 85, rel=0.02)
+    assert first == pytest.approx(42.5, rel=0.02)
+    # Linear is first: its share is 0.048 of the 85 s, and its first trial may have half of them.
+    assert firsts["Linear"][0] == pytest.approx(0.048 * 85, rel=0.02)
+    assert firsts["Linear"][1] == pytest.approx(42.5, rel=0.02)
     assert all(firsts[name][1] is None for name in TEXT_LATE)
 
 

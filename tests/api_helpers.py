@@ -90,8 +90,10 @@ FAST_CONFIG = {"target": "species", "max_runtime_secs": 10, "max_models": 1, "nf
 
 @cache
 def tiny_model():
-    """An iris classifier, trained once per session."""
-    return AutoML(TrainConfig(**FAST_CONFIG), lambda event: None).fit(iris_frame())
+    """An iris classifier (one LightGBM model), trained once per session."""
+    return AutoML(TrainConfig(**FAST_CONFIG), lambda event: None, families=["LightGBM"]).fit(
+        iris_frame()
+    )
 
 
 def store_model(conn, storage, secret, project_id, name="iris model", model=None):
