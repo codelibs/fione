@@ -34,6 +34,7 @@ from fione.modules.registry import redact
 from fione.projects import service as projects
 from fione.projects.ingest import read_dataset_rows
 from fione.projects.service import Dataset, DatasetType
+from fione.tools.builtin import class_count
 from fione.web.access import Ctx, action, dataset_in, job_in, page
 from fione.web.easyml import (
     MAX_FORM_FIELDS,
@@ -486,7 +487,9 @@ def _train_view(
     left_out = {"analysis.tip.runtime_long"}
     if values is None:  # first shown: the run time the size of the data needs
         values = _form_values(_defaults())
-        values["max_runtime_minutes"] = str(recommended_runtime(dataset, found.profile))
+        values["max_runtime_minutes"] = str(
+            recommended_runtime(dataset, found.profile, class_count(found.y, defaults.task))
+        )
     else:
         left_out.add("analysis.tip.runtime")
     if inputs is None:

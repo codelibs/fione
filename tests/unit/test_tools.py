@@ -666,6 +666,31 @@ def test_the_proposed_run_time_counts_the_text_of_the_data(env, monkeypatch):
     assert need > 360 and secs() == 60 * math.ceil(need / 60)
 
 
+def test_the_proposed_run_time_of_a_text_counts_its_classes(env, monkeypatch):
+    comments = [f"free text comment number {i % 300} " + "word " * 40 for i in range(400)]
+    monkeypatch.setattr(builtin, "SECS_PER_TEXT_CHAR", 0.0044)
+    chars = sum(map(len, comments))
+
+    def proposal(labels):
+        frame = pd.DataFrame({"comment": comments, "label": labels})
+        ds = ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "prose", DatasetType.TRAIN, [frame]
+        )
+        try:
+            return call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+        finally:
+            projects.delete_dataset(env.conn, env.storage, ds.id)
+
+    two = proposal(["a", "b"] * 200)
+    assert two["config"]["max_runtime_secs"] == 60 * math.ceil(chars * 0.0044 / 60)
+    assert "runtime_short" not in codes(two)
+    many = proposal(
+        [f"c{i % 20}" for i in range(400)]
+    )  # ten times the text term: over 1.5 x 30 min
+    assert many["config"]["max_runtime_secs"] == 1800
+    assert "runtime_short" in codes(many)
+
+
 def test_propose_sets_only_the_settings_the_user_wanted(env):
     base = {"dataset_id": env.dataset.id, "target": "label"}
     config = call(env, "propose_training_config", base)["config"]

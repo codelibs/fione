@@ -2597,6 +2597,21 @@ def test_a_binary_fit_with_no_ranking_skill_says_so():
     assert "no_skill" in [e.data.get("kind") for e in events if e.type == "notice"]
 
 
+def test_a_fit_of_many_classes_that_learned_nothing_says_so_and_a_good_one_does_not():
+    rng = np.random.default_rng(2)
+    df = pd.DataFrame({"a": rng.normal(size=600), "b": rng.normal(size=600)})
+    df["y"] = rng.choice(["p", "q", "r", "s"], 600, p=[0.4, 0.3, 0.2, 0.1])
+    events = []
+    _fit(df, events, families=["LightGBM", "Linear"], target="y", max_models=2)
+    found = [e.data for e in events if e.type == "notice" and e.data.get("kind") == "no_skill"]
+    assert len(found) == 1
+    assert found[0]["logloss"] >= (1 - automl_module.NO_SKILL_LOGLOSS) * found[0]["prior_logloss"]
+    df["y"] = np.select([df.a < -0.5, df.a < 0.5, df.b < 0], ["p", "q", "r"], "s")
+    events = []
+    _fit(df, events, families=["LightGBM", "Linear"], target="y", max_models=2)
+    assert "no_skill" not in _kinds(events)
+
+
 KIND_QUALITY = ("no_skill", "near_perfect_fit", "leak_suspects")
 
 

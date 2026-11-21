@@ -636,6 +636,16 @@ def test_the_run_time_counts_the_text_of_the_data(owner, monkeypatch):
     assert 'value="10" checked' in page and "set to 10 minutes" in page
 
 
+def test_the_run_time_of_a_text_counts_its_classes(owner, monkeypatch):
+    comments = [f"free text comment number {i % 300} " + "word " * 40 for i in range(400)]
+    monkeypatch.setattr(builtin, "SECS_PER_TEXT_CHAR", 0.0044)  # two classes: 7 minutes
+    two = pd.DataFrame({"comment": comments, "label": ["a", "b"] * 200})
+    assert 'value="10" checked' in tips_page(owner, two)
+    many = pd.DataFrame({"comment": comments, "label": [f"c{i % 20}" for i in range(400)]})
+    page = tips_page(owner, many)  # ten times that: past the longest choice
+    assert 'value="30" checked' in page and "even 30 minutes" in page
+
+
 def pro_form(owner, frame: pd.DataFrame) -> str:
     """The Pro training form of ``frame`` once uploaded: its URL."""
     client, pid, csrf = owner
