@@ -8,6 +8,8 @@ import pytest
 
 from fione.data import frames
 from fione.engine.config import ConfigError, TargetError
+from fione.engine.families import LinearWide
+from fione.engine.features import CodeLevels
 from fione.engine.prep import LINEAR_LEVELS, Prep, infer_task, integer_date_format, validate_target
 
 RNG = np.random.default_rng(0)
@@ -981,3 +983,49 @@ def test_the_date_columns_of_one_fit_are_not_shared_with_another_prep():
     second = Prep().fit(plain)
     assert first.integer_dates == {"c": "%y%m%d%H"} and second.integer_dates == {}
     assert second.feature_names == ["c", "x"] and Prep.integer_dates == {}
+
+
+def _codes(n=600, seed=0):
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame(
+        {
+            "account": rng.choice(rng.integers(0, 300_000, 80), n),  # labels in a wide range
+            "age": rng.integers(18, 90, n),
+            "price": rng.normal(100, 20, n).round(2),
+        }
+    )
+
+
+def _code_position(prep, column="account"):
+    return f"f{prep.feature_names.index(f'{column}__code')}"
+
+
+def test_columns_a_group_reads_as_codes_are_read_as_categories_beside_the_number():
+    X = _codes()
+    prep = Prep().fit(X, [CodeLevels(["account", "price", "missing"])])
+    assert prep.codes == ("account",)  # not the price (decimals) nor the missing column
+    assert prep.kind_of("account") == "numeric"  # still a number
+    assert prep.feature_names.index("account") == 0
+    share = prep.tree(X)[_code_position(prep)]
+    assert share.between(0, 1).all() and share.nunique() > 1
+    text = prep.catboost(X)[_code_position(prep)]
+    assert text.dtype == object and text.iloc[0] == str(X["account"].iloc[0])  # "5", not "5.0"
+    assert prep.levels(X)["f0_l"].iloc[0] == str(X["account"].iloc[0])
+    assert prep.level_width >= X["account"].nunique()
+    assert LinearWide.applies(prep, X)
+
+
+def test_no_column_is_a_code_without_a_group_that_says_so():
+    prep = Prep().fit(_codes())
+    assert prep.codes == ()
+    assert not [n for n in prep.feature_names if n.endswith("__code")]
+    assert not LinearWide.applies(prep, None)
+
+
+def test_a_code_not_seen_in_training_gets_the_share_of_the_rarest_one():
+    X = _codes()
+    prep = Prep().fit(X, [CodeLevels(["account"])])
+    new = X.head(3).assign(account=[-1, 123456789, np.nan])
+    shares = prep.tree(new)[_code_position(prep)]
+    rarest = min(prep._code_shares["account"].values())
+    assert shares.iloc[0] == shares.iloc[1] == rarest

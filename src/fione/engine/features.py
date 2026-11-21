@@ -4,7 +4,9 @@ A ``Group`` is a family of derived numeric features that read raw input columns:
 and topics of text columns, how much two text columns share, frequencies of categories,
 row-wise counts and statistics, date parts and differences, pairwise arithmetic of numbers,
 group means, frequencies of category pairs and of pairs of repeated values, parts of structured
-identifiers, characters of codes.
+identifiers, characters of codes, and numeric columns whose whole numbers are labels
+(``CodeLevels``, chosen by ``code_columns`` from the target means of their values, not by the
+gate below).
 ``Prep.fit`` fits the groups it is given on the training features alone, so they never see the
 target: a model can be scored on out-of-fold predictions without leaking, however many groups exist.
 
@@ -101,6 +103,16 @@ CODE_LENGTHS = (3, 32)  # fewest and most characters of a code
 CODE_SHARE = 0.99  # of the values must have the length of the code
 MAX_CODE_COLUMNS = 2  # code columns that get characters
 MAX_CODE_POSITIONS = 16  # characters of a code read one by one
+CODES_LABEL = "integer codes read as categories"
+CODES_REASON = "by the order of their values"  # not by the gate: no gain is measured
+CODE_MIN_LEVELS = 30  # a column of whole numbers is a candidate code with more levels than this ...
+CODE_ROWS_PER_LEVEL = 3  # ... and at least this many rows per level on average
+CODE_MIN_ROWS = 300  # fewer rows show no order
+MAX_CODE_CANDIDATES = 100  # columns screened, the most useful first
+CODE_BINS = 20  # equal-row parts of the numeric order, to see how much the order explains
+CODE_Z = 4.0  # standard deviations the level means must differ from the overall mean by
+CODE_ORDER_SHARE = 0.3  # a code has at most this share of that variation explained by the order
+MAX_INTEGER_CODES = 10  # the ones the order explains least are read as codes
 MAX_GROUP_CATEGORIES = 50  # levels of a category that group means are taken over
 ENTITY_SHARE = (
     0.3  # of the rows must share their value with another row for a column to name entities
@@ -124,6 +136,7 @@ class Group:
     label: str
     columns: tuple[str, ...]
     density = False  # the features count rows, so what a sample of the rows shows is thinner
+    reads_as_codes = False  # names numeric columns whose whole numbers are labels (``CodeLevels``)
 
     def fit(self, X: pd.DataFrame) -> "Group":
         self._fit(X)
@@ -618,6 +631,99 @@ class CategoryPairs(Group):
         return pd.DataFrame(out, index=df.index)
 
 
+class CodeLevels(Group):
+    """Numeric columns whose whole numbers are labels (an account, a department): ``Prep`` reads
+    each of them also as a category (see ``code_columns``). No feature of its own."""
+
+    reads_as_codes = True
+
+    def __init__(self, columns: list[str]):
+        self.label, self.columns = CODES_LABEL, tuple(columns)
+
+    def _compute(self, df):
+        return pd.DataFrame(index=df.index)
+
+
+def _order_share(x: np.ndarray, targets: np.ndarray) -> tuple[float, float]:
+    """(how far the means of ``targets`` within each value of ``x`` differ beyond noise, in
+    standard deviations; the share of that difference the order of the values explains). The
+    first is a chi-square of the level means against the overall mean, less its degrees of
+    freedom. The second is the same for ``CODE_BINS`` equal-row parts of the order: a measure
+    (an age, a price) has neighbouring values alike, so the parts explain nearly all of it, a
+    label's neighbours are unrelated and they explain none."""
+    levels, found = np.unique(x, return_inverse=True)
+    rows = np.bincount(found, minlength=len(levels)).astype(float)
+    sums = np.stack(
+        [np.bincount(found, weights=t, minlength=len(levels)) for t in targets.T], axis=1
+    )
+    mean, var = targets.mean(0), targets.var(0) + 1e-12
+    k = targets.shape[1]
+
+    def chi2(groups_sums, groups_rows):
+        return float(
+            (((groups_sums - groups_rows[:, None] * mean) ** 2) / groups_rows[:, None] / var).sum()
+        )
+
+    whole = chi2(sums, rows) - (len(levels) - 1) * k
+    part = np.minimum((np.cumsum(rows) - rows) * CODE_BINS // rows.sum(), CODE_BINS - 1).astype(int)
+    part_rows = np.bincount(part, weights=rows, minlength=CODE_BINS)
+    used = part_rows > 0
+    part_sums = np.stack(
+        [np.bincount(part, weights=sums[:, j], minlength=CODE_BINS) for j in range(k)], axis=1
+    )
+    explained = chi2(part_sums[used], part_rows[used]) - (used.sum() - 1) * k
+    # The chi-square of a level of ``n`` rows has variance 2 + kurtosis / n under the null, which
+    # a rare 0/1 target makes far larger than 2 (its excess kurtosis is 1 / (p q) - 6).
+    kurtosis = (((targets - mean) ** 2 / var) ** 2).mean(0) - 3
+    spread = float(((2 + kurtosis[None, :] / rows[:, None]).clip(min=2)).sum())
+    return whole / np.sqrt(spread), max(0.0, explained) / max(whole, 1e-9)
+
+
+def code_columns(
+    prep: Prep,
+    X: pd.DataFrame,
+    y: np.ndarray,
+    task: Task,
+    ranked: list[str] | None = None,
+    out_of_time=lambda: False,
+) -> list[str]:
+    """Numeric columns of whole numbers that are labels, not measures. A candidate has more than
+    ``CODE_MIN_LEVELS`` values with ``CODE_ROWS_PER_LEVEL`` rows each on average. It is a code
+    when its values' target means differ beyond noise (``CODE_Z``) and the numeric order of the
+    values explains at most ``CODE_ORDER_SHARE`` of that. The target is the rank for a regression,
+    the 0/1 of each of the (at most ten most frequent) classes for a classification. At most
+    ``MAX_INTEGER_CODES``, the ones the order explains least. Of the numeric columns, the first
+    ``MAX_CODE_CANDIDATES`` in the order of ``ranked`` are screened, until ``out_of_time``."""
+    if len(y) < CODE_MIN_ROWS:
+        return []
+    if task == "regression":
+        ranks = pd.Series(y).rank().to_numpy()
+        targets = ((ranks - ranks.mean()) / (ranks.std() + 1e-12))[:, None]
+    else:
+        top = pd.Series(y).value_counts().index[:10]
+        targets = np.stack([(y == c).astype(float) for c in top], axis=1)
+    found = []
+    order = {column: i for i, column in enumerate(ranked or [])}
+    screened = sorted(prep.numeric_columns, key=lambda c: order.get(c, len(order)))
+    for column in screened[:MAX_CODE_CANDIDATES]:
+        if column in prep.integer_dates:
+            continue
+        if out_of_time():
+            break
+        values = _number(X[column])
+        have = values.notna().to_numpy()
+        distinct = values.nunique()
+        if not (
+            CODE_MIN_LEVELS < distinct <= have.sum() / CODE_ROWS_PER_LEVEL
+            and bool((values[have] % 1 == 0).all())
+        ):
+            continue
+        z, share = _order_share(values.to_numpy()[have], targets[have])
+        if z >= CODE_Z and share <= CODE_ORDER_SHARE:
+            found.append((share, column))
+    return [column for _, column in sorted(found)[:MAX_INTEGER_CODES]]
+
+
 def _id_layout(s: pd.Series) -> tuple[str, int] | None:
     """The delimiter and the number of fields of a string column whose values are identifiers
     made of two to four fields ("0001_01", "B/0/P"): at least ``ID_SHARE`` of the values split
@@ -906,6 +1012,7 @@ class _Fitted:
     def __init__(self, gate: "_Gate", group: Group):
         self.gate, self.group = gate, group
         self.label, self.columns = group.label, group.columns
+        self.reads_as_codes = group.reads_as_codes
 
     def fit(self, X: pd.DataFrame) -> Group:
         return self.gate.fitted(self.group)
@@ -1040,15 +1147,17 @@ class Verdict:
     adopted: bool
     gain: float  # share of the loss saved, over the sampled folds
     reason: str  # adopted, no gain, too small a gain, time or final check
+    columns: list[str] | None = None  # the input columns, for a group that is not judged by gain
 
     def to_dict(self) -> dict:
-        return {
+        out = {
             "group": self.group,
             "features": self.features,
             "adopted": self.adopted,
             "gain": round(self.gain, 5),
             "reason": self.reason,
         }
+        return out if self.columns is None else {**out, "columns": self.columns}
 
 
 def select_groups(
@@ -1090,24 +1199,37 @@ def select_groups(
     if len(X) > GATE_ROWS:
         X, y, row_groups = sampled(X, y, row_groups, GATE_ROWS)
     gate = new_gate(X, y, row_groups)
+    base: list[Group] = []  # the codes, which stay however the gate judges the others
     kept: list[Group] = []
     verdicts: list[Verdict] = []
     pool: list[Group] = []
     try:
-        pool = candidates(Prep().fit(X), X, gate.ranked(), all_rows)
-        current = gate.losses([], range(1))
+        prep, ranked = Prep().fit(X), gate.ranked()
+        pool = candidates(prep, X, ranked, all_rows)
+        codes = (
+            []
+            if row_groups is not None
+            else code_columns(prep, X, y, task, ranked, gate.out_of_time)
+        )
+        if codes:  # judged by the order of their values, not by the gate
+            base.append(CodeLevels(codes))
+            kept.append(base[0])
+            verdicts.append(Verdict(CODES_LABEL, len(codes), True, 0.0, CODES_REASON, codes))
+        current = gate.losses(kept, range(1))
         # When the time covers too few repeats of the folds to judge the groups, fewer rows do it
         # faster (a repeat takes about as long as the rows are many).
         afforded = deadline.remaining() / (GATE_AFFORDED_REPEATS * max(gate.secs([]), 1e-6))
         if afforded < 1 and len(X) > GATE_MIN_ROWS:
             X, y, row_groups = sampled(X, y, row_groups, max(GATE_MIN_ROWS, int(afforded * len(X))))
             gate = new_gate(X, y, row_groups)
-            current = gate.losses([], range(1))
+            current = gate.losses(kept, range(1))
         for group in pool:
             # A group not kept for its gain alone must pass the last check, which time may not cut
             # short: the search stops once what is left covers that and one more group that
             # goes through all its repeats.
-            unconfirmed = any(v.adopted and v.gain < DECISIVE_GAIN for v in verdicts)
+            unconfirmed = any(
+                v.adopted and v.gain < DECISIVE_GAIN for v in verdicts if v.group != CODES_LABEL
+            )
             if unconfirmed and deadline.remaining() < (
                 FINAL_MARGIN * gate.last_check_secs(kept) + GATE_REPEATS * gate.secs(kept)
             ):
@@ -1131,18 +1253,18 @@ def select_groups(
                 verdicts.append(Verdict(group.label, width, True, gain, "adopted"))
             else:
                 verdicts.append(Verdict(group.label, width, False, gain, "too small a gain"))
-        if kept:
+        if len(kept) > len(base):
             fresh = range(GATE_REPEATS, GATE_REPEATS + FINAL_REPEATS)  # folds no choice has seen
-            if not passes(gate.losses([], fresh), gate.losses(kept, fresh)):
+            if not passes(gate.losses(base, fresh), gate.losses(kept, fresh)):
                 _drop_adopted(verdicts, "final check")
-                kept = []
+                kept = list(base)
     except _OutOfTime:
         # Their last check did not finish. A gain this large is no fluke of the selection, so
         # those groups stay; the others are not trusted.
         decisive = {v.group for v in verdicts if v.adopted and v.gain >= DECISIVE_GAIN}
-        kept = [g for g in kept if g.label in decisive]
+        kept = [g for g in kept if g.label in decisive or g in base]
         for verdict in verdicts:
-            if verdict.adopted and verdict.group not in decisive:
+            if verdict.adopted and verdict.group not in decisive and verdict.group != CODES_LABEL:
                 verdict.adopted, verdict.reason = False, "time"
     judged = {v.group for v in verdicts}
     verdicts += [Verdict(g.label, 0, False, 0.0, "time") for g in pool if g.label not in judged]
@@ -1151,7 +1273,7 @@ def select_groups(
 
 def _drop_adopted(verdicts: list[Verdict], reason: str) -> None:
     for verdict in verdicts:
-        if verdict.adopted:
+        if verdict.adopted and verdict.group != CODES_LABEL:
             verdict.adopted, verdict.reason = False, reason
 
 
