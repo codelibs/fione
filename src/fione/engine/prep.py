@@ -199,6 +199,19 @@ def _has_few_levels(s: pd.Series, kind: str) -> bool:
     return MIN_FEW_LEVELS <= values.nunique() <= FEW_LEVELS and bool((values % 1 == 0).all())
 
 
+def _whole(s: pd.Series) -> bool:
+    """Whether every value of the column is a whole number (missing ones aside)."""
+    values = pd.to_numeric(s, errors="coerce").dropna()
+    return bool((values % 1 == 0).all())
+
+
+def _whole_text(s: pd.Series) -> pd.Series:
+    """Whole numbers as text (``5``, not ``5.0``), missing, infinite or huge ones missing."""
+    values = pd.to_numeric(s, errors="coerce")
+    values = values.where(values.abs() < 2**53).round().astype("Int64")
+    return values.astype(str).where(values.notna())
+
+
 def _as_str(s: pd.Series) -> pd.Series:
     """Values as strings, missing values kept missing."""
     return s.astype(str).where(s.notna())
@@ -261,7 +274,9 @@ class Prep:
     else is numeric. The views put the features in ``feature_names`` order under positional
     names ``f0, f1, ...``, because model libraries reject some characters in feature names.
     ``groups`` (see ``fione.engine.features``) add derived numeric features after those; they are
-    fitted on ``X`` alone and skipped when they read a column that is not used.
+    fitted on ``X`` alone and skipped when they read a column that is not used. A group that
+    ``reads_as_codes`` names numeric columns whose whole numbers are labels: each also gets the
+    frequency of its value, which CatBoost reads as text and the levels view as levels.
     """
 
     groups: tuple = ()  # class-level defaults: models pickled before these existed still load
@@ -275,6 +290,9 @@ class Prep:
     _no_trend: tuple = ()  # view columns the linear view leaves out (see ``_fit_no_trend``)
     _level_at: dict = {}  # levels view column (``f3_l``) -> the input column it reads
     _native_at: dict = {}  # catboost view column (``f3``) -> frequency column it reads as text
+    codes: tuple = ()  # numeric columns also read as categories (``CodeLevels``; old: none)
+    _code_shares: dict = {}  # code column -> share of the training rows with each value as text
+    _code_unseen: dict = {}  # code column -> share given to a value not seen in training
     _date_now = None  # when a model that reads two-digit years was fitted (old: today's clock)
     fill: dict = {}  # input column -> share of the training rows that have a value (old: none)
 
@@ -291,6 +309,7 @@ class Prep:
         self.categories: dict[str, list[str]] = {}
         self.frequencies: dict[str, dict[str, float]] = {}
         self._unseen = {}
+        self._code_shares, self._code_unseen = {}, {}
         for column in X.columns:
             s = X[column]
             if s.nunique(dropna=False) <= 1:
@@ -325,6 +344,17 @@ class Prep:
                     self.integer_dates[column] = fmt
         if not self._plan:
             raise ConfigError("no usable feature columns: every column is empty or constant")
+        self.codes = tuple(
+            dict.fromkeys(
+                c
+                for g in groups
+                if getattr(g, "reads_as_codes", False)
+                for c in g.columns
+                if dict(self._plan).get(c) == "numeric"
+                and c not in self.integer_dates
+                and _whole(X[c])
+            )
+        )
         self.fill = {column: float(X[column].notna().mean()) for column, _ in self._plan}
         self.prose = tuple(
             [c for c, kind in self._plan if kind in ("category", "frequency") and is_prose(X[c])][
@@ -348,7 +378,9 @@ class Prep:
             ):
                 self._native_at[f"f{len(self.feature_names)}"] = column
             if (column not in self.prose or _repeats(X[column])) and (
-                kind in ("category", "frequency") or _has_few_levels(X[column], kind)
+                kind in ("category", "frequency")
+                or _has_few_levels(X[column], kind)
+                or column in self.codes
             ):
                 self._level_at[f"f{len(self.feature_names)}_l"] = column
             if kind == "datetime":
@@ -362,6 +394,14 @@ class Prep:
                     parts = _integer_date_parts(self.integer_dates[column], self.calendar)
                     self.feature_names += [f"{column}__{part}" for part in parts]
                     self.sources += [(column,)] * len(parts)
+        for column in self.codes:
+            text = _whole_text(X[column])
+            shares = text.value_counts(normalize=True)
+            self._code_shares[column] = shares.to_dict()
+            self._code_unseen[column] = float(shares.min())
+            self._native_at[f"f{len(self.feature_names)}"] = column
+            self.feature_names.append(f"{column}__code")
+            self.sources.append((column,))
         used = set(self.columns)
         self.groups = tuple(
             fitted
@@ -502,6 +542,10 @@ class Prep:
                 out.append(encoded.mask(encoded.isna() & values.notna(), unseen))
             else:
                 out.append(_as_str(s))
+        for column in self.codes:
+            text = _whole_text(df[column])
+            share = text.map(self._code_shares[column]).astype(float)
+            out.append(share.mask(share.isna() & text.notna(), self._code_unseen[column]))
         for group in self.groups:
             derived = group.transform(df)
             out += [derived[name] for name in derived.columns]
@@ -539,7 +583,8 @@ class Prep:
         for position in self._category_at:
             base[position] = base[position].fillna("__na__").astype(object)
         for position, column in self._native_at.items():
-            base[position] = _as_str(df[column]).fillna("__na__").astype(object)
+            text = _whole_text(df[column]) if column in self.codes else _as_str(df[column])
+            base[position] = text.fillna("__na__").astype(object)
         return base
 
     def dense(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -563,7 +608,8 @@ class Prep:
         return pd.concat([out, *texts], axis=1) if texts else out
 
     def text_plain(self, df: pd.DataFrame) -> pd.DataFrame:
-        """The text view without the columns of the derived features (``groups``)."""
+        """The text view without the columns of the derived features (``groups``); the frequencies
+        of the codes (``Prep.codes``) stay, being input columns' own."""
         out = self.text(df)
         base = len(self.feature_names) - sum(len(group.names) for group in self.groups)
         return out[[c for c in out.columns if int(c[1:].split("_")[0]) < base]]
@@ -584,12 +630,10 @@ class Prep:
         texts = []
         for name, column in self._level_at.items():
             values = df[column]
-            if (
-                self.kind_of(column) == "numeric"
-            ):  # a few whole numbers: infinite or huge is missing
-                values = pd.to_numeric(values, errors="coerce")
-                values = values.where(values.abs() < 2**53).round().astype("Int64")
-            texts.append(values.astype(str).where(values.notna(), "__na__").rename(name))
+            if self.kind_of(column) == "numeric":  # whole numbers: infinite or huge is missing
+                texts.append(_whole_text(values).fillna("__na__").rename(name))
+            else:
+                texts.append(values.astype(str).where(values.notna(), "__na__").rename(name))
         # one concat: an insert each fragments the frame
         return pd.concat([out, *texts], axis=1) if texts else out
 
@@ -602,6 +646,8 @@ class Prep:
                 width += min(len(self.frequencies[column]), MAX_LEVELS)
             elif column in self.categories:
                 width += len(self.categories[column]) + 1
+            elif column in self._code_shares:
+                width += min(len(self._code_shares[column]), MAX_LEVELS)
             else:
                 width += FEW_LEVELS + 1
         return width

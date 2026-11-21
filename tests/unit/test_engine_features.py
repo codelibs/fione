@@ -1419,3 +1419,139 @@ def test_groups_pickled_before_density_existed_still_load_and_count_rows_as_befo
         loaded = pickle.loads(pickle.dumps(group))  # noqa: S301 - a group this test built
         assert "density" not in vars(loaded) and loaded.density
     assert not features.Group.density and not TextShape("t").density
+
+
+def _labels_and_measures(n=3000, seed=0, task="classification"):
+    """A label (accounts spread over a wide range, each with its own rate), a measure that
+    explains the target smoothly, a label that explains nothing, and an age."""
+    rng = np.random.default_rng(seed)
+    accounts = rng.choice(rng.integers(0, 500_000, 120), n)
+    effect = {a: rng.normal(scale=1.5) for a in np.unique(accounts)}
+    measure = rng.integers(0, 40_000, n) * 7  # whole numbers with gaps, each value rare
+    measure = np.round(measure / 300).astype(int) * 300  # ~130 values, spread out
+    noise_label = rng.choice(rng.integers(0, 500_000, 120), n)
+    age = rng.integers(18, 90, n)
+    score = (
+        pd.Series(accounts).map(effect).to_numpy() + measure / measure.std() + rng.normal(size=n)
+    )
+    y = (score > np.median(score)).astype(int) if task == "classification" else score
+    X = pd.DataFrame(
+        {"account": accounts, "measure": measure, "noise_label": noise_label, "age": age}
+    )
+    return X, y
+
+
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_a_label_is_a_code_and_a_measure_or_an_empty_label_is_not(task):
+    X, y = _labels_and_measures(task=task)
+    assert features.code_columns(Prep().fit(X), X, y, task) == ["account"]
+
+
+def test_the_codes_stay_whatever_the_gate_judges_of_the_other_groups():
+    X, y = _labels_and_measures()
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    assert kept[0].label == features.CODES_LABEL and kept[0].columns == ("account",)
+    assert verdicts[0].group == features.CODES_LABEL and verdicts[0].adopted
+    prep = Prep().fit(X, kept)
+    assert prep.codes == ("account",)
+
+
+def test_no_code_group_for_data_without_labels():
+    X, y = noise_text()
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    assert features.CODES_LABEL not in [g.label for g in kept] + [v.group for v in verdicts]
+
+
+def test_the_code_screen_is_deterministic_and_reads_columns_with_missing_values():
+    X, y = _labels_and_measures()
+    X.loc[::7, "account"] = np.nan
+    first = features.code_columns(Prep().fit(X), X, y, "classification")
+    assert first == ["account"]
+    assert features.code_columns(Prep().fit(X), X, y, "classification") == first
+
+
+def test_the_code_screen_reads_several_classes_and_many():
+    X, y = _labels_and_measures()
+    classes = np.digitize(y + np.random.default_rng(1).normal(size=len(y)), [0.3, 0.6])
+    assert features.code_columns(Prep().fit(X), X, classes, "classification") == ["account"]
+    many = np.random.default_rng(2).integers(0, 15, len(X))  # more classes than it reads
+    assert features.code_columns(Prep().fit(X), X, many, "classification") == []
+
+
+def test_the_code_screen_is_silent_for_a_constant_target_few_rows_and_no_time():
+    X, y = _labels_and_measures()
+    prep = Prep().fit(X)
+    assert features.code_columns(prep, X, np.zeros(len(X), int), "classification") == []
+    assert (
+        features.code_columns(prep.fit(X.head(200)), X.head(200), y[:200], "classification") == []
+    )
+    assert features.code_columns(prep.fit(X), X, y, "classification", None, lambda: True) == []
+
+
+def test_no_codes_are_read_when_the_gate_keeps_the_rows_of_a_group_together():
+    X, y = _labels_and_measures()
+    kept, verdicts = select_groups(
+        X, y, "classification", 5, 0, Deadline(120), row_groups=np.arange(len(X)) // 6
+    )
+    assert features.CODES_LABEL not in [v.group for v in verdicts]
+
+
+def test_the_verdict_names_the_code_columns_and_claims_no_gain():
+    X, y = _labels_and_measures()
+    _, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    codes = verdicts[0].to_dict()
+    assert codes["columns"] == ["account"] and codes["gain"] == 0.0
+    assert codes["reason"] == features.CODES_REASON
+    assert "columns" not in verdicts[1].to_dict()
+
+
+def test_a_model_with_codes_keeps_them_after_pickling():
+    X, y = _labels_and_measures()
+    prep = Prep().fit(X, [features.CodeLevels(["account"])])
+    again = pickle.loads(pickle.dumps(prep))
+    assert again.codes == ("account",)
+    pd.testing.assert_frame_equal(again.catboost(X), prep.catboost(X))
+    pd.testing.assert_frame_equal(again.levels(X), prep.levels(X))
+    old = pickle.loads(pickle.dumps(Prep().fit(X)))  # fitted before codes existed
+    del old.__dict__["codes"], old.__dict__["_code_shares"], old.__dict__["_code_unseen"]
+    assert old.codes == () and old.tree(X).shape[1] == len(old.feature_names)
+
+
+def test_characters_of_codes_are_read_for_two_string_columns_at_most():
+    wide = pd.concat(
+        [_code_frame(seed=s)["code"].rename(f"code{s}") for s in range(5)] + [_code_frame()["x"]],
+        axis=1,
+    )
+    prep = Prep().fit(wide)
+    found = [g for g in features.candidates(prep, wide, ["x"]) if isinstance(g, CodeParts)]
+    assert [len(g.columns) for g in found] == [features.MAX_CODE_COLUMNS] == [2]
+
+
+def test_a_column_that_is_not_all_whole_numbers_is_never_read_as_codes():
+    X, _ = _labels_and_measures()
+    X["account"] = X["account"] + (np.arange(len(X)) == 5) * 0.5  # one value of 2.5 in a label
+    assert Prep().fit(X, [features.CodeLevels(["account"])]).codes == ()
+
+
+def test_a_label_with_no_effect_is_not_a_code_even_when_the_target_is_rare():
+    rng = np.random.default_rng(0)
+    for p in (0.05, 0.01):
+        fired = 0
+        for _ in range(40):
+            X = pd.DataFrame({"label": rng.integers(0, 20_000 // 3, 20_000) * 11})
+            y = (rng.random(len(X)) < p).astype(int)
+            fired += bool(features.code_columns(Prep().fit(X), X, y, "classification"))
+        assert fired <= 1
+
+
+def test_a_label_with_no_effect_is_not_a_code_for_many_classes_or_a_heavy_tailed_target():
+    rng = np.random.default_rng(1)
+    shares = np.array([0.4, 0.25, 0.15, 0.08, 0.05, 0.03, 0.02, 0.01, 0.005, 0.005])
+    fired = 0
+    for _ in range(30):
+        X = pd.DataFrame({"label": rng.integers(0, 20_000 // 3, 20_000) * 11})
+        classes = rng.choice(len(shares), len(X), p=shares)
+        fired += bool(features.code_columns(Prep().fit(X), X, classes, "classification"))
+        heavy = rng.lognormal(0, 2, len(X))
+        fired += bool(features.code_columns(Prep().fit(X), X, heavy, "regression"))
+    assert fired <= 1

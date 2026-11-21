@@ -937,9 +937,11 @@ class LinearWide(TextLinear):
     @classmethod
     def applies(cls, prep, X: pd.DataFrame) -> bool:
         """Whether the linear view loses values: a column of more than ``LINEAR_LEVELS`` values
-        or a frequency encoded one."""
+        or a frequency encoded one, or a number read as a code."""
         return any(
-            column in prep.frequencies or len(prep.categories.get(column, ())) > LINEAR_LEVELS
+            column in prep.frequencies
+            or column in prep.codes
+            or len(prep.categories.get(column, ())) > LINEAR_LEVELS
             for column in prep._level_at.values()
         )
 
