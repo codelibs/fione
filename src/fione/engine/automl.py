@@ -241,6 +241,7 @@ NEAR_PERFECT_R2 = 0.999
 NO_SKILL_R2 = 0.02
 NEAR_PERFECT_AUC = 0.9995
 NO_SKILL_AUC = 0.55
+NO_SKILL_LOGLOSS = 0.02  # of more than two classes: the share of the class shares' log loss
 # A fit validated on this many rows or fewer, picked among at least
 # ``SMALL_DATA_TRIALS`` finished trials, gets a notice: see ``AutoML._notice_small_data``.
 SMALL_DATA_ROWS = 300
@@ -867,13 +868,19 @@ class AutoML:
         return True
 
     def _fit_quality_notices(
-        self, task: Task, model: TrainedModel, constant_said: bool = False
+        self,
+        task: Task,
+        model: TrainedModel,
+        constant_said: bool = False,
+        validated: np.ndarray | None = None,
     ) -> bool:
         """Say when the validated fit is suspiciously good or no better than the average: a
         column may give the answer away, or the features may not hold it. A quantile is not
         judged by R-squared or AUC, so it gets neither, and nor is a score of a time that may be
-        cut short. The average is not named again when ``constant_said``. Returns whether a
-        too-good score was said (or had been said already, of a column)."""
+        cut short. The average is not named again when ``constant_said``. Of more than two
+        classes only the log loss is judged, against that of the class shares of the
+        ``validated`` classes (their codes). Returns whether a too-good score was said (or had
+        been said already, of a column)."""
         if model.config.quantile is not None or model.config.event_column is not None:
             return False
         scores = model.metrics
@@ -884,6 +891,7 @@ class AutoML:
             skill, low, high = scores.get("auc"), NO_SKILL_AUC, NEAR_PERFECT_AUC
             name = "auc"
         else:
+            self._notice_no_class_skill(scores.get("logloss"), validated, constant_said)
             return False
         if skill is None or not np.isfinite(skill):
             return False
@@ -915,6 +923,29 @@ class AutoML:
                 score=float(skill),
             )
         return False
+
+    def _notice_no_class_skill(
+        self, logloss: float | None, validated: np.ndarray | None, constant_said: bool
+    ) -> None:
+        """Say when the validated log loss of more than two classes is no better than that of
+        predicting every class at its share of the rows (its entropy): the models have learned
+        nothing, as when the input is a text that no text model had the time to read."""
+        if constant_said or validated is None or logloss is None or not np.isfinite(logloss):
+            return
+        shares = np.bincount(validated) / len(validated)
+        entropy = float(-np.sum(shares[shares > 0] * np.log(shares[shares > 0])))
+        if entropy <= 0 or 1 - logloss / entropy > NO_SKILL_LOGLOSS:
+            return
+        self._notice(
+            f"the validation log loss is {logloss:.3f}, no better than the {entropy:.3f} of "
+            "predicting every class at its share of the rows: the models have learned almost "
+            "nothing, so the inputs may not hold what the target needs, or a model that reads "
+            "them (a text model for a text column) had no time, which a longer max_runtime_secs "
+            "gives it",
+            kind="no_skill",
+            logloss=logloss,
+            prior_logloss=entropy,
+        )
 
     def _notice_small_data(self, task: Task, model: TrainedModel, rows: int, trials: int) -> None:
         """Say that a score from few rows and many trials is too good: every trial is scored on
@@ -1421,7 +1452,9 @@ class AutoML:
         judged = sort_metric in CONSTANT_METRICS and (
             c.quantile is None or sort_metric == "pinball"
         )
-        too_good = self._fit_quality_notices(task, model, constant_said=said or judged)
+        too_good = self._fit_quality_notices(
+            task, model, constant_said=said or judged, validated=y_seen[rows]
+        )
         if not too_good:  # a score that good is the news, whatever the rows
             self._notice_small_data(task, model, len(rows), finished)
         self._event(

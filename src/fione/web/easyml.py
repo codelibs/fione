@@ -54,6 +54,7 @@ from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.schema import clean_text
 from fione.tools.builtin import (
     RARE_CLASS_SHARE,
+    class_count,
     is_skewed_target,
     propose,
     rare_class_share,
@@ -272,9 +273,9 @@ def _leak_check(request: Request, dataset: Dataset, target: str):
     return (made[0] if made else None), entry
 
 
-def recommended_runtime(dataset: Dataset, profile=None) -> int:
+def recommended_runtime(dataset: Dataset, profile=None, classes: int = 2) -> int:
     """The smallest preset (minutes) that covers ``runtime_need_secs``, from the default up."""
-    need = runtime_need_secs(dataset, profile) / 60
+    need = runtime_need_secs(dataset, profile, classes) / 60
     return next(
         (m for m in RUNTIME_PRESETS if m >= DEFAULT_RUNTIME and m >= need), RUNTIME_PRESETS[-1]
     )
@@ -322,7 +323,7 @@ def _analysis(request: Request, conn, ctx: Ctx, dataset: Dataset, target: str | 
         target=chosen,
         inputs={n for n in names if n != chosen and n not in reasons},
         task=found.task,
-        runtime=str(recommended_runtime(dataset, found.profile)),
+        runtime=str(recommended_runtime(dataset, found.profile, class_count(found.y, found.task))),
     )
     return found, columns, defaults
 
@@ -353,7 +354,8 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
         out.append((level, "analysis.warn.leak_scores", {"n": len(scored)}))
     if found.profile.leak_partial:
         out.append(("info", "analysis.warn.leak_partial", {}))
-    minutes = recommended_runtime(dataset, found.profile)
+    classes = class_count(found.y, task)
+    minutes = recommended_runtime(dataset, found.profile, classes)
     if minutes > DEFAULT_RUNTIME:
         out.append(
             (
@@ -362,7 +364,7 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
                 {"rows": f"{dataset.n_rows:,}", "cols": dataset.n_cols, "minutes": minutes},
             )
         )
-    if runtime_need_secs(dataset, found.profile) > RUNTIME_PRESETS[-1] * 60:
+    if runtime_need_secs(dataset, found.profile, classes) > RUNTIME_PRESETS[-1] * 60:
         out.append(("info", "analysis.tip.runtime_long", {"minutes": RUNTIME_PRESETS[-1]}))
     return out
 

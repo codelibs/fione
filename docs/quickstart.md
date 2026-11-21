@@ -136,7 +136,7 @@ questions about your data and models in plain language, use [the assistant](assi
 A training run also says when its validated score is suspicious: an R-squared of 0.999 or more
 (or an AUC of 0.9995 or more for two classes) usually means a column gives the answer away and
 will not be known when the model is used, and an R-squared of 0.02 or less (or an AUC of 0.55 or
-less) means the model is hardly better than the average. When the ranking metric is `mae`,
+less) means the model is hardly better than the average. For more than two classes the run says the same when the validated log loss is hardly better than that of predicting every class at its share of the rows (a gain of 2% or less). When the ranking metric is `mae`,
 `medae` or `pinball`, the run says so as well when its validated error is less than 1% better
 than predicting the median (or the quantile) of the training rows every time, since an
 R-squared does not show that for a heavy-tailed target.
@@ -238,7 +238,7 @@ topics are derived features (see below). A model family called TextLinear also r
 a logistic (or ridge) regression on the TF-IDF weights of words and word pairs, with the other
 columns beside them, learned again on each training fold. Each punctuation mark or symbol counts as a word of its own, and so does a one-letter word, since how a text is punctuated can tell its author or its mood. It joins the search and the ensemble
 only for data with such a column, and its predictions are mixed with the other families' by the
-same cross-validation scores.
+same cross-validation scores. TextLinear fits all its rows in one unit that cannot be cut short, and a fit of many classes takes longer (about 3 s plus 2.4 s per class for 40,000 texts of 150 characters), so the recommended run time for data with text grows with the number of classes: a short run leaves TextLinear without a model, and the run says so.
 
 Three variants of it are *late candidates*: TextLinearWide (up to 100,000 words and word pairs
 per column), TextLinearChar (the words and also the character n-grams of 2 to 5 letters; it is

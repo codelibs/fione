@@ -880,6 +880,23 @@ def test_propose_join_refuses_what_a_join_cannot_do(env):
         call(env, "propose_join", args, project_id=env.b.id)
 
 
+def test_the_run_time_need_of_a_text_grows_with_the_classes_to_tell_apart():
+    dataset = SimpleNamespace(n_rows=100_000, n_cols=2)
+    text = ColumnProfile("t", "text", 0.0, 90_000, None, None, None, None, mean_length=100.0)
+    profile = SimpleNamespace(columns=[text])
+    base = runtime_need_secs(dataset, profile)
+    for classes in (0, 1, 2):  # two classes, a regression, and the odd cases: as before
+        assert runtime_need_secs(dataset, profile, classes) == base
+    assert runtime_need_secs(dataset, profile, 4) == pytest.approx(2 * base)
+    assert runtime_need_secs(dataset, profile, 20) == pytest.approx(10 * base)
+    assert base == pytest.approx(100_000 * 100 * builtin.SECS_PER_TEXT_CHAR)
+    # the cells of a table with no text do not depend on the classes
+    plain = SimpleNamespace(columns=[ColumnProfile("x", "numeric", 0.0, 9, None, None, None, None)])
+    assert runtime_need_secs(dataset, plain, 20) == runtime_need_secs(dataset)
+    assert builtin.class_count(pd.Series(list("abcabcd")), "classification") == 4
+    assert builtin.class_count(pd.Series([1.5, 2.5, 3.5]), "regression") == 2
+
+
 def test_the_run_time_need_counts_the_text_of_the_data():
     dataset = SimpleNamespace(n_rows=100_000, n_cols=3)
     text = ColumnProfile("t", "text", 0.0, 90_000, None, None, None, None, mean_length=400.0)

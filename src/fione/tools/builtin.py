@@ -687,8 +687,10 @@ SECS_PER_CELL = 6e-6
 TRIALS_WANTED = 30
 # A text model fits all its data in one unit that cannot be cut short, and its first trial may
 # take only part of the search time (half of what is left when it starts, about 0.2 of the
-# run). One trial costs about 2e-6 seconds per character, so the run needs about this many
-# per character of text for the model to get a trial.
+# run). One trial of two classes costs about 2e-6 seconds per character, so the run needs about
+# this many per character of text for the model to get a trial. More classes cost more: a trial
+# takes about 3 s + 2.4 s per class on 40,000 texts of 150 characters, so the text term counts
+# ``classes / 2`` times (see ``runtime_need_secs``).
 SECS_PER_TEXT_CHAR = 1e-5
 MAX_RUNTIME_SECS = 1800
 MIN_RUNTIME_SECS = 120
@@ -728,22 +730,31 @@ _ENTITY = re.compile(
 _ID_NAME = re.compile(f"{_IDENTIFIER.pattern}|{_ENTITY.pattern}")
 
 
-def runtime_need_secs(dataset: Dataset, profile: DatasetProfile | None = None) -> float:
+def class_count(y: pd.Series, task: str) -> int:
+    """The number of classes of a classification target (2 for any other task: the base of
+    ``runtime_need_secs``)."""
+    return int(y.nunique()) if task == "classification" else 2
+
+
+def runtime_need_secs(
+    dataset: Dataset, profile: DatasetProfile | None = None, classes: int = 2
+) -> float:
     """Seconds a run needs to try about ``TRIALS_WANTED`` models on ``dataset``, or, when
     ``profile`` shows prose columns (the first ``MAX_PROSE`` are read), to give a text model one
-    trial (``SECS_PER_TEXT_CHAR``), if that is more."""
+    trial (``SECS_PER_TEXT_CHAR``, times ``classes / 2`` for a classification target of more
+    than two ``classes``), if that is more."""
     cells = dataset.n_rows * max(1, dataset.n_cols - 1)
     need = cells * SECS_PER_CELL * TRIALS_WANTED
     if profile is None:
         return need
     prose = [c for c in profile.columns if c.mean_length is not None][:MAX_PROSE]
     chars = dataset.n_rows * sum(c.mean_length * (1 - c.missing_rate) for c in prose)
-    return max(need, chars * SECS_PER_TEXT_CHAR)
+    return max(need, chars * SECS_PER_TEXT_CHAR * max(1, classes / 2))
 
 
-def _runtime_secs(dataset: Dataset, profile: DatasetProfile | None = None) -> int:
+def _runtime_secs(dataset: Dataset, profile: DatasetProfile | None = None, classes: int = 2) -> int:
     """The proposed run time: ``runtime_need_secs`` in whole minutes, from 2 to 30 minutes."""
-    minutes = math.ceil(runtime_need_secs(dataset, profile) / 60)
+    minutes = math.ceil(runtime_need_secs(dataset, profile, classes) / 60)
     return min(MAX_RUNTIME_SECS, max(MIN_RUNTIME_SECS, minutes * 60))
 
 
@@ -1283,16 +1294,17 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
             raise ToolError("target_transform applies to a regression target only")
         if pd.api.types.is_numeric_dtype(found.y) and found.y.min() <= -1:
             raise ToolError("target_transform 'log1p' needs target values above -1")
+    classes = class_count(found.y, task)
     try:
         config = TrainConfig(
             target=target,
             task=task,
-            **{"max_runtime_secs": _runtime_secs(dataset, profile), **overrides},
+            **{"max_runtime_secs": _runtime_secs(dataset, profile, classes), **overrides},
             ignored_columns=ignored,
         ).validate()
     except ConfigError as e:
         raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
-    need = runtime_need_secs(dataset, profile)
+    need = runtime_need_secs(dataset, profile, classes)
     if "max_runtime_secs" not in args and need > config.max_runtime_secs * RUNTIME_SHORT_FACTOR:
         need_minutes, limit_minutes = math.ceil(need / 60), config.max_runtime_secs // 60
         warnings.append(
