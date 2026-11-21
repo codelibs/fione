@@ -20,11 +20,13 @@ from fione.engine.features import (
     NumberPairs,
     RowCounts,
     RowStatistics,
+    SetStatistics,
     TextPairs,
     TextShape,
     TextTokens,
     TextTopics,
     ValueFrequency,
+    alike_columns,
     paired,
     passes,
     select_groups,
@@ -190,6 +192,132 @@ def test_row_statistics_summarise_the_numbers_that_are_neither_zero_nor_missing(
     assert out.loc[3, "median_nonzero"] == pytest.approx((seven - three) / 2)
     assert out.loc[3, "std_nonzero"] == pytest.approx(np.std([-three, seven]))
     assert group.sources == [("a", "b", "c")] * 4
+
+
+def hands(n=1500, seed=0):
+    """Five cards as suits S1..S5 (1-4) and ranks C1..C5 (1-13), and a class that depends only on
+    how the ranks repeat and whether the suits agree, never on which card is where."""
+    rng = np.random.default_rng(seed)
+    ranks = rng.integers(1, 14, (n, 5))
+    pairs = rng.random(n) < 0.3  # a repeated rank is rare among random hands
+    ranks[pairs, 1] = ranks[pairs, 0]
+    suits = rng.integers(1, 5, (n, 5))
+    flush = rng.random(n) < 0.3
+    suits[flush] = suits[flush, :1]
+    X = pd.DataFrame(
+        np.hstack([suits, ranks]),
+        columns=[f"S{i}" for i in range(1, 6)] + [f"C{i}" for i in range(1, 6)],
+    )
+    repeats = 5 - np.array([len(set(row)) for row in ranks])
+    return X, np.minimum(repeats, 1) + 2 * flush
+
+
+def test_set_statistics_describe_a_row_whatever_the_order_of_its_columns():
+    X = pd.DataFrame(
+        {
+            "d1": [2, 5, 3, 1],
+            "d2": [2, 5, 3, 2],
+            "d3": [2, 4, 1, 3],
+            "d4": [4, 6, 3, 4],
+            "d5": [4, 4, 3, 5],
+        }
+    )
+    group = SetStatistics([list(X.columns)]).fit(X)
+    out = group.transform(X)
+    name = "d1..d5"
+    assert out[f"{name} distinct values"].tolist() == [2, 3, 2, 5]
+    assert out[f"{name} commonest count"].tolist() == [3, 2, 4, 1]
+    assert out[f"{name} second commonest count"].tolist() == [2, 2, 1, 1]
+    assert out[f"{name} range"].tolist() == [2, 2, 2, 4]
+    assert out[f"{name} value 1 in order"].tolist() == [2, 4, 1, 1]
+    assert out[f"{name} value 5 in order"].tolist() == [4, 6, 3, 5]
+    assert group.sources == [tuple(X.columns)] * len(group.names)
+    shuffled = group.transform(X[["d4", "d2", "d5", "d1", "d3"]].set_axis(X.columns, axis=1))
+    pd.testing.assert_frame_equal(shuffled, out)  # the same cards in another order
+
+
+def test_set_statistics_leave_a_row_with_a_gap_missing_and_do_not_mind_other_numbers():
+    X = pd.DataFrame({"a": [1.0, 2, 3], "b": [1.0, 2, None], "c": [2.0, 2, 3]})
+    group = SetStatistics([["a", "b", "c"]]).fit(X)
+    out = group.transform(X)
+    assert out.loc[2].isna().all() and not out.loc[:1].isna().any().any()
+    assert out["a..c distinct values"].tolist()[:2] == [2, 1]
+    odd = pd.DataFrame({"a": [1.5, 2.0], "b": [1.5, 2.5], "c": [9.0, 9.0]})  # not whole numbers
+    assert group.transform(odd)["a..c commonest count"].tolist() == [2, 1]
+
+
+def test_set_statistics_do_not_depend_on_how_many_rows_are_computed_at_once(monkeypatch):
+    X, _ = hands(40)
+    group = SetStatistics([list(X.columns[:5]), list(X.columns[5:])]).fit(X)
+    whole = group.transform(X)
+    monkeypatch.setattr(features, "STATISTIC_CELLS", 30)  # 3 rows at a time
+    pd.testing.assert_frame_equal(group.transform(X), whole)
+    pd.testing.assert_frame_equal(group.transform(X), whole)  # and the same again
+    assert len(group.transform(X.head(0))) == 0
+
+
+def test_alike_columns_are_numbers_over_the_same_few_whole_values():
+    rng = np.random.default_rng(0)
+    n = 200
+    X = pd.DataFrame(
+        {
+            **{f"d{i}": rng.integers(1, 7, n) for i in range(4)},  # dice
+            **{f"s{i}": rng.integers(0, 2, n) for i in range(3)},  # flags
+            "age": rng.integers(18, 90, n),
+            "price": rng.normal(size=n),
+            "text": rng.choice(list("xyz"), n),
+        }
+    )
+    prep = Prep().fit(X)
+    assert alike_columns(prep, X, {}) == [["d0", "d1", "d2", "d3"], ["s0", "s1", "s2"]]
+    assert alike_columns(prep, X, {"s1": 0}) == [["s0", "s1", "s2"], ["d0", "d1", "d2", "d3"]]
+    labels = [g.label for g in features.candidates(prep, X, [])]
+    assert "statistics of alike columns per row" in labels
+
+
+def test_no_set_when_columns_differ_in_domain_or_are_too_few_or_too_many_or_not_whole():
+    rng = np.random.default_rng(1)
+    n = 100
+
+    def sets(frame):
+        return alike_columns(Prep().fit(frame), frame, {})
+
+    assert not sets(
+        pd.DataFrame(
+            {"a": rng.integers(1, 7, n), "b": rng.integers(1, 5, n), "c": rng.integers(0, 9, n)}
+        )
+    )
+    assert not sets(pd.DataFrame({"a": rng.integers(1, 7, n), "b": rng.integers(1, 7, n)}))  # two
+    wide = pd.DataFrame(rng.integers(0, 2, (n, 13)), columns=[f"f{i}" for i in range(13)])
+    assert not sets(wide)  # too many to be a hand
+    assert sets(wide.iloc[:, :12])
+    floats = pd.DataFrame(rng.integers(1, 7, (n, 3)) + 0.5, columns=list("abc"))
+    assert not sets(floats)
+    wide_range = pd.DataFrame(rng.integers(0, 1000, (n, 4)), columns=list("abcd"))
+    assert not sets(wide_range)  # a span of hundreds is a measure, not a kind of value
+    many = pd.DataFrame(
+        {f"g{k}_{i}": rng.integers(0, k + 2, n) for k in range(5) for i in range(3)}
+    )
+    assert len(sets(many)) == features.MAX_SETS
+
+
+def test_the_gate_adopts_set_statistics_for_a_label_that_depends_on_how_cards_repeat():
+    X, y = hands()
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    assert "statistics of alike columns per row" in {g.label for g in kept}
+    rng = np.random.default_rng(3)  # the same cards with a label that has nothing to do with them
+    kept, verdicts = select_groups(
+        X, rng.integers(0, 3, len(X)), "classification", 5, 0, Deadline(120)
+    )
+    assert "statistics of alike columns per row" not in {g.label for g in kept}
+
+
+def test_set_statistics_survive_pickling():
+    X, _ = hands(60)
+    group = SetStatistics([list(X.columns[:5]), list(X.columns[5:])]).fit(X)
+    clone = pickle.loads(pickle.dumps(group))  # noqa: S301 - a frame this test built
+    pd.testing.assert_frame_equal(clone.transform(X), group.transform(X))
+    assert clone.sources == group.sources
 
 
 def test_candidates_offer_row_statistics_only_for_many_numbers():
@@ -896,6 +1024,9 @@ def test_every_kind_of_group_pickles_and_transforms_alike():
         {
             "a": rng.normal(size=n),
             "b": rng.integers(0, 20, n).astype(float),
+            "k1": rng.integers(1, 7, n),
+            "k2": rng.integers(1, 7, n),
+            "k3": rng.integers(1, 7, n),
             "c": rng.choice(list("xyz"), n),
             "d": rng.choice(list("pq"), n),
             "t": [
@@ -921,6 +1052,7 @@ def test_every_kind_of_group_pickles_and_transforms_alike():
         CategoryPairs(["c", "d"]),
         ValueFrequency(["b"]),
         ClusterDistances(["a", "b"]),
+        SetStatistics([["k1", "k2", "k3"]]),
     ]
     prep = Prep().fit(X, groups)
     assert {type(g) for g in prep.groups} == {type(g) for g in groups}

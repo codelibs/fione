@@ -2,9 +2,10 @@
 
 A ``Group`` is a family of derived numeric features that read raw input columns: shape, tokens
 and topics of text columns, how much two text columns share, frequencies of categories,
-row-wise counts and statistics, date parts and differences, pairwise arithmetic of numbers,
-group means, frequencies of category pairs and of pairs of repeated values, parts of structured
-identifiers, characters of codes, and numeric columns whose whole numbers are labels
+row-wise counts and statistics (also of a set of columns that hold the same kind of value),
+date parts and differences, pairwise arithmetic of numbers, group means, frequencies of category
+pairs and of pairs of repeated values, parts of structured identifiers, characters of codes, and
+numeric columns whose whole numbers are labels
 (``CodeLevels``, chosen by ``code_columns`` from the target means of their values, not by the
 gate below).
 ``Prep.fit`` fits the groups it is given on the training features alone, so they never see the
@@ -87,6 +88,9 @@ TOKEN_SUPPORT = 0.02  # share of the rows a token must occur in (and at least 5 
 MAX_PAIR_COLUMNS = 5  # numbers or dates combined pairwise
 STATISTIC_CELLS = 20_000_000  # cells the statistics are computed over at a time, to bound memory
 MIN_STATISTIC_COLUMNS = 10  # numeric columns a row needs for statistics over them to mean much
+SET_COLUMNS = (3, 12)  # fewest and most columns of a set of alike columns
+SET_VALUES = 40  # most values (the span from the lowest to the highest) a set's columns take
+MAX_SETS = 3  # sets of alike columns that get statistics
 ID_DELIMITERS = (
     "_",
     "/",
@@ -399,6 +403,66 @@ class RowStatistics(Group):
                 "max_nonzero": np.nanmax(values, axis=1),
                 "std_nonzero": np.nanstd(values, axis=1),
             }
+        return pd.DataFrame(out, index=df.index)
+
+
+class SetStatistics(Group):
+    """How alike the values of a set of columns that hold the same kind of value are, row by
+    row (the cards of a hand, dice, lottery numbers, ratings on one scale): how many distinct values
+    the row has, how often the commonest and the second commonest value occur, the range, and
+    the values in order. None of them depends on which column holds which value. A row with a
+    missing value in the set gets missing features."""
+
+    _KINDS = ("distinct values", "commonest count", "second commonest count", "range")
+
+    def __init__(self, sets: list[list[str]]):
+        self.label = "statistics of alike columns per row"
+        self._sets = [tuple(columns) for columns in sets]
+        self.columns = tuple(c for columns in self._sets for c in columns)
+
+    @staticmethod
+    def _name(columns):
+        return f"{columns[0]}..{columns[-1]}"
+
+    def _fit(self, X):
+        self._sources = {}
+        for columns in self._sets:
+            name = self._name(columns)
+            for kind in self._KINDS:
+                self._sources[f"{name} {kind}"] = columns
+            for i in range(len(columns)):
+                self._sources[f"{name} value {i + 1} in order"] = columns
+
+    def _compute(self, df):
+        step = max(1, STATISTIC_CELLS // max(len(self.columns), 1))
+        parts = [self._chunk(df.iloc[i : i + step]) for i in range(0, len(df), step)]
+        return pd.concat(parts) if parts else self._chunk(df)
+
+    def _chunk(self, df):
+        out = {}
+        for columns in self._sets:
+            name = self._name(columns)
+            values = np.column_stack([_number(df[c]).to_numpy() for c in columns])
+            missing = np.isnan(values).any(axis=1)
+            values = np.sort(np.where(missing[:, None], 0.0, values), axis=1)
+            width = values.shape[1]
+            starts = np.ones(values.shape, bool)  # where a run of equal values begins
+            starts[:, 1:] = values[:, 1:] != values[:, :-1]
+            # a run lasts until the next start, so its length is the distance to it
+            at = np.where(starts, np.arange(width), width)
+            following = np.full(values.shape, width)
+            following[:, :-1] = at[:, 1:]
+            next_start = np.minimum.accumulate(following[:, ::-1], axis=1)[:, ::-1]
+            runs = np.sort(np.where(starts, next_start - np.arange(width), 0), axis=1)
+            features = {
+                "distinct values": starts.sum(axis=1),
+                "commonest count": runs[:, -1],
+                "second commonest count": runs[:, -2],
+                "range": values[:, -1] - values[:, 0],
+            }
+            features |= {f"value {i + 1} in order": values[:, i] for i in range(width)}
+            for kind, found in features.items():
+                out[f"{name} {kind}"] = np.where(missing, np.nan, found.astype(float))
         return pd.DataFrame(out, index=df.index)
 
 
@@ -907,6 +971,24 @@ def _structured(s: pd.Series) -> bool:
     return bool((several | mixed).mean() >= TEXT_MIN_STRUCTURED)
 
 
+def alike_columns(prep: Prep, X: pd.DataFrame, order: dict[str, int]) -> list[list[str]]:
+    """Sets of ``SET_COLUMNS`` numeric columns that hold whole numbers over the same few values
+    (the same lowest and highest, fewer than ``SET_VALUES`` apart): the cards of a hand, dice. At
+    most ``MAX_SETS``, the ones with the most useful column first; a column keeps its place in
+    the table within a set."""
+    found: dict[tuple[float, float], list[str]] = {}
+    for c in prep.numeric_columns:
+        values = _number(X[c]).dropna()
+        if len(values) == 0 or not (values % 1 == 0).all():
+            continue
+        low, high = float(values.min()), float(values.max())
+        if 0 < high - low < SET_VALUES:
+            found.setdefault((low, high), []).append(c)
+    sets = [cs for cs in found.values() if SET_COLUMNS[0] <= len(cs) <= SET_COLUMNS[1]]
+    sets.sort(key=lambda cs: min(order.get(c, len(order)) for c in cs))
+    return sets[:MAX_SETS]
+
+
 def candidates(
     prep: Prep, X: pd.DataFrame, ranked: list[str], all_rows: pd.DataFrame | None = None
 ) -> list[Group]:
@@ -992,6 +1074,9 @@ def candidates(
     identifiers = [c for c in by_rank(strings) if _id_layout(X[c])]
     if identifiers:  # last: the most specific, built only for data that has such a column
         found.append(IdParts(identifiers[:MAX_ID_COLUMNS]))
+    sets = alike_columns(prep, X, order)
+    if sets:  # last: it only helps a table of sets of alike columns, and the gate may run out
+        found.append(SetStatistics(sets))
     return found[:MAX_CANDIDATES]
 
 

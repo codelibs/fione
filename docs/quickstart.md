@@ -570,6 +570,12 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
 - rows: the number of missing values and of zeros; with 10 number columns or more also the
   mean, median, maximum and standard deviation of the row's numbers that are neither zero nor
   missing, after a signed log so that columns of different scales weigh alike;
+- sets of alike columns (cards, dice, lottery numbers, ratings on one scale): three to twelve number
+  columns of whole numbers with the same lowest and highest value, less than 40 apart (at most
+  three such sets, the ones with the most useful column first), give for each row how many
+  distinct values it has, how often the commonest and the second commonest value occur, the range,
+  and the values in order, none of which depends on which column holds which value (pairs, flushes
+  and runs of cards show in them). A row with a missing value in the set gets missing features;
 - dates: hour, minute, quarter, weekend, and the seconds between date
   columns;
 - numbers: sums, differences, products and ratios of the few most useful number columns, their
