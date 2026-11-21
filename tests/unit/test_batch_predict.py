@@ -368,8 +368,10 @@ def test_contributions_go_in_smaller_chunks(cls, monkeypatch):
     pd.testing.assert_frame_equal(pd.concat(pieces, ignore_index=True), whole)
     assert [len(p) for p in predict_chunks(cls, df, chunk_rows=4, contributions=True)] == [4] * 5
     assert [len(p) for p in predict_chunks(cls, df)] == [20]  # the plain chunk size is unchanged
-    # rows x classes x columns stay within the explanations' cell cap
-    monkeypatch.setattr(explain, "CELLS", 3 * 3 * len(cls.prep.sources))
+    # rows x classes x columns stay within the explanations' cell cap; a linear member makes the
+    # model wider than its features, and which members the time-bound search keeps varies
+    width = explain._width(cls, len(cls.prep.sources))
+    monkeypatch.setattr(explain, "CELLS", 3 * 3 * width)
     assert [len(p) for p in predict_chunks(cls, df, contributions=True)] == [3] * 6 + [2]
 
 
