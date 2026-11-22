@@ -10,6 +10,9 @@ numeric columns whose whole numbers are labels
 gate below).
 ``Prep.fit`` fits the groups it is given on the training features alone, so they never see the
 target: a model can be scored on out-of-fold predictions without leaking, however many groups exist.
+The one exception is ``ValueEncoding``, which reads the target and hands the training rows values
+cross-fitted over folds (a row never sees its own target), while other rows get the rates of all
+the training rows.
 
 What does use the target is the choice of groups. ``select_groups`` judges each candidate
 group, in order, by what it adds to a small reference LightGBM on rows it samples: the group is
@@ -27,13 +30,15 @@ reading is not bounded by the check's deadline; it takes seconds for a million r
 model does not sample columns, since that would reward any added column. Groups, not single
 features, are judged, which limits the number of comparisons. The folds differ from the search's,
 but the rows are the same, so the cross-validation scores of the search stay slightly optimistic;
-the report on the model lists every group's gain.
+the report on the model lists every group's gain. A group that reads the target needs more rows
+than the gate samples to show its worth, so it is judged last, on up to ``ENCODING_ROWS`` rows.
 
 Derived features count for their source columns in importances and contributions: a feature
 with several sources splits its share equally among them.
 """
 
 import copy
+import hashlib
 import itertools
 import re
 import time
@@ -71,6 +76,12 @@ FINAL_REPEATS = 2  # fold repeats of the last check, which no choice has seen
 FINAL_MARGIN = 1.5  # the time kept for the last check, over what its repeats took before
 DECISIVE_GAIN = 0.05  # share of the loss a group saves to be kept when time ends the last check
 MAX_CANDIDATES = 40
+ENCODING_ROWS = 100_000  # rows the encodings of values are judged on: fewer show no gain
+ENCODING_FOLDS = 5  # a training row's encoding is read from the other folds
+ENCODING_SMOOTHING = 20.0  # rows' worth of the overall rate a value's own rate is pulled towards
+ENCODING_MIN_LEVELS = 20  # a number needs this many distinct keys ...
+ENCODING_ROWS_PER_KEY = 5  # ... and at least this many rows per key on average to be encoded
+MAX_ENCODED_COLUMNS = 12  # numbers (the most useful by rank) whose values are encoded
 CLUSTERS = 8
 CLUSTER_ROWS = 20_000  # rows the clusters are fitted on
 MAX_CLUSTER_COLUMNS = 10
@@ -141,9 +152,13 @@ class Group:
     columns: tuple[str, ...]
     density = False  # the features count rows, so what a sample of the rows shows is thinner
     reads_as_codes = False  # names numeric columns whose whole numbers are labels (``CodeLevels``)
+    uses_target = False  # reads the target too: fitted only when it is given (``ValueEncoding``)
 
-    def fit(self, X: pd.DataFrame) -> "Group":
-        self._fit(X)
+    def fit(self, X: pd.DataFrame, y: np.ndarray | None = None) -> "Group":
+        if self.uses_target:
+            self._fit(X, y)
+        else:
+            self._fit(X)
         out = self._compute(X)
         self._keep = [name for name in out.columns if out[name].nunique(dropna=False) > 1]
         return self
@@ -621,6 +636,95 @@ class ValueFrequency(Group):
         return pd.DataFrame(out, index=df.index)
 
 
+def encoding_keys(columns: list[str], rows: pd.DataFrame) -> list[tuple[str, str]]:
+    """The (column, kind) pairs of numbers worth encoding by value, read from ``rows``: the whole
+    part of a number with fractions, and its value (to six decimals), each when it has at least
+    ``ENCODING_MIN_LEVELS`` distinct keys and ``ENCODING_ROWS_PER_KEY`` rows per key on average."""
+    keys = []
+    for column in columns:
+        x = _number(rows[column]).dropna()
+        value = x.round(6)
+        whole = np.floor(x)
+        for kind, key in (("whole", whole), ("value", value)):
+            if kind == "whole" and (whole == value).all():
+                continue  # no fractions: the value is the whole part
+            levels = key.nunique()
+            if levels >= ENCODING_MIN_LEVELS and len(x) >= ENCODING_ROWS_PER_KEY * levels:
+                keys.append((column, kind))
+    return keys
+
+
+class ValueEncoding(Group):
+    """The rate (or mean) of the target among the rows that share a number's whole part or its
+    value, smoothed towards the overall rate, for numbers whose values repeat. The frame the
+    group was fitted on (told by its fingerprint) gets the rate of the other folds, never its
+    own target; any other frame gets the rate of all the training rows, and so does a copy or a
+    pickle of the fitted group, which do not keep the folds' values. Binary classification and
+    regression only."""
+
+    uses_target = True
+    _oof = None  # (rows, features) of the training rows' cross-fitted values; kept by no copy
+    _seen = None  # (rows, hash of their values in order) the encodings were computed for
+
+    def __init__(self, keys: list[tuple[str, str]]):
+        self.label = "target rates of number values"
+        self.columns = tuple(dict.fromkeys(c for c, _ in keys))
+        self._keys = list(keys)
+
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items() if k not in ("_oof", "_seen")}
+
+    @staticmethod
+    def _key(values: pd.Series, kind: str) -> np.ndarray:
+        x = _number(values)
+        return (np.floor(x) if kind == "whole" else x.round(6)).to_numpy()
+
+    def _fingerprint(self, df: pd.DataFrame) -> tuple[int, str]:
+        """The rows and the order of their values: the same rows in another order are not the
+        training rows, whose encodings are by position."""
+        numbers = pd.DataFrame({c: _number(df[c]) for c in self.columns})
+        hashes = pd.util.hash_pandas_object(numbers, index=False).to_numpy()
+        return len(df), hashlib.blake2b(hashes.tobytes(), digest_size=8).hexdigest()
+
+    def _fit(self, X, y):
+        y = np.asarray(y, dtype=float)
+        self._prior = float(y.mean())
+        task = "classification" if len(np.unique(y)) == 2 else "regression"
+        folds = make_folds(y, task, ENCODING_FOLDS, 0)
+        m, prior = ENCODING_SMOOTHING, self._prior
+        self._rates, self._sources, names = [], {}, []
+        oof = np.empty((len(X), len(self._keys)), dtype=np.float32)
+        for i, (column, kind) in enumerate(self._keys):
+            codes, levels = pd.factorize(self._key(X[column], kind))
+            known = codes >= 0
+            size = len(levels)
+            count = np.bincount(codes[known], minlength=size)
+            total = np.bincount(codes[known], weights=y[known], minlength=size)
+            self._rates.append(pd.Series((total + prior * m) / (count + m), index=levels))
+            oof[:, i] = prior
+            for _, held in folds:
+                c = codes[held]
+                ok = c >= 0
+                c = c[ok]
+                n_c = np.bincount(c, minlength=size)
+                s_c = np.bincount(c, weights=y[held][ok], minlength=size)
+                oof[held[ok], i] = (total[c] - s_c[c] + prior * m) / (count[c] - n_c[c] + m)
+            name = f"{column}__{kind}_target"
+            names.append(name)
+            self._sources[name] = (column,)
+        self._names = names
+        self._oof, self._seen = oof, self._fingerprint(X)
+
+    def _compute(self, df):
+        if self._oof is not None and self._fingerprint(df) == self._seen:
+            return pd.DataFrame(self._oof, columns=self._names, index=df.index).astype(float)
+        out = {}
+        for (column, kind), rates, name in zip(self._keys, self._rates, self._names, strict=True):
+            key = pd.Series(self._key(df[column], kind), index=df.index)
+            out[name] = key.map(rates).astype(float).fillna(self._prior)
+        return pd.DataFrame(out, index=df.index)
+
+
 class ClusterDistances(Group):
     """The k-means cluster of a row over the (standardised) numbers and the distance to its
     centre; the clusters are fitted on at most ``CLUSTER_ROWS`` rows."""
@@ -995,7 +1099,8 @@ def candidates(
     """The groups worth judging for these columns, in the order the gate tries them.
     ``ranked`` lists the input columns, the most useful first, to pick the few that pairwise
     groups combine. ``all_rows`` holds the rows ``X`` was sampled from: only the columns that name
-    an entity are looked for in it, since a sample shows too few repeats of an entity."""
+    an entity, and the numbers whose values are encoded, are looked for in it, since a sample
+    shows too few repeats of a value."""
     order = {column: i for i, column in enumerate(ranked)}
     columns = prep.columns
 
@@ -1066,6 +1171,9 @@ def candidates(
     repeated = [c for c in by_rank(prep.numeric_columns) if _repeats(X[c])]
     if repeated:
         found.append(ValueFrequency(repeated[:MAX_PAIR_COLUMNS]))
+    encoded = encoding_keys(by_rank(prep.numeric_columns)[:MAX_ENCODED_COLUMNS], seen)
+    if encoded:  # judged apart from the others, on more rows (see ``select_groups``)
+        found.append(ValueEncoding(encoded))
     cluster_columns = by_rank(prep.numeric_columns)[:MAX_CLUSTER_COLUMNS]
     if len(cluster_columns) > 1:
         found.append(ClusterDistances(cluster_columns))
@@ -1097,9 +1205,9 @@ class _Fitted:
     def __init__(self, gate: "_Gate", group: Group):
         self.gate, self.group = gate, group
         self.label, self.columns = group.label, group.columns
-        self.reads_as_codes = group.reads_as_codes
+        self.reads_as_codes, self.uses_target = group.reads_as_codes, group.uses_target
 
-    def fit(self, X: pd.DataFrame) -> Group:
+    def fit(self, X: pd.DataFrame, y: np.ndarray | None = None) -> Group:
         return self.gate.fitted(self.group)
 
 
@@ -1157,7 +1265,7 @@ class _Gate:
         """``group`` fitted on the gate's rows, once however many views read it."""
         if group.label not in self._fitted:
             self._fitted[group.label] = copy.copy(group).fit(
-                self.all_rows if group.density else self.X
+                self.all_rows if group.density else self.X, self.y
             )
         return self._fitted[group.label]
 
@@ -1173,7 +1281,9 @@ class _Gate:
                 if view is None:
                     if self.out_of_time():
                         raise _OutOfTime
-                    view = Prep().fit(self.X, [_Fitted(self, g) for g in groups]).tree(self.X)
+                    view = (
+                        Prep().fit(self.X, [_Fitted(self, g) for g in groups], self.y).tree(self.X)
+                    )
                 done = []
                 for train, valid in self.folds(repeat):
                     if self.out_of_time():
@@ -1267,7 +1377,8 @@ def select_groups(
             None if row_groups is None else row_groups[rows],
         )
 
-    all_rows = X
+    all_rows, all_y = X, y
+    encodes = row_groups is None and (task == "regression" or int(y.max()) <= 1)
 
     def new_gate(X, y, row_groups):
         return _Gate(
@@ -1290,7 +1401,7 @@ def select_groups(
     pool: list[Group] = []
     try:
         prep, ranked = Prep().fit(X), gate.ranked()
-        pool = candidates(prep, X, ranked, all_rows)
+        pool = [g for g in candidates(prep, X, ranked, all_rows) if encodes or not g.uses_target]
         codes = (
             []
             if row_groups is not None
@@ -1309,6 +1420,8 @@ def select_groups(
             gate = new_gate(X, y, row_groups)
             current = gate.losses(kept, range(1))
         for group in pool:
+            if group.uses_target:
+                continue  # judged last, on more rows
             # A group not kept for its gain alone must pass the last check, which time may not cut
             # short: the search stops once what is left covers that and one more group that
             # goes through all its repeats.
@@ -1343,6 +1456,9 @@ def select_groups(
             if not passes(gate.losses(base, fresh), gate.losses(kept, fresh)):
                 _drop_adopted(verdicts, "final check")
                 kept = list(base)
+        for group in pool:
+            if group.uses_target:
+                _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, deadline)
     except _OutOfTime:
         # Their last check did not finish. A gain this large is no fluke of the selection, so
         # those groups stay; the others are not trusted.
@@ -1354,6 +1470,47 @@ def select_groups(
     judged = {v.group for v in verdicts}
     verdicts += [Verdict(g.label, 0, False, 0.0, "time") for g in pool if g.label not in judged]
     return kept, verdicts
+
+
+def _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, deadline) -> None:
+    """Judge a group that reads the target on up to ``ENCODING_ROWS`` rows (the gate's sample is
+    too small for the rates of values to show a gain), against the groups kept so far, and keep
+    it when it passes on the repeats of the folds and again on others. ``_OutOfTime`` leaves it
+    unjudged."""
+    wide = gate
+    rows_wide = min(len(all_rows), ENCODING_ROWS)
+    repeats = 2 * (1 + GATE_REPEATS + FINAL_REPEATS)  # with and without the group
+    if gate.secs([]) * rows_wide / len(gate.X) * repeats > deadline.remaining():
+        return  # not enough time left for the judgment: listed as not judged
+    if len(gate.X) < rows_wide:
+        rows = _sample(all_y, gate.task, gate.seed, rows_wide)
+        wide = new_gate(all_rows.iloc[rows].reset_index(drop=True), all_y[rows], None)
+    width = len(wide.fitted(group).names)
+    try:
+        if not width:
+            verdicts.append(Verdict(group.label, 0, False, 0.0, "no varying feature"))
+            return
+        trial = wide.losses([*kept, group], range(1))
+        if paired(wide.losses(kept, range(1)), trial)[0] <= 0:
+            verdicts.append(
+                Verdict(
+                    group.label, width, False, _share(wide.losses(kept, range(1)), trial), "no gain"
+                )
+            )
+            return
+        both = range(GATE_REPEATS)
+        before, after = wide.losses(kept, both), wide.losses([*kept, group], both)
+        gain = _share(before, after)
+        fresh = range(GATE_REPEATS, GATE_REPEATS + FINAL_REPEATS)
+        if not passes(before, after):
+            verdicts.append(Verdict(group.label, width, False, gain, "too small a gain"))
+        elif not passes(wide.losses(kept, fresh), wide.losses([*kept, group], fresh)):
+            verdicts.append(Verdict(group.label, width, False, gain, "final check"))
+        else:
+            kept.append(group)
+            verdicts.append(Verdict(group.label, width, True, gain, "adopted"))
+    except _OutOfTime:
+        pass  # listed as not judged for lack of time
 
 
 def _drop_adopted(verdicts: list[Verdict], reason: str) -> None:

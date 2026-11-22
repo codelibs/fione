@@ -1226,7 +1226,7 @@ class AutoML:
                     if c.time_column
                     else "derived features are not tried with a quantile"
                 )
-        prep = Prep().fit(X, groups)
+        prep = Prep().fit(X, groups, y)
         self._notice_dropped_columns(prep, X)
         self._leaked = set()
         leak_secs = min(LEAK_SECS, LEAK_SHARE * max(deadline.remaining(), 0.0))

@@ -274,7 +274,8 @@ class Prep:
     else is numeric. The views put the features in ``feature_names`` order under positional
     names ``f0, f1, ...``, because model libraries reject some characters in feature names.
     ``groups`` (see ``fione.engine.features``) add derived numeric features after those; they are
-    fitted on ``X`` alone and skipped when they read a column that is not used. A group that
+    fitted on ``X`` alone (and on the target ``y``, for the groups that read it, which are skipped
+    without it) and skipped when they read a column that is not used. A group that
     ``reads_as_codes`` names numeric columns whose whole numbers are labels: each also gets the
     frequency of its value, which CatBoost reads as text and the levels view as levels.
     """
@@ -296,7 +297,7 @@ class Prep:
     _date_now = None  # when a model that reads two-digit years was fitted (old: today's clock)
     fill: dict = {}  # input column -> share of the training rows that have a value (old: none)
 
-    def fit(self, X: pd.DataFrame, groups=()) -> "Prep":
+    def fit(self, X: pd.DataFrame, groups=(), y=None) -> "Prep":
         self.dropped: list[str] = []
         self._date_now = None
         self.dayfirst = ()
@@ -405,7 +406,11 @@ class Prep:
         used = set(self.columns)
         self.groups = tuple(
             fitted
-            for fitted in (copy.copy(g).fit(X) for g in groups if set(g.columns) <= used)
+            for fitted in (
+                copy.copy(g).fit(X, y)
+                for g in groups
+                if set(g.columns) <= used and (y is not None or not g.uses_target)
+            )
             if fitted.names
         )
         for group in self.groups:
