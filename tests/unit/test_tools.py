@@ -2521,3 +2521,38 @@ def test_a_day_counter_is_found_from_a_sample_of_a_larger_file():
     assert profile.n_rows == 20_000
     assert builtin.time_index_column(profile, "x", rows).name == "date_id"
     assert builtin.time_index_column(profile, "x", 20_000) is None  # the sample's rows alone
+
+
+def test_a_column_constant_in_the_sample_only_is_not_proposed_to_be_left_out(env):
+    def names(proposal):
+        return [c.name for c in proposal.ignore]
+
+    n = 1000
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({"row": np.arange(n), "x": rng.normal(size=n), "rare": 0, "same": 1})
+    frame["y"] = frame["x"] + rng.normal(size=n) * 0.1
+    columns = ["row", "x", "rare", "same"]
+    first = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "a", DatasetType.TRAIN, [frame]
+    )
+    sample = ingest.read_dataset_runs(env.storage, first, 100, [*columns, "y"])
+    unseen = int(np.setdiff1d(np.arange(n), sample["row"])[0])  # a row the sample does not hold
+    frame.loc[unseen, "rare"] = 1  # the column varies, but not in the sample
+    dataset = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "b", DatasetType.TRAIN, [frame]
+    )
+    proposal = builtin.propose(env.storage, dataset, "y", columns, sample_rows=100)
+    assert proposal.profile.n_rows < dataset.n_rows  # a sample
+    assert {c.name: c.kind for c in proposal.profile.columns}["rare"] == "constant"
+    assert "rare" not in names(proposal) and "same" not in names(proposal)
+    whole = builtin.propose(env.storage, dataset, "y", columns, sample_rows=n)
+    assert "same" in names(whole) and "rare" not in names(whole)
+    constant = ingest.ingest_batches(
+        env.storage,
+        env.conn,
+        env.project.id,
+        "c",
+        DatasetType.TRAIN,
+        [frame.assign(rare=0)],
+    )
+    assert "rare" in names(builtin.propose(env.storage, constant, "y", columns, sample_rows=n))
