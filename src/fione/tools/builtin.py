@@ -952,10 +952,16 @@ def propose(
     if task is None:
         task = infer_task(y)
     listed = set(columns)
+    # A column that holds one value in a sample of the rows may vary in the rest (a rare count in
+    # a table of sparse counts): only a column that is constant in every row is proposed to leave
+    # out. Training leaves such columns out itself.
+    whole = profile.n_rows >= dataset.n_rows
     ignore = [
         col
         for col in profile.columns
-        if col.name != target and col.name in listed and col.kind in ("id", "constant")
+        if col.name != target
+        and col.name in listed
+        and (col.kind == "id" or (col.kind == "constant" and whole))
     ]
     return Proposal(task, profile, next(c for c in profile.columns if c.name == target), ignore, y)
 
