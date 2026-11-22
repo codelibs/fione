@@ -687,6 +687,17 @@ def cor(df, params, ctx):
 _PIVOT_AGGS = ("first", "sum", "mean", "min", "max", "count")
 
 
+def _labels(values: pd.Index) -> list[str]:
+    """The values as column names, a whole number the same whether it is stored as float or
+    integer (``calc`` gives decimal numbers, so a team id of 1104 would otherwise become the
+    name ``1104.0``, which no key written 1104 matches)."""
+    if pd.api.types.is_float_dtype(values.dtype):
+        v = values.to_numpy(dtype=float)
+        if len(v) and np.isfinite(v).all() and (v == np.round(v)).all() and np.abs(v).max() < 1e15:
+            return [str(int(x)) for x in v]
+    return [str(c) for c in values]
+
+
 def pivot(df, params, ctx):
     names = [require_column(df, params[k]) for k in ("index", "column", "value")]
     if len(set(names)) != 3:
@@ -704,7 +715,7 @@ def pivot(df, params, ctx):
     else:
         cells = getattr(groups[value], agg)()
     table = cells.unstack()
-    table.columns = [str(c) for c in table.columns]
+    table.columns = _labels(table.columns)
     notes = _pivot_notes(df, index, column, groups[value].count() if agg == "first" else None)
     return ModuleOutput(table.reset_index(), notes=notes)
 

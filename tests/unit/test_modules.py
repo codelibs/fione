@@ -183,6 +183,22 @@ CASES = [
         expect(k=[1, 2], c=[7, 8], v=[1.0, 2.0]),
         expect(k=[1, 2], **{"7": [1.0, np.nan], "8": [np.nan, 2.0]}),
     ),
+    # a whole number stored as a decimal (calc gives decimals) names its column like the integer
+    (
+        "pivot",
+        {"index": "k", "column": "c", "value": "v"},
+        None,
+        expect(k=[1, 2], c=[1104.0, 1105.0], v=[1.0, 2.0]),
+        expect(k=[1, 2], **{"1104": [1.0, np.nan], "1105": [np.nan, 2.0]}),
+    ),
+    # a column of other decimals keeps them in its names
+    (
+        "pivot",
+        {"index": "k", "column": "c", "value": "v"},
+        None,
+        expect(k=[1, 2], c=[0.5, 1104.0], v=[1.0, 2.0]),
+        expect(k=[1, 2], **{"0.5": [1.0, np.nan], "1104.0": [np.nan, 2.0]}),
+    ),
     # unpivot: the kept columns repeat once per unpivoted column, in column order
     (
         "unpivot",
@@ -2445,3 +2461,13 @@ def test_rank_respects_the_cell_cap(monkeypatch):
     monkeypatch.setattr(registry, "MAX_OUTPUT_CELLS", 6)
     with pytest.raises(ModuleError, match="cells"):
         run_op("rank", pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [1, 2, 3]}), {"column": "a"})
+
+
+def test_a_pivot_of_decimal_whole_numbers_joins_back_to_the_integer_key():
+    games = pd.DataFrame({"season": [1, 1, 1], "team": [1104.0, 1105.0, 1104.0], "win": [1, 0, 0]})
+    pivot = {"index": "season", "column": "team", "value": "win", "agg": "mean"}
+    wide, _ = run_op("pivot", games, pivot)
+    long, _ = run_op("unpivot", wide, {"keep": ["season"], "name": "team", "value": "win_pct"})
+    ints = pd.DataFrame({"season": [1, 1], "team": [1104, 1105]})
+    joined, _ = run_op("join", ints, {"other_dataset_id": 1, "keys": ["season", "team"]}, long)
+    assert joined["win_pct"].tolist() == [0.5, 0.0]
