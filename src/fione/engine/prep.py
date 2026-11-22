@@ -32,6 +32,9 @@ SPACED_PROSE = 0.5  # share of values with a space: words of one letter are text
 # ... and so is a short text that repeats (a search query) when it takes this many different
 # values: a label has a few hundred at most, and a query is read by its words, not as a whole.
 REPEATED_PROSE_VALUES = 1000
+NOTATION_LENGTH = 15  # mean characters of a notation (a shorter value is a label or code)
+NOTATION_LENGTH_VARIATION = 0.3  # std / mean of the lengths: an id or a hash has one length
+NOTATION_UNIQUE = 0.9  # share of different values
 MAX_PROSE = 3  # prose columns the text view reads (the first ones)
 CONSOLIDATE_COLUMNS = 2_000  # a view of more columns is joined into few blocks (see _base)
 FEW_LEVELS = (
@@ -217,6 +220,20 @@ def _as_str(s: pd.Series) -> pd.Series:
     return s.astype(str).where(s.notna())
 
 
+def is_notation(s: pd.Series) -> bool:
+    """Whether a string column holds a notation (a SMILES molecule, a DNA or protein sequence):
+    values mostly different, without spaces and of varying length (an id has one length). Its
+    character n-grams carry the signal, but the values are no words."""
+    values = _as_str(s).dropna()
+    first = values.head(1000)
+    if len(first) < MIN_ROWS or first.str.contains(r"\s").mean() > 0.05:
+        return False
+    length = first.str.len()
+    if length.mean() < NOTATION_LENGTH or length.std() < NOTATION_LENGTH_VARIATION * length.mean():
+        return False
+    return bool(values.nunique() >= NOTATION_UNIQUE * len(values))
+
+
 def is_prose(s: pd.Series) -> bool:
     """Whether a string column holds text: the median value has ``PROSE_WORDS`` words (runs of
     letters, so a timestamp or a code is not prose; nor is a hex id, whose runs are short and
@@ -227,6 +244,8 @@ def is_prose(s: pd.Series) -> bool:
     first = values.head(1000)
     if not len(first):
         return False
+    if is_notation(s):
+        return True
     words = first.str.findall(_LETTERS.pattern)
     counts = words.str.len()
     # a hex id has as many runs of letters as a sentence has words, but runs of a letter or two

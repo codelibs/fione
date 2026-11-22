@@ -286,6 +286,17 @@ def test_the_character_variant_sizes_the_text_on_a_random_sample_of_the_rows():
     assert "TextLinearChar" in late
 
 
+def test_the_character_variant_is_tried_on_a_notation_of_varying_length():
+    rng = np.random.default_rng(1)
+    smiles = ["".join(rng.choice(list("CNO=()1c"), rng.integers(10, 90))) for _ in range(300)]
+    df = pd.DataFrame({"smiles": smiles, "x": rng.normal(size=300)})
+    prep = Prep().fit(df)
+    assert prep.prose == ("smiles",)
+    y = rng.normal(size=300)
+    late = AutoML(TrainConfig(target="t"))._late_families(prep, df, y, "regression")
+    assert "TextLinearChar" in late
+
+
 def test_the_character_variant_is_not_tried_on_text_without_spaces():
     # Letter runs split by digits are prose; with no spaces the n-grams of a text are far too many.
     rng = np.random.default_rng(0)
