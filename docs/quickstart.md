@@ -244,11 +244,13 @@ Three variants of it are *late candidates*: TextLinearWide (up to 100,000 words 
 per column), TextLinearChar (the words and also the character n-grams of 2 to 5 letters; it is
 left out when the text is very large or has no spaces, unless it is such a notation) and TextLinearPlain (without the derived features; it is
 tried only when derived features were added). They run after all the other families, in the
-search time that is left: for text data, 15% of the search time is kept for them (taken from
+search time that is left: 15% of the search time is kept for the late candidates (taken from
 the other families, not from TextLinear), and what the other families leave unused is added. Each takes a share of that time, and one that cannot finish
 a first trial in its share is skipped. A late candidate stays in the model
 only when its cross-validation scores improve the ensemble; otherwise it gets weight 0 and is
-dropped. They are not run for data without a text column.
+dropped. The three variants are not run for data without a text column. LinearBoost, small
+trees boosted from a linear model, is a late candidate of every table: it runs after them and
+takes the time they leave.
 
 ## Data with one column per time
 

@@ -85,13 +85,13 @@ class _SlowFamily(FamilySpec):
     view = "dense"
     defaults = {}
     unit = 0.2
-    starts: list[float] = []
+    begun: list[float] = []
 
     def space(self, trial):
         return {}
 
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
-        self.starts.append(time.monotonic())
+        self.begun.append(time.monotonic())
         time.sleep(self.unit)
         deadline.expired()
         return _ConstantModel()
@@ -116,7 +116,7 @@ class _BoostingFamily(_SlowFamily):
 @pytest.fixture
 def slow(monkeypatch):
     monkeypatch.setitem(FAMILIES, "Slow", _SlowFamily)
-    monkeypatch.setattr(_SlowFamily, "starts", [])
+    monkeypatch.setattr(_SlowFamily, "begun", [])
     return _SlowFamily
 
 
@@ -182,7 +182,7 @@ def test_fit_refuses_to_start_a_unit_that_cannot_finish(slow):
     assert spec.unit_secs == pytest.approx(slow.unit, abs=0.05)
     with pytest.raises(DeadlineExceeded):
         spec.fit({}, X, y, X, y, Deadline(UNIT_SAFETY * slow.unit * 0.9))
-    assert len(slow.starts) == 1
+    assert len(slow.begun) == 1
 
 
 @pytest.mark.parametrize("name", FAMILY_NAMES)
@@ -192,7 +192,9 @@ def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
     spec = FAMILIES[name]("classification", 2)
     view = getattr(prep, spec.view)(X)
     model = spec.fit_full(spec.defaults, view, y, Deadline(30), rounds=7)
-    one_step = {name: 1 for name in FAMILY_NAMES if "Linear" in name}  # fitted in one go: no rounds
+    one_step = {  # fitted in one go: no rounds
+        name: 1 for name in FAMILY_NAMES if "Linear" in name and name != "LinearBoost"
+    }
     full = Forest.n_trees if issubclass(FAMILIES[name], Forest) else 7
     assert spec.rounds(model) == one_step.get(name, full)
     assert spec.predict(model, view).shape == (1_000, 2)
@@ -203,7 +205,10 @@ def test_fit_full_trains_the_requested_rounds_on_all_rows(name):
 
 # The linear families are excluded: one fit takes far less than the shortest calibrated budget,
 # so it finishes.
-@pytest.mark.parametrize("name", [name for name in FAMILY_NAMES if "Linear" not in name])
+@pytest.mark.parametrize(
+    "name",
+    [name for name in FAMILY_NAMES if "Linear" not in name or name == "LinearBoost"],
+)
 def test_fit_full_raises_when_it_cannot_finish(name):
     X, y = _classification(50_000, 30)
     prep, y, _ = _setup(X, y)
@@ -230,7 +235,7 @@ def test_fit_full_refuses_when_the_scaled_unit_does_not_fit(slow):
     spec.fit({}, X.iloc[:10], y[:10], X, y, Deadline(5))  # unit measured on 10 rows
     with pytest.raises(DeadlineExceeded):  # 20 rows: a bigger unit than 1.2 x 0.2 s
         spec.fit_full({}, X, y, Deadline(UNIT_SAFETY * slow.unit * 1.05), rounds=1)
-    assert len(slow.starts) == 1
+    assert len(slow.begun) == 1
 
 
 def test_rounds_counts_the_iterations_used_for_prediction():
@@ -371,8 +376,8 @@ def test_later_trials_never_start_a_fit_that_would_straddle_the_deadline(slow):
         "Slow", X, y, folds, "classification", prep, Deadline(budget), lambda e: None, lambda: False
     )
     elapsed = time.monotonic() - start
-    assert len(slow.starts) >= 4  # several trials ran
-    assert all(start + budget - t >= UNIT_SAFETY * slow.unit for t in slow.starts)
+    assert len(slow.begun) >= 4  # several trials ran
+    assert all(start + budget - t >= UNIT_SAFETY * slow.unit for t in slow.begun)
     assert elapsed <= budget
 
 
@@ -440,7 +445,7 @@ def test_first_trial_gives_up_as_soon_as_its_folds_cannot_fit(slow, monkeypatch)
             "Slow", X, y, folds, "classification", prep, Deadline(1), lambda e: None, lambda: False
         )
     assert time.monotonic() - start < 0.5
-    assert len(slow.starts) == 1
+    assert len(slow.begun) == 1
     # The error says what the folds needed: a unit each, with the safety margin.
     assert caught.value.needed_secs == pytest.approx(len(folds) * UNIT_SAFETY * 0.3, rel=0.2)
 

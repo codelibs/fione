@@ -79,7 +79,14 @@ def _late_models(model: TrainedModel, frame: pd.DataFrame, name: str) -> list:
     view = getattr(model.prep, spec.view)(frame.drop(columns=[target]))
     cuts = [0, 100, 200, 300]
     return [
-        spec.fit(spec.defaults, view.iloc[a:b], y[a:b], None, None, Deadline(60))
+        spec.fit(
+            spec.defaults,
+            view.iloc[a : b - 20],
+            y[a : b - 20],
+            view.iloc[b - 20 : b],
+            y[b - 20 : b],
+            Deadline(60),
+        )
         for a, b in zip(cuts, cuts[1:], strict=False)
     ]
 
