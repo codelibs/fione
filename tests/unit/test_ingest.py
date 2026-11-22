@@ -588,3 +588,22 @@ def test_thousands_separated_column_with_empty_cells(conn, storage, project):
     ds, df = load(conn, storage, project, b'a,b\n"1,200",1\n,2\n950,3\n"",4\n')
     assert dict(ds.schema)["a"] == "int64"
     assert [None if pd.isna(v) else v for v in df["a"].tolist()] == [1200, None, 950, None]
+
+
+def test_a_wide_table_is_written_in_row_groups_of_fewer_rows(conn, storage, project, monkeypatch):
+    # a group holds up to _ROW_GROUP_CELLS cells, so a table of many columns is cut sooner
+    monkeypatch.setattr(ingest, "_ROW_GROUP_CELLS", 4 * 1500)
+    monkeypatch.setattr(ingest, "_MIN_GROUP_ROWS", 100)
+    frame = pd.DataFrame({f"c{i}": range(6000) for i in range(4)})
+    data = frame.to_csv(index=False).encode()
+    ds, df = load(conn, storage, project, data, block_size=4096)  # small batches from the reader
+    with storage.open_read(ds.key) as f:
+        meta = pq.ParquetFile(f).metadata
+    sizes = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
+    assert len(sizes) >= 3 and max(sizes) < 2500 and sum(sizes) == 6000  # a batch may overshoot
+    assert df.equals(frame)
+    # a narrow table keeps the usual group
+    monkeypatch.setattr(ingest, "_ROW_GROUP_CELLS", 10**9)
+    ds, _ = load(conn, storage, project, frame.to_csv(index=False).encode())
+    with storage.open_read(ds.key) as f:
+        assert pq.ParquetFile(f).metadata.num_row_groups == 1

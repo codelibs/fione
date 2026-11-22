@@ -28,6 +28,10 @@ _SAMPLE_SIZE = 1 << 20
 _COPY_CHUNK = 1 << 20
 _BLOCK_SIZE = 1 << 20
 _ROW_GROUP_ROWS = 128 * 1024
+# A row group holds at most this many cells: the rows of a table of thousands of columns would
+# otherwise fill gigabytes (128k rows of 10,000 columns) before the first group is written.
+_ROW_GROUP_CELLS = 16 * 1024 * 1024
+_MIN_GROUP_ROWS = 1024
 _EXPORT_BATCH_ROWS = 50_000
 _PAGE_BATCH_ROWS = 8192  # read_dataset_rows
 _DELIMITERS = ",;\t|"
@@ -163,12 +167,13 @@ def _write_parquet(
     rows = 0
     pending: list[pa.RecordBatch] = []
     pending_rows = 0
+    group_rows = min(_ROW_GROUP_ROWS, max(_MIN_GROUP_ROWS, _ROW_GROUP_CELLS // max(len(names), 1)))
     with pq.ParquetWriter(out, schema) as writer:
         for batch in reader:
             rows += batch.num_rows
             pending.append(batch.rename_columns(names))
             pending_rows += batch.num_rows
-            if pending_rows >= _ROW_GROUP_ROWS:
+            if pending_rows >= group_rows:
                 writer.write_table(pa.Table.from_batches(pending, schema))
                 pending, pending_rows = [], 0
         if pending:
