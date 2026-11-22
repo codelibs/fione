@@ -1455,8 +1455,8 @@ def test_a_fit_without_high_cardinality_strings_does_not_depend_on_their_unseen_
     monkeypatch,
 ):
     class NoUnseenShare(automl_module.Prep):
-        def fit(self, X, groups=()):
-            super().fit(X, groups)
+        def fit(self, X, groups=(), y=None):
+            super().fit(X, groups, y)
             self.__dict__.pop("_unseen", None)  # as a Prep pickled without the field
             return self
 

@@ -25,8 +25,10 @@ from fione.engine.features import (
     TextShape,
     TextTokens,
     TextTopics,
+    ValueEncoding,
     ValueFrequency,
     alike_columns,
+    encoding_keys,
     paired,
     passes,
     select_groups,
@@ -909,9 +911,9 @@ def test_the_gate_fits_each_group_once_however_many_views_read_it(monkeypatch):
     fits = []
     real = features.Group.fit
 
-    def counting(self, frame):
+    def counting(self, frame, y=None):
         fits.append(self.label)
-        return real(self, frame)
+        return real(self, frame, y)
 
     monkeypatch.setattr(features.Group, "fit", counting)
     kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
@@ -1687,3 +1689,116 @@ def test_a_label_with_no_effect_is_not_a_code_for_many_classes_or_a_heavy_tailed
         heavy = rng.lognormal(0, 2, len(X))
         fired += bool(features.code_columns(Prep().fit(X), X, heavy, "regression"))
     assert fired <= 1
+
+
+def _prices(n=4000, seed=0):
+    """A price whose whole part decides the label, and an unrelated one."""
+    rng = np.random.default_rng(seed)
+    price = rng.integers(0, 40, n) + rng.integers(0, 10, n) / 10
+    y = (rng.random(n) < np.where(np.floor(price) % 4 == 0, 0.6, 0.05)).astype(int)
+    return pd.DataFrame({"price": price, "noise": rng.normal(size=n)}), y
+
+
+def test_encoding_keys_choose_numbers_with_repeated_values_only():
+    X, _ = _prices()
+    X["unique"] = np.arange(len(X)) + 0.5
+    X["count"] = np.arange(len(X)) % 3
+    assert encoding_keys(["price", "noise", "unique", "count"], X) == [
+        ("price", "whole"),
+        ("price", "value"),
+    ]
+
+
+def test_value_encoding_gives_training_rows_rates_that_never_saw_their_own_target():
+    X, y = _prices()
+    group = ValueEncoding([("price", "value")]).fit(X, y)
+    train = group.transform(X)["price__value_target"].to_numpy()
+    full = group.transform(X.copy().assign(price=X["price"] + 0.0))["price__value_target"]
+    assert np.allclose(train, full)  # a copy of the training rows is still the training rows
+    other = group.transform(X.iloc[:50].reset_index(drop=True))["price__value_target"].to_numpy()
+    assert not np.allclose(train[:50], other)  # other rows get the rate of all the rows
+    # a value that occurs once is given the overall rate (the other folds know nothing of it)
+    rng = np.random.default_rng(1)
+    prices = np.append(rng.integers(0, 50, 300) / 10, 99.9)
+    labels = np.append(rng.integers(0, 2, 300), 1)
+    frame = pd.DataFrame({"price": prices})
+    one = ValueEncoding([("price", "value")]).fit(frame, labels)
+    rates = one.transform(frame)["price__value_target"]
+    assert rates.iloc[-1] == pytest.approx(labels.mean())
+    other = one.transform(pd.DataFrame({"price": [99.9]}))["price__value_target"]
+    assert other.iloc[0] > rates.iloc[-1]  # a new row with that value gets the rate with its label
+
+
+def test_value_encoding_gives_unseen_values_the_overall_rate_and_pickles_without_rows():
+    X, y = _prices()
+    group = ValueEncoding([("price", "whole")]).fit(X, y)
+    out = group.transform(pd.DataFrame({"price": [1000.5, np.nan]}))["price__whole_target"]
+    assert out.tolist() == pytest.approx([y.mean()] * 2)
+    loaded = pickle.loads(pickle.dumps(group))
+    assert loaded._oof is None
+    rates = loaded.transform(X.iloc[:5])["price__whole_target"]
+    assert rates.tolist() == pytest.approx(
+        group.transform(X.iloc[:5])["price__whole_target"].tolist()
+    )
+
+
+def test_prep_fits_a_group_that_reads_the_target_only_when_it_is_given():
+    X, y = _prices()
+    group = ValueEncoding([("price", "whole")])
+    assert Prep().fit(X, [group]).groups == ()
+    prep = Prep().fit(X, [group], y)
+    assert [g.label for g in prep.groups] == ["target rates of number values"]
+    assert prep.tree(X).shape[1] == 3
+
+
+def test_select_groups_judges_value_encoding_on_more_rows_and_keeps_it_when_it_helps():
+    X, y = _prices(60000)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    verdict = next(v for v in verdicts if v.group == "target rates of number values")
+    assert verdict.adopted and any(isinstance(g, ValueEncoding) for g in kept)
+
+
+def test_select_groups_does_not_encode_values_for_many_classes_or_grouped_folds():
+    X, y = _prices(3000)
+    y3 = y + (np.arange(len(y)) % 3 == 0)
+    _, verdicts = select_groups(X, y3, "classification", 5, 0, Deadline(60))
+    assert all(v.group != "target rates of number values" for v in verdicts)
+    groups = np.arange(len(X)) // 6
+    _, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(60), row_groups=groups)
+    assert all(v.group != "target rates of number values" for v in verdicts)
+
+
+def test_value_encoding_reads_the_mean_of_a_numeric_target():
+    X, _ = _prices()
+    y = np.floor(X["price"].to_numpy()) * 2.0 + 100
+    group = ValueEncoding([("price", "whole")]).fit(X, y)
+    rates = group.transform(pd.DataFrame({"price": [3.5, 10.2]}))["price__whole_target"]
+    # the mean of each whole part (106, 120), pulled a little towards the overall mean (about 140)
+    assert 106 < rates.iloc[0] < 115 and 120 < rates.iloc[1] < 128
+
+
+def test_value_encoding_does_not_take_the_training_rows_in_another_order_for_themselves():
+    X, y = _prices()
+    group = ValueEncoding([("price", "value")]).fit(X, y)
+    order = np.random.default_rng(0).permutation(len(X))
+    shuffled = group.transform(X.iloc[order].reset_index(drop=True))["price__value_target"]
+    straight = group.transform(X)["price__value_target"].to_numpy()
+    allrows = X["price"].iloc[order].round(6).map(group._rates[0]).fillna(group._prior)
+    assert np.allclose(shuffled.to_numpy(), allrows.to_numpy())  # the rates of all rows
+    assert not np.allclose(shuffled.to_numpy(), straight)  # not the folds' values in their order
+
+
+def test_automl_keeps_the_value_encoding_honest_and_through_a_save_and_load():
+    from sklearn.metrics import roc_auc_score
+
+    X, y = _prices(60000)
+    config = TrainConfig(target="label", task="classification", max_runtime_secs=600, max_models=3)
+    model = AutoML(config, families=["LightGBM"]).fit(X.assign(label=y))
+    tried = {row["group"]: row for row in model.features}
+    assert tried["target rates of number values"]["adopted"]
+    fresh_X, fresh_y = _prices(8000, seed=9)
+    proba = model.predict_proba(fresh_X)
+    auc = roc_auc_score(fresh_y, proba[proba.columns[1]])
+    assert abs(auc - model.metrics["auc"]) < 0.02  # the validation did not see its own target
+    loaded = pickle.loads(pickle.dumps(model))
+    assert np.allclose(loaded.predict_proba(fresh_X).to_numpy(), proba.to_numpy())
