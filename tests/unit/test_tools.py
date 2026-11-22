@@ -981,6 +981,55 @@ def test_a_class_is_rare_against_an_even_share_of_the_classes():
     assert share(pd.Series([0] * 85 + [1] * 15), "classification") is None
 
 
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (np.repeat([1, 2, 3, 4], 10), (1, 4)),  # a rating
+        (np.repeat([0, 1, 2, 3, 4], 10), (0, 4)),  # a grade
+        (np.repeat(np.arange(1, 11), 10), (1, 10)),  # the most classes
+        (np.repeat([1.0, 2.0, 3.0], 10), (1, 3)),  # whole numbers held as floats
+        (np.repeat([0, 1], 10), None),  # two classes
+        (np.repeat(np.arange(11), 10), None),  # too many
+        (np.repeat([1, 2, 4], 10), None),  # a gap
+        (np.repeat([17, 18, 19, 20], 10), None),  # not from 0 or 1: a measure, not a grade
+        (np.repeat([1.5, 2.5, 3.5], 10), None),  # not whole numbers
+        (np.repeat(["1", "2", "3"], 10), None),  # text
+        (np.repeat([True, False], 10), None),
+    ],
+)
+def test_ordered_classes_are_whole_numbers_in_a_row_from_zero_or_one(values, expected):
+    assert builtin.ordered_classes(pd.Series(values), "classification") == expected
+    assert builtin.ordered_classes(pd.Series(values), "regression") is None
+
+
+def test_propose_suggests_the_kappa_for_ordered_classes_besides_a_rare_class(env):
+    rng = np.random.default_rng(0)
+    rating = rng.choice([1, 2, 3, 4], 400, p=[0.05, 0.1, 0.15, 0.7])  # a rare class too
+    frame = pd.DataFrame(
+        {"x": rng.normal(size=400), "rating": rating, "label": rng.integers(0, 2, 400)}
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "ratings", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "rating"})
+    found = codes(result)
+    assert "ordered_classes" in found and "rare_class" in found
+    warning = next(w for w in result["warnings"] if w["code"] == "ordered_classes")
+    assert warning["params"] == {"low": "1", "high": "4"}
+    assert "qwk" in warning["message"] and "rounded_qwk" in warning["message"]
+    assert result["config"]["sort_metric"] == "auto"  # a hint, not a choice
+    assert result["config"]["decision"] == "argmax"
+    for given in ("qwk", "QWK"):  # the user has chosen it already
+        named = call(
+            env,
+            "propose_training_config",
+            {"dataset_id": ds.id, "target": "rating", "sort_metric": given},
+        )
+        assert "ordered_classes" not in codes(named)
+    other = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    assert "ordered_classes" not in codes(other)
+
+
 def test_the_recommended_metric_follows_the_problem():
     rare = pd.Series([0] * 95 + [1] * 5)
     assert builtin.recommended_metric(rare, "classification") == "aucpr"

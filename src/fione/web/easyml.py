@@ -56,6 +56,7 @@ from fione.tools.builtin import (
     RARE_CLASS_SHARE,
     class_count,
     is_skewed_target,
+    ordered_classes,
     propose,
     rare_class_share,
     recommended_metric,
@@ -372,13 +373,16 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
 
 def _tips(request: Request, conn, dataset: Dataset, found, task: str) -> list[tuple[str, dict]]:
     """``(key, vars)`` for advanced settings that suit the data: a skewed non-negative number
-    to predict (``target_transform``), a rare class (``decision``) and an ID column that repeats
-    over rows (``cv_group_column``), unless the test data holds its values too."""
+    to predict (``target_transform``), ordered classes (``sort_metric``), a rare class
+    (``decision``) and an ID column that repeats over rows (``cv_group_column``), unless the test
+    data holds its values too."""
     tips = []
     if is_skewed_target(found.y, task):
         tips.append(("analysis.tip.skewed_target", {}))
     elif (share := rare_class_share(found.y, task)) is not None:
         tips.append(("analysis.tip.rare_class", {"share": _pct(share)}))
+    if (ordered := ordered_classes(found.y, task)) is not None:
+        tips.append(("analysis.tip.ordered_classes", {"low": ordered[0], "high": ordered[1]}))
     if (repeated := repeated_id_column(found.profile, found.target.name)) is not None:
         shared = repeated_values_in_test(
             _storage(request), conn, dataset, repeated.name, _profile_rows(dataset)

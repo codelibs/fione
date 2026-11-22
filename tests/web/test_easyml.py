@@ -595,6 +595,16 @@ def test_a_rare_class_suggests_the_class_size_decision(owner):
     assert "rarest class" not in tips_page(owner, tip_frame(even))
 
 
+def test_ordered_classes_suggest_the_kappa_besides_the_class_size_decision(owner):
+    rng = np.random.default_rng(0)
+    rating = pd.Series(rng.choice([1, 2, 3, 4], 400, p=[0.03, 0.1, 0.17, 0.7]))
+    page = tips_page(owner, tip_frame(rating))
+    assert "The classes are the whole numbers 1 to 4" in page
+    assert "Quadratic weighted kappa (classification)" in page
+    assert "rarest class" in page  # the rare class is still said
+    assert "whole numbers" not in tips_page(owner, tip_frame(pd.Series([1.5, 2.5] * 200)))
+
+
 def test_a_repeated_id_column_suggests_keeping_its_rows_together(owner):
     label = pd.Series(np.random.default_rng(2).integers(0, 2, 400))
     repeated = tip_frame(label)  # the column to predict stays the last one

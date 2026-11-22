@@ -231,6 +231,12 @@ class its expected number falls in. The cut points are stored with the model and
 threshold above; without `tuned`, a `qwk` run says in a notice that it would score better with
 them.
 
+The analysis page and the assistant suggest `qwk` with `tuned` when the classes are three to ten
+whole numbers in a row starting at 0 or 1 (a rating of 1 to 5). A regression
+ranked by `rounded_qwk` is the alternative: it needs no decision, and its cut points are fitted on
+the blend. The suggestion is a hint, since codes and counts of the same shape (digits 0 to 9, a
+number of children) are not ordered ratings.
+
 ## Text columns
 
 A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product, or that take a thousand different values or more, such as a search query; so is a column of notations without spaces, such as molecules written as SMILES or DNA sequences, whose values are mostly different, 15 characters or longer and of varying length) is read in two ways. Its
