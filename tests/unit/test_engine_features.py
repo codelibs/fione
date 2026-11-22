@@ -1396,6 +1396,66 @@ def test_candidates_offer_pairs_of_repeated_values_only_for_two_entity_columns()
     assert "frequencies of repeated pairs" not in labels
 
 
+FREQUENCY_LABELS = {"frequencies of repeated pairs", "frequencies of repeated numbers"}
+
+
+def test_candidates_offer_no_frequencies_when_columns_repeat_together_over_groups_of_rows():
+    rng = np.random.default_rng(0)
+    X = _entities(300, 6)  # an id and a surname that repeat: frequencies are offered
+    X["amount"] = np.round(rng.lognormal(3, 1, len(X)), 1)  # a number that repeats
+    labels = {g.label for g in features.candidates(Prep().fit(X), X, ["x"])}
+    assert FREQUENCY_LABELS <= labels
+    # the same rows with the features of their entity joined on: three numbers shared by the
+    # rows of an entity, none a copy of another
+    shared = pd.DataFrame(rng.normal(size=(300, 3)), columns=["s1", "s2", "s3"])
+    joined = pd.concat([X, shared.loc[X["cid"] - 1000].reset_index(drop=True)], axis=1)
+    assert features.repeated_blocks(joined, ["s1", "s2", "s3"]) is not None
+    labels = {g.label for g in features.candidates(Prep().fit(joined), joined, ["x"])}
+    assert not FREQUENCY_LABELS & labels
+    assert "difference of numbers" in labels  # the other groups are still offered
+
+
+def test_repeated_blocks_need_columns_that_are_not_copies_and_values_that_repeat():
+    rng = np.random.default_rng(1)
+    base = rng.integers(0, 400, 1200)
+    levels = rng.normal(size=(400, 3))
+    shared = pd.DataFrame(levels[base], columns=["a", "b", "c"])
+    found = features.repeated_blocks(shared, ["a", "b", "c"])
+    assert found is not None and set(found[0]) == {"a", "b", "c"}
+    assert found[1] == pytest.approx(3, rel=0.1)
+    assert features.repeated_blocks(shared, ["a", "b"]) is None  # two columns are not enough
+    copies = pd.DataFrame({"a": levels[base, 0]})
+    copies["b"], copies["c"] = copies["a"] * 2, np.exp(copies["a"])
+    assert features.repeated_blocks(copies, ["a", "b", "c"]) is None
+    alone = pd.DataFrame(rng.normal(size=(1200, 3)), columns=["a", "b", "c"])
+    assert features.repeated_blocks(alone, ["a", "b", "c"]) is None  # no value repeats
+    assert features.repeated_blocks(shared.iloc[:150], ["a", "b", "c"]) is None  # too few rows
+
+
+def test_repeated_blocks_are_not_found_in_columns_that_only_look_alike():
+    rng = np.random.default_rng(2)
+    n = 3000
+    # three independent numbers that each repeat (rounded): no one is a function of another
+    rounded = pd.DataFrame(np.round(rng.normal(size=(n, 3)), 1) * 100, columns=["a", "b", "c"])
+    assert features.repeated_blocks(rounded, ["a", "b", "c"]) is None
+    # a filler (0 or -999) on the same rows is a repeat of one value, not of many
+    filler = pd.DataFrame(rng.normal(size=(n, 3)), columns=["a", "b", "c"])
+    filler[rng.random(n) < 0.6] = -999.0
+    assert features.repeated_blocks(filler, ["a", "b", "c"]) is None
+    # a day of the year and its sine and cosine have fewer levels than the day
+    day = rng.integers(1, 366, n)
+    cyclic = pd.DataFrame({"day": day.astype(float)})
+    cyclic["sin"], cyclic["cos"] = np.sin(2 * np.pi * day / 365), np.cos(2 * np.pi * day / 365)
+    assert features.repeated_blocks(cyclic, ["day", "sin", "cos"]) is None
+    # one missing value is a value that is not shared
+    base = rng.integers(0, 400, n)
+    levels = rng.normal(size=(400, 3))
+    block = pd.DataFrame(levels[base], columns=["a", "b", "c"])
+    assert features.repeated_blocks(block, ["a", "b", "c"]) is not None
+    block.loc[0, "c"] = np.nan
+    assert features.repeated_blocks(block, ["a", "b", "c"]) is None
+
+
 def test_candidates_pair_the_entity_columns_with_the_most_levels():
     X = _entities(300, 6)
     X["code"] = X["cid"] % 60  # repeated, 60 levels: fewer than the id

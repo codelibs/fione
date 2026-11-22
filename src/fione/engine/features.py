@@ -133,6 +133,16 @@ ENTITY_SHARE = (
     0.3  # of the rows must share their value with another row for a column to name entities
 )
 MAX_ENTITY_COLUMNS = 3  # such columns (the ones with the most levels) whose pairs are counted
+# Number columns that take the same values on the same groups of rows (the features of a team in
+# a season, a store, a zip code joined onto its games): see ``repeated_blocks``.
+BLOCK_ROWS = 200_000  # rows looked at (the first: a sample would break the groups up)
+BLOCK_LEVELS = 100  # different values a column that repeats has, at least; and that come back
+BLOCK_REPEATED = 0.5  # share of the rows whose value comes back on another row, at least
+BLOCK_FUNCTION = 1.02  # the values together split the rows at most this much finer than one alone
+BLOCK_SAME_LEVELS = 0.9  # a column has this share of the first one's levels, at least
+BLOCK_DISTINCT = 0.95  # largest rank correlation of a column with the first (else it is a copy)
+BLOCK_COLUMNS = 3  # columns, the first included
+BLOCK_MAX_CANDIDATES = 30  # columns tried as the first (the ones with the most levels)
 MIN_GROUP_ROWS = 5  # rows a level needs for its mean
 _WORD = re.compile(r"[^\W_]+")  # runs of letters and digits
 _TOKEN = re.compile(r"[^\W\d_]+")  # runs of letters, so "C85" gives "c" and "PC 17599" gives "pc"
@@ -1093,6 +1103,50 @@ def alike_columns(prep: Prep, X: pd.DataFrame, order: dict[str, int]) -> list[li
     return sets[:MAX_SETS]
 
 
+def repeated_blocks(X: pd.DataFrame, numbers: list[str]) -> tuple[list[str], float] | None:
+    """The first of the number columns that take the same values on the same groups of rows, and
+    the mean size of those groups: a column of at least ``BLOCK_LEVELS`` different values that
+    come back on at least ``BLOCK_REPEATED`` of the rows, with ``BLOCK_COLUMNS`` - 1 other such
+    columns that are a function of it (rows with its value have theirs too), have as many levels
+    (so they are not its sines or its rounding) and are not a copy of it (rank correlation under
+    ``BLOCK_DISTINCT``). Such columns are what a join of the features of an entity onto its rows
+    leaves: the same team and season, store or zip code on several rows, every row of it with the
+    same numbers. Only the first ``BLOCK_ROWS`` rows are read."""
+    X = X.head(BLOCK_ROWS)
+    n = len(X)
+    if n < 2 * BLOCK_LEVELS:
+        return None
+    codes: dict[str, np.ndarray] = {}
+    for c in numbers:
+        # rounded so that the cosine of 1 and of 364 days, equal but for the last digits, match
+        code, uniques = pd.factorize(X[c].astype(float).round(10), use_na_sentinel=True)
+        if len(uniques) < BLOCK_LEVELS or (code < 0).any():
+            continue  # a missing value is not a shared value
+        counts = np.bincount(code)
+        # a filler (0, -999) on most rows repeats too, but a value that repeats is many values
+        if (counts > 1).sum() >= BLOCK_LEVELS and (counts[code] > 1).mean() >= BLOCK_REPEATED:
+            codes[c] = code
+    if len(codes) < BLOCK_COLUMNS:
+        return None
+    ordered = sorted(codes, key=lambda c: -(codes[c].max() + 1))[:BLOCK_MAX_CANDIDATES]
+    for first in ordered:
+        levels = codes[first].max() + 1
+        by_first = np.argsort(codes[first], kind="stable")
+        changes = np.diff(codes[first][by_first]) != 0
+        block = [first]
+        for other in ordered:
+            if other == first or codes[other].max() + 1 < BLOCK_SAME_LEVELS * levels:
+                continue
+            runs = np.diff(codes[other][by_first]) != 0
+            if (changes | runs).sum() + 1 > BLOCK_FUNCTION * levels:
+                continue  # its values split the rows of one value of the first
+            if abs(X[first].rank().corr(X[other].rank())) < BLOCK_DISTINCT:
+                block.append(other)
+        if len(block) >= BLOCK_COLUMNS:
+            return block, n / levels
+    return None
+
+
 def candidates(
     prep: Prep, X: pd.DataFrame, ranked: list[str], all_rows: pd.DataFrame | None = None
 ) -> list[Group]:
@@ -1155,20 +1209,29 @@ def candidates(
     # with it) identify it only together: how often the pair occurs is the size of the entity,
     # which neither column shows.
     seen = X if all_rows is None else all_rows
-    entities = sorted(
-        (
-            c
-            for c in columns
-            if kinds[c] in ("category", "frequency", "numeric")
-            and c not in durations
-            and X[c].nunique() > MAX_GROUP_CATEGORIES
-            and _entity_key(seen[c])
-        ),
-        key=lambda c: -seen[c].nunique(),
+    # A frequency counts the rows of a value, those of the validation rows too, and a group of
+    # rows that repeat together (see ``repeated_blocks``) has a size that the outcome of its rows
+    # may set (the games a team played): in training it tells the label, on a new group it
+    # says nothing.
+    grouped = repeated_blocks(seen, prep.numeric_columns) is not None
+    entities = (
+        []
+        if grouped
+        else sorted(
+            (
+                c
+                for c in columns
+                if kinds[c] in ("category", "frequency", "numeric")
+                and c not in durations
+                and X[c].nunique() > MAX_GROUP_CATEGORIES
+                and _entity_key(seen[c])
+            ),
+            key=lambda c: -seen[c].nunique(),
+        )
     )
     if len(entities) > 1:
         found.append(CategoryPairs(entities[:MAX_ENTITY_COLUMNS], "frequencies of repeated pairs"))
-    repeated = [c for c in by_rank(prep.numeric_columns) if _repeats(X[c])]
+    repeated = [] if grouped else [c for c in by_rank(prep.numeric_columns) if _repeats(X[c])]
     if repeated:
         found.append(ValueFrequency(repeated[:MAX_PAIR_COLUMNS]))
     encoded = encoding_keys(by_rank(prep.numeric_columns)[:MAX_ENCODED_COLUMNS], seen)

@@ -104,7 +104,7 @@ from fione.engine.diagnostics import diagnostics
 from fione.engine.ensemble import caruana
 from fione.engine.events import Event, EventSink, jsonable
 from fione.engine.families import FAMILIES, MAX_ROUNDS, FamilySpec
-from fione.engine.features import DateDifferences, select_groups
+from fione.engine.features import DateDifferences, repeated_blocks, select_groups
 from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep, Task, infer_task, validate_target
 from fione.engine.search import (
@@ -387,7 +387,7 @@ class AutoML:
     def _event(self, type: str, **data) -> None:
         self.emit(Event(type, data=jsonable(data)))
 
-    def _notice_repeated_values(self, prep: Prep, X: pd.DataFrame) -> None:
+    def _notice_repeated_values(self, prep: Prep, X: pd.DataFrame) -> bool:
         """Say when rows seem to belong together while the validation shuffles them: a text
         column of many different values that each come back on many rows, whose rows also share
         the values of most other columns (the rows of one game, one patient, one store look
@@ -401,7 +401,7 @@ class AutoML:
             if len(values) >= REPEATED_LEVELS and n_rows / len(values) >= REPEATED_ROWS
         ]
         if not found:
-            return
+            return False
         sample = (
             X if n_rows <= REPEATED_SAMPLE_ROWS else X.sample(REPEATED_SAMPLE_ROWS, random_state=0)
         )
@@ -412,7 +412,7 @@ class AutoML:
             default=(None, 0),
         )
         if column is None:
-            return
+            return False
         self._notice(
             f"{column!r} has {levels_n:,} different values, each on about {n_rows / levels_n:.0f} "
             "rows, and the rows of one value look alike in most other columns. The validation "
@@ -422,6 +422,31 @@ class AutoML:
             kind="repeated_values",
             columns=[column],
             shared=round(shared[column], 2),
+        )
+        return True
+
+    def _notice_repeated_rows(self, prep: Prep, X: pd.DataFrame) -> None:
+        """Say when several number columns repeat together over groups of rows (see
+        ``repeated_blocks``) while the validation shuffles the rows: rows of one group then sit
+        on both sides of every split, a model can recognise a group by its numbers, and the score
+        is better than the model will do on rows of other groups."""
+        found = repeated_blocks(X, list(prep.numeric_columns))
+        if found is None:
+            return
+        columns = found[0]
+        # the groups of the whole table, not of the rows looked at
+        size = len(X) / X[columns[0]].astype(float).round(10).nunique()
+        shown = ", ".join(repr(c) for c in columns[:4])
+        self._notice(
+            f"{len(columns)} number columns ({shown}) hold the same values on groups of about "
+            f"{size:.1f} rows, as the features of one team, store or place joined onto its rows "
+            "do. The validation shuffles the rows, so rows of one group sit on both sides of a "
+            "split and the score is probably better than the model will do on rows of other "
+            "groups. If you will predict other groups or later times, name a column that "
+            "identifies the group as cv_group_column, or the time as time_column",
+            kind="repeated_rows",
+            columns=columns[:10],
+            rows_per_group=round(size, 1),
         )
 
     def _notice_missing_history(
@@ -1250,7 +1275,8 @@ class AutoML:
                     columns=dates[:3],
                 )
             if row_groups is None:
-                self._notice_repeated_values(prep, X)
+                if not self._notice_repeated_values(prep, X):
+                    self._notice_repeated_rows(prep, X)
                 if (
                     not dates
                     and not self._notice_sorted_column(prep, X)

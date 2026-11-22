@@ -2502,6 +2502,59 @@ def test_no_repeated_values_notice_with_a_group_column_or_for_values_that_do_not
     assert "repeated_values" not in _kinds(events)
 
 
+def test_number_columns_repeating_together_are_offered_as_the_validation_group():
+    events = []
+    _fit(
+        _repeating().drop(columns="game"),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+    )
+    notice = next(e.data for e in events if e.data.get("kind") == "repeated_rows")
+    assert "rule0" in notice["columns"] and "cv_group_column" in notice["message"]
+    assert notice["rows_per_group"] == pytest.approx(25, rel=0.1)
+    assert "repeated_values" not in _kinds(events)
+
+
+def test_the_size_of_the_repeating_groups_is_counted_over_the_whole_table(monkeypatch):
+    from fione.engine import features
+
+    monkeypatch.setattr(features, "BLOCK_ROWS", 4000)  # fewer rows than the table has
+    shuffled = _repeating().drop(columns="game").sample(frac=1, random_state=0)
+    events = []
+    _fit(shuffled.reset_index(drop=True), events, families=["LightGBM"], target="y", max_models=1)
+    notice = next(e.data for e in events if e.data.get("kind") == "repeated_rows")
+    assert notice["rows_per_group"] == pytest.approx(25, rel=0.1)
+
+
+def test_no_repeated_rows_notice_for_independent_columns_copies_or_a_named_group():
+    rng = np.random.default_rng(0)
+    independent = pd.DataFrame(rng.normal(size=(3000, 6)), columns=list("abcdef"))
+    independent["y"] = independent["a"] + 0.1 * rng.normal(size=3000)
+    events = []
+    _fit(independent, events, families=["LightGBM"], target="y", max_models=1)
+    assert "repeated_rows" not in _kinds(events)
+    # amounts that repeat, with their logarithm and square: one column in three forms
+    price = pd.DataFrame({"price": np.round(rng.lognormal(3, 1, 3000), 1)})
+    price["log_price"], price["price2"] = np.log(price["price"]), price["price"] ** 2
+    price["y"] = price["price"] + rng.normal(size=3000)
+    events = []
+    _fit(price, events, families=["LightGBM"], target="y", max_models=1)
+    assert "repeated_rows" not in _kinds(events)
+    games = _repeating().assign(team=lambda d: d["game"])
+    events = []
+    _fit(
+        games.drop(columns="game"),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        cv_group_column="team",
+    )
+    assert "repeated_rows" not in _kinds(events)
+
+
 def _sized_groups(n_groups=250, seed=0, values=None):
     """Rows of groups of 2 to 30 rows: the id says nothing, but the size of the group sets y."""
     rng = np.random.default_rng(seed)

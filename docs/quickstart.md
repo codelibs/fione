@@ -525,6 +525,12 @@ assistant suggest this when a column named like an ID (`user_id`, `顧客ID`) re
 A training run also says so when no group column is given and a text column of 100 or more
 values has about 20 rows or more for each value, and the rows of one value share the value of
 most other columns (rows of one game or patient look alike).
+A run with no group column also says so when three or more number columns take the same values on
+the same groups of rows (the features of a team, store or place joined onto its rows: each value
+comes back on half the rows or more, over 100 different values, the columns are functions of one
+another and not copies), looked for in the first 200,000 rows; it is the validation that then
+looks better than the model will do on new groups, and the frequency counts of the derived
+features below are not tried (this part also holds with a group column).
 
 A group column and a time column can be used together (see "Data that follows time").
 
@@ -546,7 +552,11 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   have more than 50 distinct values and where at least 30 % of the rows share their value with
   another row (a customer number, a surname, a balance that repeats with the customer), how
   common each pair of the three with the most values is, which counts how often one entity
-  occurs even when no single column does;
+  occurs even when no single column does (these counts, and how common each repeated number is,
+  are not tried when three or more number columns take the same values on the same groups of
+  rows, as the features of a team or a place joined onto its rows do: the size of a group then
+  tells the label in training and says nothing about a new group; see "Keeping related rows
+  together");
 - integer codes: a numeric column of whole numbers with more than 30 distinct values and at least
   3 rows per value on average (an account, a department number) is read also as a category when
   its values' target means differ beyond noise and the numeric order of the values explains at
