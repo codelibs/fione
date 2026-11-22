@@ -1023,6 +1023,63 @@ def test_propose_suggests_grouping_by_a_repeated_id_column(env, grouped):
     assert result["config"]["cv_group_column"] is None  # a hint, not a choice
 
 
+@pytest.mark.parametrize(
+    ("test_ids", "expected"),
+    [
+        (np.arange(40), "repeated_id_in_test"),  # every value is in the training rows
+        (np.r_[np.arange(38), np.arange(100, 102)], "repeated_id_in_test"),  # 38 of 40 rows seen
+        (np.arange(100, 140), "repeated_id"),  # other values
+        (np.r_[np.arange(20), np.arange(100, 120)], "repeated_id"),  # half of them
+    ],
+)
+def test_propose_does_not_ask_for_grouping_when_the_test_data_holds_the_same_values(
+    env, grouped, test_ids, expected
+):
+    ds = grouped()
+    test = ingest.ingest_batches(
+        env.storage,
+        env.conn,
+        env.project.id,
+        "later",
+        DatasetType.TEST,
+        [pd.DataFrame({"x": np.zeros(len(test_ids)), "user_id": test_ids})],
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+    found = codes(result)
+    assert expected in found
+    assert ({"repeated_id", "repeated_id_in_test"} - {expected}).isdisjoint(found)
+    warning = next(w for w in result["warnings"] if w["code"] == expected)
+    assert warning["params"]["column"] == "user_id"
+
+
+def _ids_dataset(env, kind, ids, name="later"):
+    frame = pd.DataFrame({"x": np.zeros(len(ids)), "user_id": ids})
+    return ingest.ingest_batches(env.storage, env.conn, env.project.id, name, kind, [frame])
+
+
+def test_the_values_of_the_whole_training_column_are_compared_not_a_sample_of_it(env, grouped):
+    ds = grouped()  # 40 ids in 400 rows: a sample of 50 rows holds only a few of them
+    test = _ids_dataset(env, DatasetType.TEST, np.arange(40))
+    try:
+        assert builtin.repeated_values_in_test(env.storage, env.conn, ds, "user_id", 50)
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+
+
+def test_a_prediction_dataset_does_not_say_the_test_rows_hold_the_same_values(env, grouped):
+    ds = grouped()
+    made = _ids_dataset(env, DatasetType.PREDICT, np.arange(40), "predict_groups")
+    try:
+        assert not builtin.repeated_values_in_test(env.storage, env.conn, ds, "user_id")
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, made.id)
+    assert "repeated_id" in codes(result) and "repeated_id_in_test" not in codes(result)
+
+
 def test_propose_does_not_suggest_grouping_for_plain_columns(env, grouped):
     for name, repeats in (("city", 10), ("user_id", 1), ("paid", 10), ("idle", 10)):
         ds = grouped(name, repeats)

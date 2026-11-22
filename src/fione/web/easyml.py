@@ -60,6 +60,7 @@ from fione.tools.builtin import (
     rare_class_share,
     recommended_metric,
     repeated_id_column,
+    repeated_values_in_test,
     runtime_need_secs,
     sample_profile,
 )
@@ -369,17 +370,21 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
     return out
 
 
-def _tips(found, task: str) -> list[tuple[str, dict]]:
+def _tips(request: Request, conn, dataset: Dataset, found, task: str) -> list[tuple[str, dict]]:
     """``(key, vars)`` for advanced settings that suit the data: a skewed non-negative number
     to predict (``target_transform``), a rare class (``decision``) and an ID column that repeats
-    over rows (``cv_group_column``)."""
+    over rows (``cv_group_column``), unless the test data holds its values too."""
     tips = []
     if is_skewed_target(found.y, task):
         tips.append(("analysis.tip.skewed_target", {}))
     elif (share := rare_class_share(found.y, task)) is not None:
         tips.append(("analysis.tip.rare_class", {"share": _pct(share)}))
     if (repeated := repeated_id_column(found.profile, found.target.name)) is not None:
-        tips.append(("analysis.tip.repeated_id", {"column": repeated.name}))
+        shared = repeated_values_in_test(
+            _storage(request), conn, dataset, repeated.name, _profile_rows(dataset)
+        )
+        key = "analysis.tip.repeated_id_in_test" if shared else "analysis.tip.repeated_id"
+        tips.append((key, {"column": repeated.name}))
     return tips
 
 
@@ -439,7 +444,7 @@ def _analysis_view(
         form=form,
         detected=defaults.task,
         warnings=_warnings(dataset, found, form.task, form.inputs),
-        tips=_tips(found, form.task),
+        tips=_tips(request, conn, dataset, found, form.task),
         target_missing=float(found.y.isna().mean()) if len(found.y) else 0.0,
         target_values=int(found.y.nunique()),
         missing_pct=_pct(sum(missing) / len(missing)) if missing else "0",

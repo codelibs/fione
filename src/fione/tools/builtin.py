@@ -791,6 +791,32 @@ def recommended_metric(y: pd.Series, task: str) -> str:
     return "aucpr" if rare == _sorted_labels(y)[-1] else "auto"
 
 
+# A test dataset whose rows hold, in at least this share, values of the column that the train
+# dataset holds too, is predicted for the values the model has seen.
+TEST_SEEN_SHARE = 0.9
+
+
+def repeated_values_in_test(
+    storage, conn, dataset: Dataset, column: str, sample_rows: int = _SAMPLE_ROWS
+) -> bool:
+    """Whether a test dataset of the project holds ``column`` and at least ``TEST_SEEN_SHARE`` of
+    its rows (a sample of ``sample_rows``) have a value that ``dataset`` (a train dataset) holds
+    too, in any of its rows. A prediction dataset is not asked: a batch prediction keeps the
+    columns of the data it was made from, so it holds the values of its own input."""
+    if dataset.type != DatasetType.TRAIN:
+        return False
+    seen = None
+    for other in projects.list_datasets(conn, dataset.project_id):
+        if other.type != DatasetType.TEST or column not in {name for name, _ in other.schema}:
+            continue
+        if seen is None:
+            seen = set(ingest.read_dataset(storage, dataset, [column])[column].dropna().unique())
+        values = ingest.read_dataset_runs(storage, other, sample_rows, [column])[column].dropna()
+        if len(values) and values.isin(seen).mean() >= TEST_SEEN_SHARE:
+            return True
+    return False
+
+
 def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | None:
     """The first column other than ``target`` that is named like an identifier (failing that, for
     the entity the rows are about) and repeats its values over rows (``REPEATED_ID_GROUPS`` or
@@ -1226,15 +1252,28 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         overrides["cv_group_column"] = group
     elif (repeated := repeated_id_column(profile, target)) is not None:
         column = clean_text(repeated.name)
-        warnings.append(
-            _warning(
-                "repeated_id",
-                f"column '{column}' looks like an id that repeats over rows; if rows of one "
-                "value are related (the same customer, say), group_column keeps them together "
-                "in validation so the score is not too good",
-                column=column,
+        if repeated_values_in_test(ctx.storage, ctx.conn, dataset, repeated.name, rows):
+            warnings.append(
+                _warning(
+                    "repeated_id_in_test",
+                    f"column '{column}' repeats over rows, and almost every row of the test or "
+                    "predict data of this project has a value the training rows hold too, so "
+                    "shuffled validation matches how the model will be used; group_column would "
+                    "validate on values the model has not seen and make the score look worse "
+                    "than the test will give",
+                    column=column,
+                )
             )
-        )
+        else:
+            warnings.append(
+                _warning(
+                    "repeated_id",
+                    f"column '{column}' looks like an id that repeats over rows; if rows of one "
+                    "value are related (the same customer, say), group_column keeps them "
+                    "together in validation so the score is not too good",
+                    column=column,
+                )
+            )
     if time_index is not None:
         overrides["time_column"] = time_index.name
         column = clean_text(time_index.name)
