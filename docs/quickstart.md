@@ -233,7 +233,7 @@ them.
 
 ## Text columns
 
-A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product, or that take a thousand different values or more, such as a search query) is read in two ways. Its
+A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product, or that take a thousand different values or more, such as a search query; so is a column of notations without spaces, such as molecules written as SMILES or DNA sequences, whose values are mostly different, 15 characters or longer and of varying length) is read in two ways. Its
 topics are derived features (see below). A model family called TextLinear also reads its words:
 a logistic (or ridge) regression on the TF-IDF weights of words and word pairs, with the other
 columns beside them, learned again on each training fold. Each punctuation mark or symbol counts as a word of its own, and so does a one-letter word, since how a text is punctuated can tell its author or its mood. It joins the search and the ensemble
@@ -242,7 +242,7 @@ same cross-validation scores. TextLinear fits all its rows in one unit that cann
 
 Three variants of it are *late candidates*: TextLinearWide (up to 100,000 words and word pairs
 per column), TextLinearChar (the words and also the character n-grams of 2 to 5 letters; it is
-left out when the text is very large or has no spaces) and TextLinearPlain (without the derived features; it is
+left out when the text is very large or has no spaces, unless it is such a notation) and TextLinearPlain (without the derived features; it is
 tried only when derived features were added). They run after all the other families, in the
 search time that is left: for text data, 15% of the search time is kept for them (taken from
 the other families, not from TextLinear), and what the other families leave unused is added. Each takes a share of that time, and one that cannot finish

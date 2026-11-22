@@ -10,7 +10,14 @@ from fione.data import frames
 from fione.engine.config import ConfigError, TargetError
 from fione.engine.families import LinearWide
 from fione.engine.features import CodeLevels
-from fione.engine.prep import LINEAR_LEVELS, Prep, infer_task, integer_date_format, validate_target
+from fione.engine.prep import (
+    LINEAR_LEVELS,
+    Prep,
+    infer_task,
+    integer_date_format,
+    is_notation,
+    validate_target,
+)
 
 RNG = np.random.default_rng(0)
 
@@ -590,6 +597,47 @@ def test_a_label_with_hundreds_of_levels_is_not_prose_though_its_first_rows_look
     first = frame["merchant"].head(1000)
     assert first.nunique() > 0.5 * len(first)  # all different, to look at 1,000 rows
     assert Prep().fit(frame).prose == ()
+
+
+def test_a_notation_of_varying_length_is_text_but_an_id_of_one_length_is_not():
+    n = 300
+    rng = np.random.default_rng(5)
+    smiles = ["".join(rng.choice(list("CNO=()1c"), rng.integers(10, 90))) for _ in range(n)]
+    ids = ["".join(rng.choice(list("0123456789abcdef"), 24)) for _ in range(n)]
+    frame = pd.DataFrame({"smiles": smiles, "id": ids, "num": rng.normal(size=n)})
+    assert Prep().fit(frame).prose == ("smiles",)
+    # a notation that repeats is a label
+    frame["smiles"] = rng.choice(smiles[:20], n)
+    assert Prep().fit(frame).prose == ()
+
+
+def test_codes_of_one_shape_and_unspaced_sentences_are_told_apart():
+    import hashlib
+    import uuid
+
+    n = 400
+    rng = np.random.default_rng(6)
+    word = lambda k: "".join(rng.choice(list("abcdefghijklmnopqrstuvwxyz0123456789"), k))  # noqa: E731
+    not_text = {
+        "uuid": [str(uuid.uuid4()) for _ in range(n)],
+        "hash": [hashlib.md5(word(8).encode()).hexdigest() for _ in range(n)],
+        "email": [f"{word(rng.integers(4, 12))}@{word(rng.integers(4, 9))}.com" for _ in range(n)],
+        "path": [
+            f"/data/{word(rng.integers(3, 9))}/{word(rng.integers(3, 15))}.csv" for _ in range(n)
+        ],
+        "key": [
+            f"A_{rng.integers(1, 99)}_x_2016-0{rng.integers(1, 9)}-{rng.integers(10, 28)}"
+            for _ in range(n)
+        ],
+        "fixed_sequence": ["".join(rng.choice(list("ACGT"), 100)) for _ in range(n)],
+    }
+    sentences = list("今日は天気がとても良いので公園へ散歩に行きました私猫犬学校先生")
+    text = {
+        "sentence": ["".join(rng.choice(sentences, rng.integers(20, 80))) for _ in range(n)],
+        "sequence": ["".join(rng.choice(list("ACGT"), rng.integers(30, 200))) for _ in range(n)],
+    }
+    assert not any(is_notation(pd.Series(v)) for v in not_text.values())
+    assert all(is_notation(pd.Series(v)) for v in text.values())
 
 
 def test_a_search_query_that_repeats_is_prose_and_still_read_as_levels():

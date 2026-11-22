@@ -67,7 +67,7 @@ from sklearn.neural_network import MLPClassifier, MLPRegressor
 from threadpoolctl import threadpool_limits
 
 from fione.engine.config import ConfigError, DeadlineExceeded
-from fione.engine.prep import LINEAR_LEVELS, MAX_LEVELS, Task
+from fione.engine.prep import LINEAR_LEVELS, MAX_LEVELS, Task, is_notation
 
 MAX_ROUNDS = 2000
 EARLY_STOPPING_ROUNDS = 50
@@ -998,7 +998,7 @@ class TextLinearChar(TextLinear):
         for column in sample:
             text = sample[column].fillna("").astype(str)
             tokens = max(1.0, text.str.split().str.len().mean())
-            if text.str.len().mean() / tokens > TEXT_CHAR_TOKEN:
+            if text.str.len().mean() / tokens > TEXT_CHAR_TOKEN and not is_notation(sample[column]):
                 return False
             chars += text.str.len().mean() * len(X)
         return chars <= TEXT_CHAR_BUDGET
