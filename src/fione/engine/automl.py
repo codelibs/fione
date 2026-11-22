@@ -491,7 +491,7 @@ class AutoML:
 
     def _notice_frequency_encoded_values(
         self, prep: Prep, X: pd.DataFrame, importance: pd.Series
-    ) -> None:
+    ) -> list[str]:
         """Say when the model leans on an id or a group code that is read as how often each value
         occurs (``Prep`` does so above ``HIGH_CARDINALITY`` values). The share of each value is
         counted over all the training rows, so the validation rows already have their true share,
@@ -509,9 +509,9 @@ class AutoML:
                 ):
                     found.append((share, column, len(values), rows))
         except Exception:
-            return
+            return []
         if not found:
-            return
+            return []
         found.sort(reverse=True)
         share, column, values, rows = found[0]
         others = [c for _, c, _, _ in found[1:DROPPED_SHOWN]]
@@ -528,6 +528,31 @@ class AutoML:
             kind="frequency_encoded_values",
             columns=[column, *others],
             values=values,
+            importance=round(share, 2),
+        )
+        return [column, *others]
+
+    def _notice_group_column_input(
+        self, X: pd.DataFrame, importance: pd.Series, named: list[str]
+    ) -> None:
+        """Say when the column that keeps the validation groups apart is also an input that the
+        model leans on. The validation never shows the model a group it has learned from, so it
+        cannot show what the column does on rows of other groups; a number that orders the groups
+        (trial 7 next to trial 8) even makes the score better than it will be, as the groups next
+        to a validation group are in the training rows."""
+        column = self.config.cv_group_column
+        share = float(importance.get(column, 0.0)) if column in X.columns else 0.0
+        if column is None or column in named or share < FREQUENCY_IMPORTANCE:
+            return
+        self._notice(
+            f"{column!r} is the group column and also an input, and the model relies on it for "
+            f"{share:.0%} of what it relies on. The validation never shows the model a group it "
+            "has learned from, so it cannot show what the column does on rows of other groups "
+            "(groups next to each other in a number or a code may be related, which makes the "
+            "score better than it will be). If the rows you will predict hold other groups, "
+            "leave the column out of the inputs (ignored_columns)",
+            kind="group_column_input",
+            columns=[column],
             importance=round(share, 2),
         )
 
@@ -689,20 +714,28 @@ class AutoML:
             values=len(values),
         )
 
-    def _notice_ordered_target(self, y: np.ndarray) -> None:
+    def _notice_ordered_target(self, y: np.ndarray, classes: bool = False) -> None:
         """Say when the target of a row is nearly that of the row before it: the rows are in
         time order, or each has near copies beside it. The validation shuffles the rows, so the
         neighbours of every validated row are learned from, and the score is far better than
         the model will do on rows of other times. A table sorted by its target gets the notice
-        too: its rows look the same as a trend in time order, and the notice only asks."""
+        too: its rows look the same as a trend in time order, and the notice only asks. Of
+        ``classes`` (the codes of a classification) the likeness is how far above chance the
+        share of rows with the class of the row before them is (1: always the same)."""
         if len(y) < ORDERED_MIN_ROWS or np.ptp(y) == 0:
             return
-        alike = np.corrcoef(y[:-1], y[1:])[0, 1]
+        if classes:
+            chance = float(np.sum((np.bincount(y) / len(y)) ** 2))
+            alike = (float(np.mean(y[:-1] == y[1:])) - chance) / (1 - chance)
+        else:
+            alike = np.corrcoef(y[:-1], y[1:])[0, 1]
         if not alike >= ORDERED_AUTOCORR:
             return
+        measure = "agreement" if classes else "correlation"
         self._notice(
-            f"the target of a row is nearly that of the row before it (correlation "
-            f"{alike:.2f}), so the rows may be in time order or have near copies beside them. "
+            f"the target of a row is nearly that of the row before it ({measure} "
+            f"{alike:.2f}), so the rows may be in time order, have near copies beside them or "
+            "be sorted by the target. "
             "The validation shuffles the rows: if the model will predict rows from other times or "
             "other groups, the score is probably much better than it will be; name the column "
             "that gives the order (add a row number if none does) as time_column, or the column "
@@ -1284,6 +1317,8 @@ class AutoML:
                 ):
                     if task == "regression" and not survival:
                         self._notice_ordered_target(y_seen)
+                    elif task == "classification":
+                        self._notice_ordered_target(y, classes=True)
             folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
             first_run = folds[:nfolds]  # reported: the other repeats only judge the search
             if row_groups is not None and task == "classification":
@@ -1469,7 +1504,8 @@ class AutoML:
         )
         if task == "regression" and not survival and c.quantile is None and not rating_cuts:
             self._notice_baseline(X, y_seen[rows], rows, blended, sort_metric)
-        self._notice_frequency_encoded_values(prep, X, model.feature_importance)
+        named = self._notice_frequency_encoded_values(prep, X, model.feature_importance)
+        self._notice_group_column_input(X, model.feature_importance, named)
         median_ran = any(member.spec.median for member in members)
         said = self._notice_constant(
             y_seen, rows, first_run, blended, sort_metric, c.quantile, median_ran

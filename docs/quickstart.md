@@ -517,7 +517,9 @@ value occurs, counted over all the training rows. A group the model has not seen
 rarest value, so its rows look like a very small group, and the validation, whose groups were
 counted too, cannot show that: leave the group column out when the rows to predict hold other groups.
 A training run says so when such a column holds codes (values of 8 characters or more with a digit
-and no space) on about 3 rows or more each, and holds at least 5% of what the model relies on. A missing value
+and no space) on about 3 rows or more each, and holds at least 5% of what the model relies on. It also says so when the group
+column, of any kind of values, is an input that holds at least 5% of what the model relies on: groups next to each other in a number
+(trial 7 and trial 8) may be related, and the validation cannot show that. A missing value
 counts as one group, and with fewer groups than folds the number of folds is lowered to the
 number of groups (at least two groups are needed). A class that occurs in so few groups that
 some fold's training rows lack it is refused, with the column named. The analysis page and the

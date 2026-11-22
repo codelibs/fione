@@ -3347,3 +3347,69 @@ def test_a_quantile_fit_on_a_few_rows_gets_no_small_data_notice():
         max_models=25,
     )
     assert len(model.trials) >= automl_module.SMALL_DATA_TRIALS and not _small_data(events)
+
+
+def _neighbouring_groups(n_groups=60, per_group=40, seed=0):
+    """Groups numbered 0, 1, 2...: the label of a group is that of the group before it."""
+    rng = np.random.default_rng(seed)
+    labels = np.repeat((np.arange(n_groups) // 10) % 2, per_group)
+    df = pd.DataFrame({"trial": np.repeat(np.arange(n_groups), per_group)})
+    df["x"] = rng.normal(size=len(df))
+    df["y"] = labels
+    return df
+
+
+def test_a_group_column_that_is_also_an_input_the_model_relies_on_is_named():
+    events = []
+    _fit(
+        _neighbouring_groups(),
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        nfolds=3,
+        cv_group_column="trial",
+    )
+    notice = next(e.data for e in events if e.data.get("kind") == "group_column_input")
+    assert notice["columns"] == ["trial"] and notice["importance"] > 0.5
+    assert "ignored_columns" in notice["message"]
+
+
+def test_no_group_input_notice_when_the_group_column_is_left_out_or_not_relied_on():
+    left_out, no_group = [], []
+    options = dict(families=["LightGBM"], target="y", max_models=1, nfolds=3)
+    _fit(
+        _neighbouring_groups(),
+        left_out,
+        cv_group_column="trial",
+        ignored_columns=["trial"],
+        **options,
+    )
+    _fit(_neighbouring_groups(), no_group, **options)
+    assert "group_column_input" not in _kinds(left_out)
+    assert "group_column_input" not in _kinds(no_group)
+
+
+def _runs(n=1_200, run=100, seed=0):
+    """A class that holds for a run of rows and then flips: the row before has its class."""
+    rng = np.random.default_rng(seed)
+    labels = np.arange(n) // run % 2
+    df = pd.DataFrame({"x": rng.normal(size=n) + labels, "z": rng.normal(size=n)})
+    df["y"] = labels
+    return df
+
+
+def _class_runs_hints(df, **config):
+    events = []
+    options = dict(target="y", families=["LightGBM"], max_models=1, nfolds=3)
+    _fit(df, events, feature_engineering=False, **options, **config)
+    return [e for e in events if e.data.get("kind") == "ordered_target"]
+
+
+def test_a_class_that_holds_for_runs_of_rows_is_pointed_out_unless_the_order_is_given():
+    (hint,) = _class_runs_hints(_runs())
+    assert hint.data["correlation"] > 0.8 and "agreement" in hint.data["message"]
+    assert "cv_group_column" in hint.data["message"]
+    assert not _class_runs_hints(_runs().assign(when=np.arange(1_200)), time_column="when")
+    shuffled = _runs().sample(frac=1, random_state=0).reset_index(drop=True)
+    assert not _class_runs_hints(shuffled)
