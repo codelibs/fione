@@ -1464,6 +1464,8 @@ def select_groups(
             None if row_groups is None else row_groups[rows],
         )
 
+    from fione.engine.level_models import judged_early, level_models  # it imports this module
+
     all_rows, all_y = X, y
     encodes = row_groups is None and (task == "regression" or int(y.max()) <= 1)
 
@@ -1489,6 +1491,8 @@ def select_groups(
     try:
         prep, ranked = Prep().fit(X), gate.ranked()
         pool = [g for g in candidates(prep, X, ranked, all_rows) if encodes or not g.uses_target]
+        if encodes and task == "classification":  # models per value of a column (binary only)
+            pool += level_models(prep, X, y, ranked, all_rows, all_y, seed)
         codes = (
             []
             if row_groups is not None
@@ -1505,6 +1509,8 @@ def select_groups(
         if afforded < 1 and len(X) > GATE_MIN_ROWS:
             X, y, row_groups = sampled(X, y, row_groups, max(GATE_MIN_ROWS, int(afforded * len(X))))
             gate = new_gate(X, y, row_groups)
+            current = gate.losses(kept, range(1))
+        if judged_early(pool, base, kept, verdicts, gate):  # a decisive gain: no need to wait
             current = gate.losses(kept, range(1))
         for group in pool:
             if group.uses_target:
@@ -1541,10 +1547,10 @@ def select_groups(
         if len(kept) > len(base):
             fresh = range(GATE_REPEATS, GATE_REPEATS + FINAL_REPEATS)  # folds no choice has seen
             if not passes(gate.losses(base, fresh), gate.losses(kept, fresh)):
-                _drop_adopted(verdicts, "final check")
+                _drop_adopted(verdicts, "final check", {g.label for g in base})
                 kept = list(base)
         for group in pool:
-            if group.uses_target:
+            if group.uses_target and group not in base:
                 _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, deadline)
     except _OutOfTime:
         # Their last check did not finish. A gain this large is no fluke of the selection, so
@@ -1612,9 +1618,10 @@ def _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, dead
         pass  # listed as not judged for lack of time
 
 
-def _drop_adopted(verdicts: list[Verdict], reason: str) -> None:
+def _drop_adopted(verdicts: list[Verdict], reason: str, keep: set[str] = frozenset()) -> None:
+    """Take back the adoption of every group but the codes and those of ``keep``."""
     for verdict in verdicts:
-        if verdict.adopted and verdict.group != CODES_LABEL:
+        if verdict.adopted and verdict.group != CODES_LABEL and verdict.group not in keep:
             verdict.adopted, verdict.reason = False, reason
 
 
