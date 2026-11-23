@@ -18,11 +18,11 @@ from fione.engine.model import Member, TrainedModel, feature_importance
 from fione.engine.prep import Prep
 
 # The variants of TextLinear; LinearWide is tested in test_engine_levels, LinearBoost in
-# test_engine_boost.
+# test_engine_boost, LinearSpline in test_engine_splines.
 TEXT_LATE = tuple(
     name
     for name in LATE_ORDER
-    if name not in ("LinearWide", "LinearBoost") and name not in MEDIAN_ORDER
+    if name not in ("LinearWide", "LinearBoost", "LinearSpline") and name not in MEDIAN_ORDER
 )
 CLASSES = ["food", "law", "space"]
 
@@ -226,7 +226,8 @@ def test_without_prose_the_time_shares_are_what_they_are_without_late_families(m
     X = pd.DataFrame({"a": np.arange(40.0), "b": np.arange(40.0)[::-1]})
     y = np.arange(40) % 2
     assert AutoML(TrainConfig(target="y"))._late_families(Prep().fit(X), X, y, "regression") == [
-        "LinearBoost"
+        "LinearBoost",
+        "LinearSpline",
     ]
     calls = _schedule(monkeypatch, reference_secs=0.1, late=())
     weights = automl_module.FAMILY_WEIGHTS
@@ -251,8 +252,9 @@ def test_without_prose_the_search_gets_exactly_the_base_families(monkeypatch):
 
     monkeypatch.setattr(AutoML, "_search", spy)
     _fit(df, target="y", max_models=len(FAMILY_ORDER), max_runtime_secs=30)
-    # LinearBoost is the only late family without prose; no TextLinear
-    assert seen == [[*(f for f in FAMILY_ORDER if f != "TextLinear"), "LinearBoost"]]
+    # LinearBoost and LinearSpline are the late families without prose; no TextLinear
+    late = ["LinearBoost", "LinearSpline"]
+    assert seen == [[*(f for f in FAMILY_ORDER if f != "TextLinear"), *late]]
 
 
 def test_without_prose_a_fit_has_the_base_families_and_no_late_one():
@@ -276,7 +278,11 @@ def _prose():
 
 def test_prose_makes_every_late_family_apply():
     runner, prep, X, y = _prose()
-    assert runner._late_families(prep, X, y, "classification") == [*TEXT_LATE, "LinearBoost"]
+    assert runner._late_families(prep, X, y, "classification") == [
+        *TEXT_LATE,
+        "LinearBoost",
+        "LinearSpline",
+    ]
     assert AutoML(TrainConfig(target="t"), families=["TextLinearWide"]).late == ["TextLinearWide"]
     assert AutoML(TrainConfig(target="t"), families=["LightGBM"]).late == []
 
@@ -286,7 +292,7 @@ def test_the_plain_variant_needs_derived_features_to_differ_from_textlinear():
     X = df.drop(columns=["topic"])
     runner = AutoML(TrainConfig(target="topic"))
     late = runner._late_families(Prep().fit(X), X, _codes(df), "classification")
-    assert late == ["TextLinearChar", "TextLinearWide", "LinearBoost"]
+    assert late == ["TextLinearChar", "TextLinearWide", "LinearBoost", "LinearSpline"]
 
 
 def _long_texts(n, tail_words, seed=0):
@@ -376,7 +382,7 @@ def test_late_families_are_left_out_when_the_text_or_its_model_would_be_too_big(
     runner, prep, X, y = _prose()
     monkeypatch.setattr("fione.engine.families.TEXT_CHAR_BUDGET", 100)
     late = runner._late_families(prep, X, y, "classification")
-    assert late == ["TextLinearPlain", "TextLinearWide", "LinearBoost"]
+    assert late == ["TextLinearPlain", "TextLinearWide", "LinearBoost", "LinearSpline"]
     monkeypatch.setattr(automl_module, "SIZE_CAP", 1)
     assert runner._late_families(prep, X, y, "classification") == []
     monkeypatch.setattr(automl_module, "SIZE_CAP", 40 * 1024**2)
@@ -664,7 +670,7 @@ def test_the_l1_variants_are_late_candidates_of_a_regression_ranked_by_an_absolu
 ):
     names = _searched(monkeypatch, _heavy_tailed(), sort_metric=metric)
     base = [name for name in FAMILY_ORDER if name != "TextLinear"]  # no prose here
-    assert names == [*base, "LinearBoost", *MEDIAN_ORDER]
+    assert names == [*base, "LinearBoost", "LinearSpline", *MEDIAN_ORDER]
 
 
 @pytest.mark.parametrize(

@@ -18,7 +18,8 @@ spec 5.1/5.7) and spends it in phases:
    ``Family#2`` and ``Family#3``.
    After them come the *late* families (``LATE_ORDER``: LinearWide, for data with categorical
    columns that the linear view cuts short; the variants of TextLinear, for data with prose; and
-   LinearBoost, small trees boosted from a linear model), and for a regression ranked by MAE,
+   LinearBoost, small trees boosted from a linear model; LinearSpline, a linear model with a
+   curve for each number), and for a regression ranked by MAE,
    MEDAE or SMAPE with no ``quantile``, the L1 variants of the boosting families
    (``MEDIAN_ORDER``: LightGBM_L1, XGBoost_L1, CatBoost_L1, which learn the median; each after the
    family it varies). When any applies, ``LATE_SHARE`` of the search
@@ -28,7 +29,8 @@ spec 5.1/5.7) and spends it in phases:
    leave), never the time of the later phases:
    each one the search time still left times its ``LATE_WEIGHTS`` share among the late families
    not yet run, and only when its first trial is expected to fit in that share (``cost`` times
-   the first trial of its reference family: TextLinear, Linear for LinearWide and LinearBoost,
+   the first trial of its reference family: TextLinear, Linear for LinearWide, LinearBoost and
+   LinearSpline,
    the boosting family itself for its L1 variant). A late
    family that does not apply to the data is not run and changes nothing; one that does not
    improve the ensemble gets weight 0 from ``caruana``.
@@ -156,15 +158,20 @@ LATE_ORDER = (
     "TextLinearPlain",
     "TextLinearWide",
     "LinearBoost",
+    "LinearSpline",
     *MEDIAN_ORDER,
 )
-LATE_WEIGHTS = {  # sum 1; LinearBoost comes after the text ones and takes what they leave
+# sum 1; LinearBoost comes after the text ones and takes what they leave. LinearSpline has a
+# nominal weight: it takes what is left only where no median variant follows it, so LinearBoost
+# keeps nearly all the time it had.
+LATE_WEIGHTS = {
     "LinearWide": 5 / 64,
     "TextLinearChar": 25 / 128,
     "TextLinearPlain": 25 / 256,
     "TextLinearWide": 25 / 256,
     "LinearBoost": 1 / 16,
-    "LightGBM_L1": 15 / 64,
+    "LinearSpline": 1 / 256,
+    "LightGBM_L1": 59 / 256,
     "XGBoost_L1": 15 / 128,
     "CatBoost_L1": 15 / 128,
 }
