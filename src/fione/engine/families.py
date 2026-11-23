@@ -83,6 +83,15 @@ SMALL_DATA_THREADS = 4
 PROBE_ROWS = 20_000
 UNIT_SAFETY = 1.2
 MEDIAN = 0.5  # the level of the L1 variants
+# The strength of the penalty that suits a linear model falls with the number of columns (on a
+# table of 5,000 columns the best ``C`` is near 1e-3, and the default 1 overfits badly): ``C`` is
+# scaled by this many columns over the width of the table, on a table wider than that.
+LINEAR_COLUMNS = 20
+# A forest looks at ``max_features`` of the columns at every split. On a table wider than this the
+# fraction is scaled down so that no more than about this many columns are looked at: a few
+# hundred random columns find as good a split as thousands (on a table of thousands of sparse
+# counts, better ones), and a trial takes a fraction of the time.
+FOREST_COLUMNS = 300
 
 
 def n_threads(n_rows: int) -> int:
@@ -659,6 +668,15 @@ class Forest(FamilySpec):
     regressor: ClassVar[type]
     extra: ClassVar[dict] = {}  # constructor arguments that make the family what it is
     shrinkable = True
+    scale = 1.0  # of ``max_features``, on a wide table (``fit_width``)
+
+    def fit_width(self, n_features: int) -> None:
+        """Scale ``max_features`` down for a table of ``n_features`` columns (FOREST_COLUMNS)."""
+        self.scale = min(1.0, FOREST_COLUMNS / max(n_features, 1))
+        self.defaults = {
+            **self.defaults,
+            "max_features": type(self).defaults["max_features"] * self.scale,
+        }
 
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         cls = self.classifier if self.classification else self.regressor
@@ -722,7 +740,7 @@ class ExtraTrees(Forest):
 
     def space(self, trial):
         return {
-            "max_features": trial.suggest_float("max_features", 0.3, 1.0),
+            "max_features": trial.suggest_float("max_features", 0.3 * self.scale, 1.0 * self.scale),
             "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
         }
 
@@ -735,7 +753,7 @@ class RandomForest(Forest):
 
     def space(self, trial):
         return {
-            "max_features": trial.suggest_float("max_features", 0.2, 1.0),
+            "max_features": trial.suggest_float("max_features", 0.2 * self.scale, 1.0 * self.scale),
             "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
         }
 
@@ -768,9 +786,15 @@ class Linear(FamilySpec):
     seeded = False
     defaults = {"C": 1.0}
     max_iter = 300
+    scale = 1.0  # of ``C``, on a wide table (``fit_width``)
+
+    def fit_width(self, n_features: int) -> None:
+        """Scale ``C``, its default and its range down for a table of ``n_features`` columns."""
+        self.scale = min(1.0, LINEAR_COLUMNS / max(n_features, 1))
+        self.defaults = {**self.defaults, "C": self.scale}
 
     def space(self, trial):
-        return {"C": trial.suggest_float("C", 1e-3, 1e2, log=True)}
+        return {"C": trial.suggest_float("C", 1e-3 * self.scale, 1e2 * self.scale, log=True)}
 
     def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
         # One unit: the solver cannot be interrupted, so the deadline is only checked before it.
