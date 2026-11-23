@@ -1021,24 +1021,30 @@ def _order_works(found: Proposal, order: pd.Series) -> bool:
     return True
 
 
-def _columns_not_in_test(
-    ctx: ToolContext, dataset: Dataset, names: list[str], target: str, ignored: list[str]
-) -> dict | None:
-    """The warning for the columns the model would learn from that no test or predict dataset of
-    the project has, or None. Predicting needs every column the model learned from, under its
-    exact name, so a column one of those datasets has is not reported. A dataset that has none
-    of the columns is another table, not the data to predict, and is not compared."""
+def absent_from_test(
+    conn,
+    dataset: Dataset,
+    features: list[str],
+    kinds: tuple[DatasetType, ...] = (DatasetType.TEST, DatasetType.PREDICT),
+) -> list[str]:
+    """The ``features`` that no dataset of the project of one of ``kinds`` (test or predict) has.
+    Predicting needs every column the model learned from, under its exact name, so a column one
+    of those datasets has is not reported. A dataset that has none of the columns is another
+    table, not the data to predict, and is not compared."""
     if dataset.type != DatasetType.TRAIN:
-        return None
-    left_out = {target, *ignored}
-    features = [n for n in names if n not in left_out]
+        return []
     later = [
         have
-        for other in projects.list_datasets(ctx.conn, dataset.project_id)
-        if other.type in (DatasetType.TEST, DatasetType.PREDICT)
+        for other in projects.list_datasets(conn, dataset.project_id)
+        if other.type in kinds
         and (have := {name for name, _ in other.schema}).intersection(features)
     ]
-    absent = [n for n in features if not any(n in have for have in later)] if later else []
+    return [n for n in features if not any(n in have for have in later)] if later else []
+
+
+def _columns_not_in_test(absent: list[str]) -> dict | None:
+    """The warning for the columns the model would learn from that no test or predict dataset of
+    the project has, or None."""
     if not absent:
         return None
     shown = ", ".join(clean_text(n) for n in absent[:_MAX_ABSENT_SHOWN])
@@ -1185,8 +1191,32 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         warnings.append(
             _warning("leak_partial", "the leak check ran out of time; some columns were not scored")
         )
-    if absent := _columns_not_in_test(ctx, dataset, columns, target, [*ignored, *left_out]):
-        warnings.append(absent)
+    left_out_names = {target, *ignored, *left_out}
+    features = [n for n in columns if n not in left_out_names]
+    absent = absent_from_test(ctx.conn, dataset, features)
+    # A column that a test dataset lacks cannot be predicted from, so the proposal leaves it out.
+    # A predict dataset may be the output of a batch prediction (with the columns of its input,
+    # or some of them), so it only makes the warning. A column that another train dataset without
+    # the target holds may have been added by a module to the train data and to the test data
+    # alike (a join), so the test dataset is not the one to predict from.
+    lacking = absent_from_test(ctx.conn, dataset, features, (DatasetType.TEST,))
+    elsewhere = {
+        name
+        for other in projects.list_datasets(ctx.conn, dataset.project_id)
+        if other.type == DatasetType.TRAIN
+        and other.id != dataset.id
+        and target not in {n for n, _ in other.schema}
+        for name, _ in other.schema
+    }
+    room = max(_MAX_IGNORED_LISTED - len(ignored), 0)  # shared with the ids and constants
+    left_out_here = [n for n in lacking if n not in elsewhere and _is_plain(n)][:room]
+    for name in left_out_here:
+        suggestions.append(
+            {"column": clean_text(name), "reason": "not in the test data", "code": "not_in_test"}
+        )
+        ignored.append(name)
+    if warning := _columns_not_in_test([n for n in absent if n not in set(left_out_here)]):
+        warnings.append(warning)
     if is_skewed_target(found.y, task):
         warnings.append(
             _warning(
