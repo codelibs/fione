@@ -705,6 +705,11 @@ RARE_CLASS_SHARE = 0.10  # below this share of the rows, suggest decision="balan
 # ... and only when the class is also under this fraction of an even share (1 / classes): with
 # many classes every one of them is under RARE_CLASS_SHARE, rare or not.
 RARE_CLASS_EVEN = 0.5
+# A classification target of whole numbers in a row, from 0 or 1 up, between these many classes (a
+# rating of 1 to 5, a grade of 0 to 4), may be ordered: suggest the quadratic weighted kappa. A
+# measure that few values cover (an age of 17 to 24, a year) does not start there.
+ORDERED_CLASSES_MIN = 3
+ORDERED_CLASSES_MAX = 10
 # A column named like an identifier (id, user_id, userId, 顧客ID, 番号) or like whom the rows are
 # about (subject, patient, customer, query, ... alone) that holds each value in several rows, at
 # least REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
@@ -765,6 +770,27 @@ def is_skewed_target(y: pd.Series, task: str) -> bool:
     if task != "regression" or len(y) == 0 or not pd.api.types.is_numeric_dtype(y):
         return False
     return metrics.log1p_skew(y.to_numpy(dtype=float)) is not None
+
+
+def ordered_classes(y: pd.Series, task: str) -> tuple[int, int] | None:
+    """The lowest and highest class of a classification target whose values are
+    ``ORDERED_CLASSES_MIN`` to ``ORDERED_CLASSES_MAX`` whole numbers in a row starting at 0 or 1,
+    else None."""
+    y = y.dropna()
+    if (
+        task != "classification"
+        or pd.api.types.is_bool_dtype(y)
+        or not pd.api.types.is_numeric_dtype(y)
+    ):
+        return None
+    values = np.sort(y.unique())
+    if not ORDERED_CLASSES_MIN <= len(values) <= ORDERED_CLASSES_MAX:
+        return None
+    if (values != np.round(values)).any() or values[-1] - values[0] + 1 != len(values):
+        return None
+    if values[0] not in (0, 1):
+        return None
+    return int(values[0]), int(values[-1])
 
 
 def rare_class_share(y: pd.Series, task: str) -> float | None:
@@ -1228,6 +1254,20 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 f"the rarest class is {share:.1%} of the rows; if the score treats every class "
                 "alike (such as balanced accuracy or macro F1), decision 'balanced' may help",
                 share=f"{max(share * 100, 0.1):.1f}",
+            )
+        )
+    ordered = ordered_classes(found.y, task)
+    if ordered is not None and str(args.get("sort_metric", "")).lower() != "qwk":
+        low, high = ordered
+        warnings.append(
+            _warning(
+                "ordered_classes",
+                f"the classes are the whole numbers {low} to {high}; if their order matters (a "
+                "rating scored by quadratic weighted kappa), sort_metric 'qwk' with decision "
+                "'tuned' fits cut points on the expected class, and task 'regression' with "
+                "sort_metric 'rounded_qwk' is the alternative",
+                low=str(low),
+                high=str(high),
             )
         )
     overrides = {"sort_metric": recommended_metric(found.y, task)}
