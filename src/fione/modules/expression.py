@@ -42,8 +42,9 @@ _UNARY_FUNCTIONS = {
     "log": np.log,
     "log1p": np.log1p,
     "exp": np.exp,
+    "floor": np.floor,
 }
-_TWO_FUNCTIONS = {"min2": np.minimum, "max2": np.maximum}
+_TWO_FUNCTIONS = {"min2": np.minimum, "max2": np.maximum, "mod2": np.mod}
 _ROW_FUNCTIONS = ("rowsum", "rowmean", "rowcount")
 FUNCTIONS = (
     *_UNARY_FUNCTIONS,

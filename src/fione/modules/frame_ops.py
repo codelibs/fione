@@ -914,8 +914,8 @@ _op(
             "maxLength": 1000,
             "description": (
                 'numbers and columns (col("a b") for a name with spaces or symbols); + - * / **;'
-                " == != < <= > >= & | ~ (give 1 or 0); abs sqrt log log1p exp min2 max2 clip"
-                " isnull where(cond, x, y); rowsum rowmean rowcount of values and quoted"
+                " == != < <= > >= & | ~ (give 1 or 0); abs sqrt log log1p exp floor min2 max2 mod2"
+                " clip isnull where(cond, x, y); rowsum rowmean rowcount of values and quoted"
                 ' patterns ("flag_*"); nan. An infinite result is empty.'
             ),
         },
