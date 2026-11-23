@@ -523,7 +523,12 @@ column, of any kind of values, is an input that holds at least 5% of what the mo
 counts as one group, and with fewer groups than folds the number of folds is lowered to the
 number of groups (at least two groups are needed). A class that occurs in so few groups that
 some fold's training rows lack it is refused, with the column named. The analysis page and the
-assistant suggest this when a column named like an ID (`user_id`, `顧客ID`) repeats its values over rows.
+assistant suggest this when a column named like an ID (`user_id`, `顧客ID`) repeats its values over rows,
+unless a test dataset of the project has, on at least 90% of its rows, a value of that column
+that the training rows hold too: the rows to predict then belong to groups the model has seen, a random split
+matches how the model will be used, and keeping the groups together would make the score look worse than the
+test gives. They say so instead. The check reads the values of the whole training column and a sample of the
+test rows; a prediction dataset is not asked, since a batch prediction keeps the values of its own input.
 A training run also says so when no group column is given and a text column of 100 or more
 values has about 20 rows or more for each value, and the rows of one value share the value of
 most other columns (rows of one game or patient look alike).

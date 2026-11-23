@@ -513,7 +513,7 @@ def _train_view(
         values=values,
         inputs=inputs,
         warnings=[w for w in _warnings(dataset, found, task, inputs) if w[1] not in left_out],
-        tips=_tips(found, task),
+        tips=_tips(request, conn, dataset, found, task),
         tasks=TASKS,
         decisions=DECISIONS,
         transforms=TRANSFORMS,

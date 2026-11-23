@@ -607,6 +607,23 @@ def test_a_repeated_id_column_suggests_keeping_its_rows_together(owner):
     assert "appears in several rows" not in tips_page(owner, unique)
 
 
+def test_a_repeated_id_the_test_data_holds_too_is_not_suggested_for_grouping(owner):
+    from fione.projects.ingest import ingest_csv
+    from fione.projects.service import DatasetType
+
+    client, pid, _ = owner
+    label = pd.Series(np.random.default_rng(2).integers(0, 2, 400))
+    repeated = tip_frame(label)
+    repeated.insert(1, "user_id", np.repeat(np.arange(40), 10))
+    later = repeated.drop(columns="label")
+    with closing(connect(client)) as conn:
+        content = io.BytesIO(later.to_csv(index=False).encode())
+        ingest_csv(client.app.state.storage, conn, pid, "later", DatasetType.TEST, content)
+    page = tips_page(owner, repeated)
+    assert "has a value that the training data has too" in page and "user_id" in page
+    assert "looks like an ID that appears in several rows" not in page
+
+
 def test_the_tips_are_for_the_detailed_view_where_the_settings_are(owner):
     rare = pd.Series(["a"] * 380 + ["b"] * 20)
     assert "rarest class" not in tips_page(owner, tip_frame(rare), detailed=False)
