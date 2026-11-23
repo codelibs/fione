@@ -36,6 +36,11 @@ TextLinearWide, TextLinearChar and TextLinearPlain are variants of TextLinear fo
 phase of the search (``fione.engine.automl``): more words, word and character n-grams, and the
 text view without the derived features. They differ from it only in what they read.
 
+LinearBoost is a late family too: a linear model on the ``linear`` view and small trees boosted
+from its margin. LightGBM, XGBoost and CatBoost also start with a trial of very small trees
+(``starts``) and may choose them: trees of two to four leaves can beat the defaults where the
+signal is mostly additive.
+
 LightGBM_L1, XGBoost_L1 and CatBoost_L1 are the boosting families with an L1 objective: they
 learn the median of the target, which a heavy-tailed target makes a better prediction for the
 absolute error than the mean. They are late candidates too, for a regression ranked by MAE,
@@ -54,6 +59,7 @@ import pandas as pd
 import xgboost as xgb
 from catboost import CatBoostClassifier, CatBoostRegressor
 from scipy import sparse
+from scipy.special import softmax
 from sklearn.ensemble import (
     ExtraTreesClassifier,
     ExtraTreesRegressor,
@@ -98,6 +104,9 @@ class FamilySpec:
         str
     ]  # Prep method producing this family's input: tree, catboost, dense or linear
     defaults: ClassVar[dict]  # the first trial's parameters, keyed like ``space``
+    # Trials that follow the defaults before the sampler chooses: points of ``space`` it would
+    # reach late or never, such as trees far smaller than the defaults.
+    starts: ClassVar[tuple[dict, ...]] = ()
     refit: ClassVar[bool] = True  # False: the final model is the average of the fold models
     quantile_objective: ClassVar[bool] = False  # True: can learn a quantile of the target
     seeded: ClassVar[bool] = True  # False: the same fit gives the same model, whatever the seed
@@ -306,11 +315,21 @@ class LightGBM(FamilySpec):
         "subsample": 0.8,
         "reg_lambda": 1.0,
     }
+    starts = (
+        {
+            "learning_rate": 0.1,
+            "num_leaves": 4,
+            "min_child_samples": 100,
+            "colsample_bytree": 0.6,
+            "subsample": 0.8,
+            "reg_lambda": 10.0,
+        },
+    )
 
     def space(self, trial):
         return {
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
-            "num_leaves": trial.suggest_int("num_leaves", 8, MAX_LEAVES, log=True),
+            "num_leaves": trial.suggest_int("num_leaves", 2, MAX_LEAVES, log=True),
             "min_child_samples": trial.suggest_int("min_child_samples", 5, 100),
             "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
             "subsample": trial.suggest_float("subsample", 0.5, 1.0),
@@ -350,6 +369,135 @@ class LightGBM(FamilySpec):
         return np.asarray(model.booster_.feature_importance(importance_type="gain"), dtype=float)
 
 
+class OffsetBoost:
+    """A linear model and the small trees boosted from its margin: the prediction is the sum of
+    the two in margin space (logits, or the value for regression)."""
+
+    def __init__(self, linear, booster, classification: bool):
+        self.linear = linear
+        self.booster = booster
+        self.classification = classification
+        self.classes_ = getattr(booster, "classes_", None)
+        self.baseline_ = linear.baseline_
+
+    def margin(self, X: pd.DataFrame) -> np.ndarray:
+        base = self.linear.decision_function(X) if self.classification else self.linear.predict(X)
+        return base + self.booster.predict(X, raw_score=True)
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        margin = self.margin(X)
+        if margin.ndim == 1:
+            positive = 1.0 / (1.0 + np.exp(-margin))
+            return np.column_stack([1.0 - positive, positive])
+        return softmax(margin, axis=1)
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        return self.margin(X)
+
+
+class LinearBoost(LightGBM):
+    """Small trees boosted from a linear model's margin (LightGBM's ``init_score``), on the
+    linear view. Where the signal is mostly additive (the rates of the values of a column, the
+    levels of a category) the linear model carries most of it, and trees of a few leaves add the
+    interactions it misses; large trees on the same inputs mostly fit noise. The linear model is
+    fitted on the training rows themselves, as a regularised linear model with few parameters
+    fits little noise. A late candidate."""
+
+    name = "LinearBoost"
+    view = "linear"
+    quantile_objective = False
+    cost = 2.0
+    reference = "Linear"
+    keeps_share = False  # a family of its own: Linear runs in the base time like the others
+    defaults = {
+        "C": 1.0,
+        "learning_rate": 0.1,
+        "num_leaves": 4,
+        "min_child_samples": 100,
+        "colsample_bytree": 0.7,
+        "subsample": 0.8,
+        "reg_lambda": 10.0,
+    }
+    starts = ()
+
+    @classmethod
+    def applies(cls, prep, X: pd.DataFrame) -> bool:
+        return True
+
+    @classmethod
+    def coef_bytes(cls, prep, outputs: int) -> int:
+        return prep.linear_width * max(1, outputs) * 8 + 1024
+
+    def space(self, trial):
+        return {
+            "C": trial.suggest_float("C", 1e-3, 1e2, log=True),
+            "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.3, log=True),
+            "num_leaves": trial.suggest_int("num_leaves", 2, 16, log=True),
+            "min_child_samples": trial.suggest_int("min_child_samples", 20, 500, log=True),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.4, 1.0),
+            "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 30.0, log=True),
+        }
+
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
+        params = dict(params)
+        c = params.pop("C")
+        if self.classification:
+            linear = LogisticRegression(C=c, max_iter=Linear.max_iter)
+        else:
+            linear = Ridge(alpha=1.0 / c)
+        linear.fit(X_tr, y_tr, sample_weight=sample_weight)
+        linear.baseline_ = X_tr.to_numpy(np.float64).mean(axis=0)
+        deadline.remaining()  # consulted once, so that the unit time is measured (see ``fit``)
+
+        def offset(X):
+            return linear.decision_function(X) if self.classification else linear.predict(X)
+
+        cls = lgb.LGBMClassifier if self.classification else lgb.LGBMRegressor
+        booster = cls(
+            n_estimators=MAX_ROUNDS if X_va is not None else rounds,
+            subsample_freq=1,
+            n_jobs=self.n_jobs,
+            random_state=self.seed,
+            verbose=-1,
+            **params,
+        )
+        callbacks = [_LightGBMDeadline(deadline)]
+        evaluation = {}
+        if X_va is not None:
+            callbacks.insert(0, lgb.early_stopping(EARLY_STOPPING_ROUNDS, verbose=False))
+            evaluation = {
+                "eval_X": (X_va,),
+                "eval_y": (y_va,),
+                "eval_init_score": [offset(X_va)],
+            }
+        booster.fit(
+            X_tr,
+            y_tr,
+            sample_weight=sample_weight,
+            init_score=offset(X_tr),
+            callbacks=callbacks,
+            **evaluation,
+        )
+        return OffsetBoost(linear, booster, self.classification)
+
+    def rounds(self, model) -> int:
+        return super().rounds(model.booster)
+
+    def size_bytes(self, model) -> int:
+        return super().size_bytes(model.booster) + model.linear.coef_.size * 8 + 1024
+
+    def importance(self, model) -> np.ndarray:
+        trees = by_feature(super().importance(model.booster), list(model.booster.feature_name_))
+        weight = by_feature(
+            np.abs(np.atleast_2d(model.linear.coef_)).sum(axis=0), list(model.booster.feature_name_)
+        )
+        # Gains and coefficients are in different units: each part counts for half.
+        return sum(
+            (part / part.sum() for part in (trees, weight) if part.sum() > 0), np.zeros(len(trees))
+        )
+
+
 class _XGBoostDeadline(xgb.callback.TrainingCallback):
     def __init__(self, deadline):
         super().__init__()
@@ -371,6 +519,16 @@ class XGBoost(FamilySpec):
         "subsample": 0.8,
         "reg_lambda": 1.0,
     }
+    starts = (
+        {
+            "learning_rate": 0.1,
+            "max_depth": 2,
+            "min_child_weight": 5.0,
+            "colsample_bytree": 0.6,
+            "subsample": 0.8,
+            "reg_lambda": 10.0,
+        },
+    )
 
     def space(self, trial):
         return {
@@ -439,11 +597,12 @@ class CatBoost(FamilySpec):
     view = "catboost"
     quantile_objective = True
     defaults = {"learning_rate": 0.05, "depth": 6, "l2_leaf_reg": 3.0}
+    starts = ({"learning_rate": 0.1, "depth": 2, "l2_leaf_reg": 10.0},)
 
     def space(self, trial):
         return {
             "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.3, log=True),
-            "depth": trial.suggest_int("depth", 3, 8),
+            "depth": trial.suggest_int("depth", 2, 8),
             "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1.0, 20.0, log=True),
         }
 
@@ -1045,6 +1204,7 @@ FAMILIES: dict[str, type[FamilySpec]] = {
     spec.name: spec
     for spec in (
         LightGBM,
+        LinearBoost,
         XGBoost,
         CatBoost,
         RandomForest,

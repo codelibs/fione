@@ -17,18 +17,19 @@ spec 5.1/5.7) and spends it in phases:
    Each family hands on its ``TOP_TRIALS`` best trials, as candidates ``Family``,
    ``Family#2`` and ``Family#3``.
    After them come the *late* families (``LATE_ORDER``: LinearWide, for data with categorical
-   columns that the linear view cuts short, and the variants of TextLinear, for data with
-   prose), and for a regression ranked by MAE, MEDAE or SMAPE with no ``quantile``, the L1 variants
-   of the boosting families (``MEDIAN_ORDER``: LightGBM_L1, XGBoost_L1, CatBoost_L1, which learn
-   the median; each after the family it varies). When any applies, ``LATE_SHARE`` of the search
+   columns that the linear view cuts short; the variants of TextLinear, for data with prose; and
+   LinearBoost, small trees boosted from a linear model), and for a regression ranked by MAE,
+   MEDAE or SMAPE with no ``quantile``, the L1 variants of the boosting families
+   (``MEDIAN_ORDER``: LightGBM_L1, XGBoost_L1, CatBoost_L1, which learn the median; each after the
+   family it varies). When any applies, ``LATE_SHARE`` of the search
    time is kept for them, taken from
    the base families' shares (scaled to 0.85) except TextLinear's, which is as without them.
    The late families get what is left of the search time (that and what the base families
    leave), never the time of the later phases:
    each one the search time still left times its ``LATE_WEIGHTS`` share among the late families
    not yet run, and only when its first trial is expected to fit in that share (``cost`` times
-   the first trial of its reference family: TextLinear, Linear for LinearWide, the boosting
-   family itself for its L1 variant). A late
+   the first trial of its reference family: TextLinear, Linear for LinearWide and LinearBoost,
+   the boosting family itself for its L1 variant). A late
    family that does not apply to the data is not run and changes nothing; one that does not
    improve the ensemble gets weight 0 from ``caruana``.
    With few rows the folds are drawn again, with other seeds, ``repeats_for`` times (or
@@ -154,16 +155,18 @@ LATE_ORDER = (
     "TextLinearChar",
     "TextLinearPlain",
     "TextLinearWide",
+    "LinearBoost",
     *MEDIAN_ORDER,
 )
-LATE_WEIGHTS = {
-    "LinearWide": 1 / 12,
-    "TextLinearChar": 5 / 24,
-    "TextLinearPlain": 5 / 48,
-    "TextLinearWide": 5 / 48,
-    "LightGBM_L1": 1 / 4,
-    "XGBoost_L1": 1 / 8,
-    "CatBoost_L1": 1 / 8,
+LATE_WEIGHTS = {  # sum 1; LinearBoost comes after the text ones and takes what they leave
+    "LinearWide": 5 / 64,
+    "TextLinearChar": 25 / 128,
+    "TextLinearPlain": 25 / 256,
+    "TextLinearWide": 25 / 256,
+    "LinearBoost": 1 / 16,
+    "LightGBM_L1": 15 / 64,
+    "XGBoost_L1": 15 / 128,
+    "CatBoost_L1": 15 / 128,
 }
 LATE_SHARE = 0.15  # of the search time is kept for the late families, when any applies
 # The first trial of a base family may take up to this share of the search time left, if that is

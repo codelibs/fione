@@ -34,6 +34,7 @@ from fione.engine.families import (
     Forest,
     LightGBM,
     Linear,
+    LinearBoost,
     TextLinear,
     TextModel,
     XGBoost,
@@ -84,6 +85,8 @@ def _width(model: TrainedModel, features: int, hidden: bool = True) -> int:
                 widths.append(max(one.coefs_[0].shape) if hidden else one.coefs_[0].shape[0])
             elif isinstance(member.spec, Linear):
                 widths.append(np.atleast_2d(one.coef_).shape[1])
+            elif isinstance(member.spec, LinearBoost):
+                widths.append(np.atleast_2d(one.linear.coef_).shape[1])
             elif isinstance(member.spec, TextLinear):  # the words are summed per column
                 widths.append(len(one.dense) + len(one.texts))
     return max(1, *widths)
@@ -291,6 +294,18 @@ def _linear_view_contributions(spec, model, view: pd.DataFrame) -> tuple[np.ndar
     return by_feature, bias
 
 
+def _linear_boost_contributions(spec, model, view: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """The linear model's contributions (see ``_linear_view_contributions``) plus the trees'
+    TreeSHAP ones, both margins over the linear view's columns, summed onto the features."""
+    linear, bias = _linear_view_contributions(Linear(spec.task, spec.n_classes), model.linear, view)
+    raw = model.booster.predict(view, pred_contrib=True, num_iteration=spec.rounds(model))
+    raw = np.asarray(raw, dtype=float).reshape(len(view), -1, view.shape[1] + 1)
+    owner = owners(view.columns)
+    trees = np.zeros((len(view), raw.shape[1], owner.max() + 1))
+    np.add.at(trees, (slice(None), slice(None), owner), raw[:, :, : view.shape[1]])
+    return linear + trees, bias + raw[:, :, view.shape[1]]
+
+
 def _text_linear_contributions(model, view: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     """Contributions of the text view, summed onto the features they derive from: like the
     linear view's (``coef * (x - baseline)``), with the words of a text column summed to one
@@ -334,6 +349,8 @@ def native_contributions(
             bias += tree_bias
         phi, bias = phi / len(model.estimators_), bias / len(model.estimators_)
         return (phi[:, 1:], bias[:, 1:]) if k == 2 else (phi, bias)
+    if isinstance(spec, LinearBoost):
+        return _linear_boost_contributions(spec, model, view)
     if isinstance(spec, LightGBM):
         raw = model.predict(view, pred_contrib=True, num_iteration=spec.rounds(model))
     elif isinstance(spec, XGBoost):

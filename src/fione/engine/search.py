@@ -356,7 +356,8 @@ def run_family(
         ),
         pruner=optuna.pruners.MedianPruner(n_startup_trials=3),
     )
-    study.enqueue_trial(spec.defaults)
+    for first_params in (spec.defaults, *spec.starts):
+        study.enqueue_trial(first_params)
     best: _Outcome | None = None
     leaders: list[
         tuple[_Outcome, dict, int, float]
