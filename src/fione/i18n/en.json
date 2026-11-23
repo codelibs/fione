@@ -567,7 +567,7 @@
   "train.f.seed": "Random seed",
   "train.f.time_column": "Order of the rows in time",
   "train.time_column.none": "Not in time (shuffled parts)",
-  "train.h.time_column": "Choose a column of dates or numbers that orders the rows in time to check each model on later rows than it learned from, as when predicting the future. The earliest part is only learned from, and derived features are not tried. A column used here can be left out of the inputs.",
+  "train.h.time_column": "Choose a column of dates or numbers that orders the rows in time to check each model on later rows than it learned from, as when predicting the future. The earliest part is only learned from, and derived features are not tried. When other inputs move with time too (a day number, a year), the column's own number, or the year and the seconds of a date, are not used as inputs; a notice says so.",
   "train.error.time_column": "Choose a column of the data other than the target.",
   "train.f.balance_classes": "Balance the classes",
   "train.f.decision": "Choosing the predicted class",

@@ -281,6 +281,40 @@ def _datetimes(s: pd.Series, dayfirst: bool = False) -> pd.Series:
     return s
 
 
+TREND_CARRIER_CORR = 0.8  # rank correlation with the time column of an input that moves with it
+TREND_SAMPLE_ROWS = 20_000
+
+
+def _time_numbers(s: pd.Series) -> pd.Series:
+    """A column as numbers that grow with time: the numbers themselves, else its dates as seconds
+    (NaN where a value is neither)."""
+    numbers = pd.to_numeric(s, errors="coerce")
+    if numbers.notna().mean() >= 0.9:
+        return numbers.astype(float)
+    when = _datetimes(s)
+    return when.astype("int64").where(when.notna()).astype(float) / 1e9
+
+
+def _trend_carriers(X: pd.DataFrame, column: str) -> list[str]:
+    """The numeric inputs other than the time ``column`` that rank with it (a rank correlation of
+    at least ``TREND_CARRIER_CORR``): a day counter, a year, the day of a second date. Where the
+    level of the target moves with time, they let a model learn it without the time column
+    itself; without them nothing would."""
+    step = max(len(X) // TREND_SAMPLE_ROWS, 1)
+    sample = X.iloc[::step]
+    time = _time_numbers(sample[column]).rank()
+    found = []
+    for other in sample.columns:
+        if other == column:
+            continue
+        values = pd.to_numeric(sample[other], errors="coerce")
+        if values.notna().mean() < 0.9 or values.nunique() <= 1:
+            continue
+        if abs(values.rank().corr(time)) >= TREND_CARRIER_CORR:
+            found.append(other)
+    return found
+
+
 class Prep:
     """Turns raw feature frames into the inputs of each model family.
 
@@ -315,9 +349,15 @@ class Prep:
     _code_unseen: dict = {}  # code column -> share given to a value not seen in training
     _date_now = None  # when a model that reads two-digit years was fitted (old: today's clock)
     fill: dict = {}  # input column -> share of the training rows that have a value (old: none)
+    # The time column, when it has no raw value, year or seconds feature because the inputs in
+    # ``trend_carriers`` move with it too (a day counter, a year, a second date): see ``fit``.
+    trend_column: str | None = None
+    trend_carriers: list = []
 
-    def fit(self, X: pd.DataFrame, groups=(), y=None) -> "Prep":
+    def fit(self, X: pd.DataFrame, groups=(), y=None, trend: str | None = None) -> "Prep":
         self.dropped: list[str] = []
+        self.trend_carriers = _trend_carriers(X, trend) if trend in X.columns else []
+        self.trend_column = trend if self.trend_carriers else None
         self._date_now = None
         self.dayfirst = ()
         self.integer_dates = {}
@@ -358,6 +398,8 @@ class Prep:
                 else:
                     self.categories[column] = sorted(counts.index)
                     self._plan.append((column, "category"))
+            elif column == self.trend_column and not integer_date_format(s):
+                continue  # a counter of the time: later rows lie beyond every value learned from
             else:
                 self._plan.append((column, "numeric"))
                 if fmt := integer_date_format(s):
@@ -446,6 +488,8 @@ class Prep:
         """The features of a date column, in order (a Prep fitted before the day and the week of the
         year were added has neither)."""
         parts = tuple(p for p in _DATE_PARTS if self.calendar or p not in _CALENDAR_PARTS)
+        if column == self.trend_column:  # the parts that only grow: later rows lie beyond them
+            parts = tuple(p for p in parts if p not in ("year", "ordinal"))
         return parts + (("hour",) if column in self.timed else ())
 
     def _fit_no_trend(self, base: pd.DataFrame) -> None:
@@ -464,7 +508,7 @@ class Prep:
                     at += len(_integer_date_parts(self.integer_dates[column], self.calendar))
                 continue
             parts = self._date_parts(column)
-            if base[f"f{at + parts.index('year')}"].nunique() <= 1:
+            if column != self.trend_column and base[f"f{at + parts.index('year')}"].nunique() <= 1:
                 off.append(f"f{at + parts.index('ordinal')}")
             at += len(parts)
         self._no_trend = tuple(off)

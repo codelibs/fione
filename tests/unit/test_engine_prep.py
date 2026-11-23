@@ -1077,3 +1077,40 @@ def test_a_code_not_seen_in_training_gets_the_share_of_the_rarest_one():
     shares = prep.tree(new)[_code_position(prep)]
     rarest = min(prep._code_shares["account"].values())
     assert shares.iloc[0] == shares.iloc[1] == rarest
+
+
+def test_trend_column_loses_only_the_features_that_grow_when_another_input_moves_with_time():
+    days = pd.date_range("2020-01-01", periods=60)
+    X = pd.DataFrame(
+        {
+            "when": days.strftime("%Y-%m-%d"),
+            "n": np.arange(60),
+            "m": np.arange(60) * 2 + 5,
+            "v": np.arange(60) % 7,
+        }
+    )
+    dated = Prep().fit(X, trend="when")
+    assert dated.trend_column == "when" and set(dated.trend_carriers) == {"n", "m"}
+    assert [f for f in dated.feature_names if f.startswith("when")] == [
+        "when__month",
+        "when__day",
+        "when__dayofweek",
+        "when__dayofyear",
+        "when__week",
+    ]
+    counted = Prep().fit(X, trend="n")
+    assert "n" not in counted.columns and "when__ordinal" in counted.feature_names
+    later = X.assign(when=pd.date_range("2024-03-01", periods=60).strftime("%Y-%m-%d"))
+    assert dated.tree(later).shape[1] == dated.tree(X).shape[1]
+    assert counted.tree(X.drop(columns="n")).shape == counted.tree(X).shape  # not needed to predict
+
+
+def test_trend_column_is_read_as_before_when_no_other_input_moves_with_time():
+    days = pd.date_range("2020-01-01", periods=60)
+    X = pd.DataFrame(
+        {"when": days.strftime("%Y-%m-%d"), "n": np.arange(60), "v": np.arange(60) % 7}
+    )
+    alone = Prep().fit(X.drop(columns="n"), trend="when")  # the date is the only trend there is
+    assert alone.trend_column is None and "when__ordinal" in alone.feature_names
+    counter = Prep().fit(X.drop(columns="when"), trend="n")
+    assert counter.trend_column is None and "n" in counter.columns

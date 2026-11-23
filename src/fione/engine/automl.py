@@ -559,6 +559,25 @@ class AutoML:
             importance=round(share, 2),
         )
 
+    def _notice_time_trend(self, prep: Prep) -> None:
+        """Say that the time column is not read as what only grows with time. The rows to predict
+        are later than all the rows the model learns from, so a tree would read the new values of
+        the column (as a number, or the year and the seconds of a date) as the latest period it
+        knows; the validation parts lie just after the rows they learn from and do not show what
+        that costs. Inputs that move with the column keep the level over time learnable."""
+        if prep.trend_column is None:
+            return
+        shown = ", ".join(repr(name) for name in prep.trend_carriers[:DROPPED_SHOWN])
+        self._notice(
+            f"{prep.trend_column!r}, the column that orders the rows in time, is not read as a "
+            "number (or as the year and the seconds of a date): the rows to predict are later than "
+            "all the rows the model learns from, so it would read their values as the latest "
+            f"period it knows. The inputs {shown} move with it and carry the level over time",
+            kind="time_trend_left_out",
+            columns=[prep.trend_column],
+            carriers=list(prep.trend_carriers[:DROPPED_SHOWN]),
+        )
+
     def _notice_time_parts(self, times: pd.Series, folds, n_rows: int) -> None:
         """Say how the rows are cut for the time-ordered validation: the rows (and, for a date
         column, the days) of the first part, which is only learned from, and of each validation
@@ -1287,8 +1306,9 @@ class AutoML:
                     if c.time_column
                     else "derived features are not tried with a quantile"
                 )
-        prep = Prep().fit(X, groups, y)
+        prep = Prep().fit(X, groups, y, trend=c.time_column)
         self._notice_dropped_columns(prep, X)
+        self._notice_time_trend(prep)
         self._leaked = set()
         leak_secs = min(LEAK_SECS, LEAK_SHARE * max(deadline.remaining(), 0.0))
         leak_start = time.monotonic()
