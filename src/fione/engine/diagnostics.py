@@ -217,7 +217,12 @@ def _binary(y: np.ndarray, positive: np.ndarray) -> dict:
 
 def _regression(y: np.ndarray, pred: np.ndarray, rng: np.random.Generator) -> dict:
     residual = y - pred
-    counts, edges = np.histogram(residual, bins=RESIDUAL_BINS)
+    try:
+        counts, edges = np.histogram(residual, bins=RESIDUAL_BINS)
+    except ValueError:  # residuals within float noise of one number: too close to cut into bins
+        counts = np.zeros(RESIDUAL_BINS, dtype=int)
+        counts[0] = len(residual)
+        edges = np.linspace(residual.min(), residual.max(), RESIDUAL_BINS + 1)
     groups = [g for g in np.array_split(np.argsort(pred, kind="stable"), DECILES) if len(g)]
     means = _fine(np.array([pred[group].mean() for group in groups]))
     by_decile = [
