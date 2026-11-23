@@ -12,6 +12,8 @@ from fione.engine import search
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError
 from fione.engine.families import (
     FAMILIES,
+    FOREST_COLUMNS,
+    LINEAR_COLUMNS,
     MAX_ROUNDS,
     UNIT_SAFETY,
     FamilySpec,
@@ -252,6 +254,50 @@ def test_rounds_counts_the_iterations_used_for_prediction():
 
 
 # --- run_family -----------------------------------------------------------------
+
+
+def test_a_linear_model_on_a_wide_table_starts_with_a_weaker_c_and_searches_below_it():
+    X, y = _classification(300, 60)
+    prep, y, folds = _setup(X, y)
+    events = []
+    run_family(
+        "Linear",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(30),
+        events.append,
+        _until_trials(events, 3),
+    )
+    scale = LINEAR_COLUMNS / 60
+    first, *later = [e.data["params"]["C"] for e in events if e.type == "trial"]
+    assert first == pytest.approx(scale)
+    assert all(1e-3 * scale <= c <= 1e2 * scale for c in later)
+    assert FAMILIES["Linear"].defaults == {"C": 1.0}  # a table that is not wide keeps C = 1
+
+
+def test_a_forest_on_a_wide_table_looks_at_fewer_columns_at_a_split():
+    X, y = _classification(200, FOREST_COLUMNS + 100)
+    prep, y, folds = _setup(X, y)
+    events = []
+    run_family(
+        "ExtraTrees",
+        X,
+        y,
+        folds,
+        "classification",
+        prep,
+        Deadline(60),
+        events.append,
+        _until_trials(events, 3),
+    )
+    scale = FOREST_COLUMNS / (FOREST_COLUMNS + 100)
+    first, *later = [e.data["params"]["max_features"] for e in events if e.type == "trial"]
+    assert first == pytest.approx(0.7 * scale)
+    assert all(0.3 * scale <= f <= 1.0 * scale for f in later)
+    assert FAMILIES["ExtraTrees"].defaults["max_features"] == 0.7  # a narrow table keeps it
 
 
 def test_every_trial_emits_an_event_with_the_listed_keys():

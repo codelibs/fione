@@ -356,8 +356,6 @@ def run_family(
         ),
         pruner=optuna.pruners.MedianPruner(n_startup_trials=3),
     )
-    for first_params in (spec.defaults, *spec.starts):
-        study.enqueue_trial(first_params)
     best: _Outcome | None = None
     leaders: list[
         tuple[_Outcome, dict, int, float]
@@ -388,6 +386,10 @@ def run_family(
             break
         if view is None:
             view = getattr(prep, spec.view)(X)
+            if hasattr(spec, "fit_width"):  # the defaults and ranges that depend on the width
+                spec.fit_width(view.shape[1])
+            for first_params in (spec.defaults, *spec.starts):
+                study.enqueue_trial(first_params)
             if max_trial_secs is not None:  # a probe now lets the first trial's cap be raised
                 spec.estimate_unit(spec.defaults, view.iloc[folds[0][0]], y[folds[0][0]])
         trial = study.ask()
