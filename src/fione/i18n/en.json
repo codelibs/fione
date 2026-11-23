@@ -516,7 +516,7 @@
   "train.task.regression": "Regression",
   "train.decision.argmax": "Most likely class",
   "train.decision.balanced": "Adjust for class sizes",
-  "train.decision.tuned": "Fit to the ranking metric (two classes, or any number with QWK)",
+  "train.decision.tuned": "Fit to the ranking metric (two classes, or up to 50 with QWK)",
   "train.transform.none": "As it is",
   "train.transform.log1p": "Logarithm (log1p)",
   "train.metric.auto": "Automatic",

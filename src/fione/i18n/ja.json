@@ -516,7 +516,7 @@
   "train.task.regression": "回帰",
   "train.decision.argmax": "最も確率の高いクラス",
   "train.decision.balanced": "クラスの件数で補正",
-  "train.decision.tuned": "ランキング指標に合わせる(二値分類、QWK なら多クラスも)",
+  "train.decision.tuned": "ランキング指標に合わせる(二値分類、QWK なら 50 クラスまで)",
   "train.transform.none": "そのまま",
   "train.transform.log1p": "対数(log1p)",
   "train.metric.auto": "自動",
