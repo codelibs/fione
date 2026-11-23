@@ -714,7 +714,7 @@ class ValueEncoding(Group):
         y = np.asarray(y, dtype=float)
         self._prior = float(y.mean())
         task = "classification" if len(np.unique(y)) == 2 else "regression"
-        self._logit = task == "classification"
+        self._logit = set(np.unique(y)) == {0.0, 1.0}  # the rate of a class, not a two-valued mean
         folds = make_folds(y, task, ENCODING_FOLDS, 0)
         m, prior = ENCODING_SMOOTHING, self._prior
         self._rates, self._sources, names = [], {}, []

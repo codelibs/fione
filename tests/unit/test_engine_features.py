@@ -1833,6 +1833,14 @@ def test_value_encoding_gives_training_rows_rates_that_never_saw_their_own_targe
     assert other.iloc[0] > rates.iloc[-1]  # a new row with that value gets the rate with its label
 
 
+def test_value_encoding_reads_a_two_valued_number_as_a_mean_not_a_rate():
+    X, _ = _prices()
+    y = np.where(np.floor(X["price"].to_numpy()) % 2 == 0, 100.0, 200.0)
+    group = ValueEncoding([("price", "whole")]).fit(X, y)
+    rates = group.transform(pd.DataFrame({"price": [2.5, 3.5]}))["price__whole_target"]
+    assert rates.iloc[0] < 130 < 170 < rates.iloc[1]
+
+
 def test_value_encoding_gives_unseen_values_the_overall_rate_and_pickles_without_rows():
     X, y = _prices()
     group = ValueEncoding([("price", "whole")]).fit(X, y)
