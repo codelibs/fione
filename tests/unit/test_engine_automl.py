@@ -1455,8 +1455,8 @@ def test_a_fit_without_high_cardinality_strings_does_not_depend_on_their_unseen_
     monkeypatch,
 ):
     class NoUnseenShare(automl_module.Prep):
-        def fit(self, X, groups=(), y=None):
-            super().fit(X, groups, y)
+        def fit(self, X, groups=(), y=None, trend=None):
+            super().fit(X, groups, y, trend)
             self.__dict__.pop("_unseen", None)  # as a Prep pickled without the field
             return self
 
@@ -3388,6 +3388,47 @@ def test_no_group_input_notice_when_the_group_column_is_left_out_or_not_relied_o
     _fit(_neighbouring_groups(), no_group, **options)
     assert "group_column_input" not in _kinds(left_out)
     assert "group_column_input" not in _kinds(no_group)
+
+
+def _trend_table(n=900, copy=True):
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"day": np.arange(n), "x": rng.normal(size=n)})
+    df["y"] = 0.05 * df["day"] + df["x"] + rng.normal(0, 0.3, n)
+    return df.assign(week_no=df["day"] // 7) if copy else df
+
+
+def test_a_time_counter_is_not_an_input_when_another_input_moves_with_time():
+    events = []
+    df = _trend_table()
+    model = _fit(
+        df,
+        events,
+        target="y",
+        families=["LightGBM"],
+        max_models=1,
+        nfolds=3,
+        time_column="day",
+    )
+    assert "day" not in model.prep.columns and "week_no" in model.prep.columns
+    (notice,) = [e.data for e in events if e.data.get("kind") == "time_trend_left_out"]
+    assert notice["columns"] == ["day"] and notice["carriers"] == ["week_no"]
+    later = df.drop(columns=["day", "y"]).head(20)
+    assert len(model.predict(later)) == 20  # the counter is not needed to predict
+
+
+def test_a_time_counter_is_an_input_when_nothing_else_moves_with_time():
+    events = []
+    model = _fit(
+        _trend_table(copy=False),
+        events,
+        target="y",
+        families=["LightGBM"],
+        max_models=1,
+        nfolds=3,
+        time_column="day",
+    )
+    assert "day" in model.prep.columns
+    assert not [e for e in events if e.data.get("kind") == "time_trend_left_out"]
 
 
 def _runs(n=1_200, run=100, seed=0):

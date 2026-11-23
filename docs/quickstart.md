@@ -471,8 +471,8 @@ column is given, a notice points this out, since the score
 of shuffled parts is then probably better than on later dates. The models read such a whole-number
 column as a number and also as its year, month, day, day of the week, day of the year, week of
 the year and, with an hour or a Unix time, hour of the day. A column of dates (or of text a date
-can be read from) is read the same way, and as the seconds since 1970 too, with or without a
-time column.
+can be read from) is read the same way, and as the seconds since 1970 too, except when it is the
+time column (see below).
 A notice also points this out for a whole-number column named like a time that runs through 20 or
 more consecutive numbers (a few may be missing), in a sorted file or a shuffled one. With each
 value on one row, a name such as `date`, `day` or `week_no` is enough (a counter of days or
@@ -485,6 +485,39 @@ order. When values repeat, it only warns and sets nothing. It also only warns ab
 dates (20 or more different dates over 30 days to 50 years, no missing value, in 300 rows or
 more, not a birth date) when it proposes no time column, since the date may order the rows in time. A time column turns the search for
 derived features off, so a run with the proposed column does not try them.
+When other inputs move with time too (a day counter, a year, a second date: a rank correlation of
+0.8 or more with the time column), the model does not read what only grows with the time column
+itself. A time column that is a plain number is then left out of the inputs, and a date time column
+loses its year and its seconds since 1970 (its month, day, day of the week, day of the year and
+week stay, and the hour when it has one). The rows to predict are later than all the rows the
+model learned from, so it has not seen their values of what grows, and a tree reads them as the
+latest period it knows; the validation parts lie just after the rows they learn from and do not
+show that. The inputs that move with time keep a level that changes over time learnable, and a
+notice names them. Without such an input the time column is read as it is, since nothing else
+would carry that level. A whole-number time column that holds a date (20141021, a Unix time)
+keeps its number and its date parts.
+A notice also points this out for a whole-number column named like a time that runs through 20 or
+more consecutive numbers (a few may be missing), in a sorted file or a shuffled one. With each
+value on one row, a name such as `date`, `day` or `week_no` is enough (a counter of days or
+periods). With each value on many rows (the day or period of each row), the name must be a
+counter's: a time word and `id`, `idx`, `index`, `no` or `num` (`date_id`, `day_idx`), since a
+year, an age or a day of the month repeats over rows too. The notice is conditional on the rows
+being ordered in time. When each value is on one row, the assistant proposes the column as "Order of the rows in
+time" instead of leaving it out as an ID, unless the classes could not all be validated in that
+order. When values repeat, it only warns and sets nothing. It also only warns about a column of
+dates (20 or more different dates over 30 days to 50 years, no missing value, in 300 rows or
+more, not a birth date) when it proposes no time column, since the date may order the rows in time. A time column turns the search for
+derived features off, so a run with the proposed column does not try them.
+With a time column, the model does not read what only grows with time: a time column that is a
+plain number (a day counter) is left out of the inputs, and a date time column loses its year and
+its seconds since 1970, while its month, day, day of the week, day of the year and week stay (and the hour, when it has one).
+The rows to predict are later than all the rows the model learned from, so it has not seen their
+values of what grows, and a tree reads them as the latest period it knows. On tables of hourly
+or daily rows and on tables of forecast origins this scored better than reading them (the
+validation parts lie just after the rows they learn from and do not show the difference), and
+it scored the same where a level moves with time. A whole-number time column that holds a date
+(20141021, a Unix time) keeps its number and its date parts; to keep a counter as an input, give
+the model a copy of it under another name. A counter that is the only input is kept.
 
 When the data needs more than 1.5 times the longest time the assistant proposes (30 minutes), which
 holds from about 15 million cells (rows times columns) on, its proposal warns that many models may
