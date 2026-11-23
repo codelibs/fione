@@ -29,6 +29,7 @@ from fione.engine.features import (
     ValueFrequency,
     alike_columns,
     encoding_keys,
+    encoding_rows,
     paired,
     passes,
     select_groups,
@@ -1767,6 +1768,44 @@ def test_encoding_keys_choose_numbers_with_repeated_values_only():
         ("price", "whole"),
         ("price", "value"),
     ]
+
+
+def test_the_encodings_are_judged_on_more_rows_when_the_time_covers_them():
+    from fione.engine.features import ENCODING_ROWS, ENCODING_ROWS_MAX
+
+    assert encoding_rows(1_000_000, 1e-4, 10_000) == ENCODING_ROWS_MAX  # 30 s of 5,000
+    assert encoding_rows(1_000_000, 1e-4, 10) == ENCODING_ROWS  # as before: no more than that
+    assert ENCODING_ROWS < encoding_rows(1_000_000, 1e-4, 40) < ENCODING_ROWS_MAX
+    assert encoding_rows(50_000, 1e-4, 10_000) == 50_000  # never more rows than there are
+
+
+def _amounts(n=20000, seed=0):
+    """An amount in cents whose fraction decides the label (a round amount is the risky one)."""
+    rng = np.random.default_rng(seed)
+    amount = rng.integers(1, 30, n) + rng.integers(0, 100, n) / 100
+    cents = np.round((amount - np.floor(amount)) * 100)
+    y = (rng.random(n) < np.where(cents == 0, 0.5, 0.05)).astype(int)
+    return pd.DataFrame({"amount": amount}), y
+
+
+def test_encoding_keys_read_the_cents_of_an_amount_but_not_of_a_whole_number():
+    X, _ = _amounts()
+    X["count"] = np.arange(len(X)) % 50
+    kinds = [kind for column, kind in encoding_keys(["amount", "count"], X) if column == "amount"]
+    assert "cents" in kinds
+    assert ("count", "cents") not in encoding_keys(["amount", "count"], X)
+    prices, _ = _prices()  # tenths only: fewer than ENCODING_MIN_LEVELS fractions
+    assert ("price", "cents") not in encoding_keys(["price"], prices)
+
+
+def test_value_encoding_by_cents_gives_the_rate_of_the_fraction():
+    X, y = _amounts()
+    group = ValueEncoding([("amount", "cents")]).fit(X, y)
+    out = group.transform(pd.DataFrame({"amount": [5.0, 5.37, 12.0, np.nan]}))
+    rates = out["amount__cents_target"].to_numpy()
+    assert rates[0] == pytest.approx(rates[2])  # the same fraction, whatever the whole part
+    assert rates[0] > 0.3 > rates[1]  # round amounts are the risky ones
+    assert rates[3] == pytest.approx(y.mean())
 
 
 def test_value_encoding_gives_training_rows_rates_that_never_saw_their_own_target():
