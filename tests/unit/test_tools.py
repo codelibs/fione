@@ -801,9 +801,14 @@ def _absent_columns(result):
 def test_propose_names_the_columns_the_test_data_lacks(env):
     result = _propose_with_later_data(env, [(DatasetType.TEST, ["x", "label"])])
     codes(result)  # both languages translate the code
-    warning = _absent_columns(result)
-    assert warning["code"] == "columns_not_in_test"
-    assert warning["params"] == {"columns": "z, Age"}
+    # the proposal leaves them out of the training itself, which is what the card says
+    assert _absent_columns(result) is None
+    assert result["config"]["ignored_columns"] == ["z", "Age"]
+    assert all("analysis.reason.not_in_test" in i18n.catalog(lang) for lang in i18n.LANGUAGES)
+    assert {s["column"]: s["code"] for s in result["ignored_suggestions"]} == {
+        "z": "not_in_test",
+        "Age": "not_in_test",
+    }
 
 
 @pytest.mark.parametrize(
@@ -847,18 +852,59 @@ def test_propose_warns_only_about_columns_absent_from_every_test_dataset(env):
     later = [(DatasetType.TEST, ["x", "z"]), (DatasetType.PREDICT, ["x", "Age"])]
     assert _absent_columns(_propose_with_later_data(env, later)) is None
     later = [(DatasetType.TEST, ["x"]), (DatasetType.PREDICT, ["x", "Age"])]
-    assert _absent_columns(_propose_with_later_data(env, later))["params"] == {"columns": "z"}
+    result = _propose_with_later_data(env, later)
+    assert _absent_columns(result) is None
+    assert result["config"]["ignored_columns"] == ["z", "Age"]  # a prediction does not excuse them
+
+
+def test_a_predict_dataset_that_lacks_columns_only_warns(env):
+    # it may be the output of a batch prediction that kept some columns: not a sign of the test data
+    result = _propose_with_later_data(env, [(DatasetType.PREDICT, ["x", "label"])])
+    assert _absent_columns(result)["params"] == {"columns": "z, Age"}
+    assert not {"z", "Age"} & set(result["config"]["ignored_columns"])
+    assert not result["ignored_suggestions"]
+
+
+def test_a_column_that_another_train_dataset_holds_is_not_left_out(env):
+    # a join may add columns to the train data and to the test data alike, as train datasets
+    later = [(DatasetType.TEST, ["x", "label"]), (DatasetType.TRAIN, ["x", "z", "Age"])]
+    result = _propose_with_later_data(env, later)
+    assert not {"z", "Age"} & set(result["config"]["ignored_columns"])
+    assert _absent_columns(result)["params"] == {"columns": "z, Age"}  # still said
+
+
+def test_a_prediction_of_the_train_table_does_not_excuse_the_columns_the_test_data_lacks(env):
+    later = [(DatasetType.TEST, ["x", "label"]), (DatasetType.PREDICT, ["x", "z", "Age", "label"])]
+    result = _propose_with_later_data(env, later)
+    assert result["config"]["ignored_columns"] == ["z", "Age"]
+
+
+def test_a_copy_of_the_train_table_does_not_stop_the_columns_being_left_out(env):
+    later = [(DatasetType.TEST, ["x", "label"]), (DatasetType.TRAIN, ["x", "z", "Age", "label"])]
+    result = _propose_with_later_data(env, later)
+    assert result["config"]["ignored_columns"] == ["z", "Age"]
+
+
+def test_a_wide_table_lists_only_so_many_columns_the_test_data_lacks(env):
+    columns = [f"feature_column_{i:04d}" for i in range(300)]
+    result = _propose_with_later_data(
+        env,
+        [(DatasetType.TEST, [columns[0]])],
+        train_columns=[*columns, "label"],
+    )
+    assert len(result["config"]["ignored_columns"]) == builtin._MAX_IGNORED_LISTED
+    assert _absent_columns(result)["code"] == "columns_not_in_test_more"  # the rest are said
 
 
 def test_propose_compares_the_names_exactly_as_predicting_does(env):
     result = _propose_with_later_data(env, [(DatasetType.TEST, ["x", "z", "age ", "label"])])
-    assert _absent_columns(result)["params"] == {"columns": "Age"}
+    assert result["config"]["ignored_columns"] == ["Age"]
 
 
 def test_propose_counts_the_columns_beyond_the_few_it_names(env):
     columns = [f"c{i}" for i in range(9)]
     result = _propose_with_later_data(
-        env, [(DatasetType.TEST, ["keep"])], train_columns=[*columns, "keep", "label"]
+        env, [(DatasetType.PREDICT, ["keep"])], train_columns=[*columns, "keep", "label"]
     )
     warning = _absent_columns(result)
     assert warning["code"] == "columns_not_in_test_more"
@@ -877,7 +923,7 @@ def test_propose_counts_the_columns_beyond_the_few_it_names(env):
 def test_propose_names_up_to_five_columns_and_counts_the_rest(env, n_absent, code, params):
     columns = [f"c{i}" for i in range(n_absent)]
     result = _propose_with_later_data(
-        env, [(DatasetType.TEST, ["keep"])], train_columns=[*columns, "keep", "label"]
+        env, [(DatasetType.PREDICT, ["keep"])], train_columns=[*columns, "keep", "label"]
     )
     warning = _absent_columns(result)
     assert (warning["code"], warning["params"]) == (code, params)
@@ -916,10 +962,11 @@ def test_propose_compares_only_the_test_datasets_that_share_a_column_with_the_tr
     later = [(DatasetType.TEST, ["store", "region"]), (DatasetType.PREDICT, ["x", "z", "label"])]
     result = _propose_with_later_data(env, later)
     assert _absent_columns(result)["params"] == {"columns": "Age"}
+    assert result["config"]["ignored_columns"] == []
 
 
-def test_propose_still_warns_when_a_related_test_dataset_lacks_columns(env):
-    result = _propose_with_later_data(env, [(DatasetType.TEST, ["x"])])
+def test_propose_still_warns_when_a_related_predict_dataset_lacks_columns(env):
+    result = _propose_with_later_data(env, [(DatasetType.PREDICT, ["x"])])
     assert _absent_columns(result)["params"] == {"columns": "z, Age"}
 
 

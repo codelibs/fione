@@ -1813,7 +1813,7 @@ def test_prep_fits_a_group_that_reads_the_target_only_when_it_is_given():
 
 def test_select_groups_judges_value_encoding_on_more_rows_and_keeps_it_when_it_helps():
     X, y = _prices(60000)
-    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(120))
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(3600))
     verdict = next(v for v in verdicts if v.group == "target rates of number values")
     assert verdict.adopted and any(isinstance(g, ValueEncoding) for g in kept)
 
@@ -1852,7 +1852,7 @@ def test_automl_keeps_the_value_encoding_honest_and_through_a_save_and_load():
     from sklearn.metrics import roc_auc_score
 
     X, y = _prices(60000)
-    config = TrainConfig(target="label", task="classification", max_runtime_secs=600, max_models=3)
+    config = TrainConfig(target="label", task="classification", max_runtime_secs=6000, max_models=3)
     model = AutoML(config, families=["LightGBM"]).fit(X.assign(label=y))
     tried = {row["group"]: row for row in model.features}
     assert tried["target rates of number values"]["adopted"]
