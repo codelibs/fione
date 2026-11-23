@@ -1197,3 +1197,12 @@ def test_an_id_column_of_whole_numbers_has_the_span_of_its_values():
     )
     spans = {c.name: c.span for c in profile_dataset(df).columns}
     assert spans == {"a": 40, "b": None, "c": None}
+
+
+def test_profile_of_a_column_equal_up_to_float_noise_does_not_fail():
+    # a mean-scaled feature (the mean of 12 values each divided by their own mean) is 1 up to
+    # rounding; its range is too small to cut into bins
+    noise = 1.0 + np.array([0.0, 4e-16, -4e-16, 0.0] * 50)
+    frame = pd.DataFrame({"x": noise, "y": np.arange(200.0)})
+    column = next(c for c in profile_dataset(frame, "y").columns if c.name == "x")
+    assert len(column.histogram) == 20 and sum(n for _, n in column.histogram) == 200

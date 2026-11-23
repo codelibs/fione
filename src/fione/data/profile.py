@@ -183,7 +183,12 @@ def _numeric_details(
         "q75": float(q3),
         "max": float(arr.max()),
     }
-    counts, edges = np.histogram(arr, bins=_HISTOGRAM_BINS)
+    try:
+        counts, edges = np.histogram(arr, bins=_HISTOGRAM_BINS)
+    except ValueError:  # values within float noise of one number: too close to cut into bins
+        counts = np.zeros(_HISTOGRAM_BINS, dtype=int)
+        counts[0] = arr.size
+        edges = np.linspace(arr.min(), arr.max(), _HISTOGRAM_BINS + 1)
     histogram = [(float(left), int(c)) for left, c in zip(edges[:-1], counts, strict=True)]
     iqr = q3 - q1
     outside = (arr < q1 - 1.5 * iqr) | (arr > q3 + 1.5 * iqr)

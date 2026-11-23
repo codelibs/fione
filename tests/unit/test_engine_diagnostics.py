@@ -180,6 +180,14 @@ def test_per_class_keeps_the_200_largest_in_index_order():
     assert [row["class"] for row in d["per_class"]] == expected
 
 
+def test_regression_residuals_equal_up_to_float_noise_do_not_fail():
+    y = 1.0 + np.array([0.0, 2.2e-16] * 50)
+    d = _strict(diagnostics("regression", y, np.zeros(100), None, seed=5))  # residual: about 1
+    residuals = d["residuals"]
+    assert len(residuals["edges"]) == 31 and len(residuals["counts"]) == 30
+    assert sum(residuals["counts"]) == 100
+
+
 def test_regression():
     rng = np.random.default_rng(0)
     y = rng.normal(10, 3, 5_000)
