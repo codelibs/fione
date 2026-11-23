@@ -31,7 +31,8 @@ model does not sample columns, since that would reward any added column. Groups,
 features, are judged, which limits the number of comparisons. The folds differ from the search's,
 but the rows are the same, so the cross-validation scores of the search stay slightly optimistic;
 the report on the model lists every group's gain. A group that reads the target needs more rows
-than the gate samples to show its worth, so it is judged last, on up to ``ENCODING_ROWS`` rows.
+than the gate samples to show its worth, so it is judged last, on ``ENCODING_ROWS`` rows or as
+many more (up to ``ENCODING_ROWS_MAX``) as the time covers.
 
 Derived features count for their source columns in importances and contributions: a feature
 with several sources splits its share equally among them.
@@ -77,6 +78,7 @@ FINAL_MARGIN = 1.5  # the time kept for the last check, over what its repeats to
 DECISIVE_GAIN = 0.05  # share of the loss a group saves to be kept when time ends the last check
 MAX_CANDIDATES = 40
 ENCODING_ROWS = 100_000  # rows the encodings of values are judged on: fewer show no gain
+ENCODING_ROWS_MAX = 300_000  # ... and more rows show more: judged on as many as the time covers
 ENCODING_FOLDS = 5  # a training row's encoding is read from the other folds
 ENCODING_SMOOTHING = 20.0  # rows' worth of the overall rate a value's own rate is pulled towards
 ENCODING_MIN_LEVELS = 20  # a number needs this many distinct keys ...
@@ -646,18 +648,28 @@ class ValueFrequency(Group):
         return pd.DataFrame(out, index=df.index)
 
 
+def _cents(x: pd.Series) -> pd.Series:
+    """The fraction of ``x`` in hundredths, 0 to 99: 37 for 12.37 (a rounded price has few).
+    The fraction counts up from the floor, so -12.37 gives 63."""
+    return (np.round((x - np.floor(x)) * 100) % 100).astype(float)
+
+
 def encoding_keys(columns: list[str], rows: pd.DataFrame) -> list[tuple[str, str]]:
     """The (column, kind) pairs of numbers worth encoding by value, read from ``rows``: the whole
-    part of a number with fractions, and its value (to six decimals), each when it has at least
+    part of a number with fractions, its fraction in hundredths (the cents of an amount, for a
+    number whose values repeat), and its value (to six decimals), each when it has at least
     ``ENCODING_MIN_LEVELS`` distinct keys and ``ENCODING_ROWS_PER_KEY`` rows per key on average."""
     keys = []
     for column in columns:
         x = _number(rows[column]).dropna()
         value = x.round(6)
         whole = np.floor(x)
-        for kind, key in (("whole", whole), ("value", value)):
+        repeats = len(x) >= ENCODING_ROWS_PER_KEY * value.nunique()
+        for kind, key in (("whole", whole), ("cents", _cents(x)), ("value", value)):
             if kind == "whole" and (whole == value).all():
                 continue  # no fractions: the value is the whole part
+            if kind == "cents" and not repeats:
+                continue  # the values do not repeat: their fractions are noise
             levels = key.nunique()
             if levels >= ENCODING_MIN_LEVELS and len(x) >= ENCODING_ROWS_PER_KEY * levels:
                 keys.append((column, kind))
@@ -665,14 +677,15 @@ def encoding_keys(columns: list[str], rows: pd.DataFrame) -> list[tuple[str, str
 
 
 class ValueEncoding(Group):
-    """The rate (or mean) of the target among the rows that share a number's whole part or its
-    value, smoothed towards the overall rate, for numbers whose values repeat. The frame the
-    group was fitted on (told by its fingerprint) gets the rate of the other folds, never its
-    own target; any other frame gets the rate of all the training rows, and so does a copy or a
-    pickle of the fitted group, which do not keep the folds' values. Binary classification and
-    regression only."""
+    """The rate of the target (as log-odds; the mean for a number) among the rows that share a
+    number's whole part, its fraction in hundredths or its value, smoothed towards the overall
+    rate, for numbers whose values repeat. The frame the group was fitted on (told by its
+    fingerprint) gets the rate of the other folds, never its own target; any other frame gets
+    the rate of all the training rows, and so does a copy or a pickle of the fitted group, which
+    do not keep the folds' values. Binary classification and regression only."""
 
     uses_target = True
+    _logit = False  # class-level default: groups pickled before it existed give the rate itself
     _oof = None  # (rows, features) of the training rows' cross-fitted values; kept by no copy
     _seen = None  # (rows, hash of their values in order) the encodings were computed for
 
@@ -687,6 +700,8 @@ class ValueEncoding(Group):
     @staticmethod
     def _key(values: pd.Series, kind: str) -> np.ndarray:
         x = _number(values)
+        if kind == "cents":
+            return _cents(x).to_numpy()
         return (np.floor(x) if kind == "whole" else x.round(6)).to_numpy()
 
     def _fingerprint(self, df: pd.DataFrame) -> tuple[int, str]:
@@ -700,6 +715,7 @@ class ValueEncoding(Group):
         y = np.asarray(y, dtype=float)
         self._prior = float(y.mean())
         task = "classification" if len(np.unique(y)) == 2 else "regression"
+        self._logit = set(np.unique(y)) == {0.0, 1.0}  # the rate of a class, not a two-valued mean
         folds = make_folds(y, task, ENCODING_FOLDS, 0)
         m, prior = ENCODING_SMOOTHING, self._prior
         self._rates, self._sources, names = [], {}, []
@@ -723,7 +739,15 @@ class ValueEncoding(Group):
             names.append(name)
             self._sources[name] = (column,)
         self._names = names
-        self._oof, self._seen = oof, self._fingerprint(X)
+        self._oof, self._seen = self._log_odds(oof), self._fingerprint(X)
+
+    def _log_odds(self, rates):
+        """``rates`` as log-odds for a classification (a linear model reads them better; the
+        order of the values, which the trees read, is the same)."""
+        if not self._logit:
+            return rates
+        rates = np.clip(rates, 1e-6, 1 - 1e-6)
+        return np.log(rates / (1 - rates))
 
     def _compute(self, df):
         if self._oof is not None and self._fingerprint(df) == self._seen:
@@ -731,7 +755,7 @@ class ValueEncoding(Group):
         out = {}
         for (column, kind), rates, name in zip(self._keys, self._rates, self._names, strict=True):
             key = pd.Series(self._key(df[column], kind), index=df.index)
-            out[name] = key.map(rates).astype(float).fillna(self._prior)
+            out[name] = self._log_odds(key.map(rates).astype(float).fillna(self._prior).to_numpy())
         return pd.DataFrame(out, index=df.index)
 
 
@@ -1535,15 +1559,27 @@ def select_groups(
     return kept, verdicts
 
 
+def encoding_rows(rows: int, secs_per_row: float, left: float) -> int:
+    """The rows the encodings are judged on: ``ENCODING_ROWS``, or more (up to
+    ``ENCODING_ROWS_MAX``) when their judgment takes no more than half of the ``left`` seconds;
+    ``secs_per_row`` is the time all the judgment's fits take per row."""
+    wide = ENCODING_ROWS_MAX
+    while wide > ENCODING_ROWS and secs_per_row * wide > left / 2:
+        wide = max(ENCODING_ROWS, wide * 2 // 3)
+    return min(rows, wide)
+
+
 def _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, deadline) -> None:
-    """Judge a group that reads the target on up to ``ENCODING_ROWS`` rows (the gate's sample is
-    too small for the rates of values to show a gain), against the groups kept so far, and keep
+    """Judge a group that reads the target on many more rows than the gate's (its sample is
+    too small for the rates of values to show a gain; at least 100,000 when the table has
+    them), against the groups kept so far, and keep
     it when it passes on the repeats of the folds and again on others. ``_OutOfTime`` leaves it
     unjudged."""
     wide = gate
-    rows_wide = min(len(all_rows), ENCODING_ROWS)
     repeats = 2 * (1 + GATE_REPEATS + FINAL_REPEATS)  # with and without the group
-    if gate.secs([]) * rows_wide / len(gate.X) * repeats > deadline.remaining():
+    unit = gate.secs([]) / len(gate.X)  # seconds of one fit per row
+    rows_wide = encoding_rows(len(all_rows), unit * repeats, deadline.remaining())
+    if unit * rows_wide * repeats > deadline.remaining():
         return  # not enough time left for the judgment: listed as not judged
     if len(gate.X) < rows_wide:
         rows = _sample(all_y, gate.task, gate.seed, rows_wide)
