@@ -585,7 +585,7 @@ A group column and a time column can be used together (see "Data that follows ti
 
 ## Derived features
 
-Fione builds *derived features* that never read the target, and chooses among them by
+Fione builds *derived features*, most of which never read the target, and chooses among them by
 validation (the "Add derived features" option, `feature_engineering` in the API, on by default):
 
 - text columns: the common words (letter runs, so `C85` gives `c`) as 0/1 flags, plus length,
@@ -641,6 +641,23 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   means within each of the three most useful small categories (and the difference from it),
   how common each repeated value is, and k-means clusters with the distance to the cluster
   centre.
+- per-value model scores (a group that reads the target): a
+  whole-number or text column with at least 30 values and 30 rows per value on average (a
+  machine, a store, a sensor) that selects which of the number columns tell the classes apart
+  gets, for a binary target, the log likelihood ratio of class 1 to class 0 under a regularised
+  quadratic discriminant (a Gaussian per class, its covariance shrunk towards a multiple of the
+  identity) fitted on the number columns for each value of the column alone; the share of each
+  class among the rows of a value is not part of it. A training row's score comes from the model
+  of its value fitted on the other folds of the training rows, any other row's from the model
+  fitted on all of them, and a value the training rows hold too few rows of gets no score. A cheap
+  screen on a sample of the values keeps a column only when the cross-fitted scores of a model
+  per value reach an AUC of 0.55 and beat those of one model for all the rows by 0.05. The gate
+  then keeps the group at once when its loss falls by at least 5% on its sample and again on other
+  folds; a group that gains less is judged last on more rows, with the usual thresholds, and can
+  still be kept. The fitted models are kept with the model: all such groups of a table together
+  take at most about 160 MB, so a table of many values and columns uses fewer columns (and a
+  fit holds at most 300 million cells). The importance of the group is shared among its source
+  columns.
 
 A column of a comma-delimited CSV in which every value is a number written with thousands
 separators (`16,853`, `-1,234.5`; plain digits may be mixed in, and at least one value must have
