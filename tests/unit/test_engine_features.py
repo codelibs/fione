@@ -1779,6 +1779,11 @@ def test_the_encodings_are_judged_on_more_rows_when_the_time_covers_them():
     assert encoding_rows(50_000, 1e-4, 10_000) == 50_000  # never more rows than there are
 
 
+def _odds(rate):
+    """The log-odds of a rate: what a classification's encodings are."""
+    return float(np.log(rate / (1 - rate)))
+
+
 def _amounts(n=20000, seed=0):
     """An amount in cents whose fraction decides the label (a round amount is the risky one)."""
     rng = np.random.default_rng(seed)
@@ -1804,8 +1809,8 @@ def test_value_encoding_by_cents_gives_the_rate_of_the_fraction():
     out = group.transform(pd.DataFrame({"amount": [5.0, 5.37, 12.0, np.nan]}))
     rates = out["amount__cents_target"].to_numpy()
     assert rates[0] == pytest.approx(rates[2])  # the same fraction, whatever the whole part
-    assert rates[0] > 0.3 > rates[1]  # round amounts are the risky ones
-    assert rates[3] == pytest.approx(y.mean())
+    assert rates[0] > _odds(0.3) > rates[1]  # round amounts are the risky ones
+    assert rates[3] == pytest.approx(_odds(y.mean()))
 
 
 def test_value_encoding_gives_training_rows_rates_that_never_saw_their_own_target():
@@ -1823,7 +1828,7 @@ def test_value_encoding_gives_training_rows_rates_that_never_saw_their_own_targe
     frame = pd.DataFrame({"price": prices})
     one = ValueEncoding([("price", "value")]).fit(frame, labels)
     rates = one.transform(frame)["price__value_target"]
-    assert rates.iloc[-1] == pytest.approx(labels.mean())
+    assert rates.iloc[-1] == pytest.approx(_odds(labels.mean()), abs=1e-5)
     other = one.transform(pd.DataFrame({"price": [99.9]}))["price__value_target"]
     assert other.iloc[0] > rates.iloc[-1]  # a new row with that value gets the rate with its label
 
@@ -1832,7 +1837,7 @@ def test_value_encoding_gives_unseen_values_the_overall_rate_and_pickles_without
     X, y = _prices()
     group = ValueEncoding([("price", "whole")]).fit(X, y)
     out = group.transform(pd.DataFrame({"price": [1000.5, np.nan]}))["price__whole_target"]
-    assert out.tolist() == pytest.approx([y.mean()] * 2)
+    assert out.tolist() == pytest.approx([_odds(y.mean())] * 2)
     loaded = pickle.loads(pickle.dumps(group))
     assert loaded._oof is None
     rates = loaded.transform(X.iloc[:5])["price__whole_target"]
@@ -1882,7 +1887,10 @@ def test_value_encoding_does_not_take_the_training_rows_in_another_order_for_the
     order = np.random.default_rng(0).permutation(len(X))
     shuffled = group.transform(X.iloc[order].reset_index(drop=True))["price__value_target"]
     straight = group.transform(X)["price__value_target"].to_numpy()
-    allrows = X["price"].iloc[order].round(6).map(group._rates[0]).fillna(group._prior)
+    allrows = group._log_odds(
+        X["price"].iloc[order].round(6).map(group._rates[0]).fillna(group._prior).to_numpy()
+    )
+    allrows = pd.Series(allrows)
     assert np.allclose(shuffled.to_numpy(), allrows.to_numpy())  # the rates of all rows
     assert not np.allclose(shuffled.to_numpy(), straight)  # not the folds' values in their order
 

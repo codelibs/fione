@@ -676,14 +676,15 @@ def encoding_keys(columns: list[str], rows: pd.DataFrame) -> list[tuple[str, str
 
 
 class ValueEncoding(Group):
-    """The rate (or mean) of the target among the rows that share a number's whole part, its
-    fraction in hundredths or its value, smoothed towards the overall rate, for numbers whose
-    values repeat. The frame the group was fitted on (told by its fingerprint) gets the rate of
-    the other folds, never its own target; any other frame gets the rate of all the training
-    rows, and so does a copy or a pickle of the fitted group, which do not keep the folds'
-    values. Binary classification and regression only."""
+    """The rate of the target (as log-odds; the mean for a number) among the rows that share a
+    number's whole part, its fraction in hundredths or its value, smoothed towards the overall
+    rate, for numbers whose values repeat. The frame the group was fitted on (told by its
+    fingerprint) gets the rate of the other folds, never its own target; any other frame gets
+    the rate of all the training rows, and so does a copy or a pickle of the fitted group, which
+    do not keep the folds' values. Binary classification and regression only."""
 
     uses_target = True
+    _logit = False  # class-level default: groups pickled before it existed give the rate itself
     _oof = None  # (rows, features) of the training rows' cross-fitted values; kept by no copy
     _seen = None  # (rows, hash of their values in order) the encodings were computed for
 
@@ -713,6 +714,7 @@ class ValueEncoding(Group):
         y = np.asarray(y, dtype=float)
         self._prior = float(y.mean())
         task = "classification" if len(np.unique(y)) == 2 else "regression"
+        self._logit = task == "classification"
         folds = make_folds(y, task, ENCODING_FOLDS, 0)
         m, prior = ENCODING_SMOOTHING, self._prior
         self._rates, self._sources, names = [], {}, []
@@ -736,7 +738,15 @@ class ValueEncoding(Group):
             names.append(name)
             self._sources[name] = (column,)
         self._names = names
-        self._oof, self._seen = oof, self._fingerprint(X)
+        self._oof, self._seen = self._log_odds(oof), self._fingerprint(X)
+
+    def _log_odds(self, rates):
+        """``rates`` as log-odds for a classification (a linear model reads them better; the
+        order of the values, which the trees read, is the same)."""
+        if not self._logit:
+            return rates
+        rates = np.clip(rates, 1e-6, 1 - 1e-6)
+        return np.log(rates / (1 - rates))
 
     def _compute(self, df):
         if self._oof is not None and self._fingerprint(df) == self._seen:
@@ -744,7 +754,7 @@ class ValueEncoding(Group):
         out = {}
         for (column, kind), rates, name in zip(self._keys, self._rates, self._names, strict=True):
             key = pd.Series(self._key(df[column], kind), index=df.index)
-            out[name] = key.map(rates).astype(float).fillna(self._prior)
+            out[name] = self._log_odds(key.map(rates).astype(float).fillna(self._prior).to_numpy())
         return pd.DataFrame(out, index=df.index)
 
 
