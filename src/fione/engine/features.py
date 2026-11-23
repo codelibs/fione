@@ -649,7 +649,8 @@ class ValueFrequency(Group):
 
 
 def _cents(x: pd.Series) -> pd.Series:
-    """The fraction of ``x`` in hundredths, 0 to 99: 37 for 12.37 (a rounded price has few)."""
+    """The fraction of ``x`` in hundredths, 0 to 99: 37 for 12.37 (a rounded price has few).
+    The fraction counts up from the floor, so -12.37 gives 63."""
     return (np.round((x - np.floor(x)) * 100) % 100).astype(float)
 
 
@@ -1569,8 +1570,9 @@ def encoding_rows(rows: int, secs_per_row: float, left: float) -> int:
 
 
 def _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, deadline) -> None:
-    """Judge a group that reads the target on 100,000 or more rows (the gate's sample is
-    too small for the rates of values to show a gain), against the groups kept so far, and keep
+    """Judge a group that reads the target on many more rows than the gate's (its sample is
+    too small for the rates of values to show a gain; at least 100,000 when the table has
+    them), against the groups kept so far, and keep
     it when it passes on the repeats of the folds and again on others. ``_OutOfTime`` leaves it
     unjudged."""
     wide = gate
