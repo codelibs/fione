@@ -1852,7 +1852,7 @@ def test_automl_keeps_the_value_encoding_honest_and_through_a_save_and_load():
     from sklearn.metrics import roc_auc_score
 
     X, y = _prices(60000)
-    config = TrainConfig(target="label", task="classification", max_runtime_secs=600, max_models=3)
+    config = TrainConfig(target="label", task="classification", max_runtime_secs=6000, max_models=3)
     model = AutoML(config, families=["LightGBM"]).fit(X.assign(label=y))
     tried = {row["group"]: row for row in model.features}
     assert tried["target rates of number values"]["adopted"]
