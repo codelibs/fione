@@ -982,6 +982,187 @@ def test_the_missing_column_warnings_show_their_figures_in_both_languages(code, 
         assert {f for _, f, _, _ in string.Formatter().parse(template) if f} == placeholders
 
 
+def _propose_with_test_values(env, test_values, train_missing=0.0, rows=60, test_rows=30, **args):
+    """The proposal for a train dataset (columns x, z, Age; ``z`` missing in ``train_missing`` of
+    its rows) next to test datasets whose column ``z`` holds ``test_values`` (a list of lists,
+    one per test dataset; None is a missing value)."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({c: rng.normal(size=rows) for c in ("x", "z", "Age", "label")})
+    frame.loc[frame.sample(frac=train_missing, random_state=0).index, "z"] = np.nan
+    made = [
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "train", DatasetType.TRAIN, [frame]
+        )
+    ]
+    for i, (kind, values) in enumerate(test_values):
+        other = pd.DataFrame(
+            {"x": rng.normal(size=test_rows), "Age": rng.normal(size=test_rows), "z": values}
+        )
+        made.append(
+            ingest.ingest_batches(env.storage, env.conn, env.project.id, f"t{i}", kind, [other])
+        )
+    try:
+        return call(
+            env, "propose_training_config", {"dataset_id": made[0].id, "target": "label", **args}
+        )
+    finally:
+        for dataset in made:
+            projects.delete_dataset(env.conn, env.storage, dataset.id)
+
+
+def _empty_warning(result):
+    found = [w for w in result["warnings"] if w["code"].startswith("columns_empty_in_test")]
+    return found[0] if found else None
+
+
+EMPTY = [None] * 30
+
+
+def test_propose_leaves_out_a_column_the_test_data_holds_no_value_in(env):
+    result = _propose_with_test_values(env, [(DatasetType.TEST, EMPTY)])
+    codes(result)  # both languages translate every code
+    assert result["config"]["ignored_columns"] == ["z"]
+    assert result["ignored_suggestions"] == [
+        {"column": "z", "reason": "empty in the test data", "code": "empty_in_test"}
+    ]
+    assert _empty_warning(result) is None  # it is left out, not only said
+    assert all("analysis.reason.empty_in_test" in i18n.catalog(lang) for lang in i18n.LANGUAGES)
+
+
+@pytest.mark.parametrize(
+    ("test_values", "train_missing", "test_rows"),
+    [
+        ([(DatasetType.TEST, [1.0] + [None] * 29)], 0.0, 30),  # one value is a value
+        ([(DatasetType.TEST, EMPTY), (DatasetType.TEST, [1.0] * 30)], 0.0, 30),  # another has some
+        ([(DatasetType.PREDICT, EMPTY)], 0.0, 30),  # a predict dataset is not the test data
+        ([(DatasetType.TEST, [None] * 10)], 0.0, 10),  # too few rows to say
+        ([(DatasetType.TEST, EMPTY)], 0.95, 30),  # the train column is empty itself
+    ],
+)
+def test_propose_keeps_a_column_that_the_test_data_does_not_leave_empty(
+    env, test_values, train_missing, test_rows
+):
+    result = _propose_with_test_values(
+        env, test_values, train_missing=train_missing, test_rows=test_rows
+    )
+    assert "z" not in result["config"]["ignored_columns"]
+    assert _empty_warning(result) is None
+
+
+def test_a_few_filled_rows_far_apart_keep_the_column_whatever_the_sample_is(env, monkeypatch):
+    monkeypatch.setattr(builtin, "_SAMPLE_ROWS", 100)  # a sample would miss rows 700 and 1,500
+    values = [None] * 2_000
+    values[700], values[1_500] = 1.0, 2.0
+    result = _propose_with_test_values(env, [(DatasetType.TEST, values)], test_rows=2_000)
+    assert "z" not in result["config"]["ignored_columns"]
+    assert _empty_warning(result) is None
+
+
+def test_a_column_of_only_missing_values_has_no_type_and_is_left_out(env, monkeypatch):
+    seen = []
+    real = ingest.dataset_row_count_and_empty_columns
+
+    def spy(storage, dataset, columns):
+        seen.append(ingest.read_schema(storage, dataset).field("z").type)
+        return real(storage, dataset, columns)
+
+    monkeypatch.setattr(ingest, "dataset_row_count_and_empty_columns", spy)
+    result = _propose_with_test_values(env, [(DatasetType.TEST, EMPTY)])
+    assert [str(t) for t in seen] == ["null"]
+    assert result["config"]["ignored_columns"] == ["z"]
+
+
+def test_a_column_one_test_dataset_lacks_and_another_leaves_empty_is_left_out(env):
+    rng = np.random.default_rng(0)
+    train = pd.DataFrame({c: rng.normal(size=60) for c in ("x", "z", "label")})
+    without = pd.DataFrame({"x": rng.normal(size=30)})
+    empty = pd.DataFrame({"x": rng.normal(size=30), "z": [None] * 30})
+    made = [
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "a", DatasetType.TRAIN, [train]
+        ),
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "b", DatasetType.TEST, [without]
+        ),
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "c", DatasetType.TEST, [empty]
+        ),
+    ]
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": made[0].id, "target": "label"})
+    finally:
+        for dataset in made:
+            projects.delete_dataset(env.conn, env.storage, dataset.id)
+    assert result["config"]["ignored_columns"] == ["z"]
+
+
+@pytest.mark.parametrize(("filled", "ignored"), [(False, ["z"]), (True, [])])
+def test_a_file_that_cannot_count_its_missing_values_is_read_on_a_sample(
+    env, monkeypatch, filled, ignored
+):
+    monkeypatch.setattr(
+        ingest,
+        "dataset_row_count_and_empty_columns",
+        lambda storage, dataset, columns: (30, dict.fromkeys(columns)),
+    )
+    result = _propose_with_test_values(env, [(DatasetType.TEST, [1.0] * 30 if filled else EMPTY)])
+    assert result["config"]["ignored_columns"] == ignored
+
+
+def test_propose_does_not_leave_out_a_column_another_train_dataset_holds(env):
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({c: rng.normal(size=60) for c in ("x", "z", "label")})
+    other = pd.DataFrame({c: rng.normal(size=60) for c in ("x", "z")})
+    test = pd.DataFrame({"x": rng.normal(size=30), "z": [None] * 30})
+    made = [
+        ingest.ingest_batches(env.storage, env.conn, env.project.id, "a", DatasetType.TRAIN, [f])
+        for f in (frame, other)
+    ] + [
+        ingest.ingest_batches(env.storage, env.conn, env.project.id, "b", DatasetType.TEST, [test])
+    ]
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": made[0].id, "target": "label"})
+    finally:
+        for dataset in made:
+            projects.delete_dataset(env.conn, env.storage, dataset.id)
+    assert "z" not in result["config"]["ignored_columns"]
+
+
+def test_a_wide_table_lists_only_so_many_columns_the_test_data_holds_no_value_in(env, monkeypatch):
+    monkeypatch.setattr(builtin, "_MAX_IGNORED_LISTED", 3)
+    rng = np.random.default_rng(0)
+    names = [f"c{i}" for i in range(9)]
+    train = pd.DataFrame({**{n: rng.normal(size=60) for n in names}, "label": rng.normal(size=60)})
+    test = pd.DataFrame({n: [None] * 30 for n in names})
+    made = [
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "train", DatasetType.TRAIN, [train]
+        ),
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "test", DatasetType.TEST, [test]
+        ),
+    ]
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": made[0].id, "target": "label"})
+    finally:
+        for dataset in made:
+            projects.delete_dataset(env.conn, env.storage, dataset.id)
+    assert result["config"]["ignored_columns"] == ["c0", "c1", "c2"]
+    warning = _empty_warning(result)
+    assert warning["code"] == "columns_empty_in_test_more"
+    assert warning["params"] == {"columns": "c3, c4, c5, c6, c7", "more": 1}
+
+
+@pytest.mark.parametrize(
+    ("code", "placeholders"),
+    [("columns_empty_in_test", {"columns"}), ("columns_empty_in_test_more", {"columns", "more"})],
+)
+def test_the_empty_column_warnings_show_their_figures_in_both_languages(code, placeholders):
+    for lang in i18n.LANGUAGES:
+        template = i18n.catalog(lang)[f"assistant.warn.{code}"]
+        assert {f for _, f, _, _ in string.Formatter().parse(template) if f} == placeholders
+
+
 def test_propose_hints_at_settings_that_suit_the_target(env):
     rng = np.random.default_rng(0)
     frame = pd.DataFrame(
