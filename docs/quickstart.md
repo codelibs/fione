@@ -564,6 +564,8 @@ of derived features alike. The column is still an input unless you leave it out
 value occurs, counted over all the training rows. A group the model has not seen gets the share of the
 rarest value, so its rows look like a very small group, and the validation, whose groups were
 counted too, cannot show that: leave the group column out when the rows to predict hold other groups.
+The assistant proposes the column itself when the project has a test dataset that holds it and at
+most 10% of the test rows have a value the training rows hold (it warns instead when 90% or more do).
 A training run says so when such a column holds codes (values of 8 characters or more with a digit
 and no space) on about 3 rows or more each, and holds at least 5% of what the model relies on. It also says so when the group
 column, of any kind of values, is an input that holds at least 5% of what the model relies on: groups next to each other in a number

@@ -1307,7 +1307,7 @@ def test_propose_suggests_grouping_by_a_repeated_id_column(env, grouped):
     [
         (np.arange(40), "repeated_id_in_test"),  # every value is in the training rows
         (np.r_[np.arange(38), np.arange(100, 102)], "repeated_id_in_test"),  # 38 of 40 rows seen
-        (np.arange(100, 140), "repeated_id"),  # other values
+        (np.arange(100, 140), "group_column_for_test"),  # other values: grouped
         (np.r_[np.arange(20), np.arange(100, 120)], "repeated_id"),  # half of them
     ],
 )
@@ -1329,9 +1329,60 @@ def test_propose_does_not_ask_for_grouping_when_the_test_data_holds_the_same_val
         projects.delete_dataset(env.conn, env.storage, test.id)
     found = codes(result)
     assert expected in found
-    assert ({"repeated_id", "repeated_id_in_test"} - {expected}).isdisjoint(found)
+    assert (
+        {"repeated_id", "repeated_id_in_test", "group_column_for_test"} - {expected}
+    ).isdisjoint(found)
     warning = next(w for w in result["warnings"] if w["code"] == expected)
     assert warning["params"]["column"] == "user_id"
+
+
+@pytest.mark.parametrize(
+    ("test_ids", "grouped_by_test"),
+    [
+        (np.arange(100, 140), True),  # no value is in the training rows
+        (np.r_[np.arange(4), np.arange(100, 136)], True),  # 4 of 40 rows seen: at the limit
+        (np.r_[np.arange(5), np.arange(100, 135)], False),  # more than a tenth seen
+        (np.r_[np.arange(20), np.arange(100, 120)], False),  # half of them
+    ],
+)
+def test_propose_groups_by_the_repeated_column_when_the_test_data_holds_other_values(
+    env, grouped, test_ids, grouped_by_test
+):
+    ds = grouped()
+    test = ingest.ingest_batches(
+        env.storage,
+        env.conn,
+        env.project.id,
+        "later",
+        DatasetType.TEST,
+        [pd.DataFrame({"x": np.zeros(len(test_ids)), "user_id": test_ids})],
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+    found = codes(result)
+    assert ("group_column_for_test" in found) is grouped_by_test
+    assert result["config"]["cv_group_column"] == ("user_id" if grouped_by_test else None)
+    assert ("repeated_id" in found) is not grouped_by_test
+    if grouped_by_test:
+        warning = next(w for w in result["warnings"] if w["code"] == "group_column_for_test")
+        assert warning["params"]["column"] == "user_id"
+
+
+def test_a_group_column_the_user_names_is_kept_when_the_test_data_holds_other_values(env, grouped):
+    ds = grouped()
+    test = _ids_dataset(env, DatasetType.TEST, np.arange(100, 140))
+    try:
+        result = call(
+            env,
+            "propose_training_config",
+            {"dataset_id": ds.id, "target": "label", "group_column": "x"},
+        )
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+    assert result["config"]["cv_group_column"] == "x"
+    assert "group_column_for_test" not in codes(result)
 
 
 def _ids_dataset(env, kind, ids, name="later"):
