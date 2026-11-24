@@ -43,7 +43,13 @@ import pandas as pd
 from pandas.api import types as pdt
 
 from fione.data.frames import looks_like_dates, parse_datetimes
-from fione.engine.prep import REPEATED_PROSE_VALUES, Task, infer_task, is_prose
+from fione.engine.prep import (
+    REPEATED_PROSE_VALUES,
+    Task,
+    infer_task,
+    integer_date_format,
+    is_prose,
+)
 
 Kind = Literal["numeric", "categorical", "text", "datetime", "id", "constant"]
 
@@ -149,7 +155,8 @@ def _infer_kind(nonnull: pd.Series, n_unique: int, n_missing: int = 0) -> Kind:
     if pdt.is_numeric_dtype(dtype):
         if pdt.is_integer_dtype(dtype):
             if n_unique == n and n >= _ID_MIN_ROWS:
-                return "id"
+                # a clock with one reading per row (20141021, a Unix time) is not a row's name
+                return "numeric" if integer_date_format(nonnull) else "id"
             if n_unique <= 10 and n_unique / n <= 0.05:
                 return "categorical"
         return "numeric"

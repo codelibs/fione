@@ -57,6 +57,14 @@ def test_unique_per_row_int_is_id():
     assert _kind(pd.Series(range(100))) == "id"
 
 
+def test_unique_whole_numbers_that_are_dates_are_not_ids():
+    days = pd.date_range("2021-01-01", periods=100, freq="D")
+    assert _kind(pd.Series(days.strftime("%Y%m%d").astype("int64"))) == "numeric"
+    seconds = pd.Timestamp("2014-10-21") + pd.to_timedelta(np.arange(100) * 997, unit="s")
+    assert _kind(pd.Series(seconds.strftime("%Y%m%d%H%M%S").astype("int64"))) == "numeric"
+    assert _kind(pd.Series(RNG.permutation(10**13 + np.arange(100) * 7919))) == "id"
+
+
 def test_unique_per_row_string_is_id():
     assert _kind(pd.Series([f"u{i}" for i in range(100)])) == "id"
 
