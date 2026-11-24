@@ -556,6 +556,49 @@ def read_dataset_runs(
     return pa.concat_tables(parts).to_pandas()
 
 
+def dataset_row_count_and_empty_columns(
+    storage: Storage, dataset: Dataset, columns: list[str]
+) -> tuple[int, dict[str, bool | None]]:
+    """(the rows of the dataset, and for each of ``columns`` whether it holds no value in any row:
+    True or False, or None when the file cannot say). The answer comes from the file's metadata,
+    which counts the missing values of every row group exactly, so no data is read. A column of
+    type null (all empty in a CSV) is empty; a column of numbers with no minimum or maximum in a
+    row group may hold NaN that is not counted as missing, so it is left to the caller (None)."""
+    with storage.open_read(dataset.key) as f:
+        parquet = pq.ParquetFile(f)
+        meta, schema = parquet.metadata, parquet.schema_arrow
+        leaves = {name: j for j, name in enumerate(meta.schema.names)}
+        found: dict[str, bool | None] = {}
+        for name in columns:
+            if name not in schema.names:
+                continue
+            kind = schema.field(name).type
+            if pa.types.is_null(kind):
+                found[name] = True
+                continue
+            j = leaves.get(name)
+            if j is None or meta.num_row_groups == 0:
+                found[name] = None
+                continue
+            missing = 0
+            for g in range(meta.num_row_groups):
+                group = meta.row_group(g)
+                stats = group.column(j).statistics
+                if stats is None or not stats.has_null_count:
+                    missing = -1
+                    break
+                if (
+                    pa.types.is_floating(kind)
+                    and not stats.has_min_max
+                    and stats.null_count < group.num_rows
+                ):
+                    missing = -1  # NaN is not counted as missing: the file cannot say
+                    break
+                missing += stats.null_count
+            found[name] = None if missing < 0 else missing == meta.num_rows
+        return meta.num_rows, found
+
+
 def _head(parquet: pq.ParquetFile, group: int, rows: int, columns) -> list[pa.RecordBatch]:
     """The first ``rows`` rows of the row group, decoding no more of it than that needs."""
     batches = parquet.iter_batches(rows, row_groups=[group], columns=columns, use_threads=False)

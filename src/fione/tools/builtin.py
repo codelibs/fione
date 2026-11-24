@@ -1039,6 +1039,13 @@ def sample_profile(
 
 
 _MAX_ABSENT_SHOWN = 5  # columns named by the warning that the test data lacks, the rest counted
+# A column that the test data has but holds no value in cannot be used at prediction time, any
+# more than one it lacks. It is looked for among the columns whose train rows hold values (more
+# than EMPTY_TRAIN_MAX_MISSING of them missing is a column that is empty anyway), in a test dataset
+# of at least EMPTY_TEST_MIN_ROWS rows. The file's metadata counts the missing values exactly, so
+# no data is read unless it cannot say.
+EMPTY_TRAIN_MAX_MISSING = 0.9
+EMPTY_TEST_MIN_ROWS = 20
 
 
 def _warning(code: str, message: str, **params) -> dict:
@@ -1103,6 +1110,79 @@ def absent_from_test(
         and (have := {name for name, _ in other.schema}).intersection(features)
     ]
     return [n for n in features if not any(n in have for have in later)] if later else []
+
+
+def empty_in_test(
+    storage, conn, dataset: Dataset, features: list[str], profile: DatasetProfile
+) -> list[str]:
+    """The ``features`` that the test datasets of the project have but hold no value in, while the
+    train rows hold values (``profile`` is the train profile). A column that any test dataset holds
+    a value in is not reported, nor is one a test dataset has too few rows to tell
+    (``EMPTY_TEST_MIN_ROWS``). Only test datasets that share a column with the train dataset are
+    read, and of them only the file's metadata unless it cannot say (``_empty_columns``)."""
+    if dataset.type != DatasetType.TRAIN:
+        return []
+    missing = {c.name: c.missing_rate for c in profile.columns}
+    candidates = [n for n in features if missing.get(n, 1.0) <= EMPTY_TRAIN_MAX_MISSING]
+    tests = [
+        other
+        for other in projects.list_datasets(conn, dataset.project_id)
+        if other.type == DatasetType.TEST
+        and {name for name, _ in other.schema}.intersection(features)
+    ]
+    seen: set[str] = set()
+    filled: set[str] = set()
+    for other in tests:
+        have = {name for name, _ in other.schema}
+        read = [n for n in candidates if n in have]
+        if not read:
+            continue
+        seen.update(read)
+        rows, empty = _empty_columns(storage, other, read)
+        if rows < EMPTY_TEST_MIN_ROWS:
+            filled.update(read)  # too few rows to say the column is empty
+            continue
+        filled.update(n for n in read if not empty[n])
+    return [n for n in candidates if n in seen and n not in filled]
+
+
+def _empty_columns(storage, dataset: Dataset, columns: list[str]) -> tuple[int, dict[str, bool]]:
+    """(the rows of ``dataset``, and whether each of ``columns`` holds no value in any row). The
+    file's metadata says, exactly; a column it cannot say of is decided on a sample of the rows."""
+    rows, said = ingest.dataset_row_count_and_empty_columns(storage, dataset, columns)
+    unsure = [n for n in columns if said.get(n) is None]
+    if unsure and rows >= EMPTY_TEST_MIN_ROWS:
+        sample = ingest.read_dataset_runs(
+            storage, dataset, min(_SAMPLE_ROWS, _PROPOSE_CELLS // len(unsure)), unsure
+        )
+        has_value = sample.notna().any()
+        said |= {n: not bool(has_value[n]) for n in unsure}
+    return rows, {n: bool(said.get(n)) for n in columns}
+
+
+def _columns_empty_in_test(empty: list[str]) -> dict | None:
+    """The warning for the columns the test data holds no value in that the proposal could not
+    list, or None."""
+    if not empty:
+        return None
+    shown = ", ".join(clean_text(n) for n in empty[:_MAX_ABSENT_SHOWN])
+    if len(empty) <= _MAX_ABSENT_SHOWN:
+        return _warning(
+            "columns_empty_in_test",
+            f"the test data of this project holds no value in the columns {shown}; a model "
+            "that learns from them has nothing to predict with, so leave these columns out of "
+            "the training",
+            columns=shown,
+        )
+    more = len(empty) - _MAX_ABSENT_SHOWN
+    return _warning(
+        "columns_empty_in_test_more",
+        f"the test data of this project holds no value in the columns {shown} and {more} more; "
+        "a model that learns from them has nothing to predict with, so leave these columns "
+        "out of the training",
+        columns=shown,
+        more=more,
+    )
 
 
 def _columns_not_in_test(absent: list[str]) -> dict | None:
@@ -1279,6 +1359,32 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         )
         ignored.append(name)
     if warning := _columns_not_in_test([n for n in absent if n not in set(left_out_here)]):
+        warnings.append(warning)
+    # A column the test data has but leaves empty cannot be predicted from either. Only the test
+    # datasets count (a predict dataset may hold the columns of a table not yet filled in). A
+    # column another train dataset holds is kept, as above: it may have been added to the train and
+    # the test data alike, so this test dataset is not necessarily the one to predict from, and the
+    # proposal leaves out only what it is sure of.
+    gone = {*left_out_here, *absent}
+    empty = [
+        n
+        for n in empty_in_test(
+            ctx.storage, ctx.conn, dataset, [n for n in features if n not in gone], profile
+        )
+        if n not in elsewhere
+    ]
+    room = max(_MAX_IGNORED_LISTED - len(ignored), 0)
+    left_empty = [n for n in empty if _is_plain(n)][:room]
+    for name in left_empty:
+        suggestions.append(
+            {
+                "column": clean_text(name),
+                "reason": "empty in the test data",
+                "code": "empty_in_test",
+            }
+        )
+        ignored.append(name)
+    if warning := _columns_empty_in_test([n for n in empty if n not in set(left_empty)]):
         warnings.append(warning)
     if is_skewed_target(found.y, task):
         warnings.append(

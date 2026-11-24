@@ -155,8 +155,11 @@ and says when there are more. It lists at most 200 columns to leave out, ids fir
 others: columns that hold one value in the rows examined, which training leaves out by itself,
 and ids beyond the 200, which stay in the training unless you ignore them. When the project already has a test or prediction dataset, the card also
 warns about columns the model would learn from that those datasets lack, because predicting
-needs every column the model learned from. A dataset that shares no column with the training
-data is taken for another table and not compared. People who can edit the project
+needs every column the model learned from. A column that the test datasets have but hold no value in (each of them of at least 20 rows),
+while at most 90% of the training rows examined lack it, is left out of the proposal in the same
+way, since a prediction could not use it; the files' own counts of missing values decide, so every
+row is taken into account. A dataset that shares
+no column with the training data is taken for another table and not compared. People who can edit the project
 press **Start training** (the job starts exactly as shown, once) or **Dismiss**. Viewers see the
 card without buttons. A decided proposal is final; open the job from its card.
 
