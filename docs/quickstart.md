@@ -682,8 +682,12 @@ over paired cross-validation folds by more than three standard errors and by 0.1
 with at least 70 % of the folds improving, and the kept groups together pass a last check on
 other folds of the same rows. The gate gets a tenth of the run time (a short run gives it 30 seconds, but never more than 30 % of the run); when that is not enough for every group, it stops judging in time for the last check of the groups it has kept, and the groups it did not reach are marked as not judged. The groups tried,
 their gains and why each was kept or not are on the model (`features`) and in a `features`
-notice. A table of more than 5,000 columns gets none: one fit of the quick model on so many
-columns takes longer than the time the gate has, and a `notice` says so.
+notice. On a table of more than 1,000 input columns the quick model reads only the 300 most
+useful ones (by its own ranking on the sample) and every feature of the groups, so that a wide
+table is judged as fast as a narrow one, though a group that sums up the columns it does not
+read can look better than it is; a table of 1,000 columns or fewer is judged on all of them. A table of more than 5,000 columns that the run keeps (constant columns do not count) gets
+no derived features: reading so many columns for every repeat of the folds takes longer than the
+time the gate has, and a `notice` says so.
 
 ## Stop, back up, upgrade
 

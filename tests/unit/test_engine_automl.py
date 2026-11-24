@@ -2239,6 +2239,28 @@ def test_derived_features_are_not_tried_on_a_table_wider_than_the_limit(monkeypa
     assert chosen
 
 
+def test_the_column_limit_for_derived_features_counts_only_the_columns_the_run_keeps(monkeypatch):
+    monkeypatch.setattr(automl_module, "FEATURE_MAX_COLUMNS", 12)
+    chosen = []
+    monkeypatch.setattr(
+        automl_module, "select_groups", lambda *a, **k: chosen.append(1) or ([], [])
+    )
+    df = _binary(300)  # 8 inputs
+    for i in range(20):
+        df[f"constant{i}"] = 7.0 if i % 2 else np.nan  # a value or none on every row
+    assert automl_module.kept_columns(df.drop(columns="y")) == 8
+    events = []
+    _fit(df, events, target="y", families=["LightGBM"], max_models=1)  # 28 columns, 8 kept
+    assert chosen
+    assert not any("derived features are not tried" in e.data.get("message", "") for e in events)
+    for i in range(8):  # now 16 columns that vary
+        df[f"varying{i}"] = np.arange(len(df)) % (i + 2)
+    chosen.clear()
+    _fit(df, events, target="y", families=["LightGBM"], max_models=1)
+    assert not chosen
+    assert any("derived features are not tried" in e.data.get("message", "") for e in events)
+
+
 @pytest.mark.parametrize(
     ("transform", "metric", "kind"),
     [

@@ -1917,3 +1917,71 @@ def test_automl_keeps_the_value_encoding_honest_and_through_a_save_and_load():
     assert abs(auc - model.metrics["auc"]) < 0.02  # the validation did not see its own target
     loaded = pickle.loads(pickle.dumps(model))
     assert np.allclose(loaded.predict_proba(fresh_X).to_numpy(), proba.to_numpy())
+
+
+def _sparse(n=1500, columns=60, seed=0):
+    """Mostly zeros in every column; the label is whether a row has many non-zero values."""
+    rng = np.random.default_rng(seed)
+    X = pd.DataFrame(
+        rng.normal(size=(n, columns)) * (rng.random((n, columns)) < 0.15),
+        columns=[f"c{i}" for i in range(columns)],
+    )
+    return X, ((X != 0).sum(axis=1) > columns * 0.15).astype(int).to_numpy()
+
+
+def _widths_read_by_the_gate(monkeypatch):
+    """The number of columns every fit of the gate's reference model reads."""
+    widths = []
+    model = features._Gate._model
+
+    def spy(self):
+        fitted = model(self)
+        fit = fitted.fit
+
+        def counting(X, y, *args, **kwargs):
+            widths.append(X.shape[1])
+            return fit(X, y, *args, **kwargs)
+
+        fitted.fit = counting
+        return fitted
+
+    monkeypatch.setattr(features._Gate, "_model", spy)
+    return widths
+
+
+def test_the_gate_reads_the_top_columns_of_a_wide_table_and_every_group_feature(monkeypatch):
+    X, y = _sparse()
+    widths = _widths_read_by_the_gate(monkeypatch)
+    monkeypatch.setattr(features, "GATE_COLUMNS", 20)
+    monkeypatch.setattr(features, "GATE_NARROW_COLUMNS", 50)
+    _, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(600))
+    row_counts = next(v for v in verdicts if v.group == "missing and zero counts per row")
+    assert row_counts.adopted  # judged with the top columns and its own features
+    ranking = widths.pop(0)  # the ranking reads every column once
+    assert ranking == 60
+    # the top columns, the features of the groups kept and those of the one judged
+    largest = max(v.features for v in verdicts)
+    assert max(widths) <= 20 + largest + sum(v.features for v in verdicts if v.adopted)
+    assert max(widths) < 60
+    assert min(widths) == 20  # the base fits, without a group
+    widths.clear()
+    monkeypatch.setattr(
+        features, "GATE_NARROW_COLUMNS", 60
+    )  # a table of that many columns or fewer
+    select_groups(X, y, "classification", 5, 0, Deadline(600))
+    assert min(widths) == 60
+
+
+def test_the_gate_judges_a_table_of_at_most_the_limit_exactly_as_before(monkeypatch):
+    X, y = _sparse(columns=30)
+    monkeypatch.setattr(features, "GATE_COLUMNS", 10)
+    monkeypatch.setattr(features, "GATE_NARROW_COLUMNS", 30)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(600))
+    monkeypatch.setattr(features, "GATE_NARROW_COLUMNS", 10_000)
+    again, same = select_groups(X, y, "classification", 5, 0, Deadline(600))
+    assert [v.to_dict() for v in verdicts] == [v.to_dict() for v in same]
+    assert [g.label for g in kept] == [g.label for g in again]
+    monkeypatch.setattr(features, "GATE_NARROW_COLUMNS", 30)
+    gate = features._Gate(X, y, "classification", 5, 0)
+    assert gate.narrowed(list(X.columns)) is None
+    assert gate.narrowed([*X.columns, "extra"]) == frozenset(list(X.columns)[:10])

@@ -180,9 +180,9 @@ FEATURE_SHARE = 0.10  # of the time, at most, goes to choosing derived features
 # the most useful candidates run out of time unconfirmed. Never over FEATURE_MAX_SHARE.
 FEATURE_MIN_SECS = 30.0
 FEATURE_MAX_SHARE = 0.30
-# On a table this wide one fit of the reference model takes a share of the choice's time that
-# leaves nothing to judge a candidate with (a hundred rows: about 2 s per 1,000 columns for each
-# of the folds' fits, and the candidates' own fit grows faster than the columns).
+# A table with more columns than this that the run keeps (not the constant ones, which it leaves
+# out) gets no derived features: reading its columns once for every repeat of the gate's folds
+# takes seconds, which leaves nothing to judge a candidate with.
 FEATURE_MAX_COLUMNS = 5_000
 DROPPED_SHOWN = 5  # names of left-out columns in the notice
 # The check for a column that predicts the target alone (``fione.data.profile.leak_check``) gets
@@ -287,6 +287,12 @@ def _ignore(event: Event) -> None:
 
 def _never() -> bool:
     return False
+
+
+def kept_columns(X: pd.DataFrame) -> int:
+    """The columns of ``X`` the models read: those with more than one value (``Prep`` leaves out
+    the others)."""
+    return int((X.nunique(dropna=False) > 1).sum())
 
 
 def _shared_values(X: pd.DataFrame, column: str) -> float:
@@ -1563,7 +1569,7 @@ class AutoML:
         ``FEATURE_MIN_SECS`` (but under ``FEATURE_MAX_SHARE``)."""
         if not self.config.feature_engineering:
             return [], None
-        if X.shape[1] > FEATURE_MAX_COLUMNS:
+        if X.shape[1] > FEATURE_MAX_COLUMNS and kept_columns(X) > FEATURE_MAX_COLUMNS:
             self._notice(
                 f"derived features are not tried on a table of more than "
                 f"{FEATURE_MAX_COLUMNS:,} columns"
