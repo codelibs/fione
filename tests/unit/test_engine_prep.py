@@ -820,6 +820,12 @@ def test_whole_numbers_that_all_read_as_dates_are_found_and_other_numbers_are_no
     hours = pd.Timestamp("2014-10-21") + pd.to_timedelta(rng.integers(0, 240, 500), unit="h")
     assert integer_date_format(pd.Series(hours.strftime("%y%m%d%H").astype("int64"))) == "%y%m%d%H"
     assert integer_date_format(pd.Series(hours.strftime("%Y%m%d%H").astype("int64"))) == "%Y%m%d%H"
+    seconds = pd.Timestamp("2014-10-21") + pd.to_timedelta(rng.integers(0, 900_000, 500), unit="s")
+    assert integer_date_format(pd.Series(seconds.strftime("%Y%m%d%H%M%S").astype("int64"))) == (
+        "%Y%m%d%H%M%S"
+    )
+    ids = rng.integers(10**13, 10**14 - 1, 500)
+    assert integer_date_format(pd.Series(ids)) is None  # 14-digit ids that are not clocks
     assert integer_date_format(pd.Series(rng.integers(10_000_000, 99_999_999, 500))) is None  # ids
     assert integer_date_format(pd.Series(rng.integers(0, 50, 500))) is None  # small numbers
     assert integer_date_format(pd.Series(ymd[:5].repeat(100))) is None  # five values: codes

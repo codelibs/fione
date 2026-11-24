@@ -125,7 +125,12 @@ def _is_categorical(s: pd.Series) -> bool:
     return pd.api.types.is_bool_dtype(s.dtype) or not pd.api.types.is_numeric_dtype(s.dtype)
 
 
-INTEGER_DATE_FORMATS = (("%Y%m%d", 8), ("%y%m%d%H", 8), ("%Y%m%d%H", 10))
+INTEGER_DATE_FORMATS = (
+    ("%Y%m%d", 8),
+    ("%y%m%d%H", 8),
+    ("%Y%m%d%H", 10),
+    ("%Y%m%d%H%M%S", 14),
+)
 INTEGER_DATE_MIN_VALUES = 10  # different values; a few are codes, not a clock
 INTEGER_DATE_SAMPLE = 2_000
 # Unix time of 2000-01-01 and of 2100-01-01, in seconds: whole numbers between them may be a clock,
@@ -135,10 +140,10 @@ UNIX_MAX_SPAN = 50 * 365 * 86_400
 
 
 def integer_date_format(s: pd.Series) -> str | None:
-    """The format (``%Y%m%d``, ``%y%m%d%H``, ``%Y%m%d%H``) when ``s`` holds whole numbers that
-    all read as dates in it, such as 20141021 or 14102100; ``unix_s`` or ``unix_ms`` when they
-    all lie between 2000 and 2100 as seconds or milliseconds since 1970; ``None`` when it does
-    not."""
+    """The format (``%Y%m%d``, ``%y%m%d%H``, ``%Y%m%d%H``, ``%Y%m%d%H%M%S``) when ``s`` holds whole
+    numbers that all read as dates in it, such as 20141021, 14102100 or 20141021153045;
+    ``unix_s`` or ``unix_ms`` when they all lie between 2000 and 2100 as seconds or milliseconds
+    since 1970; ``None`` when it does not."""
     if not (pd.api.types.is_integer_dtype(s.dtype) and not pd.api.types.is_bool_dtype(s.dtype)):
         return None
     values = s.dropna().astype("int64")
@@ -155,7 +160,7 @@ def integer_date_format(s: pd.Series) -> str | None:
         ),
         None,
     )
-    if low < 10_000_000 or (high >= 10_000_000_000 and unix is None):
+    if low < 10_000_000 or (high >= 100_000_000_000_000 and unix is None):
         return None  # most integer columns end here, at the cost of two scans
     if len(values) > INTEGER_DATE_SAMPLE:
         values = values.sample(INTEGER_DATE_SAMPLE, random_state=0)
@@ -167,6 +172,8 @@ def integer_date_format(s: pd.Series) -> str | None:
             text, format=fmt, errors="coerce"
         ).notna().all():
             if fmt == "%Y%m%d" and not values.between(19000101, 21001231).all():
+                continue
+            if digits == 14 and not values.between(19000101000000, 21001231235959).all():
                 continue
             return fmt
     return unix
