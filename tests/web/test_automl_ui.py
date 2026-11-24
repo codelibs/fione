@@ -843,7 +843,7 @@ def test_the_project_navigation_is_on_every_project_screen(world):
 
 def test_a_refused_form_keeps_the_posted_run_time(world, monkeypatch):
     csrf = world.login("ed")
-    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.03)  # iris: 600 cells, 9 minutes
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.004)  # iris: 150 rows as 30 columns, 9 minutes
     url = world.path("/projects/{p}/datasets/{train}/train")
     assert "set to 10 minutes" in world.client.get(url).text
     r = world.client.post(url, data=form_for(csrf, nfolds="1"))

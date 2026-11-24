@@ -639,10 +639,11 @@ def test_propose_cleans_notes_and_never_interprets_them(env):
 
 @pytest.mark.parametrize(
     ("rows", "cols", "secs"),
-    [(1, 2, 120), (18_000, 9, 120), (166_000, 9, 240), (100_000, 11, 180), (750_000, 19, 1800)],
+    [(1, 2, 120), (18_000, 9, 120), (166_000, 9, 900), (100_000, 11, 540), (750_000, 19, 1800)],
 )
 def test_runtime_follows_the_size_of_the_data(rows, cols, secs):
     dataset = SimpleNamespace(n_rows=rows, n_cols=cols)  # in whole minutes, from 2 to 30
+    # a table of fewer than MIN_EFFECTIVE_COLUMNS columns counts as that many
     assert builtin._runtime_secs(dataset) == secs
 
 
@@ -727,11 +728,12 @@ def codes(result):
 def test_propose_warns_when_the_run_time_is_capped_far_below_what_the_data_needs(
     env, monkeypatch, need, args, warned
 ):
-    frame = pd.DataFrame({"x": range(1000), "label": [0, 1] * 500})
+    frame = pd.DataFrame({"x": [i % 37 for i in range(1000)], "label": [0, 1] * 500})
     ds = ingest.ingest_batches(
         env.storage, env.conn, env.project.id, "big", DatasetType.TRAIN, [frame]
     )
-    monkeypatch.setattr(builtin, "SECS_PER_CELL", need / (1000 * builtin.TRIALS_WANTED))
+    columns = builtin.MIN_EFFECTIVE_COLUMNS  # a table of one column counts as this many
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", need / (1000 * columns * builtin.TRIALS_WANTED))
     try:
         result = call(
             env, "propose_training_config", {"dataset_id": ds.id, "target": "label", **args}
@@ -1797,7 +1799,9 @@ def test_describe_reads_a_bounded_sample(env, monkeypatch):
     )
     assert ds.n_rows == 300_000
     proposal = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "b"})
-    assert proposal["config"]["max_runtime_secs"] == 120  # 300k rows x 1 column is a short job
+    # 300k rows count as at least MIN_EFFECTIVE_COLUMNS columns
+    need = 300_000 * builtin.MIN_EFFECTIVE_COLUMNS * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
+    assert proposal["config"]["max_runtime_secs"] == 60 * math.ceil(need / 60)
 
     def forbidden(*args, **kwargs):
         raise AssertionError("the whole dataset was read")

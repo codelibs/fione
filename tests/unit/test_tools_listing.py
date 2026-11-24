@@ -882,14 +882,14 @@ def test_propose_join_refuses_what_a_join_cannot_do(env):
 
 def test_the_run_time_need_of_a_text_grows_with_the_classes_to_tell_apart():
     dataset = SimpleNamespace(n_rows=100_000, n_cols=2)
-    text = ColumnProfile("t", "text", 0.0, 90_000, None, None, None, None, mean_length=100.0)
+    text = ColumnProfile("t", "text", 0.0, 90_000, None, None, None, None, mean_length=2_000.0)
     profile = SimpleNamespace(columns=[text])
     base = runtime_need_secs(dataset, profile)
     for classes in (0, 1, 2):  # two classes, a regression, and the odd cases: as before
         assert runtime_need_secs(dataset, profile, classes) == base
     assert runtime_need_secs(dataset, profile, 4) == pytest.approx(2 * base)
     assert runtime_need_secs(dataset, profile, 20) == pytest.approx(10 * base)
-    assert base == pytest.approx(100_000 * 100 * builtin.SECS_PER_TEXT_CHAR)
+    assert base == pytest.approx(100_000 * 2_000 * builtin.SECS_PER_TEXT_CHAR)
     # the cells of a table with no text do not depend on the classes
     plain = SimpleNamespace(columns=[ColumnProfile("x", "numeric", 0.0, 9, None, None, None, None)])
     assert runtime_need_secs(dataset, plain, 20) == runtime_need_secs(dataset)
@@ -899,25 +899,68 @@ def test_the_run_time_need_of_a_text_grows_with_the_classes_to_tell_apart():
 
 def test_the_run_time_need_counts_the_text_of_the_data():
     dataset = SimpleNamespace(n_rows=100_000, n_cols=3)
-    text = ColumnProfile("t", "text", 0.0, 90_000, None, None, None, None, mean_length=400.0)
+    text = ColumnProfile("t", "text", 0.0, 90_000, None, None, None, None, mean_length=4_000.0)
     plain = ColumnProfile("x", "numeric", 0.0, 90_000, None, None, None, None)
-    cells = 100_000 * 2 * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
+    cells = 100_000 * builtin.MIN_EFFECTIVE_COLUMNS * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
     assert runtime_need_secs(dataset) == cells
     assert runtime_need_secs(dataset, SimpleNamespace(columns=[plain])) == cells
     profile = SimpleNamespace(columns=[text, plain])
     assert runtime_need_secs(dataset, profile) == pytest.approx(
-        100_000 * 400 * builtin.SECS_PER_TEXT_CHAR
+        100_000 * 4_000 * builtin.SECS_PER_TEXT_CHAR
     )
     many = SimpleNamespace(columns=[text, text, text, text])  # only the first MAX_PROSE are read
     assert runtime_need_secs(dataset, many) == pytest.approx(
-        3 * 100_000 * 400 * builtin.SECS_PER_TEXT_CHAR
+        3 * 100_000 * 4_000 * builtin.SECS_PER_TEXT_CHAR
     )
-    half_empty = ColumnProfile("t", "text", 0.5, 90_000, None, None, None, None, mean_length=400.0)
+    half_empty = ColumnProfile(
+        "t", "text", 0.5, 90_000, None, None, None, None, mean_length=4_000.0
+    )
     assert runtime_need_secs(dataset, SimpleNamespace(columns=[half_empty])) == pytest.approx(
-        100_000 * 200 * builtin.SECS_PER_TEXT_CHAR
+        100_000 * 2_000 * builtin.SECS_PER_TEXT_CHAR
     )
-    assert builtin._runtime_secs(dataset, profile) == 60 * math.ceil(
-        100_000 * 400 * builtin.SECS_PER_TEXT_CHAR / 60
+    assert builtin._runtime_secs(dataset, profile) == min(
+        builtin.MAX_RUNTIME_SECS,
+        60 * math.ceil(100_000 * 4_000 * builtin.SECS_PER_TEXT_CHAR / 60),
+    )
+
+
+def test_a_table_of_few_columns_needs_the_time_of_the_least_columns_a_trial_costs():
+    narrow = SimpleNamespace(n_rows=867_000, n_cols=4)
+    wide = SimpleNamespace(n_rows=867_000, n_cols=200)
+    per_column = 867_000 * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
+    assert runtime_need_secs(narrow) == pytest.approx(per_column * builtin.MIN_EFFECTIVE_COLUMNS)
+    assert runtime_need_secs(wide) == pytest.approx(per_column * 199)  # its own columns
+    just = SimpleNamespace(n_rows=867_000, n_cols=builtin.MIN_EFFECTIVE_COLUMNS + 1)
+    assert runtime_need_secs(just) == runtime_need_secs(narrow)  # where the two meet
+    assert builtin._runtime_secs(narrow) == builtin.MAX_RUNTIME_SECS
+    assert runtime_need_secs(narrow) > builtin.MAX_RUNTIME_SECS * builtin.RUNTIME_SHORT_FACTOR
+    # a small table stays at the shortest run
+    assert (
+        builtin._runtime_secs(SimpleNamespace(n_rows=1_000, n_cols=4)) == builtin.MIN_RUNTIME_SECS
+    )
+    # a short text column does not take the floor away; a long one is taken over it; a table of
+    # nothing but text has no columns the floor counts
+    short = ColumnProfile("t", "text", 0.0, 9, None, None, None, None, mean_length=10.0)
+    titles = SimpleNamespace(n_rows=867_000, n_cols=4)
+    assert runtime_need_secs(titles, SimpleNamespace(columns=[short])) == pytest.approx(
+        runtime_need_secs(narrow)
+    )
+    long = ColumnProfile("t", "text", 0.0, 9, None, None, None, None, mean_length=4_000.0)
+    assert runtime_need_secs(titles, SimpleNamespace(columns=[long])) == pytest.approx(
+        867_000 * 4_000 * builtin.SECS_PER_TEXT_CHAR
+    )
+    ident = ColumnProfile("i", "id", 0.0, 100_000, None, None, None, None)
+    with_id = SimpleNamespace(n_rows=100_000, n_cols=3)  # an identifier, the text and the target
+    assert runtime_need_secs(with_id, SimpleNamespace(columns=[ident, short])) == pytest.approx(
+        100_000 * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED * 2
+    )
+    plain = ColumnProfile("x", "numeric", 0.0, 9, None, None, None, None)
+    assert runtime_need_secs(with_id, SimpleNamespace(columns=[ident, plain])) == pytest.approx(
+        100_000 * builtin.MIN_EFFECTIVE_COLUMNS * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
+    )
+    only_text = SimpleNamespace(n_rows=100_000, n_cols=2)  # the text and the target
+    assert runtime_need_secs(only_text, SimpleNamespace(columns=[short])) == pytest.approx(
+        100_000 * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
     )
 
 
