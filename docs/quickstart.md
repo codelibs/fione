@@ -362,8 +362,9 @@ An expression is built from:
 - comparisons `== != < <= > >=`, which give 1 or 0 (a comparison with an empty value gives 0, and
   `!=` gives 1), and `&`, `|`, `~` for "and", "or", "not" on such values, which also give 1 or 0 (an
   empty value is false). Put each comparison in parentheses: `(a > 0) & (b > 0)`.
-- `abs`, `sqrt`, `log`, `log1p`, `exp`, `floor`, `min2(x, y)` and `max2(x, y)` (the smaller and larger
-  of two values), `mod2(x, y)` (the remainder of `x` over `y`, with the sign of `y`; empty for a `y` of 0:
+- `abs`, `sqrt`, `log`, `log1p`, `exp`, `floor`, `sin`, `cos` and `radians` (an angle in degrees to radians:
+  `sin(radians(lat))`), `atan2(y, x)` (the angle of the point `(x, y)` in radians, from -pi to pi),
+  `min2(x, y)` and `max2(x, y)` (the smaller and larger of two values), `mod2(x, y)` (the remainder of `x` over `y`, with the sign of `y`; empty for a `y` of 0:
   `mod2(month_index, 12)` is the month of the year), `clip(x, low, high)`, `isnull(x)` (1 where `x` is empty) and `where(condition, x, y)`
   (`x` where the condition is true, `y` elsewhere).
 - `rowsum`, `rowmean` and `rowcount` of any number of values on one row, which skip the empty ones:
