@@ -1380,6 +1380,9 @@ def test_calc_functions_match_numpy_and_pandas():
     np.testing.assert_allclose(calc("floor(a)"), np.floor(a), equal_nan=True)
     np.testing.assert_allclose(calc("mod2(a, 3)"), np.mod(a, 3), equal_nan=True)
     assert np.isnan(calc("mod2(a, 0)")).all()
+    np.testing.assert_allclose(calc("sin(radians(a))"), np.sin(np.radians(a)), equal_nan=True)
+    np.testing.assert_allclose(calc("cos(radians(a))"), np.cos(np.radians(a)), equal_nan=True)
+    np.testing.assert_allclose(calc("atan2(a, b)"), np.arctan2(a, b), equal_nan=True)
     np.testing.assert_array_equal(calc("isnull(a) + isnull(b)"), a.isna() * 1.0 + b.isna())
     np.testing.assert_array_equal(calc("where(a > 1, a, -1)"), np.where(a > 1, a, -1))
     np.testing.assert_array_equal(calc("where(a > 1, a, nan)"), np.where(a > 1, a, np.nan))
@@ -2474,3 +2477,35 @@ def test_a_pivot_of_decimal_whole_numbers_joins_back_to_the_integer_key():
     ints = pd.DataFrame({"season": [1, 1], "team": [1104, 1105]})
     joined, _ = run_op("join", ints, {"other_dataset_id": 1, "keys": ["season", "team"]}, long)
     assert joined["win_pct"].tolist() == [0.5, 0.0]
+
+
+def test_calc_builds_the_great_circle_distance_and_the_bearing_between_two_points():
+    df = pd.DataFrame(
+        {
+            "lat1": [40.7, 40.78, 51.5],
+            "lon1": [-74.0, -73.95, -0.12],
+            "lat2": [40.75, 40.64, 48.85],
+            "lon2": [-73.98, -73.78, 2.35],
+        }
+    )
+    a = (
+        "sin(radians((lat2 - lat1) / 2)) ** 2"
+        " + cos(radians(lat1)) * cos(radians(lat2)) * sin(radians((lon2 - lon1) / 2)) ** 2"
+    )
+    lat1, lon1, lat2, lon2 = (np.radians(df[c]) for c in ("lat1", "lon1", "lat2", "lon2"))
+    h = (
+        np.sin((lat2 - lat1) / 2) ** 2
+        + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
+    )
+    expected = 2 * 6371 * np.arcsin(np.sqrt(h))
+    np.testing.assert_allclose(calc(f"2 * 6371 * atan2(sqrt({a}), sqrt(1 - ({a})))", df), expected)
+    bearing = np.arctan2(
+        np.sin(lon2 - lon1) * np.cos(lat2),
+        np.cos(lat1) * np.sin(lat2) - np.sin(lat1) * np.cos(lat2) * np.cos(lon2 - lon1),
+    )
+    y = "sin(radians(lon2 - lon1)) * cos(radians(lat2))"
+    x = (
+        "cos(radians(lat1)) * sin(radians(lat2))"
+        " - sin(radians(lat1)) * cos(radians(lat2)) * cos(radians(lon2 - lon1))"
+    )
+    np.testing.assert_allclose(calc(f"atan2({y}, {x})", df), bearing)
