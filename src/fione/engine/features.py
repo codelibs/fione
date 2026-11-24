@@ -27,12 +27,16 @@ fitted on all the training rows, not on the sample, and the columns that name an
 for in all of them: a sample of 20,000 rows of a table in which an entity occurs six times in
 130,000 shows it once, so a frequency read from it would not be the one the model gets. That
 reading is not bounded by the check's deadline; it takes seconds for a million rows. The reference
-model does not sample columns, since that would reward any added column. Groups, not single
-features, are judged, which limits the number of comparisons. The folds differ from the search's,
-but the rows are the same, so the cross-validation scores of the search stay slightly optimistic;
-the report on the model lists every group's gain. A group that reads the target needs more rows
-than the gate samples to show its worth, so it is judged last, on ``ENCODING_ROWS`` rows or as
-many more (up to ``ENCODING_ROWS_MAX``) as the time covers.
+model does not sample columns, since that would reward any added column; on a table of more
+than ``GATE_NARROW_COLUMNS`` input columns it reads only the ``GATE_COLUMNS`` most useful of them
+(by its own ranking on the sample) and every feature of the groups, so that a candidate is judged
+in seconds, not minutes. Below that it reads them all, because a group that sums up the columns
+the reference model cannot see looks better than it is; on a wider table that limit remains.
+Groups, not single features, are judged, which limits the number of comparisons. The folds differ
+from the search's, but the rows are the same, so the cross-validation scores of the search stay
+slightly optimistic; the report on the model lists every group's gain. A group that reads the
+target needs more rows than the gate samples to show its worth, so it is judged last, on
+``ENCODING_ROWS`` rows or as many more (up to ``ENCODING_ROWS_MAX``) as the time covers.
 
 Derived features count for their source columns in importances and contributions: a feature
 with several sources splits its share equally among them.
@@ -69,6 +73,8 @@ GATE_Z = 3.0  # standard errors of the paired fold-wise loss difference a group 
 GATE_MIN_GAIN = 0.001  # and this share of the loss
 GATE_SHARE = 0.7  # of the folds must improve
 GATE_ROUNDS = 150  # of the reference model, a small and smooth one: fewer leaves, more shrinkage
+GATE_COLUMNS = 300  # input columns the reference model reads of a very wide table (the top ones)
+GATE_NARROW_COLUMNS = 1_000  # input columns from which it reads only those
 GATE_SEED_OFFSET = 1000  # the gate's folds differ from the search's
 GATE_SEED_SPACE = 2**31 - 1000  # keeps the folds' seeds (plus the repeat) valid for any seed
 THREAD_ROWS = 5000  # below this the reference model runs on one thread: faster on small data
@@ -1324,6 +1330,13 @@ class _Gate:
         self.classes = int(y.max()) + 1 if task == "classification" else 0
         self.threads = 1 if len(X) < THREAD_ROWS else n_threads(len(X))
         self._folds: dict[int, list] = {}
+        # the input columns the reference model reads (None: all of them), set once ranked
+        self.top: frozenset[str] | None = None
+
+    def narrowed(self, ranked: list[str]) -> frozenset[str] | None:
+        """The ``GATE_COLUMNS`` most useful of the ranked input columns, or None for a table that
+        has no more than ``GATE_NARROW_COLUMNS`` of them."""
+        return frozenset(ranked[:GATE_COLUMNS]) if len(ranked) > GATE_NARROW_COLUMNS else None
 
     def folds(self, repeat: int):
         if repeat not in self._folds:
@@ -1368,9 +1381,16 @@ class _Gate:
                 if view is None:
                     if self.out_of_time():
                         raise _OutOfTime
-                    view = (
-                        Prep().fit(self.X, [_Fitted(self, g) for g in groups], self.y).tree(self.X)
-                    )
+                    prep = Prep().fit(self.X, [_Fitted(self, g) for g in groups], self.y)
+                    view = prep.tree(self.X)
+                    if self.top is not None:  # a wide table: its top columns, every group feature
+                        base = len(prep.feature_names) - sum(len(g.names) for g in prep.groups)
+                        keep = [
+                            i
+                            for i, sources in enumerate(prep.sources)
+                            if i >= base or set(sources) <= self.top
+                        ]
+                        view = view.iloc[:, keep]
                 done = []
                 for train, valid in self.folds(repeat):
                     if self.out_of_time():
@@ -1469,8 +1489,10 @@ def select_groups(
     all_rows, all_y = X, y
     encodes = row_groups is None and (task == "regression" or int(y.max()) <= 1)
 
+    narrow: list = [None]  # the columns every gate reads, set by the first gate's ranking
+
     def new_gate(X, y, row_groups):
-        return _Gate(
+        gate = _Gate(
             X,
             y,
             task,
@@ -1480,6 +1502,8 @@ def select_groups(
             row_groups,
             all_rows,
         )
+        gate.top = narrow[0]
+        return gate
 
     if len(X) > GATE_ROWS:
         X, y, row_groups = sampled(X, y, row_groups, GATE_ROWS)
@@ -1490,6 +1514,7 @@ def select_groups(
     pool: list[Group] = []
     try:
         prep, ranked = Prep().fit(X), gate.ranked()
+        narrow[0] = gate.top = gate.narrowed(ranked)
         pool = [g for g in candidates(prep, X, ranked, all_rows) if encodes or not g.uses_target]
         if encodes and task == "classification":  # models per value of a column (binary only)
             pool += level_models(prep, X, y, ranked, all_rows, all_y, seed)
