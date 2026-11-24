@@ -519,9 +519,14 @@ it scored the same where a level moves with time. A whole-number time column tha
 (20141021, a Unix time) keeps its number and its date parts; to keep a counter as an input, give
 the model a copy of it under another name. A counter that is the only input is kept.
 
-When the data needs more than 1.5 times the longest time the assistant proposes (30 minutes), which
-holds from about 15 million cells (rows times columns) on, its proposal warns that many models may
-be cut by time and each kind tried with few settings. A longer `max_runtime_secs` is allowed, and so
+The time the assistant proposes (2 to 30 minutes) is what the data needs to try about 30 models,
+from its cells (rows times input columns, a table of fewer than 30 input columns counting as 30,
+since a trial of such a table costs more than its cells: the boosting rounds, the date and
+category encodings and the folds are work per row; a table of nothing but text counts its own
+columns), or, for text, from its characters if that is more. When the data needs more than 1.5 times the longest time the assistant proposes (30
+minutes), which holds from about 15 million cells on (500,000 rows of 30 columns or fewer), its
+proposal warns that many models may be cut by time and each kind tried with few settings. A
+longer `max_runtime_secs` is allowed, and so
 is training on a part of the rows (made with **Split into train, valid and test**).
 
 The first part is only learned from. The scores, the ensemble weights, the diagnostics and the

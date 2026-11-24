@@ -685,6 +685,12 @@ def _get_training_events(ctx: ToolContext, args: dict) -> dict:
 # on the larger sets measured; a run should try about TRIALS_WANTED of them.
 SECS_PER_CELL = 6e-6
 TRIALS_WANTED = 30
+# A trial of a table with few columns costs far more than its cells: the boosting rounds, the
+# date and category encodings and the folds are work per row. Measured on tables of a few to about
+# 25 columns, one trial took as long as one of 25 to 190 columns (60 for most). A longer run pays
+# off only where boosting is the best family, so a table counts as at least half of that, to keep
+# the default wait moderate.
+MIN_EFFECTIVE_COLUMNS = 30
 # A text model fits all its data in one unit that cannot be cut short, and its first trial may
 # take only part of the search time (half of what is left when it starts, about 0.2 of the
 # run). One trial of two classes costs about 2e-6 seconds per character, so the run needs about
@@ -744,16 +750,21 @@ def class_count(y: pd.Series, task: str) -> int:
 def runtime_need_secs(
     dataset: Dataset, profile: DatasetProfile | None = None, classes: int = 2
 ) -> float:
-    """Seconds a run needs to try about ``TRIALS_WANTED`` models on ``dataset``, or, when
-    ``profile`` shows prose columns (the first ``MAX_PROSE`` are read), to give a text model one
-    trial (``SECS_PER_TEXT_CHAR``, times ``classes / 2`` for a classification target of more
-    than two ``classes``), if that is more."""
-    cells = dataset.n_rows * max(1, dataset.n_cols - 1)
-    need = cells * SECS_PER_CELL * TRIALS_WANTED
+    """Seconds a run needs to try about ``TRIALS_WANTED`` models on ``dataset`` (its rows times its
+    columns, a table of fewer than ``MIN_EFFECTIVE_COLUMNS`` columns counting as that many unless
+    all its inputs are prose, identifiers or constants), or, when ``profile`` shows prose columns
+    (the first ``MAX_PROSE`` are read), to give a text model one trial (``SECS_PER_TEXT_CHAR``,
+    times ``classes / 2`` for a classification target of more than two ``classes``), if that is
+    more."""
+    columns = max(1, dataset.n_cols - 1)
+    prose = [] if profile is None else [c for c in profile.columns if c.mean_length is not None]
+    unused = [] if profile is None else [c for c in profile.columns if c.kind in ("id", "constant")]
+    if columns - len(unused) > len(prose):  # else no column is left for the trials the floor counts
+        columns = max(columns, MIN_EFFECTIVE_COLUMNS)
+    need = dataset.n_rows * columns * SECS_PER_CELL * TRIALS_WANTED
     if profile is None:
         return need
-    prose = [c for c in profile.columns if c.mean_length is not None][:MAX_PROSE]
-    chars = dataset.n_rows * sum(c.mean_length * (1 - c.missing_rate) for c in prose)
+    chars = dataset.n_rows * sum(c.mean_length * (1 - c.missing_rate) for c in prose[:MAX_PROSE])
     return max(need, chars * SECS_PER_TEXT_CHAR * max(1, classes / 2))
 
 

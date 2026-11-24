@@ -644,7 +644,7 @@ def test_the_run_time_follows_the_size_of_the_data(owner, monkeypatch):
     page = tips_page(owner, frame)
     assert 'id="runtime-3" name="runtime" value="3" checked' in page
     assert "so the maximum run time is set" not in page
-    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.03)  # 400 cells: 6 minutes
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.001)  # 400 rows as 30 columns: 6 minutes
     page = tips_page(owner, frame)
     assert 'value="10" checked' in page
     assert "400 rows and 2 columns" in page and "set to 10 minutes" in page
@@ -698,7 +698,7 @@ def test_the_pro_form_run_time_follows_the_size_of_the_data(owner, monkeypatch):
     client = owner[0]
     url = pro_form(owner, tip_frame(pd.Series(["a", "b"] * 200)))
     assert 'name="max_runtime_minutes" value="3"' in client.get(url).text
-    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.03)  # 400 cells: 6 minutes
+    monkeypatch.setattr(builtin, "SECS_PER_CELL", 0.001)  # 400 rows as 30 columns: 6 minutes
     page = client.get(url).text
     assert 'name="max_runtime_minutes" value="10"' in page
     assert "set to 10 minutes" in page
