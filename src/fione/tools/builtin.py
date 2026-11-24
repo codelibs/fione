@@ -831,27 +831,54 @@ def recommended_metric(y: pd.Series, task: str) -> str:
 # A test dataset whose rows hold, in at least this share, values of the column that the train
 # dataset holds too, is predicted for the values the model has seen.
 TEST_SEEN_SHARE = 0.9
+# ... and at most this share of the rows of every test dataset has a value the train rows hold: the
+# test rows are about other values, which a validation that holds out whole values mimics.
+TEST_UNSEEN_SHARE = 0.1
 
 
-def repeated_values_in_test(
+def test_seen_shares(
     storage, conn, dataset: Dataset, column: str, sample_rows: int = _SAMPLE_ROWS
-) -> bool:
-    """Whether a test dataset of the project holds ``column`` and at least ``TEST_SEEN_SHARE`` of
-    its rows (a sample of ``sample_rows``) have a value that ``dataset`` (a train dataset) holds
-    too, in any of its rows. A prediction dataset is not asked: a batch prediction keeps the
-    columns of the data it was made from, so it holds the values of its own input."""
+) -> list[float]:
+    """For each test dataset of the project that holds ``column``, the share of its rows (a sample
+    of ``sample_rows``) that have a value ``dataset`` (a train dataset) holds too, in any of its
+    rows; empty when no test dataset holds the column. A prediction dataset is not asked: a batch
+    prediction keeps the columns of the data it was made from, so it holds the values of its own
+    input."""
     if dataset.type != DatasetType.TRAIN:
-        return False
+        return []
     seen = None
+    shares = []
     for other in projects.list_datasets(conn, dataset.project_id):
         if other.type != DatasetType.TEST or column not in {name for name, _ in other.schema}:
             continue
         if seen is None:
             seen = set(ingest.read_dataset(storage, dataset, [column])[column].dropna().unique())
         values = ingest.read_dataset_runs(storage, other, sample_rows, [column])[column].dropna()
-        if len(values) and values.isin(seen).mean() >= TEST_SEEN_SHARE:
-            return True
-    return False
+        if len(values):
+            shares.append(float(values.isin(seen).mean()))
+    return shares
+
+
+def repeated_values_in_test(
+    storage, conn, dataset: Dataset, column: str, sample_rows: int = _SAMPLE_ROWS
+) -> bool:
+    """Whether a test dataset of the project holds ``column`` and at least ``TEST_SEEN_SHARE`` of
+    its rows have a value that ``dataset`` (a train dataset) holds too (``test_seen_shares``)."""
+    return any(
+        share >= TEST_SEEN_SHARE
+        for share in test_seen_shares(storage, conn, dataset, column, sample_rows)
+    )
+
+
+def other_values_in_test(
+    storage, conn, dataset: Dataset, column: str, sample_rows: int = _SAMPLE_ROWS
+) -> bool:
+    """Whether every test dataset of the project that holds ``column`` has, in at most
+    ``TEST_UNSEEN_SHARE`` of its rows, a value that ``dataset`` (a train dataset) holds too, and at
+    least one test dataset holds it: the test rows are about values the training rows do not
+    have."""
+    shares = test_seen_shares(storage, conn, dataset, column, sample_rows)
+    return bool(shares) and all(share <= TEST_UNSEEN_SHARE for share in shares)
 
 
 def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | None:
@@ -1342,6 +1369,20 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                     "shuffled validation matches how the model will be used; group_column would "
                     "validate on values the model has not seen and make the score look worse "
                     "than the test will give",
+                    column=column,
+                )
+            )
+        elif _is_plain(repeated.name) and other_values_in_test(
+            ctx.storage, ctx.conn, dataset, repeated.name, rows
+        ):
+            overrides["cv_group_column"] = repeated.name
+            warnings.append(
+                _warning(
+                    "group_column_for_test",
+                    f"column '{column}' repeats over rows, and almost no row of the test data of "
+                    "this project has a value the training rows hold, so it is proposed as "
+                    "group_column: the validation holds out whole values, as the test data is "
+                    "made of other values; leave group_column empty to validate on shuffled rows",
                     column=column,
                 )
             )
