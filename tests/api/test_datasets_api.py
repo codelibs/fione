@@ -11,6 +11,7 @@ import pytest
 from api_helpers import CSV, add_user, bearer, connect, upload
 from fione.api import routes_datasets
 from fione.auth.roles import Role
+from fione.data import profile as profile_module
 from fione.data.profile import profile_dataset
 
 
@@ -262,6 +263,60 @@ def test_profile_says_which_leak_suspects_are_exact(client, owner, project):
         "predicts the target on its own",
         "score",
     )
+
+
+def test_the_profile_names_the_columns_a_target_may_be_computed_from(client, owner, project):
+    rng = np.random.default_rng(0)
+    n = 2000
+    rate = {(g, t): rng.uniform(1, 90) for g in "abcd" for t in "xyz"}
+    frame = pd.DataFrame(
+        {
+            "category": rng.choice(list("abcd"), n),
+            "tier": rng.choice(list("xyz"), n),
+            "quantity": rng.integers(1, 500, n).astype(float),
+        }
+    )
+    unit = [rate[g, t] for g, t in zip(frame.category, frame.tier, strict=True)]
+    frame["revenue"] = frame.quantity * np.array(unit)
+    dataset = upload(client, project, frame.to_csv(index=False).encode(), headers=owner).json()
+    url = f"{base(project)}/{dataset['id']}/profile"
+    found = client.get(f"{url}?target=revenue", headers=owner).json()["derived"]
+    assert found["column"] == "quantity" and found["keys"] == ["category", "tier"]
+    assert client.get(url, headers=owner).json()["derived"] is None  # no target, no check
+
+
+def test_a_derived_target_search_cut_by_its_time_is_not_cached_and_is_not_a_partial_check(
+    client, owner, project, monkeypatch
+):
+    rng = np.random.default_rng(0)
+    n = 2000
+    frame = pd.DataFrame(
+        {
+            "category": rng.choice(list("abcd"), n),
+            "quantity": rng.integers(1, 500, n).astype(float),
+        }
+    )
+    frame["revenue"] = frame.quantity * frame.category.map(dict(a=3.0, b=9.0, c=20.0, d=70.0))
+    dataset = upload(client, project, frame.to_csv(index=False).encode(), headers=owner).json()
+    url = f"{base(project)}/{dataset['id']}/profile?target=revenue"
+    calls = []
+    real = routes_datasets.leak_check
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(routes_datasets, "leak_check", spy)
+    assert client.get(url, headers=owner).json()["derived"] is not None
+    client.get(url, headers=owner)
+    assert len(calls) == 1  # kept
+    calls.clear()
+    monkeypatch.setattr(profile_module, "_DERIVED_SECS", -1.0)
+    other = f"{base(project)}/{dataset['id']}/profile?target=quantity"
+    for _ in range(2):
+        found = client.get(other, headers=owner).json()
+        assert found["leak_partial"] is False and found["derived_cut"] is True
+    assert len(calls) == 2  # cut: checked again
 
 
 def test_the_profile_leak_check_runs_once_per_dataset_and_target(

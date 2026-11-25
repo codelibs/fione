@@ -267,10 +267,16 @@ def _leak_check(request: Request, dataset: Dataset, target: str):
             profile=_profile(request, dataset),
         )
         made.append(found)
-        return LeakCheck(found.profile.leak_suspects, found.profile.leak_partial), found.task
+        check = LeakCheck(
+            found.profile.leak_suspects,
+            found.profile.leak_partial,
+            found.profile.derived,
+            found.profile.derived_cut,
+        )
+        return check, found.task
 
     entry = request.app.state.ui_leaks.get(
-        (dataset.id, target), compute, keep=lambda e: not e[0].partial
+        (dataset.id, target), compute, keep=lambda e: not e[0].partial and not e[0].derived_cut
     )
     return (made[0] if made else None), entry
 
@@ -354,6 +360,13 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
     if scored:
         level = "warning" if max(s.score for s in scored) >= LEAK_STRONG else "info"
         out.append((level, "analysis.warn.leak_scores", {"n": len(scored)}))
+    derived = found.profile.derived
+    if derived is not None and {derived.column, *derived.keys} & inputs:
+        params = {"column": derived.column, "first": derived.keys[0]}
+        if len(derived.keys) > 1:
+            params["second"] = derived.keys[1]
+        code = "leak_derived" if len(derived.keys) == 1 else "leak_derived_pair"
+        out.append(("warning", f"analysis.warn.{code}", params))
     if found.profile.leak_partial:
         out.append(("info", "analysis.warn.leak_partial", {}))
     classes = class_count(found.y, task)

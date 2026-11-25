@@ -1214,3 +1214,246 @@ def test_profile_of_a_column_equal_up_to_float_noise_does_not_fail():
     frame = pd.DataFrame({"x": noise, "y": np.arange(200.0)})
     column = next(c for c in profile_dataset(frame, "y").columns if c.name == "x")
     assert len(column.histogram) == 20 and sum(n for _, n in column.histogram) == 200
+
+
+def _revenue(n=6000, seed=0, groups=("a", "b", "c", "d"), tiers=("x", "y", "z")):
+    """Revenue = quantity x the unit price that the category and the tier fix (a currency and a
+    period fix the rate of an amount), to 0.1 %."""
+    rng = np.random.default_rng(seed)
+    price = {(g, t): rng.uniform(1, 90) for g in groups for t in tiers}
+    df = pd.DataFrame(
+        {
+            "category": rng.choice(groups, n),
+            "tier": rng.choice(tiers, n),
+            "quantity": rng.integers(1, 500, n).astype(float),
+            "noise": rng.normal(size=n),
+        }
+    )
+    unit = np.array([price[g, t] for g, t in zip(df.category, df.tier, strict=True)])
+    df["revenue"] = df.quantity * unit * np.exp(rng.normal(0, 0.001, n))
+    return df
+
+
+def _derived(df, target="revenue", **kwargs):
+    columns = [profile_module._profile_column(c, df[c]) for c in df.columns]
+    return profile_module.derived_target(df, columns, target, **kwargs)[0]
+
+
+def test_a_target_that_a_column_times_a_rate_of_two_categories_gives_is_named():
+    found = profile_dataset(_revenue(), "revenue").derived
+    assert found is not None and found.column == "quantity"
+    assert set(found.keys) == {"category", "tier"} and found.share > 0.99
+
+
+def test_one_category_is_named_alone_and_not_with_a_random_column_beside_it():
+    rng = np.random.default_rng(0)
+    df = _revenue(groups=tuple("abcdefgh"), tiers=("x",))
+    df["junk"] = rng.choice(list("pqrstu"), len(df))
+    found = _derived(df)
+    assert found is not None and found.keys == ("category",)
+
+
+def test_a_target_that_is_a_group_mean_with_noise_is_not_derived():
+    rng = np.random.default_rng(0)
+    df = _revenue()
+    df["revenue"] = np.exp(rng.normal(3, 0.3, len(df))) * (1 + 0.5 * (df.category == "a"))
+    assert _derived(df) is None
+    # a price of a brand that does not depend on the quantity: the categories alone explain it
+    df["revenue"] = df.category.map({"a": 10.0, "b": 25.0, "c": 40.0, "d": 90.0}) * np.exp(
+        rng.normal(0, 0.001, len(df))
+    )
+    assert _derived(df) is None
+
+
+def test_a_noisy_multiple_of_a_column_is_not_derived_by_a_key_that_adds_nothing():
+    rng = np.random.default_rng(0)
+    n = 20_000
+    x = np.exp(rng.normal(3, 1, n))
+    df = pd.DataFrame(
+        {
+            "x": x,
+            "k1": rng.choice(list("abcde"), n),
+            "k2": rng.choice(list("xyz"), n),
+            "revenue": 1.1 * x * np.exp(rng.normal(0, 0.08, n)),
+        }
+    )
+    assert _derived(df) is None  # the column is the target but for noise: not a rate of keys
+    stores = df.assign(store=rng.choice([f"s{i}" for i in range(50)], n))
+    assert _derived(stores) is None
+
+
+def test_a_rate_of_a_key_is_found_only_with_20_rows_for_each_of_its_values():
+    rng = np.random.default_rng(0)
+
+    def table(n):
+        k = rng.integers(0, 250, n)
+        rate = np.exp(rng.normal(0, 1.5, 250))
+        quantity = np.exp(rng.normal(3, 1.5, n))  # as spread as the rate: the key is no price alone
+        df = pd.DataFrame({"key": [f"k{i}" for i in k], "quantity": quantity})
+        return df.assign(revenue=quantity * rate[k])
+
+    assert _derived(table(2500)) is None  # 10 rows each: too few to tell a rate from noise
+    found = _derived(table(7500))  # 30 rows each
+    assert found is not None and found.keys == ("key",)
+
+
+def test_columns_of_more_than_300_values_are_names_and_not_keys():
+    rng = np.random.default_rng(0)
+    n = 9000
+    k = rng.integers(0, 301, n)
+    rate = rng.uniform(1, 90, 301)
+    df = pd.DataFrame({"key": [f"k{i}" for i in k], "q": rng.integers(1, 500, n) * 1.0})
+    df["revenue"] = df.q * rate[k]
+    assert _derived(df) is None
+    k = rng.integers(0, 300, n)
+    assert _derived(df.assign(key=[f"k{i}" for i in k], revenue=df.q * rate[k])) is not None
+
+
+def test_the_column_is_found_after_many_other_number_columns():
+    df = _revenue()
+    others = pd.DataFrame(
+        np.random.default_rng(1).lognormal(size=(len(df), 20)), columns=[f"n{i}" for i in range(20)]
+    )
+    found = _derived(pd.concat([others, df], axis=1))  # 20 columns, then the one that matters
+    assert found is not None and found.column == "quantity"
+
+
+def test_a_target_with_an_infinite_value_is_still_checked():
+    df = _revenue()
+    df.loc[0, "revenue"] = np.inf
+    found = _derived(df)
+    assert found is not None and found.column == "quantity"
+
+
+def test_the_target_s_own_multiple_and_a_target_that_is_not_a_positive_number_are_not_derived():
+    same = _revenue()
+    same["quantity"] = same.revenue / 3.0
+    assert _derived(same) is None
+    df = _revenue()
+    assert _derived(df.assign(revenue=df.revenue - df.revenue.mean())) is None
+    assert _derived(df.assign(revenue=(df.revenue > df.revenue.median()).astype(int))) is None
+
+
+def test_an_exact_rate_that_varies_little_is_found():
+    rng = np.random.default_rng(0)
+    n = 6000
+    regions = rng.integers(0, 10, n)
+    rate = rng.uniform(1.0, 3.0, 10)
+    x = np.exp(rng.normal(3, 1, n))
+    df = pd.DataFrame({"x": x, "region": [f"r{i}" for i in regions], "y": x * rate[regions]})
+    found = _derived(df, "y")
+    assert found is not None and found.column == "x" and found.keys == ("region",)
+
+
+def test_a_key_that_is_just_short_of_enough_is_not_completed_by_a_random_column():
+    rng = np.random.default_rng(0)
+    n = 50_000
+    k = rng.integers(0, 8, n)
+    rate = np.exp(rng.normal(0, 1.0, 8))
+    x = np.exp(rng.normal(3, 1, n))
+    df = pd.DataFrame(
+        {
+            "x": x,
+            "k": [f"k{i}" for i in k],
+            "junk": [f"j{i}" for i in rng.integers(0, 300, n)],  # 24 rows for each pair of values
+            "y": x * rate[k] * np.exp(rng.normal(0, 0.124, n)),  # 98.97% explained by k alone
+        }
+    )
+    assert (
+        _derived(df, "y") is None
+    )  # k and the junk column reach 99.02%, from fitting 2,400 groups
+    sharper = df.assign(y=x * rate[k] * np.exp(rng.normal(0, 0.05, n)))
+    assert _derived(sharper, "y").keys == ("k",)
+
+
+def test_a_price_that_a_category_fixes_is_not_a_rate_times_a_column_that_hardly_varies():
+    rng = np.random.default_rng(0)
+    n = 6000
+    g = rng.choice(list("abcd"), n)
+    price = pd.Series(g).map({"a": 10.0, "b": 25.0, "c": 40.0, "d": 90.0}).to_numpy()
+    df = pd.DataFrame(
+        {
+            "category": g,
+            "quantity": np.exp(rng.normal(0, 0.05, n)),
+            "revenue": price * np.exp(rng.normal(0, 0.001, n)),
+        }
+    )
+    assert _derived(df) is None
+
+
+def test_the_search_stops_when_its_time_is_out_and_says_so_and_keeps_what_it_found():
+    df = _revenue().assign(
+        other=lambda d: d.quantity * np.exp(np.random.default_rng(1).normal(size=len(d)))
+    )
+    columns = [profile_module._profile_column(c, df[c]) for c in df.columns]
+
+    def run(expires_at):
+        calls = []
+
+        def clock():
+            calls.append(1)
+            return 0.0 if len(calls) < expires_at else 99.0
+
+        return profile_module.derived_target(df, columns, "revenue", clock=clock, time_budget=1.0)
+
+    assert run(10**6)[1] is False and run(10**6)[0] is not None  # in time
+    outcomes = [run(k) for k in range(2, 40)]
+    assert (None, True) in outcomes  # cut before anything was found
+    assert any(found is not None and cut for found, cut in outcomes)  # cut after the column
+
+
+def test_a_search_cut_by_its_time_is_marked_and_not_a_partial_leak_check(monkeypatch):
+    df = _revenue()
+    monkeypatch.setattr(profile_module, "_DERIVED_SECS", -1.0)
+    columns = [profile_module._profile_column(c, df[c]) for c in df.columns]
+    check = leak_check(df, columns, "revenue")
+    assert check.derived_cut and check.derived is None and not check.partial
+    profile = profile_dataset(df, "revenue")
+    assert profile.derived_cut and not profile.leak_partial
+
+
+def test_a_rate_that_two_categories_fix_with_a_small_spread_is_found():
+    rng = np.random.default_rng(3)
+    n = 6000
+    rate = {(g, t): rng.uniform(1, 1.3) for g in "abcd" for t in "xyz"}
+    g, t = rng.choice(list("abcd"), n), rng.choice(list("xyz"), n)
+    x = np.exp(rng.normal(3, 1, n))
+    df = pd.DataFrame({"g": g, "t": t, "x": x})
+    df["y"] = x * np.array([rate[a, b] for a, b in zip(g, t, strict=True)])
+    found = _derived(df, "y")
+    assert found is not None and found.column == "x" and set(found.keys) == {"g", "t"}
+
+
+def test_a_large_table_is_read_as_a_sample():
+    seen = []
+    real = pd.factorize
+    big = pd.concat([_revenue()] * 20, ignore_index=True)
+    columns = [profile_module._profile_column(c, big[c]) for c in big.columns]
+
+    def spy(values, *args, **kwargs):
+        seen.append(len(values))
+        return real(values, *args, **kwargs)
+
+    profile_module.pd.factorize = spy
+    try:
+        assert profile_module.derived_target(big, columns, "revenue")[0] is not None
+    finally:
+        profile_module.pd.factorize = real
+    assert max(seen) <= profile_module._DERIVED_ROWS
+
+
+def test_a_training_run_does_not_look_for_a_derived_target():
+    df = _revenue()
+    check = leak_check(
+        df, [profile_module._profile_column(c, df[c]) for c in df.columns], "revenue"
+    )
+    assert check.derived is not None
+    assert (
+        leak_check(
+            df,
+            [profile_module._profile_column(c, df[c]) for c in df.columns],
+            "revenue",
+            derived=False,
+        ).derived
+        is None
+    )

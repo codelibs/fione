@@ -199,9 +199,10 @@ def profile(
     target: str | None = Query(None, max_length=1000),
 ) -> dict:
     """Profile (EDA) of a sample of 100,000 rows from across the dataset: kinds, statistics,
-    histograms, correlations and, with ``target``, leak suspects. For the UI, so ``top_values``
-    (raw cell values) are included, unlike the LLM-facing tools. ``n_rows`` is the whole
-    dataset's row count, ``sample_rows`` the number profiled. Each leak suspect's ``kind`` is
+    histograms, correlations and, with ``target``, leak suspects and ``derived`` (the number
+    column and the category columns the target may be computed from, or null). For the UI, so
+    ``top_values`` (raw cell values) are included, unlike the LLM-facing tools. ``n_rows`` is the
+    whole dataset's row count, ``sample_rows`` the number profiled. Each leak suspect's ``kind`` is
     ``exact`` (the column is left out of the EasyML defaults) or ``score`` (a warning only: a
     strong legitimate column can score as high). The leak check, which can take seconds, is kept
     per dataset and target in the app's leak-check cache (the UI's), unless its time budget
@@ -216,9 +217,15 @@ def profile(
             check = request.app.state.ui_leaks.get(
                 ("api-profile", dataset.id, target),
                 lambda: leak_check(frame, result.columns, target),
-                keep=lambda found: not found.partial,
+                keep=lambda found: not found.partial and not found.derived_cut,
             )
-            result = replace(result, leak_suspects=check.suspects, leak_partial=check.partial)
+            result = replace(
+                result,
+                leak_suspects=check.suspects,
+                leak_partial=check.partial,
+                derived=check.derived,
+                derived_cut=check.derived_cut,
+            )
     out = {**asdict(result), "n_rows": dataset.n_rows, "sample_rows": len(frame)}
     out["leak_suspects"] = [
         {**s, "kind": "score" if s["reason"] in SCORE_REASONS else "exact"}

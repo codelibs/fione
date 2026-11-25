@@ -254,7 +254,7 @@ def _describe_dataset(ctx: ToolContext, args: dict) -> dict:
     shown = names[:_MAX_COLUMNS]
     read = shown + [target] if target is not None and target not in shown else shown
     frame = ingest.read_dataset_runs(ctx.storage, dataset, _SAMPLE_ROWS, read)
-    profile = profile_dataset(frame, target, sample_rows=_SAMPLE_ROWS)
+    profile = profile_dataset(frame, target, sample_rows=_SAMPLE_ROWS, derived=False)
     result = {
         "dataset": _dataset_block(dataset),
         "profile_rows": len(frame),
@@ -1037,7 +1037,11 @@ def propose(
             frame = ingest.read_dataset_runs(storage, dataset, sample_rows, read)
             check = leak_check(frame, profile.columns, target)
         profile = dataclasses.replace(
-            profile, leak_suspects=check.suspects, leak_partial=check.partial
+            profile,
+            leak_suspects=check.suspects,
+            leak_partial=check.partial,
+            derived=check.derived,
+            derived_cut=check.derived_cut,
         )
     # the whole target column (one column) decides the task, not a sample
     y = ingest.read_dataset(storage, dataset, [target])[target]
@@ -1357,6 +1361,23 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 f"{len(left_out):,} more columns hold one value on every row examined and are "
                 "not listed in ignored_columns; training leaves such columns out itself",
                 n=f"{len(left_out):,}",
+            )
+        )
+    if profile.derived is not None:
+        derived = profile.derived
+        column = clean_text(derived.column)
+        keys = [clean_text(k) for k in derived.keys]
+        names = ", ".join(f"'{k}'" for k in keys)
+        params = {"column": column, "first": keys[0]}
+        if len(keys) > 1:
+            params["second"] = keys[1]
+        warnings.append(
+            _warning(
+                "leak_derived" if len(keys) == 1 else "leak_derived_pair",
+                f"the target looks like the number column '{column}' multiplied by a rate that "
+                f"depends on {names}. If the rows to predict will not have them, add them to "
+                "ignored_columns",
+                **params,
             )
         )
     if profile.leak_partial:

@@ -33,6 +33,7 @@ than ``_CORR_MAX_COLUMNS`` numeric columns lists none: the pairs grow with the s
 columns, in time and memory, and among that many the strongest are rarely the ones to look at.
 """
 
+import itertools
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -84,6 +85,20 @@ _LEAK_CODES = {
     ORDERED_BY_TARGET: "ordered",
 }
 LEAK_STRONG = 0.99
+# A number target that is a column times a rate that a few categories fix (an amount in a currency
+# times the rate of the currency and the period): the share of the variation of its logarithm that
+# the categories explain once the column's logarithm is taken off, at least ``_DERIVED_SHARE`` of
+# it, while the categories alone explain at most ``_DERIVED_ALONE`` of it.
+_DERIVED_SHARE = 0.99
+_DERIVED_ALONE = 0.9
+_DERIVED_MAX_LEVELS = 300  # a key column of more values is a name, not a category
+_DERIVED_MIN_GROUP = 20  # rows per combination of keys, on average
+_DERIVED_ROWS = 50_000
+_DERIVED_NUMBERS = 15  # number columns looked at
+_DERIVED_SINGLES = 8  # key columns that are combined in pairs
+_DERIVED_RATIO = 0.001  # of the variation of log(target) that the ratio to the column must keep
+_DERIVED_RATE = 0.9  # of the variation of the ratio that the categories must explain
+_DERIVED_SECS = 1.0  # the search for such columns stops after this long
 
 
 def leak_code(reason: str) -> str:
@@ -116,6 +131,17 @@ class LeakSuspect:
 
 
 @dataclass
+class DerivedTarget:
+    """A number target that may be computed from ``column`` and the categories ``keys``: within
+    each combination of ``keys`` it is nearly a fixed multiple of ``column`` (``share`` of the
+    variation of its logarithm is explained)."""
+
+    column: str
+    keys: tuple[str, ...]
+    share: float
+
+
+@dataclass
 class DatasetProfile:
     n_rows: int
     n_cols: int
@@ -123,12 +149,16 @@ class DatasetProfile:
     correlations: list[tuple[str, str, float]]
     leak_suspects: list[LeakSuspect]
     leak_partial: bool = False  # the leak check's time budget ran out before every column
+    derived: DerivedTarget | None = None  # see ``derived_target``
+    derived_cut: bool = False  # the search for it ran out of time: do not keep the result
 
 
 @dataclass
 class LeakCheck:
     suspects: list[LeakSuspect]
     partial: bool
+    derived: DerivedTarget | None = None
+    derived_cut: bool = False  # ``derived_target`` ran out of time (not a ``partial`` check)
 
 
 def _is_plain_numeric(dtype) -> bool:
@@ -477,6 +507,116 @@ def flag_scores(scores: dict[str, float], task: Task) -> set[str]:
     }
 
 
+def derived_target(
+    df: pd.DataFrame,
+    columns: list[ColumnProfile],
+    target: str,
+    *,
+    time_budget: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[DerivedTarget | None, bool]:
+    """``(found, cut)``: the number column and the one or two category columns from which the
+    number ``target`` may be computed (a pay in a currency from the amount, the currency and the
+    period), or None, and whether the search was cut short by ``time_budget`` seconds.
+
+    With ``y`` the target and ``x`` the column, on the rows where both are above 0 (at most
+    ``_DERIVED_ROWS``) and ``r = log(y / x)``: the categories must explain at least
+    ``_DERIVED_SHARE`` of the variation of ``log(y)`` in ``r`` and at least ``_DERIVED_RATE`` of
+    the variation of ``r`` itself (a column that is the target but for noise has a ratio that no
+    category explains), while they explain at most ``_DERIVED_ALONE`` of ``log(y)`` alone. The
+    ratio must vary a little (``_DERIVED_RATIO`` of the variation of ``log(y)``: else the column
+    is the target itself, which other checks name). The categories have 2 to
+    ``_DERIVED_MAX_LEVELS`` values and ``_DERIVED_MIN_GROUP`` rows for each combination; one
+    category is taken if it is enough, else the best pair of the ``_DERIVED_SINGLES`` best ones,
+    if it leaves less than half of what that category leaves. The ``_DERIVED_NUMBERS`` columns
+    most correlated with the target in logarithms are tried."""
+    start = clock()
+    budget = _DERIVED_SECS if time_budget is None else time_budget
+
+    def late() -> bool:
+        return clock() - start > budget
+
+    if {c.name: c.kind for c in columns}.get(target) != "numeric":
+        return None, False
+    y = pd.to_numeric(df[target], errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
+    rows = np.flatnonzero(np.isfinite(y) & (y > 0))
+    if len(rows) < _LEAK_MIN_ROWS * 25:
+        return None, False
+    if len(rows) > _DERIVED_ROWS:
+        rows = np.sort(np.random.default_rng(0).choice(rows, _DERIVED_ROWS, replace=False))
+    work = df.iloc[rows]
+    log_y = np.log(y[rows])
+    if not log_y.var() > 0:
+        return None, False
+    keys = [
+        c.name
+        for c in columns
+        if c.kind in ("categorical", "text") and 2 <= c.n_unique <= _DERIVED_MAX_LEVELS
+    ]
+    candidates = []
+    for c in columns:
+        if late():
+            return None, True
+        if c.name == target or c.kind != "numeric" or not _is_plain_numeric(df[c.name].dtype):
+            continue
+        x = _as_float(work[c.name])
+        good = np.isfinite(x) & (x > 0)
+        if good.mean() < 0.9 or good.sum() < _LEAK_MIN_ROWS * 25:
+            continue
+        log_x = np.log(np.where(good, x, 1.0))
+        link = abs(np.corrcoef(log_x[good], log_y[good])[0, 1])
+        if np.isfinite(link):
+            candidates.append((link, c.name, good, log_x))
+    if not candidates or not keys:
+        return None, False
+    candidates.sort(key=lambda c: -c[0])
+    codes: dict[str, np.ndarray] = {}
+
+    def unexplained(values: np.ndarray, key: tuple[str, ...], good: np.ndarray) -> float:
+        """The variation of ``values`` left within the combinations of ``key``, relative to its
+        whole variation (1 when the combinations are too small to say)."""
+        code = np.zeros(len(values), dtype=np.int64)
+        for k in key:
+            if k not in codes:
+                codes[k] = pd.factorize(work[k])[0].astype(np.int64)
+            code = code * (_DERIVED_MAX_LEVELS + 2) + (codes[k] + 1)
+        code, levels = pd.factorize(code[good])
+        if good.sum() < _DERIVED_MIN_GROUP * len(levels):
+            return 1.0
+        v = values[good]
+        means = np.bincount(code, weights=v) / np.bincount(code)
+        return float(((v - means[code]) ** 2).mean()) / float(v.var())
+
+    best = None
+    for _, name, good, log_x in candidates[:_DERIVED_NUMBERS]:
+        ratio = log_y - log_x
+        spread = float(ratio[good].var()) / float(log_y[good].var())  # relative to log(y)
+        if spread < _DERIVED_RATIO:
+            continue
+        singles = []
+        for k in keys:
+            if late():
+                return best, True
+            singles.append((unexplained(ratio, (k,), good), k))
+        singles.sort()
+        left, key = singles[0][0], (singles[0][1],)
+        if 1 - left * spread < _DERIVED_SHARE or 1 - left < _DERIVED_RATE:  # not enough: a pair
+            alone, pair_left = left, left
+            for pair in itertools.combinations([k for _, k in singles[:_DERIVED_SINGLES]], 2):
+                if late():
+                    return best, True
+                found = unexplained(ratio, pair, good)
+                if found < alone * 0.5 and found < pair_left:
+                    pair_left, key = found, pair
+            left = pair_left if len(key) == 2 else left
+        share = 1 - left * spread
+        if share >= _DERIVED_SHARE and 1 - left >= _DERIVED_RATE:
+            if 1 - unexplained(log_y, key, good) <= _DERIVED_ALONE:
+                if best is None or share > best.share:
+                    best = DerivedTarget(name, tuple(sorted(key)), share)
+    return best, False
+
+
 def leak_check(
     df: pd.DataFrame,
     columns: list[ColumnProfile],
@@ -486,6 +626,7 @@ def leak_check(
     max_rows: int = 10_000,
     min_rows: int = 200,
     clock: Callable[[], float] = time.monotonic,
+    derived: bool = True,
 ) -> LeakCheck:
     """Columns of ``df`` (profiled as ``columns``) that may reveal ``target``.
 
@@ -494,7 +635,8 @@ def leak_check(
     ``single_column_score`` on a deterministic sample of at most ``max_rows`` rows with a
     target (no score below ``min_rows``), and ``flag_scores`` picks the suspects. Columns are
     scored in profile order until ``time_budget`` seconds have passed; ``partial`` is then
-    true. Each column is listed at most once, with its first reason."""
+    true. Each column is listed at most once, with its first reason. With ``derived`` the
+    result also holds what ``derived_target`` finds (a training run does not look)."""
     start = clock()
     suspects = _value_suspects(df, columns, target)
     listed = {s.column for s in suspects}
@@ -520,7 +662,8 @@ def leak_check(
             reason = ORDERED_BY_TARGET if kinds[name] in ("id", "datetime") else PREDICTS_ALONE
             suspects.append(LeakSuspect(name, reason, scores[name]))
     suspects.sort(key=lambda s: (-s.score, s.column))
-    return LeakCheck(suspects, partial)
+    found, cut = derived_target(df, columns, target) if derived else (None, False)
+    return LeakCheck(suspects, partial, found, cut)
 
 
 def training_leak_suspects(
@@ -552,7 +695,10 @@ def training_leak_suspects(
         if clock() - start > time_budget / 2:
             break
         profiles.append(_profile_column(name, work[name]))
-    return leak_check(work, profiles, target, time_budget=time_budget - (clock() - start)).suspects
+    check = leak_check(
+        work, profiles, target, time_budget=time_budget - (clock() - start), derived=False
+    )
+    return check.suspects
 
 
 def leak_suspects(df: pd.DataFrame, columns: list[ColumnProfile], target: str) -> list[LeakSuspect]:
@@ -561,14 +707,19 @@ def leak_suspects(df: pd.DataFrame, columns: list[ColumnProfile], target: str) -
 
 
 def profile_dataset(
-    df: pd.DataFrame, target: str | None = None, *, sample_rows: int = 200_000
+    df: pd.DataFrame, target: str | None = None, *, sample_rows: int = 200_000, derived: bool = True
 ) -> DatasetProfile:
-    """Profile ``df``; frames above ``sample_rows`` rows are sampled deterministically."""
+    """Profile ``df``; frames above ``sample_rows`` rows are sampled deterministically. With
+    ``derived`` False the leak check does not look for a target computed from columns."""
     if target is not None and target not in df.columns:
         raise ValueError(f"target column '{target}' not found")
     work = df.sample(sample_rows, random_state=0) if len(df) > sample_rows else df
     columns = [_profile_column(name, work[name]) for name in work.columns]
-    check = leak_check(work, columns, target) if target is not None else LeakCheck([], False)
+    check = (
+        leak_check(work, columns, target, derived=derived)
+        if target is not None
+        else LeakCheck([], False)
+    )
     return DatasetProfile(
         n_rows=len(df),
         n_cols=df.shape[1],
@@ -576,4 +727,6 @@ def profile_dataset(
         correlations=_correlations(work, columns),
         leak_suspects=check.suspects,
         leak_partial=check.partial,
+        derived=check.derived,
+        derived_cut=check.derived_cut,
     )
