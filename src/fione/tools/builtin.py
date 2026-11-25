@@ -692,12 +692,14 @@ TRIALS_WANTED = 30
 # the default wait moderate.
 MIN_EFFECTIVE_COLUMNS = 30
 # A text model fits all its data in one unit that cannot be cut short, and its first trial may
-# take only part of the search time (half of what is left when it starts, about 0.2 of the
-# run). One trial of two classes costs about 2e-6 seconds per character, so the run needs about
-# this many per character of text for the model to get a trial. More classes cost more: a trial
-# takes about 3 s + 2.4 s per class on 40,000 texts of 150 characters, so the text term counts
-# ``classes / 2`` times (see ``runtime_need_secs``).
-SECS_PER_TEXT_CHAR = 1e-5
+# take only part of the search time (half of what is left when it starts: 0.15 to 0.25 of the run,
+# measured). One trial of two classes costs about 2e-6 seconds per character alone, up to twice
+# that inside a run (derived features, categories next to the text) and a loaded machine slows it
+# more: a run of 600 s on 31 million characters, or of 180 s on 14 million, left it without a
+# model. The run needs about this many seconds per character of text for the model to get a
+# trial. More classes cost more: a trial takes about 3 s + 2.4 s per class on 40,000 texts of 150
+# characters, so the text term counts ``classes / 2`` times (see ``runtime_need_secs``).
+SECS_PER_TEXT_CHAR = 2.8e-5
 MAX_RUNTIME_SECS = 1800
 MIN_RUNTIME_SECS = 120
 # The proposal warns when the run time it proposes is capped at MAX_RUNTIME_SECS and the data

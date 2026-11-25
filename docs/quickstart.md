@@ -244,7 +244,7 @@ topics are derived features (see below). A model family called TextLinear also r
 a logistic (or ridge) regression on the TF-IDF weights of words and word pairs, with the other
 columns beside them, learned again on each training fold. Each punctuation mark or symbol counts as a word of its own, and so does a one-letter word, since how a text is punctuated can tell its author or its mood. It joins the search and the ensemble
 only for data with such a column, and its predictions are mixed with the other families' by the
-same cross-validation scores. TextLinear fits all its rows in one unit that cannot be cut short, and a fit of many classes takes longer (about 3 s plus 2.4 s per class for 40,000 texts of 150 characters), so the recommended run time for data with text grows with the number of classes: a short run leaves TextLinear without a model, and the run says so.
+same cross-validation scores. TextLinear fits all its rows in one unit that cannot be cut short, and a fit of many classes takes longer (about 3 s plus 2.4 s per class for 40,000 texts of 150 characters), so the recommended run time for data with text grows with the amount of text (about 28 microseconds per character of the text columns for two classes or a number, which takes the first trial's share of the run and a slower machine into account) and with the number of classes: a short run leaves TextLinear without a model, and the run says so.
 
 Three variants of it are *late candidates*: TextLinearWide (up to 100,000 words and word pairs
 per column), TextLinearChar (the words and also the character n-grams of 2 to 5 letters; it is
