@@ -924,7 +924,7 @@ def test_the_run_time_need_counts_the_text_of_the_data():
     )
 
 
-def test_a_table_of_few_columns_needs_the_time_of_the_least_columns_a_trial_costs():
+def test_a_table_of_few_columns_needs_the_time_of_the_least_columns_a_trial_costs(monkeypatch):
     narrow = SimpleNamespace(n_rows=867_000, n_cols=4)
     wide = SimpleNamespace(n_rows=867_000, n_cols=200)
     per_column = 867_000 * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
@@ -940,7 +940,7 @@ def test_a_table_of_few_columns_needs_the_time_of_the_least_columns_a_trial_cost
     )
     # a short text column does not take the floor away; a long one is taken over it; a table of
     # nothing but text has no columns the floor counts
-    short = ColumnProfile("t", "text", 0.0, 9, None, None, None, None, mean_length=10.0)
+    short = ColumnProfile("t", "text", 0.0, 9, None, None, None, None, mean_length=6.0)
     titles = SimpleNamespace(n_rows=867_000, n_cols=4)
     assert runtime_need_secs(titles, SimpleNamespace(columns=[short])) == pytest.approx(
         runtime_need_secs(narrow)
@@ -958,10 +958,37 @@ def test_a_table_of_few_columns_needs_the_time_of_the_least_columns_a_trial_cost
     assert runtime_need_secs(with_id, SimpleNamespace(columns=[ident, plain])) == pytest.approx(
         100_000 * builtin.MIN_EFFECTIVE_COLUMNS * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
     )
-    only_text = SimpleNamespace(n_rows=100_000, n_cols=2)  # the text and the target
-    assert runtime_need_secs(only_text, SimpleNamespace(columns=[short])) == pytest.approx(
+    # a table of nothing but a text and the target: the floor of columns is gone, whatever the
+    # text itself asks for
+    only_text = SimpleNamespace(n_rows=100_000, n_cols=2)
+    titles = ColumnProfile("t", "text", 0.0, 9, None, None, None, None, mean_length=40.0)
+    monkeypatch.setattr(builtin, "SECS_PER_TEXT_CHAR", 0.0)
+    assert runtime_need_secs(only_text, SimpleNamespace(columns=[titles])) == pytest.approx(
         100_000 * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
     )
+
+
+def test_the_text_of_a_table_that_the_cells_alone_would_not_cover_sets_the_run_time():
+    # 104k wines: two text columns of 30.7M characters, 14 columns. The cells ask for 9 minutes
+    # (30 trials), but a text model's first trial takes about 0.15 of the run: in 600 s it had no
+    # model, and the run then used nothing of the 40 words of each row.
+    dataset = SimpleNamespace(n_rows=103_865, n_cols=14)
+    texts = [
+        ColumnProfile("description", "text", 0.0, 9, None, None, None, None, mean_length=237.0),
+        ColumnProfile("title", "text", 0.0, 9, None, None, None, None, mean_length=59.0),
+    ]
+    profile = SimpleNamespace(columns=texts)
+    cells = runtime_need_secs(dataset)
+    assert cells == pytest.approx(103_865 * builtin.MIN_EFFECTIVE_COLUMNS * 6e-6 * 30)
+    need = runtime_need_secs(dataset, profile, 2)
+    assert need == pytest.approx(103_865 * 296 * builtin.SECS_PER_TEXT_CHAR) and need > 1.4 * cells
+    assert builtin._runtime_secs(dataset, profile, 2) == 60 * math.ceil(need / 60) >= 840
+    # a table of a few thousand short texts is as before: the shortest run
+    small = SimpleNamespace(n_rows=7_613, n_cols=5)
+    tweets = SimpleNamespace(
+        columns=[ColumnProfile("text", "text", 0.0, 9, None, None, None, None, mean_length=100.0)]
+    )
+    assert builtin._runtime_secs(small, tweets, 2) == builtin.MIN_RUNTIME_SECS
 
 
 def test_an_uploaded_module_cannot_declare_an_object_parameter():
