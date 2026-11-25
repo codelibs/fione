@@ -821,6 +821,30 @@ class Linear(FamilySpec):
         return by_feature(weight, model.feature_names_in_)
 
 
+SPLINE_MAX_CELLS = 100_000_000  # rows x columns of the splines view, at most
+
+
+class LinearSpline(Linear):
+    """``Linear`` on the splines view: the linear view and a hinge at each knot of every number
+    with many values, so that each number has its own piecewise linear curve (an additive model
+    of curves). Where numbers act in smooth, non-linear ways and trees need many leaves to
+    follow them, the curves give a better linear fit. A late candidate."""
+
+    name = "LinearSpline"
+    view = "splines"
+    cost = 2.0
+    reference = "Linear"
+    keeps_share = False  # a family of its own: Linear runs in the base time like the others
+
+    @classmethod
+    def applies(cls, prep, X: pd.DataFrame) -> bool:
+        return bool(prep._knots) and len(X) * prep.spline_width <= SPLINE_MAX_CELLS
+
+    @classmethod
+    def coef_bytes(cls, prep, outputs: int) -> int:
+        return prep.spline_width * max(1, outputs) * 8 + 1024
+
+
 class DeepLearning(FamilySpec):
     """A feed-forward network with two ReLU layers of ``width`` units (scikit-learn's MLP).
     It trains epoch by epoch on the linear view, stops after
@@ -1235,6 +1259,7 @@ FAMILIES: dict[str, type[FamilySpec]] = {
         ExtraTrees,
         DeepLearning,
         Linear,
+        LinearSpline,
         TextLinear,
         TextLinearWide,
         TextLinearChar,

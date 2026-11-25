@@ -85,7 +85,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
   boosting families (LightGBM_L1, XGBoost_L1, CatBoost_L1) are late candidates too and share
   that time, so LinearWide may be skipped on a short run. LinearBoost (a linear model with small
   trees boosted from its margin) is a late candidate of every table, so these 15% are kept for it
-  also where there is no text; it runs after the text candidates and LinearWide, before the median variants, and takes what they leave. TextLinearChar is left out for more than about 5 million characters of
+  also where there is no text; it runs after the text candidates and LinearWide, before the median variants, and takes what they leave. LinearSpline (a linear model with a piecewise linear curve for each number that has many values) is a late candidate of the tables that have such numbers; it runs right after LinearBoost and takes what is left, except for a regression ranked by MAE, MEDAE or SMAPE, where the median variants follow it and it gets a very small share of that time. TextLinearChar is left out for more than about 5 million characters of
   text and for a text column without spaces, TextLinearPlain when no derived feature was added,
   and a late candidate whose model would be over the size limit is not run.
 - **On a heavily loaded machine the time budget buys fewer boosting rounds**; CatBoost is
@@ -99,7 +99,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
   in probability for classification and in the target's units for regression, not in log-odds.
   They start from each library's own TreeSHAP (LightGBM, XGBoost, CatBoost), from Saabas
   path contributions for RandomForest and ExtraTrees, from the exact coefficient times the
-  distance from the training mean for Linear and TextLinear (and for the linear part of LinearBoost, whose trees use TreeSHAP) (the words of a text column summed
+  distance from the training mean for Linear, LinearSpline and TextLinear (and for the linear part of LinearBoost, whose trees use TreeSHAP) (the words of a text column summed
   into one value per row) and from integrated gradients along the path from
   the training mean for DeepLearning, and are then converted to probabilities and combined over
   the ensemble; exact Shapley values exist only for each booster on its own, before that
@@ -295,8 +295,8 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 管理者ができるまで、セットアップトークンがログに残ります。S3 の認証情報は `docker inspect` で見えます。
 - 実行中のジョブのキャンセルには最大 10 秒かかります。プロジェクトに属さないジョブは `GET /api/v1/jobs` に出ません。削除中にストレージが失敗すると、ファイルが残ることがあります。
 - 全モデルのエクスポートは、プロジェクトごとに最新の 1 つだけ残ります。
-- エンジンは実際には最大実行時間の約 3 分の 2 を使います。文章の列があるデータでは、後発候補（TextLinearWide、TextLinearChar、TextLinearPlain）を、他のファミリーの後に、探索時間の 15%（TextLinear 以外のファミリーから取り分けます）と他のファミリーが使い残した分でだけ試します（最終リフィット用の時間には入り込みませんが、探索時間の終わりに実行中の分割の学習は中断されません）。TextLinearChar は文章が約 500 万文字を超えるときと、空白のない文章の列があるときは試さず、TextLinearPlain は派生特徴量が採用されなかったときは試さず、モデルがサイズ上限を超える候補も試しません。MAE、MEDAE、SMAPE で順位を付ける回帰では、ブースティング系の中央値版（LightGBM_L1、XGBoost_L1、CatBoost_L1）も後発候補として同じ時間を使うため、短い実行では LinearWide が試されないことがあります。LinearBoost（線形モデルの予測から小さな木をブーストする候補）はどの表でも後発候補なので、文章がない表でも探索時間の 15% がその分取り分けられます。文章用の候補と LinearWide の後、中央値版の前に実行され、それらが残した時間を使います。学習やエンジンのメッセージは日本語画面でも英語です。
-- 寄与度は近似です。各行の寄与度は予測値（分類では確率、回帰では目的変数の単位。log-odds ではありません）に丸め誤差の範囲で一致しますが、各ライブラリの TreeSHAP（RandomForest と ExtraTrees は Saabas、Linear と TextLinear（と LinearBoost の線形部分、木の部分は TreeSHAP）は係数×平均からの差、DeepLearning は平均からの積分勾配）を確率に変換してアンサンブルで合成したもので、厳密な Shapley 値ではありません。説明するのは 1 行につき 1 つの出力です（2 クラスでは 2 番目のクラス、それ以上では予測したクラス、回帰では値）。
+- エンジンは実際には最大実行時間の約 3 分の 2 を使います。文章の列があるデータでは、後発候補（TextLinearWide、TextLinearChar、TextLinearPlain）を、他のファミリーの後に、探索時間の 15%（TextLinear 以外のファミリーから取り分けます）と他のファミリーが使い残した分でだけ試します（最終リフィット用の時間には入り込みませんが、探索時間の終わりに実行中の分割の学習は中断されません）。TextLinearChar は文章が約 500 万文字を超えるときと、空白のない文章の列があるときは試さず、TextLinearPlain は派生特徴量が採用されなかったときは試さず、モデルがサイズ上限を超える候補も試しません。MAE、MEDAE、SMAPE で順位を付ける回帰では、ブースティング系の中央値版（LightGBM_L1、XGBoost_L1、CatBoost_L1）も後発候補として同じ時間を使うため、短い実行では LinearWide が試されないことがあります。LinearBoost（線形モデルの予測から小さな木をブーストする候補）はどの表でも後発候補なので、文章がない表でも探索時間の 15% がその分取り分けられます。文章用の候補と LinearWide の後、中央値版の前に実行され、それらが残した時間を使います。LinearSpline（値の種類が多い数値ごとに折れ線の曲線を持つ線形モデル）は、そうした数値がある表の後発候補で、LinearBoost の直後に実行され、残った時間を使います（MAE、MEDAE、SMAPE で順位を付ける回帰では中央値版が後に続くため、取り分はごくわずかです）。学習やエンジンのメッセージは日本語画面でも英語です。
+- 寄与度は近似です。各行の寄与度は予測値（分類では確率、回帰では目的変数の単位。log-odds ではありません）に丸め誤差の範囲で一致しますが、各ライブラリの TreeSHAP（RandomForest と ExtraTrees は Saabas、Linear と LinearSpline と TextLinear（と LinearBoost の線形部分、木の部分は TreeSHAP）は係数×平均からの差、DeepLearning は平均からの積分勾配）を確率に変換してアンサンブルで合成したもので、厳密な Shapley 値ではありません。説明するのは 1 行につき 1 つの出力です（2 クラスでは 2 番目のクラス、それ以上では予測したクラス、回帰では値）。
 - 交差検証のスコアは、数百行のデータではかなり高く出ることがあります。同じ学習を繰り返しても同程度ずれることがあり、その場合は通知でお知らせします。
 - 派生特徴量（文字列の語と話題、件数、和・比、グループ平均など）は、元の列にまとめて寄与度・重要度を数えます。複数の列から作る特徴量は、それらの列に等分します。このバージョンで学習したモデルは、派生特徴量の有無にかかわらず、それより前のインストールで使わないでください（警告なしに読み込めますが、予測や説明が正しくなくなります）。派生特徴量を採用するかの判定は、交差検証と同じ行を（別の分割と厳しい基準で）使うため、学習のスコアはやや楽観的です。小さいデータでは損失の 1% 程度の本物の改善でも基準を満たさず、採用されないことがあります。
 - 説明には学習データが必要です。インポートしたモデルや学習データを削除したモデルは、「説明」タブの「説明を計算」で、列のそろったデータセットを選んでください。説明ジョブが保存するのは、最大 1,000 行の寄与度による重要度と、上位 10 列の部分依存です。曲線のグリッドは 1 万行のサンプルから作り、そのうち 300 行（列の多いモデルではもっと少なく）で平均します。1 MiB を超える結果は、目印なしで削られます。

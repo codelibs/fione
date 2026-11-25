@@ -22,6 +22,9 @@ MAX_DURATION_LEVELS = 5_000  # more different values than this are not durations
 LINEAR_LEVELS = 15  # categories one-hot encoded per column in the linear view (the most frequent)
 LINEAR_CLIP = 5.0  # standardised numbers are clipped to +-this many standard deviations
 LINEAR_SKEW = 2.0  # non-negative numbers more skewed than this are log-transformed in that view
+SPLINE_KNOTS = 7  # the splines view bends each number at this many of its quantiles
+SPLINE_MIN_VALUES = 12  # a number needs more different values than this to get knots
+SPLINE_COLUMNS = 40  # numbers bent in the splines view (the ones with the most values)
 PROSE_WORDS = 5  # a column whose median value has this many words is prose, not a label or name
 # A shorter text is prose too when its values are mostly different and made of real words (a
 # product title of four words): a label repeats, and the frequency of a title says nothing.
@@ -342,6 +345,7 @@ class Prep:
 
     groups: tuple = ()  # class-level defaults: models pickled before these existed still load
     _logged: tuple = ()
+    _knots: dict = {}  # linear view column -> where the splines view bends it (old: none)
     prose: tuple = ()
     dayfirst: tuple = ()  # date string columns that put the day before the month
     integer_dates: dict = {}  # whole-number date column -> its format (``integer_date_format``)
@@ -542,11 +546,29 @@ class Prep:
             if position not in self._no_trend
         }
         self._flags = [p for p in base.columns if base[p].isna().any() and p not in self._no_trend]
+        self._knots = self._fit_knots(filled)
         self._levels = {}
         for position in self._category_at:
             counts = base[position].value_counts()
             ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
             self._levels[position] = [level for level, _ in ranked[:LINEAR_LEVELS]]
+
+    def _fit_knots(self, filled: pd.DataFrame) -> dict[str, np.ndarray]:
+        """For the numbers with many different values (at most ``SPLINE_COLUMNS``, the ones with
+        most), the quantiles of their standardised, clipped values where a line may bend."""
+        counts = {p: filled[p].nunique() for p in self._scale}
+        wide = sorted(
+            (p for p, n in counts.items() if n > SPLINE_MIN_VALUES), key=lambda p: -counts[p]
+        )
+        knots = {}
+        for position in sorted(wide[:SPLINE_COLUMNS], key=filled.columns.get_loc):
+            mean, std = self._scale[position]
+            scaled = ((filled[position] - mean) / std).clip(-LINEAR_CLIP, LINEAR_CLIP)
+            at = np.arange(1, SPLINE_KNOTS + 1) / (SPLINE_KNOTS + 1)
+            found = np.unique(np.quantile(scaled, at))
+            if len(found):
+                knots[position] = found
+        return knots
 
     def emptier(self, df: pd.DataFrame) -> list[tuple[str, float, float]]:
         """The input columns that are much emptier in ``df`` than in the training rows, as
@@ -669,6 +691,23 @@ class Prep:
             base[position] = values.codes.astype(float)
         filled = base.fillna(self._medians)  # a block per column again
         return filled.copy() if filled.shape[1] > CONSOLIDATE_COLUMNS else filled
+
+    @property
+    def spline_width(self) -> int:
+        """Columns of the splines view: the linear view's, and a hinge for each knot."""
+        return self.linear_width + sum(len(k) for k in self._knots.values())
+
+    def splines(self, df: pd.DataFrame) -> pd.DataFrame:
+        """The linear view and, after it, a hinge ``max(0, x - knot)`` (``f3_s0``) of each
+        number with knots, so that a linear model can bend its line at the knots (a piecewise
+        linear curve per number). ``x`` is the number as the linear view has it."""
+        out = self.linear(df)
+        hinges = {
+            f"{position}_s{i}": np.maximum(out[position].to_numpy() - knot, 0.0)
+            for position, found in self._knots.items()
+            for i, knot in enumerate(found)
+        }
+        return pd.concat([out, pd.DataFrame(hinges, index=out.index)], axis=1) if hinges else out
 
     def text(self, df: pd.DataFrame) -> pd.DataFrame:
         """The linear view without the prose columns' frequencies, and after it each prose column

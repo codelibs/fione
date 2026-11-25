@@ -256,7 +256,8 @@ a first trial in its share is skipped. A late candidate stays in the model
 only when its cross-validation scores improve the ensemble; otherwise it gets weight 0 and is
 dropped. The three variants are not run for data without a text column. LinearBoost, small
 trees boosted from a linear model, is a late candidate of every table: it runs after them and
-takes the time they leave.
+takes the time they leave. LinearSpline, a linear model with a piecewise linear curve for each
+number that has many values, follows it on the tables that have such numbers.
 
 ## Data with one column per time
 
