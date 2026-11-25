@@ -195,6 +195,17 @@ def env(tmp_path_factory):
     conn.close()
 
 
+@pytest.fixture(autouse=True)
+def _datasets_as_found(env):
+    """A test ends with the datasets the shared project had when it began, so that a table-link
+    test does not find the ones another test ingested (also when that test fails)."""
+    before = {d.id for d in projects.list_datasets(env.conn, env.project.id)}
+    yield
+    for dataset in projects.list_datasets(env.conn, env.project.id):
+        if dataset.id not in before:
+            projects.delete_dataset(env.conn, env.storage, dataset.id)
+
+
 def ctx(env, user=None, allow_samples=False) -> ToolContext:
     return ToolContext(env.conn, env.storage, user or env.users.owner, allow_samples)
 
