@@ -796,6 +796,100 @@ def test_a_linear_model_fitted_within_one_year_stays_in_range_in_the_next_januar
     assert np.abs(model.predict(ahead)).max() < 5  # with the epoch seconds it is about -17
 
 
+def _unix(start, n, step=86_400, seed=0):
+    """A column of Unix seconds (whole numbers), the rows in a random order, and a number."""
+    rng = np.random.default_rng(seed)
+    first = int(pd.Timestamp(start).timestamp())
+    seconds = first + rng.integers(0, n * step, 1200)
+    return pd.DataFrame({"when": seconds.astype("int64"), "x": rng.normal(size=1200)})
+
+
+def _raw_in_linear_view(prep, frame, column="when"):
+    return f"f{prep.feature_names.index(column)}" in prep.linear(frame).columns
+
+
+def test_the_linear_view_has_no_unix_seconds_when_the_year_is_the_same_on_every_row():
+    year = _unix("2016-01-01", 300)
+    prep = Prep().fit(year)
+    assert prep.integer_dates == {"when": "unix_s"}
+    assert not _raw_in_linear_view(prep, year)
+    assert "when" in prep.feature_names and prep.tree(year).shape[1] == len(prep.feature_names)
+    assert prep.linear(year).shape[1] == prep.linear_width
+
+
+def test_the_linear_view_keeps_unix_seconds_when_the_data_covers_two_years():
+    two = _unix("2015-07-01", 500)
+    assert _raw_in_linear_view(Prep().fit(two), two)
+
+
+def test_a_linear_model_fitted_within_one_year_stays_in_range_for_later_unix_times():
+    from sklearn.linear_model import Ridge
+
+    year = _unix("2016-01-01", 300)
+    month = pd.to_datetime(year["when"], unit="s").dt.month.to_numpy()
+    y = 2.0 + 0.3 * np.sin(month * np.pi / 6)
+    prep = Prep().fit(year)
+    model = Ridge(alpha=1e-3).fit(prep.linear(year), y)
+    ahead = prep.linear(_unix("2018-01-01", 200, seed=1))  # two years on
+    assert np.abs(model.predict(ahead)).max() < 5  # with the seconds themselves it is far out
+
+
+def test_the_linear_view_of_a_time_column_of_unix_seconds_has_neither_the_seconds_nor_the_year():
+    two = _unix("2015-07-01", 500)
+    two["counter"] = (two["when"] - two["when"].min()) // 86_400  # moves with the time
+    prep = Prep().fit(two, trend="when")
+    assert prep.trend_column == "when"
+    assert not _raw_in_linear_view(prep, two)
+    assert f"f{prep.feature_names.index('when__year')}" not in prep.linear(two).columns
+    plain = Prep().fit(two)  # without a time column the seconds and the year stay
+    assert _raw_in_linear_view(plain, two)
+    assert f"f{plain.feature_names.index('when__year')}" in plain.linear(two).columns
+
+
+def _ymd(start, n, seed=0):
+    """A column of dates written as whole numbers (20160131), in a random order, and a number."""
+    rng = np.random.default_rng(seed)
+    days = pd.Timestamp(start) + pd.to_timedelta(rng.integers(0, n, 1200), unit="D")
+    return pd.DataFrame(
+        {"when": days.strftime("%Y%m%d").astype("int64"), "x": rng.normal(size=1200)}
+    )
+
+
+def test_a_whole_number_date_of_one_year_has_no_number_in_the_linear_view_and_stays_in_range():
+    from sklearn.linear_model import Ridge
+
+    year = _ymd("2016-01-01", 300)
+    prep = Prep().fit(year)
+    assert prep.integer_dates == {"when": "%Y%m%d"}
+    assert not _raw_in_linear_view(prep, year)
+    assert "when" in prep.feature_names and prep.tree(year).shape[1] == len(prep.feature_names)
+    month = pd.to_datetime(year["when"].astype(str)).dt.month.to_numpy()
+    y = 2.0 + 0.3 * np.sin(month * np.pi / 6)
+    model = Ridge(alpha=1e-3).fit(prep.linear(year), y)
+    ahead = prep.linear(_ymd("2018-01-01", 200, seed=1))
+    assert np.abs(model.predict(ahead)).max() < 5
+    two = _ymd("2015-07-01", 500)
+    assert _raw_in_linear_view(Prep().fit(two), two)  # two years: the number stays
+
+
+def test_the_linear_view_of_a_whole_number_date_time_column_has_neither_the_number_nor_the_year():
+    two = _ymd("2015-07-01", 500)
+    two["counter"] = (pd.to_datetime(two["when"].astype(str)) - pd.Timestamp("2015-07-01")).dt.days
+    prep = Prep().fit(two, trend="when")
+    assert prep.trend_column == "when"
+    assert not _raw_in_linear_view(prep, two)
+    assert f"f{prep.feature_names.index('when__year')}" not in prep.linear(two).columns
+    assert _raw_in_linear_view(Prep().fit(two), two)
+
+
+def test_unix_milliseconds_of_one_year_have_no_number_in_the_linear_view():
+    year = _unix("2016-01-01", 300)
+    year["when"] = year["when"] * 1000
+    prep = Prep().fit(year)
+    assert prep.integer_dates == {"when": "unix_ms"}
+    assert not _raw_in_linear_view(prep, year)
+
+
 def test_epoch_seconds_are_found_by_position_not_by_a_column_name():
     year = _days("2016-01-01", 360)
     year.insert(0, "when__year", np.where(np.arange(360) < 180, 2000, 2001))  # a user column
@@ -1120,3 +1214,42 @@ def test_trend_column_is_read_as_before_when_no_other_input_moves_with_time():
     assert alone.trend_column is None and "when__ordinal" in alone.feature_names
     counter = Prep().fit(X.drop(columns="when"), trend="n")
     assert counter.trend_column is None and "n" in counter.columns
+
+
+def test_a_prep_fitted_before_the_unix_seconds_were_left_out_keeps_its_view():
+    year = _unix("2016-01-01", 300)
+    prep = Prep().fit(year)
+    old = pickle.loads(pickle.dumps(prep))
+    old._no_trend = ()  # what a model saved before the rule has
+    old._scale = {**old._scale, "f0": (0.0, 1.0)}
+    assert _raw_in_linear_view(old, year) and not _raw_in_linear_view(prep, year)
+    loaded = pickle.loads(pickle.dumps(prep))  # a model saved now predicts later years alike
+    later = _unix("2018-01-01", 200, seed=1)
+    assert list(loaded.linear(later).columns) == list(prep.linear(year).columns)
+
+
+@pytest.mark.parametrize("family", ["LinearBoost", "Linear"])
+def test_a_linear_family_fitted_in_one_year_predicts_a_later_year_like_the_mean(family):
+    from fione.engine.automl import AutoML
+    from fione.engine.config import TrainConfig
+
+    def table(start, seed):
+        frame = _unix(start, 300, seed=seed)
+        month = pd.to_datetime(frame["when"], unit="s").dt.month.to_numpy()
+        frame["y"] = (
+            3.0
+            + 0.4 * np.sin(month * np.pi / 6)
+            + np.random.default_rng(seed).normal(0, 0.3, len(frame))
+        )
+        return frame
+
+    train, ahead = table("2016-01-01", 0), table("2018-01-01", 1)
+    model = AutoML(
+        TrainConfig(target="y", max_runtime_secs=60, max_models=3, feature_engineering=False),
+        lambda event: None,
+        families=[family],
+    ).fit(train)
+    rmse = float(
+        np.sqrt(np.mean((np.asarray(model.predict(ahead.drop(columns="y"))) - ahead["y"]) ** 2))
+    )
+    assert rmse < 0.6  # a mean of 3.0 and noise of 0.3: the seconds would put it far outside

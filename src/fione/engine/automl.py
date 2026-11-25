@@ -620,11 +620,15 @@ class AutoML:
         if prep.trend_column is None:
             return
         shown = ", ".join(repr(name) for name in prep.trend_carriers[:DROPPED_SHOWN])
+        if prep.trend_column in prep.integer_dates:  # the trees still read its number and year
+            read = "is not read as a number or as its year by the linear models"
+        else:
+            read = "is not read as a number (or as the year and the seconds of a date)"
         self._notice(
-            f"{prep.trend_column!r}, the column that orders the rows in time, is not read as a "
-            "number (or as the year and the seconds of a date): the rows to predict are later than "
-            "all the rows the model learns from, so it would read their values as the latest "
-            f"period it knows. The inputs {shown} move with it and carry the level over time",
+            f"{prep.trend_column!r}, the column that orders the rows in time, {read}: the rows to "
+            "predict are later than all the rows the model learns from, so it would read their "
+            f"values as the latest period it knows. The inputs {shown} move with it and carry the "
+            "level over time",
             kind="time_trend_left_out",
             columns=[prep.trend_column],
             carriers=list(prep.trend_carriers[:DROPPED_SHOWN]),

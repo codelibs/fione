@@ -505,18 +505,27 @@ class Prep:
 
     def _fit_no_trend(self, base: pd.DataFrame) -> None:
         """The seconds-since-epoch part of a date column whose year is the same on every training
-        row. Within one year it is a straight line through month and day, so a linear model
-        splits the same effect between them in opposite weights. That holds on the training rows;
-        on a date of the next year, where the month starts again, the weights add up to a
-        prediction far outside the target's range. A time order of validation cannot show it,
-        because the folds stay within the year."""
+        row (for a whole-number date, a Unix time or 20240131, the number itself). Within one
+        year it is a straight line through month and day, so a linear model splits the same
+        effect between them in opposite weights. That holds on the training rows; on a date of
+        the next year, where the month starts again, the weights add up to a prediction far
+        outside the target's range. A time order of validation cannot show it, because the folds
+        stay within the year. The time column, when other inputs move with time, loses its seconds
+        (or number) and its year whatever the years."""
         off = []
         at = 0  # position of the column's first feature
         for column, kind in self._plan:
             if kind != "datetime":
-                at += 1
                 if column in self.integer_dates:
-                    at += len(_integer_date_parts(self.integer_dates[column], self.calendar))
+                    fmt = self.integer_dates[column]
+                    parts = _integer_date_parts(fmt, self.calendar)
+                    year = f"f{at + 1 + parts.index('year')}"
+                    if column == self.trend_column:  # the parts that only grow
+                        off += [f"f{at}", year]
+                    elif base[year].nunique() <= 1:
+                        off.append(f"f{at}")
+                    at += len(parts)
+                at += 1
                 continue
             parts = self._date_parts(column)
             if column != self.trend_column and base[f"f{at + parts.index('year')}"].nunique() <= 1:
