@@ -8,7 +8,7 @@ import pandas as pd
 from fione.engine import explain
 from fione.engine.config import ConfigError
 from fione.engine.model import TrainedModel
-from fione.projects.ingest import THOUSANDS_NUMBER
+from fione.projects.ingest import THOUSANDS_NUMBER, blank_padded_numbers
 
 PREDICT = "predict"
 CHUNK_ROWS = 50_000
@@ -165,6 +165,14 @@ def check_inputs(model: TrainedModel, df: pd.DataFrame) -> None:
             raise PredictInputError(
                 f"column {column!r} was learned as text with thousands separators (such as "
                 f"{separated.iloc[0]!r}), but the file now reads it as numbers: train the model "
+                "again on the current upload"
+            )
+        if pd.api.types.is_numeric_dtype(df[column].dtype) and len(
+            padded := blank_padded_numbers(levels)
+        ):
+            raise PredictInputError(
+                f"column {column!r} was learned as text with blanks around its numbers (such as "
+                f"{padded.iloc[0]!r}), but the file now reads it as numbers: train the model "
                 "again on the current upload"
             )
     for column in numeric:

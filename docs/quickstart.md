@@ -691,6 +691,13 @@ separators (`16,853`, `-1,234.5`; plain digits may be mixed in, and at least one
 a separator) is read as a number on upload. A column with any other value stays text, such as
 `0,123`, `1,23`, `1,23,456`, `(1,234)` or `$1,234`, or `007` next to separated numbers, and so
 does every column of a file delimited by `;`, a tab or `|`, where a comma may be a decimal one.
+In a file of any delimiter, a column that the reader would take for text because of a missing
+marker with blanks around it (`" NA"`) or a cell with blanks it does not accept, but whose other
+values are numbers once the blanks are trimmed (`" 35"`, `"12 "`, `".5"`, `"+5"`, `"1.5E+10"`), is
+read as a number, and its empty or blank-only cells and its missing markers (`NA`, `N/A`, `null`,
+`NaN`) are missing. It stays text when a value is a word or has a leading zero (`007`), when a
+whole number is beyond 64 bits or, in a column with fractions, beyond what a float64 holds
+exactly, and when there is no number at all.
 
 Date features need a column of dates. ISO dates are detected on upload; a column of other date
 strings (`25-12-2024 09:00`, `Mar 5, 2024`) is recognised when a model is trained, and its

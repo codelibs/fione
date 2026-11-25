@@ -167,7 +167,7 @@ def _write_parquet(
     rows = 0
     pending: list[pa.RecordBatch] = []
     pending_rows = 0
-    group_rows = min(_ROW_GROUP_ROWS, max(_MIN_GROUP_ROWS, _ROW_GROUP_CELLS // max(len(names), 1)))
+    group_rows = _group_rows(len(names))
     with pq.ParquetWriter(out, schema) as writer:
         for batch in reader:
             rows += batch.num_rows
@@ -235,57 +235,144 @@ def _widen_columns(
 
 # 1,234 and 1,234,567.8 (no leading zero), or plain digits without leading zeros
 THOUSANDS_NUMBER = r"^-?([1-9][0-9]{0,2}(,[0-9]{3})+|0|[1-9][0-9]*)(\.[0-9]+)?$"
+# a number the reader reads (a sign, a point at either end, an exponent), without a leading zero
+_PLAIN_NUMBER = r"^[+-]?((0|[1-9][0-9]*)(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$"
+_FLOAT_MARK = r"[.eE]"
+_SMALL_INTEGER = r"^(-?[1-9][0-9]{0,14}|0)$"  # at most 15 digits: a float64 holds it exactly
+# what the CSV reader reads as missing; after trimming blanks, a cell like this is missing too
+_NULL_TEXTS = pa.array(pacsv.ConvertOptions().null_values)
 
 
-def _thousands_columns(parquet: Path, schema: pa.Schema) -> dict[str, pa.DataType]:
-    """The text columns of ``parquet`` whose values are all numbers written with thousands
-    separators (``16,853``, ``1,234,567.5``; plain digits may be mixed in), with the number type
-    each reads as: int64, or float64 when a value has a fraction. At least one value must show
-    a separator, so ``0,123`` (a decimal comma) and other text stay text, as do whole numbers
-    beyond int64."""
-    names = [f.name for f in schema if pa.types.is_string(f.type)]
-    if not names:
-        return {}
-    candidate = {name: [False, False] for name in names}  # [separator seen, fraction seen]
+def _group_rows(columns: int) -> int:
+    """The rows of one row group of a table of ``columns`` columns: a wide table gets fewer."""
+    return min(_ROW_GROUP_ROWS, max(_MIN_GROUP_ROWS, _ROW_GROUP_CELLS // max(columns, 1)))
+
+
+def _trimmed(values: pa.Array) -> tuple[pa.Array, pa.Array]:
+    """``values`` (text, no nulls) without surrounding blanks, and which of them are then empty
+    or a marker the reader reads as missing (``NA``, ``null``...)."""
+    trimmed = pc.utf8_trim_whitespace(values)
+    return trimmed, pc.is_in(trimmed, value_set=_NULL_TEXTS)
+
+
+def _is_number(numbers: pa.Array, thousands: bool) -> bool:
+    """Whether every one of ``numbers`` (trimmed text) is a number: ``_PLAIN_NUMBER``, or with
+    ``thousands`` also ``THOUSANDS_NUMBER``."""
+    found = pc.match_substring_regex(numbers, _PLAIN_NUMBER)
+    if thousands:
+        found = pc.or_(found, pc.match_substring_regex(numbers, THOUSANDS_NUMBER))
+    return pc.all(found).as_py()
+
+
+def _integers(numbers: pa.Array) -> pa.Array:
+    """The whole numbers among ``numbers`` (trimmed text), as text without a plus sign or
+    thousands separators."""
+    whole = pc.filter(numbers, pc.invert(pc.match_substring_regex(numbers, _FLOAT_MARK)))
+    return pc.replace_substring_regex(pc.replace_substring(whole, ",", ""), r"^\+", "")
+
+
+def blank_padded_numbers(levels: pd.Series) -> pd.Series:
+    """The values of ``levels`` (the values a model learned for a text column) that have blanks
+    around them, the numbers first, when all of them are numbers or missing markers once
+    trimmed, one is a number, and none is beyond what an upload reads as a number (see
+    ``_number_columns``): the column an upload now reads as numbers. Empty when the levels are
+    anything else."""
+    text = levels[levels.map(lambda value: isinstance(value, str))]
+    trimmed = text.str.strip()
+    padded = text[text != trimmed]
+    markers = trimmed.isin(_NULL_TEXTS.to_pylist())
+    numbers = trimmed[~markers]
+    none = padded.iloc[:0]
+    if not len(padded) or not len(numbers) or len(text) != len(levels):
+        return none
+    if not (numbers.str.fullmatch(_PLAIN_NUMBER) | numbers.str.fullmatch(THOUSANDS_NUMBER)).all():
+        return none
+    fraction = numbers.str.contains(_FLOAT_MARK).any()
+    whole = numbers[~numbers.str.contains(_FLOAT_MARK)].str.replace(",", "").str.lstrip("+")
+    limit = _MAX_EXACT_FLOAT_INT if fraction else 2**63 - 1
+    if any(abs(int(value)) > limit for value in whole):
+        return none
+    is_marker = markers[padded.index]
+    return pd.concat([padded[~is_marker], padded[is_marker]])  # a number first, to show
+
+
+def _scan_number_column(file: pq.ParquetFile, name: str, thousands: bool) -> pa.DataType | None:
+    """The number type (int64, or float64 when a value has a fraction or an exponent) the text
+    column ``name`` reads as, or None for a column that stays text (see ``_number_columns``)."""
+    marked = number = fraction = False
+    wide = False  # a whole number beyond what a float64 holds exactly
+    for batch in file.iter_batches(batch_size=_ROW_GROUP_ROWS, columns=[name]):
+        values = pc.drop_null(batch.column(0))
+        if not len(values):
+            continue
+        trimmed, missing = _trimmed(values)
+        numbers = pc.filter(trimmed, pc.invert(missing))
+        marked = marked or pc.any(pc.not_equal(values, trimmed)).as_py()
+        if len(numbers) and pc.all(pc.match_substring_regex(numbers, _SMALL_INTEGER)).as_py():
+            number = True  # the usual column: whole numbers a float64 holds exactly
+        elif len(numbers):
+            if not _is_number(numbers, thousands):
+                return None
+            number = True
+            marked = marked or thousands and pc.any(pc.match_substring(numbers, ",")).as_py()
+            fraction = fraction or pc.any(pc.match_substring_regex(numbers, _FLOAT_MARK)).as_py()
+            whole = _integers(numbers)
+            try:
+                bounds = pc.min_max(whole.cast(pa.int64())).as_py()
+            except pa.ArrowInvalid:  # more digits than an int64 holds
+                return None
+            if bounds["min"] is not None and not (
+                -_MAX_EXACT_FLOAT_INT <= bounds["min"] and bounds["max"] <= _MAX_EXACT_FLOAT_INT
+            ):
+                wide = True
+    if not (marked and number) or (fraction and wide):
+        return None
+    return pa.float64() if fraction else pa.int64()
+
+
+def _number_columns(parquet: Path, schema: pa.Schema, thousands: bool) -> dict[str, pa.DataType]:
+    """The text columns of ``parquet`` whose values, trimmed of surrounding blanks, are all
+    numbers (or missing: empty, ``NA``, ``null``...), with the number type each reads as: int64,
+    or float64 when a value has a fraction or an exponent. At least one value must show a
+    thousands separator (``16,853``, ``1,234,567.5``, in a comma-delimited file only: elsewhere a
+    comma may be a decimal one) or blanks around it (``' 35'``, ``'12 '``), and one must be a
+    number, so ``0,123`` and other text stay text, as do numbers with a leading zero, whole
+    numbers beyond int64, and whole numbers beyond what a float64 holds exactly in a column with
+    fractions. The columns are scanned one at a time, so a table of many text columns is not read
+    in full for the few that stay candidates."""
+    found = {}
     with pq.ParquetFile(parquet) as file:
-        for batch in file.iter_batches(batch_size=_ROW_GROUP_ROWS, columns=names):
-            if not candidate:
-                break
-            for name in list(candidate):
-                values = pc.drop_null(batch.column(batch.schema.get_field_index(name)))
-                if not len(values):
-                    continue
-                if not pc.all(pc.match_substring_regex(values, THOUSANDS_NUMBER)).as_py():
-                    del candidate[name]
-                    continue
-                seen = candidate[name]
-                seen[0] = seen[0] or pc.any(pc.match_substring(values, ",")).as_py()
-                seen[1] = seen[1] or pc.any(pc.match_substring(values, ".")).as_py()
-                if not seen[1]:
-                    try:
-                        pc.replace_substring(values, ",", "").cast(pa.int64())
-                    except pa.ArrowInvalid:  # more digits than an int64 holds
-                        del candidate[name]
-    return {
-        name: pa.float64() if fraction else pa.int64()
-        for name, (separator, fraction) in candidate.items()
-        if separator
-    }
+        for field in schema:
+            if pa.types.is_string(field.type):
+                dtype = _scan_number_column(file, field.name, thousands)
+                if dtype is not None:
+                    found[field.name] = dtype
+    return found
 
 
-def _read_thousands(parquet: Path, schema: pa.Schema) -> pa.Schema:
-    """Rewrite ``parquet`` with its thousands-separated number columns as numbers; returns the
-    schema of the result (``schema`` itself when there are none)."""
-    found = _thousands_columns(parquet, schema)
+def _to_number(column: pa.ChunkedArray | pa.Array, dtype: pa.DataType) -> pa.Array:
+    """The text ``column`` as numbers: blanks trimmed, thousands separators dropped, and empty
+    cells and missing markers as missing."""
+    trimmed, missing = _trimmed(pc.fill_null(column, ""))
+    cleaned = pc.replace_substring(trimmed, ",", "")
+    if pa.types.is_integer(dtype):
+        cleaned = pc.replace_substring_regex(cleaned, r"^\+", "")
+    return pc.if_else(missing, pa.scalar(None, pa.string()), cleaned).cast(dtype)
+
+
+def _read_numbers(parquet: Path, schema: pa.Schema, thousands: bool) -> pa.Schema:
+    """Rewrite ``parquet`` with the text columns that hold numbers (see ``_number_columns``) as
+    numbers; returns the schema of the result (``schema`` itself when there are none)."""
+    found = _number_columns(parquet, schema, thousands)
     if not found:
         return schema
     typed = pa.schema([(f.name, found.get(f.name, f.type)) for f in schema])
     out = parquet.with_suffix(".numbers")
     try:
         with pq.ParquetFile(parquet) as file, pq.ParquetWriter(out, typed) as writer:
-            for batch in file.iter_batches(batch_size=_ROW_GROUP_ROWS):
+            for batch in file.iter_batches(batch_size=_group_rows(len(schema))):
                 columns = [
-                    pc.replace_substring(batch.column(i), ",", "").cast(found[f.name])
+                    _to_number(batch.column(i), found[f.name])
                     if f.name in found
                     else batch.column(i)
                     for i, f in enumerate(schema)
@@ -348,8 +435,8 @@ def ingest_csv(
         encoding, delimiter = _inspect(raw)
         try:
             n_rows, schema = _convert(raw, parquet, encoding, delimiter, block_size)
-            if delimiter == ",":  # elsewhere a comma may be a decimal one: 12,500 is 12.5
-                schema = _read_thousands(parquet, schema)
+            # in a comma-delimited file 12,500 is 12500; elsewhere a comma may be a decimal one
+            schema = _read_numbers(parquet, schema, delimiter == ",")
         except (pa.ArrowInvalid, UnicodeDecodeError) as e:
             raise IngestError(f"could not parse the CSV: {e}") from e
         if n_rows == 0:

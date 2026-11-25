@@ -65,5 +65,13 @@ def thousands_text_regressor() -> TrainedModel:
     return _fit("value", "判定", frame)
 
 
+@cache
+def padded_text_regressor() -> TrainedModel:
+    """``color`` as text: numbers with blanks around them and a missing marker with blanks."""
+    frame = training_frame()
+    frame["color"] = frame["color"].map(dict(zip(COLORS, [" 12", " NA", "7"], strict=True)))
+    return _fit("value", "判定", frame)
+
+
 def features(n: int = 20, seed: int = 1) -> pd.DataFrame:
     return training_frame(n, seed).drop(columns=["判定", "value"])
