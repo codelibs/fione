@@ -3397,6 +3397,30 @@ def test_a_group_column_that_is_also_an_input_the_model_relies_on_is_named():
     assert "ignored_columns" in notice["message"]
 
 
+def test_a_group_that_counts_rows_is_named_when_the_validation_keeps_groups_apart(monkeypatch):
+    from fione.engine import automl
+    from fione.engine.config import Deadline
+    from fione.engine.features import CategoryFrequency
+
+    monkeypatch.setattr(
+        automl, "select_groups", lambda *args, **kwargs: ([CategoryFrequency(["code"])], [])
+    )
+    df = _neighbouring_groups()
+    df["code"] = np.random.default_rng(1).choice(list("abcde"), len(df))
+    X, y = df.drop(columns="y"), df["y"].to_numpy()
+    groups = pd.factorize(df["trial"])[0]
+    grouped, shuffled = [], []
+    for events, row_groups in ((grouped, groups), (shuffled, None)):
+        config = TrainConfig(
+            target="y", cv_group_column="trial" if row_groups is not None else None
+        )
+        AutoML(config, events.append)._engineer(X, y, "classification", 3, Deadline(60), row_groups)
+    notice = next(e.data for e in grouped if e.data.get("kind") == "counts_in_validation")
+    assert notice["groups"] == ["frequencies of categories"]
+    assert "all the training rows" in notice["message"]
+    assert "counts_in_validation" not in _kinds(shuffled)
+
+
 def test_no_group_input_notice_when_the_group_column_is_left_out_or_not_relied_on():
     left_out, no_group = [], []
     options = dict(families=["LightGBM"], target="y", max_models=1, nfolds=3)

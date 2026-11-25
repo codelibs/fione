@@ -211,6 +211,20 @@ class Group:
     def _compute(self, df: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
 
+    def _counted_keys(self, df: pd.DataFrame) -> dict[str, pd.Series]:
+        """For a group that counts rows (``density``): the key counted for each of its features
+        (a missing key is not counted)."""
+        raise NotImplementedError
+
+    def _shares_from(self, counts: np.ndarray) -> tuple[np.ndarray, float]:
+        """For a group that counts rows: the feature of each key from the number of rows of each
+        (empty for a key with no row) and the one of a key not counted."""
+        raise NotImplementedError
+
+    def _exact(self, counts: np.ndarray) -> bool:
+        """Whether ``_shares_from`` gives what ``_fit`` does for these counts."""
+        return True
+
 
 class TextShape(Group):
     """Length, word count, digit and capital shares and the first number of a text column."""
@@ -372,6 +386,14 @@ class TextTopics(Group):
         return out
 
 
+def _plain_shares(counts: np.ndarray) -> tuple[np.ndarray, float]:
+    """The share of the rows of each key (empty for a key with no row), and the rarest share."""
+    total = counts.sum()
+    if not total:
+        return np.full(len(counts), np.nan), 0.0
+    return np.where(counts > 0, counts / total, np.nan), float(counts[counts > 0].min() / total)
+
+
 class CategoryFrequency(Group):
     """The share of the training rows with the same category, for each categorical column; a
     category not seen in training gets the share of the rarest one."""
@@ -398,6 +420,12 @@ class CategoryFrequency(Group):
             unseen = self._unseen.get(c, 0.0)
             out[f"{c}__frequency"] = share.mask(share.isna() & s.notna(), unseen)
         return pd.DataFrame(out, index=df.index)
+
+    def _counted_keys(self, df):
+        return {f"{c}__frequency": _as_str(df[c]) for c in self.columns}
+
+    def _shares_from(self, counts):
+        return _plain_shares(counts)
 
 
 class RowCounts(Group):
@@ -666,6 +694,20 @@ class ValueFrequency(Group):
             )
         return pd.DataFrame(out, index=df.index)
 
+    def _counted_keys(self, df):
+        return {f"{c}__value_frequency": _number(df[c]) for c in self.columns}
+
+    def _exact(self, counts):  # past the cut, which of the tied values stay depends on the order
+        return int((counts > 1).sum()) <= MAX_REPEATED_VALUES
+
+    def _shares_from(self, counts):
+        total = counts.sum()
+        shares = (
+            np.where(counts > 1, counts / total, np.nan) if total else np.full(len(counts), np.nan)
+        )
+        single = counts[counts > 0].min() / total if total else 0.0
+        return shares, float(single)
+
 
 def _cents(x: pd.Series) -> pd.Series:
     """The fraction of ``x`` in hundredths, 0 to 99: 37 for 12.37 (a rounded price has few).
@@ -923,6 +965,12 @@ class CategoryPairs(Group):
             for a, b in self._pairs
         }
         return pd.DataFrame(out, index=df.index)
+
+    def _counted_keys(self, df):
+        return {f"{a} x {b} frequency": self._key(df, a, b) for a, b in self._pairs}
+
+    def _shares_from(self, counts):
+        return _plain_shares(counts)
 
 
 class CodeLevels(Group):
@@ -1403,9 +1451,13 @@ class _Gate:
         out_of_time=lambda: False,
         groups=None,
         all_rows=None,
+        all_groups=None,
     ):
         self.X, self.y, self.task, self.seed, self.groups = X, y, task, seed, groups
         self.all_rows = X if all_rows is None else all_rows  # what groups that count rows read
+        self.all_groups = all_groups  # the group of each of ``all_rows`` (with ``groups``)
+        self._honest: dict[tuple, np.ndarray] = {}
+        self._tables: dict[str, dict] = {}
         self.out_of_time = out_of_time
         self._cache: dict[tuple, np.ndarray] = {}
         self._fitted: dict[str, Group] = {}
@@ -1423,6 +1475,19 @@ class _Gate:
         """The ``GATE_COLUMNS`` most useful of the ranked input columns, or None for a table that
         has no more than ``GATE_NARROW_COLUMNS`` of them."""
         return frozenset(ranked[:GATE_COLUMNS]) if len(ranked) > GATE_NARROW_COLUMNS else None
+
+    def _counted(self, prep: Prep) -> list[tuple[Group, list[str]]]:
+        """With groups of rows to keep together, the groups of ``prep`` that count rows, each
+        with the names of its features in the view."""
+        if self.groups is None or self.all_groups is None:
+            return []
+        at = len(prep.feature_names) - sum(len(g.names) for g in prep.groups)
+        found = []
+        for group in prep.groups:
+            if group.density:
+                found.append((group, [f"f{at + i}" for i in range(len(group.names))]))
+            at += len(group.names)
+        return found
 
     def folds(self, repeat: int):
         if repeat not in self._folds:
@@ -1446,6 +1511,49 @@ class _Gate:
             random_state=self.seed,
             verbose=-1,
         )
+
+    def _count_tables(self, group: Group) -> dict[str, tuple]:
+        """For each feature of a group that counts rows: the code of the key of each of all the
+        rows (-1 for none), how many rows each key has, and the code of each gate row's key."""
+        if group.label not in self._tables:
+            rows = self.all_rows[list(group.columns)]
+            here = group._counted_keys(self.X)
+            tables = {}
+            for name, keys in group._counted_keys(rows).items():
+                if name in group.names:
+                    codes, levels = pd.factorize(keys)
+                    codes = codes.astype(np.int32)
+                    counts = np.bincount(codes[codes >= 0], minlength=len(levels))
+                    mine = levels.get_indexer(here[name])
+                    tables[name] = (codes, counts, mine, here[name].notna().to_numpy())
+            self._tables[group.label] = tables
+        return self._tables[group.label]
+
+    def honest(self, group: Group, repeat: int, fold: int, valid: np.ndarray) -> np.ndarray:
+        """The features of a group that counts rows, for the gate's rows, with the counts of the
+        rows outside the groups of the fold's validation rows: a validation row then has the
+        count of a row of a group the model never saw, not that of its own group's rows."""
+        key = (group.label, repeat, fold)
+        if key not in self._honest:
+            held = np.isin(self.all_groups, np.unique(self.groups[valid]))
+            out, refit = [], None
+            for name in group.names:
+                codes, counts, mine, present = self._count_tables(group)[name]
+                kept = codes[held]
+                left = counts - np.bincount(kept[kept >= 0], minlength=len(counts))
+                if not group._exact(left):  # the group's own fit on the rows left
+                    if refit is None:
+                        rows = self.all_rows[list(group.columns)].iloc[np.flatnonzero(~held)]
+                        fresh = copy.copy(group)
+                        fresh._fit(rows)
+                        refit = fresh._compute(self.X)
+                    out.append(refit[name].to_numpy())
+                    continue
+                shares, unseen = group._shares_from(left)
+                feature = np.where(mine >= 0, shares[np.maximum(mine, 0)], np.nan)
+                out.append(np.where(np.isnan(feature) & present, unseen, feature))
+            self._honest[key] = np.column_stack(out)
+        return self._honest[key]
 
     def fitted(self, group: Group) -> Group:
         """``group`` fitted on the gate's rows, once however many views read it."""
@@ -1478,15 +1586,21 @@ class _Gate:
                         ]
                         view = view.iloc[:, keep]
                 done = []
-                for train, valid in self.folds(repeat):
+                counted = self._counted(prep)
+                for fold, (train, valid) in enumerate(self.folds(repeat)):
                     if self.out_of_time():
                         raise _OutOfTime
-                    model = self._model().fit(view.iloc[train], self.y[train])
+                    seen = view
+                    if counted:  # validation groups do not count in their own rows' features
+                        seen = view.copy()
+                        for group, names in counted:
+                            seen[names] = self.honest(group, repeat, fold, valid)
+                    model = self._model().fit(seen.iloc[train], self.y[train])
                     if self.task == "regression":
-                        pred = model.predict(view.iloc[valid])
+                        pred = model.predict(seen.iloc[valid])
                     else:
                         pred = np.zeros((len(valid), self.classes))
-                        pred[:, model.classes_] = model.predict_proba(view.iloc[valid])
+                        pred[:, model.classes_] = model.predict_proba(seen.iloc[valid])
                     done.append(_loss(self.task, self.y[valid], pred, self.classes))
                 self._cache[labels, repeat] = np.asarray(done)
                 computed += 1
@@ -1572,7 +1686,7 @@ def select_groups(
 
     from fione.engine.level_models import judged_early, level_models  # it imports this module
 
-    all_rows, all_y = X, y
+    all_rows, all_y, all_groups = X, y, row_groups
     encodes = row_groups is None and (task == "regression" or int(y.max()) <= 1)
 
     narrow: list = [None]  # the columns every gate reads, set by the first gate's ranking
@@ -1587,6 +1701,7 @@ def select_groups(
             lambda: deadline.expired() or should_stop(),
             row_groups,
             all_rows,
+            all_groups,
         )
         gate.top = narrow[0]
         return gate

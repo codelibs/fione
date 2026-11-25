@@ -2217,3 +2217,100 @@ def test_a_missing_value_in_training_and_a_key_only_the_new_rows_have_get_the_ov
     prior = np.log(y.mean() / (1 - y.mean()))
     assert out[:2] == pytest.approx([prior, prior]) and out[2] != pytest.approx(prior)
     assert group.transform(X)["shop__text_target"].notna().all()
+
+
+def _rows_until_an_event(entities=1500, months=16, seed=0):
+    """Entities with rows until they acquire something: the label is 1 on that last row, so how
+    many rows an entity has (and how often its pair of columns occurs) tells the label."""
+    rng = np.random.default_rng(seed)
+    event = rng.random(entities) < 0.3
+    rows = np.where(event, rng.integers(1, months, entities), months)
+    entity = np.repeat(np.arange(entities), rows)
+    y = np.zeros(len(entity), dtype=int)
+    y[np.cumsum(rows)[event] - 1] = 1
+    X = pd.DataFrame(
+        {
+            "customer": 100_000 + entity,
+            "income": np.round(rng.lognormal(10, 0.6, entities), 2)[entity],
+            "age": rng.integers(18, 80, entities)[entity],
+            "x": rng.normal(size=len(entity)),
+        }
+    )
+    return X, y, entity
+
+
+def test_counts_of_rows_are_taken_from_outside_the_validation_groups(monkeypatch):
+    """A row's count of its pair of columns, with the entity's rows to keep together in a fold,
+    must not include the rows of its own entity: the count would tell the label."""
+    monkeypatch.setattr(
+        features, "candidates", lambda *a, **k: [CategoryPairs(["customer", "income"])]
+    )
+    X, y, entity = _rows_until_an_event()
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(600), row_groups=entity)
+    assert not any(v.adopted for v in verdicts)
+    assert any(v.group == "frequencies of category pairs" and v.gain < 0.05 for v in verdicts)
+
+
+def test_counts_of_rows_still_count_the_rows_of_other_groups(monkeypatch):
+    monkeypatch.setattr(features, "candidates", lambda *a, **k: [ValueFrequency(["price"])])
+    rng = np.random.default_rng(0)
+    n, points = 8000, 300
+    popularity = 1 / np.arange(1, points + 1)
+    point = rng.choice(points, n, p=popularity / popularity.sum())
+    price = rng.permutation(np.round(rng.uniform(1, 500, points), 2))[point]  # a price point
+    share = pd.Series(point).map(pd.Series(point).value_counts(normalize=True)).to_numpy()
+    y = (rng.random(n) < np.where(share > np.quantile(share, 0.6), 0.8, 0.1)).astype(int)
+    X = pd.DataFrame({"price": price, "x": rng.normal(size=n)})
+    blocks = rng.integers(0, 300, n)  # groups of rows that share nothing with the price points
+    _, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(600), row_groups=blocks)
+    assert [v.adopted for v in verdicts if v.group == "frequencies of repeated numbers"] == [True]
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: CategoryPairs(["customer", "income"]),
+        lambda: CategoryFrequency(["customer"]),
+        lambda: ValueFrequency(["age"]),
+    ],
+)
+def test_the_honest_counts_of_a_fold_leave_out_its_validation_groups(make):
+    X, y, entity = _rows_until_an_event(entities=300)
+    X["customer"] = X["customer"].astype(str)
+    group = make().fit(X, y)
+    gate = features._Gate(
+        X, y, "classification", 5, 0, groups=entity, all_rows=X, all_groups=entity
+    )
+    leaked = group.transform(X).to_numpy()
+    nothing = gate.honest(group, 0, 0, np.array([], dtype=int))  # no group held out: the same
+    assert np.allclose(nothing, leaked)
+    entities = [e for e in range(300) if (entity == e).sum() >= 5][:2]
+    valid = np.flatnonzero(np.isin(entity, entities))
+    honest = gate.honest(group, 0, 1, valid)
+    assert honest.shape == leaked.shape
+    outside = np.setdiff1d(np.arange(len(X)), valid)
+    assert (honest[valid] < leaked[valid]).any()
+    if isinstance(group, ValueFrequency):  # an age is shared by other entities too
+        outside = np.flatnonzero(~X["age"].isin(X["age"].iloc[valid]).to_numpy())
+        assert (honest[valid] <= leaked[valid] + 1e-12).all()
+    else:
+        assert (leaked[valid] > honest[valid]).all()  # an entity's rows are not in its count
+    assert np.allclose(honest[outside], leaked[outside], rtol=0.05)  # the others hardly change
+
+
+def test_honest_counts_of_values_past_the_cut_are_those_of_a_plain_refit(monkeypatch):
+    monkeypatch.setattr(features, "MAX_REPEATED_VALUES", 50)  # fewer repeating values than prices
+    rng = np.random.default_rng(0)
+    entity = rng.integers(0, 600, 6000)
+    price = np.round(rng.lognormal(3, 0.5, 600), 1)[entity] + rng.integers(0, 3, 6000) * 0.1
+    X = pd.DataFrame({"price": price})
+    y = rng.integers(0, 2, 6000)
+    group = ValueFrequency(["price"]).fit(X, y)
+    assert (pd.Series(price).value_counts() > 1).sum() > 50
+    gate = features._Gate(
+        X, y, "classification", 5, 0, groups=entity, all_rows=X, all_groups=entity
+    )
+    valid = np.flatnonzero(np.isin(entity, [3, 4, 5]))
+    fresh = ValueFrequency(["price"])
+    fresh._fit(X.iloc[np.flatnonzero(~np.isin(entity, [3, 4, 5]))])
+    assert np.allclose(gate.honest(group, 0, 0, valid), fresh._compute(X)[group.names])

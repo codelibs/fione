@@ -588,6 +588,11 @@ comes back on half the rows or more, over 100 different values, the columns are 
 another and not copies), looked for in the first 200,000 rows; it is the validation that then
 looks better than the model will do on new groups, and the frequency counts of the derived
 features below are not tried (this part also holds with a group column).
+With a group column, the check of the derived features that count rows (the frequencies of
+categories, of pairs and of repeated numbers) counts, for the rows of each validation fold, only
+the rows of the other groups, so that the number of rows a group has (the rows of a customer up
+to an event) does not tell its rows' labels; the model's own cross-validation scores read the
+counts of all the training rows, and a notice says so when such a group is kept.
 
 A group column and a time column can be used together (see "Data that follows time").
 
