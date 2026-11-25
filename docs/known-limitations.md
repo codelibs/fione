@@ -195,6 +195,22 @@ What this release does not do, or does with a catch. Japanese summary at the end
   Targets with more than 100 classes get no score at all, and the screens do not say so; only
   the exact checks run. Scores use at most 10,000 rows, datasets under 200 rows are not
   scored, and after 3 s the check stops and says that some columns were not scored.
+- **A number computed from other columns is named, not left out.** For a number to predict that
+  is above 0, the assistant's proposal and the analysis page look for a number column and one or
+  two category columns (of 2 to 300 values, 20 rows per combination on average) such that, within
+  each combination of the categories, the target is nearly a fixed multiple of the column (an
+  amount times the rate of its currency and period). They warn that the target looks like the
+  column times a rate that depends on the categories when the categories explain 99% or more of
+  the variation of the target's logarithm once the column's is taken off, and 90% or more of the
+  variation of that ratio itself (so a column that is the target but for noise is not it), while
+  the categories alone explain at most 90% of the target. One category is named if it is enough,
+  else the best pair of the 8 best, if it leaves less than half of what the best one leaves. They
+  try the 15 number columns most correlated with the target in logarithms, read at most 50,000
+  rows and stop after a second: a search cut by its time budget is not kept in the cache, and a
+  very wide table may go unchecked. They do not see a difference or a sum, a rate with noise of
+  20% or more, or a target computed from three categories; they add nothing to `ignored_columns`
+  (unchecking the columns in the analysis page removes the note), and name a target that is
+  really a unit price times a quantity known at prediction time too. A training run does not look.
 - **A training run names the columns the same check flags**, in a notice before the search:
   at most 5 of them, with the reason, and it never stops the run. The check runs on at most
   10,000 rows of the columns the models will read, within 5% of the time and 3 s, so on a table
@@ -308,6 +324,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 診断を持つエクスポートは、診断の機能より前のインストールでは読み込めません（どちらもバージョン 20.0.0 で区別できません）。インポートは、有限でない数や float の範囲を超える整数（診断の中も含め、どこにあっても）、未知の項目や深すぎる入れ子を持つ診断を拒否するようになりました。
 - リークとして既定でチェックを外すのは完全なもの（予測する列と同じ列、値で答えが決まる列）だけです（行の ID の列はこれまでどおり ID としてチェックを外します）。スコアによる疑い（単独で答えをよく当てる列、並び順や欠損が答えに沿う列、相関 |r| ≥ 0.99 の列。相関の列は以前はチェックを外していました）は注意を出すだけで、チェックされたままです。
 - リークのスコアは注意であり、どちらの向きにも間違えます。強い正当な列が疑われることも、リークを見逃すこともあります。すでに 0.89〜0.95 の列がある場合は 0.99 以上だけが注意になり、値の 1% が違う答えのコピー（0.987）は報告されません。一方のクラスで常に 0 の列（もう一方の 80% だけ値がある金額など）は最大 0.90 で、報告されません。回帰のリークは約 5,000 行未満ではほとんど見逃します。101 クラス以上の目的変数にはスコアがなく、画面にもそう表示されません。200 行未満のデータセットは採点せず、3 秒で打ち切ると、採点しなかった列があることを表示します。
+- 予測する数値が、ある数値の列に、いくつかのカテゴリ列で決まる率を掛けたものに見える場合（通貨と期間で決まる率を掛けた金額など）は、提案と分析画面が注意を出します（0 より大きい数値の目的変数、カテゴリは 2〜300 種類で組み合わせごとに平均 20 行以上、カテゴリが比の変動の 90% 以上、目的変数の対数の変動の 99% 以上を説明し、カテゴリだけでは 90% 以下しか説明しない場合）。目的変数と相関の高い数値列から 15 列、最大 5 万行を 1 秒まで探し、時間で打ち切った結果は保存しません（非常に列の多い表は調べないことがあります）。差や和、ノイズが 20% 以上の率、3 列で決まる率は見つけません。列は自動では除外されず、分析画面でチェックを外すと注意が消えます。学習の実行中は調べません。
 - 学習は、同じチェックで疑われた列を、探索の前の通知で挙げます（最大 5 列、理由つき）。学習は止めません。チェックは、モデルが読む列の最大 10,000 行を、時間の 5%（最大 3 秒）以内で調べます。数千列の表では、後ろの列を警告なしに調べないことがあります。ここで挙げた列は、ほぼ満点のスコアの通知では重ねて挙げません。
 - 負荷の高いマシンでは、同じ時間予算で学習できるブースティングの回数が減ります。いちばん影響を受けるのは CatBoost です。
 - API トークンに有効期限はなく、最後に使われた日時も記録しません。不要なトークンは無効にしてください。

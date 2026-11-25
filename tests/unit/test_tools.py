@@ -2958,3 +2958,44 @@ def test_a_column_constant_in_the_sample_only_is_not_proposed_to_be_left_out(env
     finally:
         for dataset in made:
             projects.delete_dataset(env.conn, env.storage, dataset.id)
+
+
+def _revenue_table(n=4000):
+    rng = np.random.default_rng(0)
+    price = {(g, t): rng.uniform(1, 90) for g in "abcd" for t in "xyz"}
+    df = pd.DataFrame(
+        {
+            "category": rng.choice(list("abcd"), n),
+            "tier": rng.choice(list("xyz"), n),
+            "quantity": rng.integers(1, 500, n).astype(float),
+            "noise": rng.normal(size=n),
+        }
+    )
+    unit = np.array([price[g, t] for g, t in zip(df.category, df.tier, strict=True)])
+    df["revenue"] = df.quantity * unit * np.exp(rng.normal(0, 0.001, n))
+    return df
+
+
+def test_a_target_that_may_be_computed_from_columns_is_warned_about_and_nothing_is_ignored(env):
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "revenue", DatasetType.TRAIN, [_revenue_table()]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "revenue"})
+    warning = next(w for w in result["warnings"] if w["code"] == "leak_derived_pair")
+    assert "'quantity'" in warning["message"] and "'category', 'tier'" in warning["message"]
+    assert warning["params"] == {"column": "quantity", "first": "category", "second": "tier"}
+    assert "ignored_columns" in warning["message"]
+    assert "leak_derived_pair" in codes(result)  # translated in both languages
+    assert result["config"]["ignored_columns"] == []
+    assert result["ignored_suggestions"] == []
+
+
+def test_no_derived_target_warning_for_a_target_that_the_columns_do_not_give(env):
+    frame = _revenue_table().assign(
+        revenue=lambda d: np.exp(np.random.default_rng(1).normal(3, 1, len(d)))
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "revenue_noise", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "revenue"})
+    assert "leak_derived" not in codes(result) and "leak_derived_pair" not in codes(result)

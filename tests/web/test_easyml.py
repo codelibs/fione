@@ -20,6 +20,7 @@ from api_helpers import add_user, connect, iris_csv, iris_frame, login
 from fione import i18n
 from fione.auth import service as auth
 from fione.auth.roles import Role
+from fione.data.profile import DerivedTarget
 from fione.engine.artifact import save_model
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
@@ -29,6 +30,7 @@ from fione.models import service as models
 from fione.models.rating import Baseline, star_rating
 from fione.predict import batch
 from fione.projects import service as projects
+from fione.projects.service import DatasetType
 from fione.tools import builtin
 from fione.web import easyml, uploads, views
 from fione.web.headers import CONTENT_SECURITY_POLICY
@@ -692,6 +694,51 @@ def test_the_pro_form_shows_the_warnings_and_tips_of_the_analysis(owner):
     by_id = client.get(pro_form(owner, ids) + "?target=row").text
     assert i18n.t("analysis.warn.target_id", "en") in by_id
     assert by_id.count(i18n.t("analysis.warn.target_id", "en")) == 1
+
+
+def test_the_pro_form_names_a_target_that_may_be_computed_from_columns(owner):
+    rng = np.random.default_rng(0)
+    n = 3000
+    price = {(g, t): rng.uniform(1, 90) for g in "abcd" for t in "xyz"}
+    frame = pd.DataFrame(
+        {
+            "category": rng.choice(list("abcd"), n),
+            "tier": rng.choice(list("xyz"), n),
+            "quantity": rng.integers(1, 500, n).astype(float),
+        }
+    )
+    unit = np.array([price[g, t] for g, t in zip(frame.category, frame.tier, strict=True)])
+    frame["revenue"] = frame.quantity * unit
+    page = owner[0].get(pro_form(owner, frame) + "?target=revenue").text
+    assert "multiplied by a rate that depends on “category” and “tier”" in page
+    assert "the number in “quantity”" in page
+    plain = frame.assign(revenue=np.exp(rng.normal(3, 1, n)))
+    assert (
+        "multiplied by a rate" not in owner[0].get(pro_form(owner, plain) + "?target=revenue").text
+    )
+
+
+def test_the_derived_target_note_goes_when_its_columns_are_unchecked():
+    found = types.SimpleNamespace(
+        y=pd.Series(np.arange(1.0, 200.0)),
+        target=types.SimpleNamespace(kind="numeric"),
+        profile=types.SimpleNamespace(
+            columns=[],
+            leak_suspects=[],
+            leak_partial=False,
+            derived=DerivedTarget("quantity", ("category", "tier"), 0.999),
+        ),
+    )
+    dataset = types.SimpleNamespace(type=DatasetType.TRAIN, n_cols=5, n_rows=199)
+
+    def codes(inputs):
+        return [key for _, key, _ in easyml._warnings(dataset, found, "regression", inputs)]
+
+    assert "analysis.warn.leak_derived_pair" in codes({"quantity", "category", "tier", "noise"})
+    assert "analysis.warn.leak_derived_pair" in codes({"tier", "noise"})  # one of them stays
+    assert "analysis.warn.leak_derived_pair" not in codes({"noise"})
+    found.profile.derived = DerivedTarget("quantity", ("category",), 0.999)
+    assert "analysis.warn.leak_derived" in codes({"category"})
 
 
 def test_the_pro_form_run_time_follows_the_size_of_the_data(owner, monkeypatch):
