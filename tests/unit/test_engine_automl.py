@@ -16,6 +16,7 @@ from fione.engine.automl import FAMILY_ORDER, LATE_ORDER, AutoML
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.families import FAMILIES, ExtraTrees, FamilySpec, LightGBM, XGBoost
 from fione.engine.metrics import HIGHER_IS_BETTER, Cuts
+from fione.engine.prep import Prep
 from fione.engine.search import STARTUP_TRIALS
 
 LEADERBOARD_COLUMNS = ["model", "family", "cv_score", "cv_std", "train_secs", "weight"]
@@ -3500,3 +3501,110 @@ def test_a_class_that_holds_for_runs_of_rows_is_pointed_out_unless_the_order_is_
     assert not _class_runs_hints(_runs().assign(when=np.arange(1_200)), time_column="when")
     shuffled = _runs().sample(frac=1, random_state=0).reset_index(drop=True)
     assert not _class_runs_hints(shuffled)
+
+
+def _reviews(n=1500, copies=0.2, seed=0):
+    """Rows of a text of 30 words and a label that follows the text, a share of them posted twice
+    with a label that differs a little."""
+    rng = np.random.default_rng(seed)
+    words = np.array([f"word{i}" for i in range(400)])
+    texts = [" ".join(rng.choice(words, 30)) for _ in range(n)]
+    score = np.array([sum(int(w[4:]) for w in t.split()) / 30 for t in texts])
+    df = pd.DataFrame({"review": texts, "score": score + rng.normal(0, 5, n)})
+    again = df.sample(int(n * copies), random_state=1).assign(score=lambda d: d.score + 1.0)
+    return pd.concat([df, again]).sample(frac=1, random_state=2).reset_index(drop=True)
+
+
+def _repeated_texts_events(df, **config):
+    events = []
+    prep = Prep().fit(df.drop(columns="score"))
+    AutoML(TrainConfig(target="score", **config), events.append)._notice_repeated_texts(
+        prep, df.drop(columns="score")
+    )
+    return [e.data for e in events if e.data.get("kind") == "repeated_texts"]
+
+
+def test_a_text_on_several_rows_is_named_when_the_validation_shuffles_the_rows():
+    (notice,) = _repeated_texts_events(_reviews())
+    assert notice["columns"] == ["review"] and 0.3 < notice["share"] < 0.4  # both rows of a pair
+    assert "'review'" in notice["message"] and "cv_group_column" in notice["message"]
+
+
+def test_no_repeated_texts_notice_for_new_texts_a_few_copies_or_labels_that_repeat():
+    assert not _repeated_texts_events(_reviews(copies=0.0))
+    assert not _repeated_texts_events(_reviews(copies=0.01))  # 2 % of the rows
+    labels = pd.DataFrame(
+        {"kind": np.random.default_rng(0).choice(["red", "white", "rosé"], 1500), "score": 0.0}
+    )
+    assert not _repeated_texts_events(labels)  # a label repeats by nature, it is not prose
+
+
+def test_no_repeated_texts_notice_for_a_sparse_column_or_phrases_that_every_row_repeats():
+    rng = np.random.default_rng(0)
+    words = np.array([f"word{i}" for i in range(400)])
+    # 1,000 filled rows of 20,000, 60 of them copies: 0.3 % of the rows
+    texts = [" ".join(rng.choice(words, 30)) for _ in range(940)]
+    filled = texts + texts[:60]
+    sparse = pd.DataFrame({"review": filled + [None] * 19_000, "score": 0.0})
+    assert not _repeated_texts_events(sparse)
+    # 1,040 phrases of a few words, 4 rows each: a label, not a copy
+    phrases = [" ".join(rng.choice(words, 5)) for _ in range(1_040)]
+    titles = pd.DataFrame({"title": np.repeat(phrases, 4), "score": 0.0})
+    assert not _repeated_texts_events(titles)
+
+
+def test_the_repeated_texts_notice_is_made_by_a_run_and_not_beside_the_notices_for_groups():
+    events = []
+    _fit(
+        _reviews(),
+        events,
+        families=["LightGBM"],
+        target="score",
+        max_models=1,
+        feature_engineering=False,
+    )
+    assert "repeated_texts" in _kinds(events)
+    grouped = []
+    df = _reviews().assign(g=lambda d: np.arange(len(d)) % 50)
+    _fit(
+        df,
+        grouped,
+        families=["LightGBM"],
+        target="score",
+        max_models=1,
+        feature_engineering=False,
+        cv_group_column="g",
+    )
+    assert "repeated_texts" not in _kinds(grouped)
+
+
+def test_no_repeated_texts_notice_when_the_rows_are_already_named_as_belonging_together(
+    monkeypatch,
+):
+    monkeypatch.setattr(AutoML, "_notice_repeated_values", lambda self, prep, X: True)
+    events = []
+    _fit(
+        _reviews(),
+        events,
+        families=["LightGBM"],
+        target="score",
+        max_models=1,
+        feature_engineering=False,
+    )
+    assert "repeated_texts" not in _kinds(events)
+
+
+def test_no_repeated_texts_notice_beside_the_notice_for_number_columns_that_repeat_together(
+    monkeypatch,
+):
+    monkeypatch.setattr(AutoML, "_notice_repeated_rows", lambda self, prep, X: True)
+    events = []
+    _fit(
+        _reviews(),
+        events,
+        families=["LightGBM"],
+        target="score",
+        max_models=1,
+        feature_engineering=False,
+    )
+    assert "repeated_texts" not in _kinds(events)

@@ -207,6 +207,10 @@ REPEATED_ROWS = 20
 REPEATED_SHARED = 0.8  # of the other columns, constant within a value, for the rows to look alike
 REPEATED_SAMPLE_ROWS = 50_000
 REPEATED_COLUMNS = 40  # other columns looked at
+REPEATED_TEXT_SHARE = 0.05  # of the rows with a text identical to another row's, to say so
+REPEATED_TEXT_ROWS = 50  # ... and at least this many of them
+REPEATED_TEXT_COPIES = 10  # a text on more rows than this is a label or a filler, not a copy
+REPEATED_TEXT_DISTINCT = 0.5  # of the filled rows have a text of their own, for copies to stand out
 # A frequency-encoded column of codes (see ``_codes``) whose values each come back on this many rows
 # or more on average, and that holds at least this share of the importance: see
 # ``AutoML._notice_frequency_encoded_values``.
@@ -441,14 +445,48 @@ class AutoML:
         )
         return True
 
-    def _notice_repeated_rows(self, prep: Prep, X: pd.DataFrame) -> None:
+    def _notice_repeated_texts(self, prep: Prep, X: pd.DataFrame) -> bool:
+        """Say when the same text is on several rows (a review posted twice, a product listed
+        again) while the validation shuffles the rows: the copy of a row's text is usually in the
+        training part and a model that reads the text recognises it. Only the prose columns count,
+        and only where copies are the exception (at least ``REPEATED_TEXT_DISTINCT`` of the
+        filled rows have a text of their own: a short phrase that every row repeats is a label);
+        a text on more than ``REPEATED_TEXT_COPIES`` rows is not a copy but a filler ("no
+        description"); nor is it said when the rows are already named as belonging together
+        (``_notice_repeated_values``, ``_notice_repeated_rows``)."""
+        found = {}
+        for column in prep.prose:
+            codes, texts = pd.factorize(X[column].dropna())
+            if not len(codes) or len(texts) / len(codes) < REPEATED_TEXT_DISTINCT:
+                continue
+            same = np.bincount(codes)[codes]  # the rows with the same text, for each row
+            copies = int(((same >= 2) & (same <= REPEATED_TEXT_COPIES)).sum())
+            if copies >= REPEATED_TEXT_ROWS and copies / len(X) >= REPEATED_TEXT_SHARE:
+                found[column] = copies / len(X)
+        if not found:
+            return False
+        column = max(found, key=found.__getitem__)
+        self._notice(
+            f"{found[column]:.0%} of the rows have a {column!r} identical to that of another row. "
+            "The validation shuffles the rows, so the copy of a text is usually in the training "
+            "part, and the model recognises it. If the rows you will predict have new texts, the "
+            "score is probably better than it will be; name a column that identifies the text "
+            "(or what it describes) as cv_group_column to validate on texts the model has not "
+            "seen, or expect a worse score on new texts if there is none",
+            kind="repeated_texts",
+            columns=list(found),
+            share=round(found[column], 2),
+        )
+        return True
+
+    def _notice_repeated_rows(self, prep: Prep, X: pd.DataFrame) -> bool:
         """Say when several number columns repeat together over groups of rows (see
         ``repeated_blocks``) while the validation shuffles the rows: rows of one group then sit
         on both sides of every split, a model can recognise a group by its numbers, and the score
         is better than the model will do on rows of other groups."""
         found = repeated_blocks(X, list(prep.numeric_columns))
         if found is None:
-            return
+            return False
         columns = found[0]
         # the groups of the whole table, not of the rows looked at
         size = len(X) / X[columns[0]].astype(float).round(10).nunique()
@@ -464,6 +502,7 @@ class AutoML:
             columns=columns[:10],
             rows_per_group=round(size, 1),
         )
+        return True
 
     def _notice_missing_history(
         self, df: pd.DataFrame, X: pd.DataFrame, y: np.ndarray, time_column: str | None
@@ -1344,8 +1383,10 @@ class AutoML:
                     columns=dates[:3],
                 )
             if row_groups is None:
-                if not self._notice_repeated_values(prep, X):
-                    self._notice_repeated_rows(prep, X)
+                if not self._notice_repeated_values(prep, X) and not self._notice_repeated_rows(
+                    prep, X
+                ):
+                    self._notice_repeated_texts(prep, X)
                 if (
                     not dates
                     and not self._notice_sorted_column(prep, X)
