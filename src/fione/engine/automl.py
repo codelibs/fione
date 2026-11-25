@@ -1599,6 +1599,16 @@ class AutoML:
                 "(a longer max_runtime_secs lets the search judge them)"
             )
         self._notice(message, kind="features", groups=tried, unjudged=len(unjudged))
+        counted = [group.label for group in kept if group.density]
+        if counted and row_groups is not None:
+            self._notice(
+                f"{', '.join(counted)} count rows: the derived features were checked with the "
+                "counts of the other groups only, but the validation scores read the counts of "
+                "all the training rows, those of each validation group's own rows included, so "
+                "they may be better than the model does on rows of new groups",
+                kind="counts_in_validation",
+                groups=counted,
+            )
         return kept, tried
 
     def _without_wide_linear_view(self, prep: Prep, n_rows: int) -> list[str]:
