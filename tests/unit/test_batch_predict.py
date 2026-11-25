@@ -9,6 +9,7 @@ from predict_models import (
     binary,
     classifier,
     features,
+    padded_text_regressor,
     regressor,
     thousands_text_regressor,
 )
@@ -432,6 +433,19 @@ def test_a_column_learned_as_thousands_separated_text_but_read_as_numbers_is_ref
         batch_predict(model, numbers)
     assert str(e.value) == (
         "column 'color' was learned as text with thousands separators (such as '1,200'), but "
+        "the file now reads it as numbers: train the model again on the current upload"
+    )
+
+
+def test_a_column_learned_as_text_with_blanks_around_numbers_but_read_as_numbers_is_refused():
+    model = padded_text_regressor()
+    text = features(10).assign(color=[" 12", " NA", "7", *["7"] * 7])
+    assert len(batch_predict(model, text)) == 10
+    numbers = features(10).assign(color=[12.0, np.nan, 7.0, *[7.0] * 7])
+    with pytest.raises(PredictInputError) as e:
+        batch_predict(model, numbers)
+    assert str(e.value) == (
+        "column 'color' was learned as text with blanks around its numbers (such as ' 12'), but "
         "the file now reads it as numbers: train the model again on the current upload"
     )
 

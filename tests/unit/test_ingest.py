@@ -511,7 +511,7 @@ def test_thousands_separated_whole_numbers_beyond_int64_stay_text(conn, storage,
         (['"123,456"', '"234,567"'], "int64", [123456, 234567]),  # an identifier reads as a number
         (['"(1,234)"', '"1,000"'], "string", None),
         (['"$1,234"', '"1,000"'], "string", None),
-        (['"1,234 "', '"1,000"'], "string", None),
+        (['"1,234 "', '"1,000"'], "int64", [1234, 1000]),  # blanks around a number are trimmed
         (['"12,34"', '"1,000"'], "string", None),
         (['"1,23,456"', '"1,000"'], "string", None),  # Indian grouping
         (['"1,2"', '"1,5"'], "string", None),  # a decimal comma
@@ -607,3 +607,118 @@ def test_a_wide_table_is_written_in_row_groups_of_fewer_rows(conn, storage, proj
     ds, _ = load(conn, storage, project, frame.to_csv(index=False).encode())
     with storage.open_read(ds.key) as f:
         assert pq.ParquetFile(f).metadata.num_row_groups == 1
+
+
+def _text(values, delimiter=","):
+    return ("a" + delimiter + "b\n" + "".join(f'"{v}"{delimiter}1\n' for v in values)).encode()
+
+
+# Each case has a cell the reader cannot read as a number (a marker or a cell of blanks), so it
+# reads the column as text: the cases are for the numbers read from that text.
+@pytest.mark.parametrize(
+    ("values", "dtype", "numbers"),
+    [
+        ([" 35", " NA", "7"], "int64", [35, None, 7]),
+        (["35 ", " NA", " 12 "], "int64", [35, None, 12]),
+        ([" 35", "N/A ", "null", " NaN", " #N/A"], "int64", [35, None, None, None, None]),
+        ([" 35", "   ", "7"], "int64", [35, None, 7]),  # a cell of blanks is missing
+        ([" -3.5", " NA", "7"], "double", [-3.5, None, 7.0]),
+        ([" 1.2e-05", " 0.5", " NA"], "double", [1.2e-05, 0.5, None]),
+        (["1.5E+10", " NA"], "double", [1.5e10, None]),
+        (["+5", " NA", "6"], "int64", [5, None, 6]),
+        ([" .5", " NA"], "double", [0.5, None]),
+        (["5.", " NA"], "double", [5.0, None]),
+        ([" 12345678901234567", " NA", "1"], "int64", [12345678901234567, None, 1]),
+        ([" 35", " NA", "1,200"], "int64", [35, None, 1200]),  # with thousands separators
+        ([" 35", "abc", " NA"], "string", None),  # a word among the numbers
+        ([" 35", "None", " NA"], "string", None),  # the reader does not read None as missing
+        ([" NA", "word", "other"], "string", None),  # a marker among words
+        ([" 007", "35", " NA"], "string", None),  # a leading zero is a code
+        ([" 1e", "35", " NA"], "string", None),
+        ([" NA", " NA"], "string", None),  # no number at all
+        ([" 99999999999999999999", "35", " NA"], "string", None),  # beyond int64
+        ([" 12345678901234567", " 0.5", " NA"], "string", None),  # a float64 would round it
+        ([" 0.5", " 99999999999999999999", " NA"], "string", None),
+    ],
+)
+def test_numbers_written_with_surrounding_blanks_are_numbers(
+    conn, storage, project, values, dtype, numbers
+):
+    ds, df = load(conn, storage, project, _text(values))
+    assert dict(ds.schema)["a"] == dtype
+    if numbers is not None:
+        kept = ingest.read_dataset(storage, ds, nullable_dtypes=True)["a"]  # integers stay exact
+        assert [None if pd.isna(v) else v for v in kept.tolist()] == numbers
+    else:
+        assert df["a"].tolist() == values
+
+
+def test_blanks_around_numbers_are_trimmed_whatever_the_delimiter(conn, storage, project):
+    ds, df = load(conn, storage, project, _text([" 35", " NA", "7"], delimiter=";"))
+    assert dict(ds.schema)["a"] == "int64" and df["a"].isna().tolist() == [False, True, False]
+    ds, df = load(conn, storage, project, _text([" 1,200", " NA", "7"], delimiter=";"))
+    assert dict(ds.schema)["a"] == "string"  # a comma may be a decimal one there
+
+
+def test_the_type_of_a_number_column_is_decided_across_batches(conn, storage, project, monkeypatch):
+    monkeypatch.setattr(ingest, "_ROW_GROUP_ROWS", 3)
+    big = "12345678901234567"  # a whole number a float64 would round
+    first = lambda cell: [cell, *["1"] * 19]  # noqa: E731  (the reader's first block: plain)
+    early = list(
+        zip(
+            first("1"), first("1"), first("1"), first("1"), first("1"),
+            first(big), first("0.5"), first(big),
+            strict=True,
+        )
+    )  # fmt: skip
+    late = [(" NA", '" 0.5"', '"x"', '" 99999999999999999999"', "7", '" 0.5"', f'" {big}"', " NA")]
+    late += [('" 2"', '" 0.25"', '" NA"', '" 5"', '" NA"', '" NA"', '" NA"', '" 3"')]
+    data = "a,b,c,d,e,f,g,h\n" + "\n".join(",".join(r) for r in early + late) + "\n"
+    ds, df = load(conn, storage, project, data.encode(), block_size=128)
+    assert dict(ds.schema) == {
+        "a": "int64",  # a marker with blanks in the last batch
+        "b": "double",  # a fraction in the last batch
+        "c": "string",  # a word in the last batch
+        "d": "string",  # a number beyond int64 in the last batch
+        "e": "int64",
+        "f": "string",  # a whole number a float64 rounds early, a fraction late
+        "g": "string",  # a fraction early, such a whole number late
+        "h": "int64",  # the same whole number early, no fraction: exact
+    }
+    assert df["a"].isna().tolist()[-2:] == [True, False] and df["a"].iloc[-1] == 2
+    assert df["b"].tolist()[-2:] == [0.5, 0.25]
+    assert df["e"].isna().tolist()[-2:] == [False, True] and df["e"].iloc[-2] == 7
+    exact = ingest.read_dataset(storage, ds, nullable_dtypes=True)["h"]
+    assert exact.iloc[0] == int(big) and exact.iloc[-2] is pd.NA
+
+
+def test_a_rewritten_wide_table_keeps_its_row_groups_small(conn, storage, project, monkeypatch):
+    monkeypatch.setattr(ingest, "_ROW_GROUP_CELLS", 4 * 1500)
+    monkeypatch.setattr(ingest, "_MIN_GROUP_ROWS", 100)
+    frame = pd.DataFrame({f"c{i}": [str(v) for v in range(6000)] for i in range(4)})
+    frame.loc[5999, "c0"] = " NA"  # the only cell the reader cannot read: it widens c0 to text
+    ds, df = load(conn, storage, project, frame.to_csv(index=False).encode(), block_size=4096)
+    assert dict(ds.schema)["c0"] == "int64"
+    with storage.open_read(ds.key) as f:
+        meta = pq.ParquetFile(f).metadata
+    sizes = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
+    assert len(sizes) >= 3 and max(sizes) <= 1500 and sum(sizes) == 6000
+
+
+@pytest.mark.parametrize(
+    ("levels", "shown"),
+    [
+        ([" NA", "7", " 12"], [" 12", " NA"]),  # a number first
+        ([" 12", "7", "1,200"], [" 12"]),
+        ([" NA", "7"], [" NA"]),
+        (["7", "12"], []),  # no blanks
+        ([" 12", "abc"], []),  # a word
+        ([" NA", " NA"], []),  # no number
+        ([" 12", "99999999999999999999"], []),  # beyond int64, as an upload keeps it text
+        ([" 12", "0.5", "12345678901234567"], []),  # a float64 would round it
+        ([" 12", "12345678901234567"], [" 12"]),
+    ],
+)
+def test_levels_with_blanks_around_numbers_are_the_ones_an_upload_reads_as_numbers(levels, shown):
+    found = ingest.blank_padded_numbers(pd.Series(levels, dtype=object))
+    assert found.tolist() == shown
