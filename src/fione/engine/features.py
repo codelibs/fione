@@ -49,6 +49,7 @@ import re
 import time
 import warnings
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import lightgbm as lgb
@@ -90,6 +91,18 @@ ENCODING_SMOOTHING = 20.0  # rows' worth of the overall rate a value's own rate 
 ENCODING_MIN_LEVELS = 20  # a number needs this many distinct keys ...
 ENCODING_ROWS_PER_KEY = 5  # ... and at least this many rows per key on average to be encoded
 MAX_ENCODED_COLUMNS = 12  # numbers (the most useful by rank) whose values are encoded
+# The values of a text or category column (a group, a store, a code) are encoded by the target rate
+# the same way, when the rates of its values differ beyond noise (``_order_share``'s z, over all
+# the rows) by TEXT_KEY_Z, which is cheap to see; when they differ by TEXT_KEY_FIRST_Z the group is
+# judged first, on the wide sample, since the gate's sample has too few rows per value to show it.
+TEXT_KEY_Z = 8.0
+TEXT_KEY_FIRST_Z = 25.0
+MAX_TEXT_KEYS = 6  # columns (the strongest difference of rates first) whose values are encoded
+TEXT_KEY_MAX_LEVELS = 500_000  # values of all the encoded columns together: their rates are kept
+TEXT_KEY_MIN_LEVELS = 1000  # fewer values are covered by the models' own category handling
+TEXT_KEY_ROWS_PER_VALUE = (
+    50  # rows per value the judgment of the group reads, as far as time allows
+)
 CLUSTERS = 8
 CLUSTER_ROWS = 20_000  # rows the clusters are fitted on
 MAX_CLUSTER_COLUMNS = 10
@@ -763,6 +776,79 @@ class ValueEncoding(Group):
             key = pd.Series(self._key(df[column], kind), index=df.index)
             out[name] = self._log_odds(key.map(rates).astype(float).fillna(self._prior).to_numpy())
         return pd.DataFrame(out, index=df.index)
+
+
+class TextValueEncoding(ValueEncoding):
+    """``ValueEncoding`` of the values of text or category columns: the rate of the target among
+    the rows that share a value, cross-fitted for the training rows, the rate of all of them for
+    other rows; a value the training rows do not have (or no value) gets the overall rate."""
+
+    def __init__(self, columns: list[str], judged_first: bool = False, values: int = 0):
+        super().__init__([(c, "text") for c in columns])
+        self.label = "target rates of text values"
+        self.judged_first = judged_first  # strong enough to be judged before the other groups
+        # the rows its judgment reads at least: ``TEXT_KEY_ROWS_PER_VALUE`` for each value of the
+        # column that has most (the gate's own rows when few values need fewer)
+        self.judge_rows = min(ENCODING_ROWS, max(GATE_ROWS, TEXT_KEY_ROWS_PER_VALUE * values))
+
+    @staticmethod
+    def _key(values: pd.Series, kind: str = "text") -> np.ndarray:
+        return _as_str(values).astype(object).to_numpy()
+
+    def _fingerprint(self, df: pd.DataFrame) -> tuple[int, str]:
+        keys = pd.DataFrame({c: self._key(df[c]) for c in self.columns})
+        hashes = pd.util.hash_pandas_object(keys, index=False).to_numpy()
+        return len(df), hashlib.blake2b(hashes.tobytes(), digest_size=8).hexdigest()
+
+
+def text_value_encoding(
+    prep: Prep,
+    rows: pd.DataFrame,
+    y: np.ndarray,
+    ranked: list[str],
+    out_of_time: Callable[[], bool] = lambda: False,
+) -> TextValueEncoding | None:
+    """The encoding of the columns of ``rows`` that the models read as frequencies and that have
+    ``TEXT_KEY_MIN_LEVELS`` values or more (fewer values are covered by the models' own category
+    handling: the encoding adds little, though the gate shows a gain), whose values repeat
+    (``ENCODING_ROWS_PER_KEY`` rows each on average: a unique value per row is an id), that are
+    not prose, and whose target rates differ beyond noise by ``TEXT_KEY_Z`` (read on all the rows
+    of the column), or None. The columns with the strongest difference are encoded, at most
+    ``MAX_TEXT_KEYS`` of them and ``TEXT_KEY_MAX_LEVELS`` values in all (the rates are kept with
+    the model). The group is judged first when one of them differs by ``TEXT_KEY_FIRST_Z``.
+    The columns are read most useful first (``ranked``), until ``out_of_time`` says so."""
+    order = {c: i for i, c in enumerate(ranked)}
+    target = np.asarray(y, dtype=float)
+    if len(np.unique(target)) > 2:  # a number: its ranks, as ``code_columns`` reads it
+        ranks = pd.Series(target).rank().to_numpy()
+        target = (ranks - ranks.mean()) / (ranks.std() + 1e-12)
+    keys: list[tuple[float, str, int]] = []  # (difference, column, values)
+    for column in sorted(prep.columns, key=lambda c: order.get(c, len(order))):
+        if out_of_time():
+            break
+        # the values the sample of the columns' rows held: fewer than all of them, rarely by much
+        if prep.kind_of(column) != "frequency" or (
+            len(prep.frequencies.get(column, ())) < TEXT_KEY_MIN_LEVELS // 4
+        ):
+            continue
+        codes, levels = pd.factorize(TextValueEncoding._key(rows[column]))
+        known = codes >= 0
+        if len(levels) < TEXT_KEY_MIN_LEVELS or known.sum() < ENCODING_ROWS_PER_KEY * len(levels):
+            continue
+        if is_prose(rows[column]):
+            continue
+        z, _ = _order_share(codes[known].astype(float), target[known][:, None])
+        if z >= TEXT_KEY_Z:
+            keys.append((z, column, len(levels)))
+    found, strong, values, total = [], False, 0, 0
+    for z, column, levels in sorted(keys, reverse=True):
+        if len(found) >= MAX_TEXT_KEYS or total + levels > TEXT_KEY_MAX_LEVELS:
+            continue
+        found.append(column)
+        total += levels
+        strong = strong or z >= TEXT_KEY_FIRST_Z
+        values = max(values, levels)
+    return TextValueEncoding(found, strong, values) if found else None
 
 
 class ClusterDistances(Group):
@@ -1518,6 +1604,10 @@ def select_groups(
         pool = [g for g in candidates(prep, X, ranked, all_rows) if encodes or not g.uses_target]
         if encodes and task == "classification":  # models per value of a column (binary only)
             pool += level_models(prep, X, y, ranked, all_rows, all_y, seed)
+        if encodes and (
+            text_keys := text_value_encoding(prep, all_rows, all_y, ranked, gate.out_of_time)
+        ):
+            pool.append(text_keys)
         codes = (
             []
             if row_groups is not None
@@ -1537,6 +1627,18 @@ def select_groups(
             current = gate.losses(kept, range(1))
         if judged_early(pool, base, kept, verdicts, gate):  # a decisive gain: no need to wait
             current = gate.losses(kept, range(1))
+        # the values of a column whose target rates differ strongly are judged first, on more rows
+        # than the gate samples: they would otherwise be left to the end, which time may not reach
+        for group in pool:
+            if getattr(group, "judged_first", False):
+                if not _judge_encoding(
+                    group, kept, verdicts, gate, new_gate, all_rows, all_y, deadline, True
+                ):
+                    group.judged_first = False  # not decisive, or no time: the last judgment
+                    continue
+                if group in kept:
+                    base.append(group)  # as the groups kept early: the last check is against it
+                    current = gate.losses(kept, range(1))
         for group in pool:
             if group.uses_target:
                 continue  # judged last, on more rows
@@ -1575,7 +1677,7 @@ def select_groups(
                 _drop_adopted(verdicts, "final check", {g.label for g in base})
                 kept = list(base)
         for group in pool:
-            if group.uses_target and group not in base:
+            if group.uses_target and group not in base and not getattr(group, "judged_first", 0):
                 _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, deadline)
     except _OutOfTime:
         # Their last check did not finish. A gain this large is no fluke of the selection, so
@@ -1590,28 +1692,34 @@ def select_groups(
     return kept, verdicts
 
 
-def encoding_rows(rows: int, secs_per_row: float, left: float) -> int:
-    """The rows the encodings are judged on: ``ENCODING_ROWS``, or more (up to
+def encoding_rows(rows: int, secs_per_row: float, left: float, least: int = ENCODING_ROWS) -> int:
+    """The rows the encodings are judged on: ``least`` (``ENCODING_ROWS``), or more (up to
     ``ENCODING_ROWS_MAX``) when their judgment takes no more than half of the ``left`` seconds;
     ``secs_per_row`` is the time all the judgment's fits take per row."""
     wide = ENCODING_ROWS_MAX
-    while wide > ENCODING_ROWS and secs_per_row * wide > left / 2:
-        wide = max(ENCODING_ROWS, wide * 2 // 3)
+    while wide > least and secs_per_row * wide > left / 2:
+        wide = max(least, wide * 2 // 3)
     return min(rows, wide)
 
 
-def _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, deadline) -> None:
+def _judge_encoding(
+    group, kept, verdicts, gate, new_gate, all_rows, all_y, deadline, decisive_only=False
+) -> bool:
     """Judge a group that reads the target on many more rows than the gate's (its sample is
     too small for the rates of values to show a gain; at least 100,000 when the table has
     them), against the groups kept so far, and keep
-    it when it passes on the repeats of the folds and again on others. ``_OutOfTime`` leaves it
-    unjudged."""
+    it when it passes on the repeats of the folds and again on others. With ``decisive_only`` it
+    is kept only when it cuts the loss by ``DECISIVE_GAIN`` on one repeat and passes on two
+    others, which takes half the fits (for a group whose pre-screen is strong: the time left at
+    the start covers them, not the full judgment); a gain that is not decisive is left for the
+    full judgment later (False: no verdict was made). ``_OutOfTime`` leaves it unjudged."""
     wide = gate
-    repeats = 2 * (1 + GATE_REPEATS + FINAL_REPEATS)  # with and without the group
+    repeats = 2 * (1 + FINAL_REPEATS if decisive_only else 1 + GATE_REPEATS + FINAL_REPEATS)
     unit = gate.secs([]) / len(gate.X)  # seconds of one fit per row
-    rows_wide = encoding_rows(len(all_rows), unit * repeats, deadline.remaining())
+    least = getattr(group, "judge_rows", ENCODING_ROWS)
+    rows_wide = encoding_rows(len(all_rows), unit * repeats, deadline.remaining(), least)
     if unit * rows_wide * repeats > deadline.remaining():
-        return  # not enough time left for the judgment: listed as not judged
+        return False  # not enough time left for the judgment: listed as not judged
     if len(gate.X) < rows_wide:
         rows = _sample(all_y, gate.task, gate.seed, rows_wide)
         wide = new_gate(all_rows.iloc[rows].reset_index(drop=True), all_y[rows], None)
@@ -1619,7 +1727,7 @@ def _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, dead
     try:
         if not width:
             verdicts.append(Verdict(group.label, 0, False, 0.0, "no varying feature"))
-            return
+            return True
         trial = wide.losses([*kept, group], range(1))
         if paired(wide.losses(kept, range(1)), trial)[0] <= 0:
             verdicts.append(
@@ -1627,7 +1735,21 @@ def _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, dead
                     group.label, width, False, _share(wide.losses(kept, range(1)), trial), "no gain"
                 )
             )
-            return
+            return True
+        if decisive_only:
+            gain = _share(wide.losses(kept, range(1)), trial)
+            start = (
+                GATE_REPEATS + 2 * FINAL_REPEATS
+            )  # repeats of its own: not those of ``judged_early``
+            fresh = range(start, start + FINAL_REPEATS)
+            if gain < DECISIVE_GAIN or not passes(wide.losses(kept, range(1)), trial):
+                return False  # not decisive: the full judgment, later, decides
+            if not passes(wide.losses(kept, fresh), wide.losses([*kept, group], fresh)):
+                verdicts.append(Verdict(group.label, width, False, gain, "final check"))
+            else:
+                kept.append(group)
+                verdicts.append(Verdict(group.label, width, True, gain, "adopted"))
+            return True
         both = range(GATE_REPEATS)
         before, after = wide.losses(kept, both), wide.losses([*kept, group], both)
         gain = _share(before, after)
@@ -1641,6 +1763,7 @@ def _judge_encoding(group, kept, verdicts, gate, new_gate, all_rows, all_y, dead
             verdicts.append(Verdict(group.label, width, True, gain, "adopted"))
     except _OutOfTime:
         pass  # listed as not judged for lack of time
+    return True
 
 
 def _drop_adopted(verdicts: list[Verdict], reason: str, keep: set[str] = frozenset()) -> None:

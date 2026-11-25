@@ -666,6 +666,25 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   take at most about 160 MB, so a table of many values and columns uses fewer columns (and a
   fit holds at most 300 million cells). The importance of the group is shared among its source
   columns.
+- target rates of text values (a group that reads the target): a text or category column of at
+  least 1,000 different values (the models' own category handling covers fewer) and 5 rows per
+  value on average (a code, a group, a store; a value per row is an identifier and running text
+  is not a key) whose values' target rates differ beyond noise gets, for a binary or number
+  target, the smoothed rate of the target among the rows that share the value (as log-odds for a
+  binary target). At most six columns are encoded, the ones whose rates differ most first, and
+  500,000 values in all, since the rates are kept with the model. A training row gets the rate of
+  the other folds, any other row the rate of all the training rows, and a value the training rows
+  do not have, or no value, the overall rate. A quick look at all the rows of each column decides
+  whether it is a candidate. When the rates differ strongly the group is judged first, before the
+  other groups, on 50 rows for each value of the column with most values (at least the gate's own
+  rows, at most 100,000, and up to 300,000 when the time covers them: a sample holds too few rows
+  of each value to show the gain), and this may use part of the time that is left for the other
+  groups. It is kept when its loss falls by at least 5 % on one repeat of the folds and passes on
+  two other repeats; otherwise it is judged last, with the usual thresholds. The group is not
+  built for a target of three classes or more, or with a group column for validation. The
+  validation cannot see the risk of a column whose values the data to predict does not share
+  (rows of people, shops or items that the training rows do not hold): the rate then falls back
+  to the overall one, and the model has learnt to lean on the column.
 
 A column of a comma-delimited CSV in which every value is a number written with thousands
 separators (`16,853`, `-1,234.5`; plain digits may be mixed in, and at least one value must have

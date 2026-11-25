@@ -25,6 +25,7 @@ from fione.engine.features import (
     TextShape,
     TextTokens,
     TextTopics,
+    TextValueEncoding,
     ValueEncoding,
     ValueFrequency,
     alike_columns,
@@ -33,6 +34,7 @@ from fione.engine.features import (
     paired,
     passes,
     select_groups,
+    text_value_encoding,
 )
 from fione.engine.model import attribution, feature_importance
 from fione.engine.prep import Prep
@@ -1985,3 +1987,233 @@ def test_the_gate_judges_a_table_of_at_most_the_limit_exactly_as_before(monkeypa
     gate = features._Gate(X, y, "classification", 5, 0)
     assert gate.narrowed(list(X.columns)) is None
     assert gate.narrowed([*X.columns, "extra"]) == frozenset(list(X.columns)[:10])
+
+
+def _shops(n=12_000, levels=1000, seed=0, signal=0.5, noise_column=True):
+    """Shops (text values) whose own rate of the label differs, and a column of other values."""
+    rng = np.random.default_rng(seed)
+    shop = rng.integers(0, levels, n)
+    rate = rng.uniform(0.5 - signal / 2, 0.5 + signal / 2, levels)
+    y = (rng.random(n) < rate[shop]).astype(int)
+    X = pd.DataFrame({"shop": [f"shop {i}" for i in shop], "amount": rng.normal(size=n)})
+    if noise_column:
+        X["branch"] = [f"branch {i}" for i in rng.integers(0, 40, n)]
+    return X, y
+
+
+def test_a_text_value_gets_the_rate_of_the_other_folds_and_a_new_one_the_rate_of_all_rows():
+    X, y = _shops()
+    group = TextValueEncoding(["shop"]).fit(X, y)
+    train = group.transform(X)["shop__text_target"].to_numpy()
+    assert np.allclose(train, group.transform(X.copy())["shop__text_target"])  # a copy of the rows
+    again = group.transform(X.iloc[::-1].reset_index(drop=True))["shop__text_target"].to_numpy()
+    assert not np.allclose(
+        train[::-1], again
+    )  # other rows (here in another order) get all rows' rate
+    rate = pd.Series(y).groupby(X["shop"].to_numpy()).mean()
+    rows = X.iloc[:300].reset_index(drop=True)
+    expected = rows["shop"].map(lambda v: group._rates[0][v]).to_numpy()
+    out = group.transform(rows)["shop__text_target"].to_numpy()
+    assert np.allclose(out, np.log(expected / (1 - expected)))
+    assert np.corrcoef(out, rate[rows["shop"]].to_numpy())[0, 1] > 0.9
+    # a row never sees its own label: with one row per value there is nothing but the prior
+    values = pd.DataFrame({"shop": [f"v{i}" for i in range(40)]})
+    one = TextValueEncoding(["shop"]).fit(values, np.array([0, 1] * 20))
+    assert one.transform(values).shape[1] == 0  # all the prior: no feature that varies
+
+
+def test_an_unseen_or_missing_text_value_gets_the_overall_rate_and_the_group_pickles():
+    X, y = _shops()
+    group = TextValueEncoding(["shop"]).fit(X, y)
+    odd = pd.DataFrame({"shop": ["never seen", None, np.nan, "shop 3"]})
+    out = group.transform(odd)["shop__text_target"].to_numpy()
+    prior = np.log(y.mean() / (1 - y.mean()))
+    assert out[:3] == pytest.approx([prior] * 3)
+    assert out[3] != pytest.approx(prior)
+    loaded = pickle.loads(pickle.dumps(group))
+    assert loaded._oof is None
+    assert loaded.transform(odd)["shop__text_target"].tolist() == pytest.approx(out.tolist())
+    assert group.transform(X.iloc[:5])["shop__text_target"].notna().all()
+
+
+def test_the_fingerprint_of_text_values_sees_a_changed_value_in_any_row():
+    X, y = _shops()
+    group = TextValueEncoding(["shop"]).fit(X, y)
+    changed = X.copy()
+    changed.loc[changed.index[-1], "shop"] = "shop 999"
+    assert group._fingerprint(X) == group._fingerprint(X.copy())
+    assert group._fingerprint(X) != group._fingerprint(changed)
+    assert not np.allclose(
+        group.transform(changed)["shop__text_target"], group.transform(X)["shop__text_target"]
+    )
+
+
+def test_a_text_column_is_encoded_when_its_values_repeat_and_their_rates_differ():
+    X, y = _shops(signal=0.9)
+    prep = Prep().fit(X)
+    found = text_value_encoding(prep, X, y, list(X.columns))
+    assert found.columns == ("shop",)  # the other column's values have no rates of their own
+    assert found.judged_first  # a strong difference
+    X["id"] = [f"row {i}" for i in range(len(X))]  # a value per row is an id
+    X["few"] = np.where(y == 1, "yes", "no")
+    X["few"] = [
+        v if i % 3 else "other" for i, v in enumerate(X["few"])
+    ]  # 3 values: a plain category
+    assert text_value_encoding(Prep().fit(X), X, y, ["id", "few", "shop"]).columns == ("shop",)
+    flat, y_flat = _shops(signal=0.0)
+    assert text_value_encoding(Prep().fit(flat), flat, y_flat, ["shop"]) is None
+
+
+def test_a_weaker_difference_builds_the_group_but_does_not_judge_it_first(monkeypatch):
+    X, y = _shops(signal=0.5)
+    group = text_value_encoding(Prep().fit(X), X, y, ["shop"])
+    assert group is not None and not group.judged_first
+    z, _ = features._order_share(
+        pd.factorize(X["shop"])[0].astype(float), np.asarray(y, dtype=float)[:, None]
+    )
+    monkeypatch.setattr(features, "TEXT_KEY_Z", z * 2)
+    assert text_value_encoding(Prep().fit(X), X, y, ["shop"]) is None
+
+
+def test_a_text_column_of_prose_is_not_a_key():
+    rng = np.random.default_rng(0)
+    words = ["lorem", "ipsum", "dolor", "amet", "elit", "sed", "tempor", "magna"]
+    text = [" ".join(rng.choice(words, 12)) for _ in range(30)]
+    X = pd.DataFrame({"comment": [text[i % 30] for i in range(3000)]})
+    y = (np.arange(3000) % 30 < 15).astype(int)
+    assert text_value_encoding(Prep().fit(X), X, y, ["comment"]) is None
+
+
+def _only_the_text_key(monkeypatch):
+    monkeypatch.setattr(features, "candidates", lambda *args, **kwargs: [])
+
+
+def test_select_groups_judges_a_strong_text_key_first_and_keeps_it(monkeypatch):
+    _only_the_text_key(monkeypatch)
+    X, y = _shops(n=12_000, levels=1000, signal=0.95)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(3600))
+    ours = [v for v in verdicts if v.group == "target rates of text values"]
+    assert len(ours) == 1 and ours[0].adopted and ours[0].gain > 0.05
+    assert any(isinstance(g, TextValueEncoding) for g in kept)
+    assert verdicts[0].group == "target rates of text values"  # judged before the others
+
+
+def test_a_gain_that_is_not_decisive_is_left_to_the_last_judgment_which_judges_it_once(monkeypatch):
+    _only_the_text_key(monkeypatch)
+    monkeypatch.setattr(features, "DECISIVE_GAIN", 10.0)  # no gain is decisive
+    X, y = _shops(n=12_000, levels=1000, signal=0.95)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(3600))
+    ours = [v for v in verdicts if v.group == "target rates of text values"]
+    assert len(ours) == 1 and ours[0].adopted
+    assert not next(g for g in kept if isinstance(g, TextValueEncoding)).judged_first
+
+
+def test_a_text_key_is_kept_for_a_number_to_predict(monkeypatch):
+    _only_the_text_key(monkeypatch)
+    X = _shops(n=12_000, levels=1000, signal=0.9)[0]
+    shop = pd.factorize(X["shop"])[0]
+    effect = np.random.default_rng(3).normal(size=shop.max() + 1)
+    y = effect[shop] + np.random.default_rng(4).normal(scale=0.5, size=len(X))
+    found = text_value_encoding(Prep().fit(X), X, y, ["shop"])
+    assert found is not None and found.columns == ("shop",)
+    kept, verdicts = select_groups(X, y, "regression", 5, 0, Deadline(3600))
+    ours = [v for v in verdicts if v.group == "target rates of text values"]
+    assert len(ours) == 1 and ours[0].adopted
+
+
+def test_a_text_key_is_kept_next_to_a_model_per_value_that_was_kept_early(monkeypatch):
+    _only_the_text_key(monkeypatch)
+    rng = np.random.default_rng(0)
+    n, units, shops = 8000, 30, 1200
+    y = rng.integers(0, 2, n)
+    unit = rng.integers(0, units, n)
+    direction = rng.normal(size=(units, 6))
+    direction /= np.linalg.norm(direction, axis=1, keepdims=True)
+    numbers = rng.normal(size=(n, 8))
+    numbers[:, :6] += 1.6 * (2 * y - 1)[:, None] * direction[unit]
+    cls = rng.permutation(shops) % 2  # the class most of the rows of a shop have
+    pure = rng.random(n) < 0.9
+    shop = np.where(
+        pure,
+        [rng.choice(np.flatnonzero(cls == c)) for c in y],
+        rng.integers(0, shops, n),
+    )
+    X = pd.DataFrame(numbers, columns=[f"x{i}" for i in range(8)])
+    X.insert(0, "unit", unit)
+    X["shop"] = [f"shop {i}" for i in shop]
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(3600))
+    adopted = {v.group for v in verdicts if v.adopted}
+    assert "target rates of text values" in adopted
+    assert len(adopted) == 2 and len(kept) == 2
+
+
+def test_no_text_key_is_built_for_three_classes_or_with_groups_of_rows(monkeypatch):
+    monkeypatch.setattr(
+        features,
+        "text_value_encoding",
+        lambda *args, **kwargs: pytest.fail("a key was looked for"),
+    )
+    X, y = _shops(n=6000, levels=1000, signal=0.9)
+    select_groups(X, y + (np.arange(len(y)) % 3 == 0), "classification", 5, 0, Deadline(2))
+    select_groups(X, y, "classification", 5, 0, Deadline(2), row_groups=np.arange(len(X)) // 6)
+
+
+def test_a_flat_key_is_not_encoded_however_many_rows_it_has():
+    X, y = _shops(n=50_000, levels=1000, signal=0.0)
+    assert text_value_encoding(Prep().fit(X), X, y, ["shop"]) is None
+
+
+def test_the_screen_stops_when_time_is_out_and_keeps_the_strongest_keys_within_the_budget(
+    monkeypatch,
+):
+    X, y = _shops(n=12_000, levels=1000, signal=0.9)
+    noisy = np.random.default_rng(5).random(len(X)) < 0.7  # a key that is the shop on 30 % only
+    other = [f"store {i}" for i in np.random.default_rng(6).integers(0, 1000, len(X))]
+    X["store"] = np.where(noisy, other, X["shop"])
+    prep = Prep().fit(X)
+    assert text_value_encoding(prep, X, y, ["shop"], out_of_time=lambda: True) is None
+    both = text_value_encoding(prep, X, y, ["store", "shop"])
+    assert set(both.columns) == {"shop", "store"}
+    monkeypatch.setattr(features, "TEXT_KEY_MAX_LEVELS", 1500)  # room for one key
+    assert text_value_encoding(prep, X, y, ["store", "shop"]).columns == ("shop",)
+    monkeypatch.setattr(features, "MAX_TEXT_KEYS", 1)
+    monkeypatch.setattr(features, "TEXT_KEY_MAX_LEVELS", 500_000)
+    assert text_value_encoding(prep, X, y, ["store", "shop"]).columns == ("shop",)  # strongest
+
+
+def test_a_text_key_outside_the_narrowed_columns_is_still_judged_and_kept(monkeypatch):
+    _only_the_text_key(monkeypatch)
+    monkeypatch.setattr(features, "GATE_NARROW_COLUMNS", 5)
+    monkeypatch.setattr(features, "GATE_COLUMNS", 3)
+    X, y = _shops(n=12_000, levels=1000, signal=0.95)
+    noise = np.random.default_rng(1).normal(size=(len(X), 12))
+    X = pd.concat([pd.DataFrame(noise).add_prefix("n"), X], axis=1)
+    kept, verdicts = select_groups(X, y, "classification", 5, 0, Deadline(3600))
+    ours = [v for v in verdicts if v.group == "target rates of text values"]
+    assert len(ours) == 1 and ours[0].adopted
+
+
+def test_a_text_key_is_judged_on_rows_for_each_of_its_values_within_the_limits():
+    X, y = _shops(signal=0.9)
+    assert text_value_encoding(Prep().fit(X), X, y, ["shop"]).judge_rows == 50_000
+    assert TextValueEncoding(["shop"], values=300).judge_rows == features.GATE_ROWS
+    many = TextValueEncoding(["shop"], values=30_000)
+    assert many.judge_rows == features.ENCODING_ROWS
+    assert encoding_rows(1_000_000, 1e-6, 1000.0, least=20_000) >= 20_000
+    assert encoding_rows(50_000, 1e-3, 10.0, least=20_000) == 20_000
+
+
+def test_a_text_column_of_fewer_than_1000_values_is_not_a_key():
+    X, y = _shops(n=12_000, levels=300, signal=0.9)
+    assert text_value_encoding(Prep().fit(X), X, y, ["shop"]) is None
+
+
+def test_a_missing_value_in_training_and_a_key_only_the_new_rows_have_get_the_overall_rate():
+    X, y = _shops(n=12_000, levels=1000, signal=0.9)
+    X.loc[X.index[::20], "shop"] = np.nan
+    group = TextValueEncoding(["shop"]).fit(X, y)
+    new = pd.DataFrame({"shop": [np.nan, "a shop only the new rows have", "shop 7"]})
+    out = group.transform(new)["shop__text_target"].to_numpy()
+    prior = np.log(y.mean() / (1 - y.mean()))
+    assert out[:2] == pytest.approx([prior, prior]) and out[2] != pytest.approx(prior)
+    assert group.transform(X)["shop__text_target"].notna().all()
