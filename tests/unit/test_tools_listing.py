@@ -890,11 +890,33 @@ def test_the_run_time_need_of_a_text_grows_with_the_classes_to_tell_apart():
     assert runtime_need_secs(dataset, profile, 4) == pytest.approx(2 * base)
     assert runtime_need_secs(dataset, profile, 20) == pytest.approx(10 * base)
     assert base == pytest.approx(100_000 * 2_000 * builtin.SECS_PER_TEXT_CHAR)
-    # the cells of a table with no text do not depend on the classes
+    # the cells of a table with no text do not depend on the classes up to ten of them
     plain = SimpleNamespace(columns=[ColumnProfile("x", "numeric", 0.0, 9, None, None, None, None)])
-    assert runtime_need_secs(dataset, plain, 20) == runtime_need_secs(dataset)
+    assert runtime_need_secs(dataset, plain, 10) == runtime_need_secs(dataset)
     assert builtin.class_count(pd.Series(list("abcabcd")), "classification") == 4
     assert builtin.class_count(pd.Series([1.5, 2.5, 3.5]), "regression") == 2
+
+
+@pytest.mark.parametrize(
+    ("classes", "factor"),
+    [(0, 1), (1, 1), (2, 1), (3, 1), (10, 1), (11, 1.1), (20, 2), (50, 5), (100, 10), (355, 10)],
+)
+def test_the_run_time_need_of_a_table_grows_with_the_classes_past_ten(classes, factor):
+    # a boosting round grows one tree per class: the cells count classes / 10 times, at most 10
+    dataset = SimpleNamespace(n_rows=100_000, n_cols=61)
+    base = 100_000 * 60 * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
+    assert runtime_need_secs(dataset, None, classes) == pytest.approx(factor * base)
+    plain = SimpleNamespace(columns=[ColumnProfile("x", "numeric", 0.0, 9, None, None, None, None)])
+    assert runtime_need_secs(dataset, plain, classes) == pytest.approx(factor * base)
+
+
+def test_the_proposed_run_time_and_its_warning_follow_the_classes_of_a_target():
+    dataset = SimpleNamespace(n_rows=50_000, n_cols=61)  # 9 minutes at two classes
+    assert builtin._runtime_secs(dataset, None, 2) == builtin._runtime_secs(dataset, None, 10)
+    assert builtin._runtime_secs(dataset, None, 2) == 9 * 60
+    assert builtin._runtime_secs(dataset, None, 20) == 18 * 60
+    assert builtin._runtime_secs(dataset, None, 50) == 30 * 60  # 45 minutes, cut at the most
+    assert builtin.runtime_need_secs(dataset, None, 355) > 1.5 * builtin.MAX_RUNTIME_SECS
 
 
 def test_the_run_time_need_counts_the_text_of_the_data():

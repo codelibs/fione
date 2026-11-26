@@ -700,6 +700,13 @@ MIN_EFFECTIVE_COLUMNS = 30
 # trial. More classes cost more: a trial takes about 3 s + 2.4 s per class on 40,000 texts of 150
 # characters, so the text term counts ``classes / 2`` times (see ``runtime_need_secs``).
 SECS_PER_TEXT_CHAR = 2.8e-5
+# A boosting round of a classification target grows one tree per class, so past about ten classes
+# the cost of a trial grows with their number. Measured on 100,000 rows of 60 numbers, one round of
+# LightGBM, XGBoost and CatBoost took 2.1 (20 classes), 4.9 (50), 8.9 (100) and 30 (355) times what
+# it took with 10 classes (each family within 25 % of that), so the table term counts
+# ``classes / CLASS_COST_FROM`` times, up to ``MAX_CLASS_FACTOR``.
+CLASS_COST_FROM = 10
+MAX_CLASS_FACTOR = 10
 MAX_RUNTIME_SECS = 1800
 MIN_RUNTIME_SECS = 120
 # The proposal warns when the run time it proposes is capped at MAX_RUNTIME_SECS and the data
@@ -757,13 +764,15 @@ def runtime_need_secs(
     all its inputs are prose, identifiers or constants), or, when ``profile`` shows prose columns
     (the first ``MAX_PROSE`` are read), to give a text model one trial (``SECS_PER_TEXT_CHAR``,
     times ``classes / 2`` for a classification target of more than two ``classes``), if that is
-    more."""
+    more. The table term counts ``classes / CLASS_COST_FROM`` times (at most ``MAX_CLASS_FACTOR``)
+    for a target of more than ``CLASS_COST_FROM`` classes."""
     columns = max(1, dataset.n_cols - 1)
     prose = [] if profile is None else [c for c in profile.columns if c.mean_length is not None]
     unused = [] if profile is None else [c for c in profile.columns if c.kind in ("id", "constant")]
     if columns - len(unused) > len(prose):  # else no column is left for the trials the floor counts
         columns = max(columns, MIN_EFFECTIVE_COLUMNS)
     need = dataset.n_rows * columns * SECS_PER_CELL * TRIALS_WANTED
+    need *= min(MAX_CLASS_FACTOR, max(1.0, classes / CLASS_COST_FROM))
     if profile is None:
         return need
     chars = dataset.n_rows * sum(c.mean_length * (1 - c.missing_rate) for c in prose[:MAX_PROSE])
