@@ -453,6 +453,7 @@
   "join.error.no_column": "No dataset of this project has the column “{column}”.",
   "join.error.no_link": "No dataset with this column has a link that a join can follow: a column whose values match a column of another dataset, with one row per value on one side.",
   "join.error.failed": "The join could not be proposed. Please try again.",
+  "join.error.busy": "Other join proposals are being looked for. Try again in a moment.",
   "join.error.changed": "This join no longer matches the datasets. Propose it again.",
   "join.error.start": "The joined dataset could not be created.",
   "datasets.error.kind": "Choose the kind of data.",

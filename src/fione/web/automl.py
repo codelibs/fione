@@ -286,9 +286,13 @@ def _join_fields(base_id: int, config: dict) -> dict[str, str]:
 
 
 def _first_join(request: Request, conn, ctx: Ctx, target: str) -> dict:
-    """The first join for the column ``target``, or the message that says why there is none."""
+    """The first join for the column ``target``, or the message that says why there is none.
+    At most ``app.JOIN_MAX_CONCURRENT_SEARCHES`` searches run at once; another is told to wait."""
     if not target.strip():  # the link search is not worth its time without a column
         return {"message": "join.error.no_target", "params": {}}
+    slots = request.app.state.join_slots
+    if not slots.acquire(blocking=False):
+        return {"message": "join.error.busy", "params": {}}
     try:
         found = call_tool(
             "propose_first_join",
@@ -298,6 +302,8 @@ def _first_join(request: Request, conn, ctx: Ctx, target: str) -> dict:
     except ToolError as e:
         key = JOIN_REFUSALS.get(e.code, "join.error.failed")
         return {"message": key, "params": {"column": target}}
+    finally:
+        slots.release()
     config, base_id = found["config"], found["dataset_id"]
     names = {d.id: d.name for d in projects.list_datasets(conn, ctx.project.id)}
     return {

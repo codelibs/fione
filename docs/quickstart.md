@@ -270,8 +270,8 @@ number that has many values, follows it on the tables that have such numbers.
 
 ## Joining datasets
 
-When a project holds two or more datasets, one of them training data, the project's dashboard
-and its **Datasets** page show **Join datasets**. Choose the column to predict and press
+When a project holds two or more training datasets (upload another table as training data), the
+project's dashboard and its **Datasets** page show **Join datasets**. Choose the column to predict and press
 **Propose a join**: Fione looks for the columns that link the datasets, by their names and
 values, and proposes the first join. No language model is used. The base is the dataset that
 has the column to predict, and the dataset to add is the one its best link joins to; when the
@@ -283,7 +283,8 @@ can edit the project presses **Create the joined dataset**, which starts a Join 
 it. Fione checks the proposal again before the job starts. The result is a new dataset, and the
 base dataset stays as it is. Join only what is known when the model predicts.
 
-The search reads the first 8 datasets of the project and stops after 30 seconds;
+The search reads the 8 oldest datasets of the project, whose columns the list offers, and stops
+after 30 seconds; two searches run at once on the server, and another is asked to wait;
 [Several tables](assistant.md#several-tables) says how the links are found. To join two
 datasets of your choice, or to set the summary's statistics, run the **Join datasets by key
 columns** module.

@@ -313,3 +313,34 @@ def test_the_join_job_makes_the_joined_dataset(make_client, monkeypatch):
     assert len(frame) == 60 and frame["rows"].tolist() == [2] * 60
     assert {"id", "churned", "total_mean", "total_sum"} <= set(frame.columns)
     assert shop.client.get(r.headers["location"]).status_code == 200
+
+
+def test_only_the_datasets_the_search_reads_are_offered(make_client):
+    client = make_client(**ASSISTANT_OFF)
+    owner = add_user(client, "ed", Role.EDITOR)
+    with closing(connect(client)) as conn:
+        pid = projects.create_project(conn, owner, "Shop").id
+    login(client, "ed")
+    ingest(client, pid, "customers", CUSTOMERS)
+    ingest(client, pid, "orders", ORDERS)
+    for i in range(6):
+        ingest(client, pid, f"test_{i}", CUSTOMERS, DatasetType.TEST)
+    late = CUSTOMERS.rename(columns={"churned": "late_target"})
+    ingest(client, pid, "late", late)  # the 9th: the link search never reads it
+    html = client.get(f"/projects/{pid}/datasets").text
+    assert '<option value="churned">' in html and "late_target" not in html
+
+
+def test_a_search_beyond_the_limit_is_asked_to_wait(shop):
+    shop.login("ed")
+    slots = shop.client.app.state.join_slots
+    held = [slots.acquire(blocking=False) for _ in range(2)]
+    try:
+        assert all(held)
+        r = shop.client.get(f"/projects/{shop.pid}/join?target=churned", headers=HX)
+        assert r.status_code == 200 and "Try again in a moment" in r.text
+    finally:
+        for _ in held:
+            slots.release()
+    r = shop.client.get(f"/projects/{shop.pid}/join?target=churned", headers=HX)
+    assert "Create the joined dataset" in r.text

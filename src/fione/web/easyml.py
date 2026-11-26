@@ -53,6 +53,7 @@ from fione.projects.ingest import read_dataset, read_dataset_rows, read_dataset_
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.schema import clean_text
 from fione.tools.builtin import (
+    _LINK_DATASETS,
     RARE_CLASS_SHARE,
     class_count,
     is_skewed_target,
@@ -221,10 +222,12 @@ class RunForm:
 
 
 def join_targets(datasets: list[Dataset]) -> list[tuple[str, list[str]]]:
-    """The columns a join can be proposed for, by train dataset (name, columns): none unless
-    the project has two train datasets (another table is uploaded as one; the test data and
-    the predictions of one table are not tables to join)."""
-    trains = [d for d in datasets if d.type == DatasetType.TRAIN]
+    """The columns a join can be proposed for, by train dataset (name, columns), among the
+    datasets the link search reads (the oldest ``_LINK_DATASETS``): none unless two of them are
+    train datasets (another table is uploaded as one; the test data and the predictions of one
+    table are not tables to join)."""
+    examined = sorted(datasets, key=lambda d: d.id)[:_LINK_DATASETS]
+    trains = [d for d in examined if d.type == DatasetType.TRAIN]
     return [(d.name, _names(d)) for d in trains] if len(trains) >= 2 else []
 
 

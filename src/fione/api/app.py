@@ -8,6 +8,7 @@ path pattern to ``UPLOAD_PATHS`` (other requests are limited to ``MAX_BODY_BYTES
 import asyncio
 import logging
 import re
+import threading
 import time
 from contextlib import asynccontextmanager, closing
 
@@ -81,6 +82,7 @@ UPLOAD_PATHS = [
 ]
 
 setup_log = logging.getLogger("fione.setup")
+JOIN_MAX_CONCURRENT_SEARCHES = 2  # the Join proposal's link searches at once
 UPLOAD_TOKEN_REDACTOR = UploadTokenRedactor()
 
 
@@ -197,6 +199,8 @@ def create_app(settings: Settings | None = None, *, start_runner: bool | None = 
     app.state.llm_monitor = LlmMonitor(settings, db_path)
     app.state.turns = TurnManager(db_path, app.state.storage, settings, app.state.llm_monitor)
     app.state.mcp_slots = asyncio.Semaphore(MCP_MAX_CONCURRENT_CALLS)  # tool calls over MCP
+    # link searches of the Join proposal (up to 30 s each), across all people
+    app.state.join_slots = threading.BoundedSemaphore(JOIN_MAX_CONCURRENT_SEARCHES)
     app.state.started_at = time.monotonic()  # the system page's uptime
     app.state.signer = SessionSigner(secret, settings.session_max_age_secs)
     # Login and password change share one throttle; first-admin token guesses have their own.
