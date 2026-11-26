@@ -1646,11 +1646,16 @@ class AutoML:
         unjudged = [v["group"] for v in tried if not v["adopted"] and v.get("reason") == "time"]
         message = "derived features: " + (", ".join(adopted) if adopted else "none added")
         if unjudged:
+            names = ", ".join(unjudged[:DROPPED_SHOWN])
+            if len(unjudged) > DROPPED_SHOWN:
+                names += f" and {len(unjudged) - DROPPED_SHOWN} more"
             message += (
-                f"; {len(unjudged)} of {len(tried)} groups were not judged for lack of time "
-                "(a longer max_runtime_secs lets the search judge them)"
+                f"; {len(unjudged)} of {len(tried)} groups were not judged for lack of time: "
+                f"{names} (a longer max_runtime_secs lets the search judge them)"
             )
-        self._notice(message, kind="features", groups=tried, unjudged=len(unjudged))
+        self._notice(
+            message, kind="features", groups=tried, unjudged=len(unjudged), unjudged_groups=unjudged
+        )
         counted = [group.label for group in kept if group.density]
         if counted and row_groups is not None:
             self._notice(

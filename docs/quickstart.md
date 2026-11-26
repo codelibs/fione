@@ -727,7 +727,7 @@ of repeated numbers, and the search for columns that name an entity, read all th
 that a sample does not thin out the repeats), and kept only if the loss drops
 over paired cross-validation folds by more than three standard errors and by 0.1 % on average,
 with at least 70 % of the folds improving, and the kept groups together pass a last check on
-other folds of the same rows. The gate gets a tenth of the run time (a short run gives it 30 seconds, but never more than 30 % of the run); when that is not enough for every group, it stops judging in time for the last check of the groups it has kept, and the groups it did not reach are marked as not judged. The groups tried,
+other folds of the same rows. The gate gets a tenth of the run time (a short run gives it 30 seconds, but never more than 30 % of the run); when that is not enough for every group, it stops judging in time for the last check of the groups it has kept, and the groups it did not reach are marked as not judged, and the notice names them. The groups tried,
 their gains and why each was kept or not are on the model (`features`) and in a `features`
 notice. On a table of more than 1,000 input columns the quick model reads only the 300 most
 useful ones (by its own ranking on the sample) and every feature of the groups, so that a wide
