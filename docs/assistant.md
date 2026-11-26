@@ -302,6 +302,13 @@ claude mcp add --transport http fione http://127.0.0.1:8080/mcp \
   --header "Authorization: Bearer <your token>"
 ```
 
+Codex reads the token from an environment variable:
+
+```
+export FIONE_TOKEN=<your token>
+codex mcp add fione --url http://127.0.0.1:8080/mcp --bearer-token-env-var FIONE_TOKEN
+```
+
 ### Starting jobs from an MCP client
 
 With `FIONE_MCP_WRITE_ENABLED=true` as well, the client also gets the tools below, as the
