@@ -33,10 +33,11 @@ class DeadlineExceeded(Exception):
 
 
 _TASKS = ("auto", "classification", "regression")
-_DECISIONS = ("argmax", "balanced", "tuned")
+_DECISIONS = ("argmax", "balanced", "tuned", "cost")
 _TRANSFORMS = ("none", "log1p")
 # The folds' random_state (numpy's RandomState through scikit-learn) takes 0..2**32 - 1.
 MAX_SEED = 2**32 - 1
+MAX_COST = 1e12  # the largest cost_miss or cost_false_alarm
 MAX_CV_REPEATS = 10  # every repeat refits every fold of every trial
 # The metric names, compared case-insensitively: ``auto`` and every metric of
 # ``fione.engine.metrics``, which accepts the subset that fits the task.
@@ -88,6 +89,10 @@ def _is_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _is_number(value) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
 def _check_int(name: str, value, minimum: int, optional: bool = False) -> None:
     if optional and value is None:
         return
@@ -108,7 +113,11 @@ class TrainConfig:
     nfolds: int = 5
     seed: int = 0
     balance_classes: bool = False
-    decision: Literal["argmax", "balanced", "tuned"] = "argmax"
+    decision: Literal["argmax", "balanced", "tuned", "cost"] = "argmax"
+    # What a row of the second class given the first (a miss) and a row of the first class given
+    # the second (a false alarm) cost, for decision "cost": the threshold with the lowest cost.
+    cost_miss: float | None = None
+    cost_false_alarm: float | None = None
     target_transform: Literal["none", "log1p"] = "none"
     feature_engineering: bool = True
     stopping_rounds: int = 10
@@ -193,6 +202,16 @@ class TrainConfig:
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ConfigError(f"{name} must be true or false, got {getattr(self, name)!r}")
+        costs = {"cost_miss": self.cost_miss, "cost_false_alarm": self.cost_false_alarm}
+        if self.decision == "cost":
+            for name, cost in costs.items():
+                if not _is_number(cost) or not 0 < cost <= MAX_COST:
+                    raise ConfigError(
+                        f"decision 'cost' needs {name} above 0 and at most {MAX_COST:.0e}, "
+                        f"got {cost!r}"
+                    )
+        elif any(cost is not None for cost in costs.values()):
+            raise ConfigError("cost_miss and cost_false_alarm are used with decision 'cost' only")
         if self.decision == "balanced" and self.balance_classes:
             raise ConfigError(
                 "decision 'balanced' and balance_classes both correct for rare classes; use one"

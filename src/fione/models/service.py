@@ -378,6 +378,8 @@ def check_target(
             metrics.check(chosen[field], encoded, len(classes), field)
         if config.decision == "tuned" and resolved == "classification":
             metrics.check_tuned(chosen["sort_metric"], len(classes))
+        if config.decision == "cost" and resolved == "classification":
+            metrics.check_cost(len(classes))
     return resolved
 
 

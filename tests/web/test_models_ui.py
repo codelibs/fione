@@ -14,9 +14,11 @@ import numpy as np
 import pytest
 
 from api_helpers import add_user, connect, iris_frame, login, store_model, tiny_model
+from fione import i18n
 from fione.api import routes_models
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
+from fione.engine.config import TrainConfig
 from fione.engine.diagnostics import diagnostics
 from fione.jobs import store
 from fione.jobs.explain_handler import build_explanation
@@ -1431,6 +1433,24 @@ def test_the_settings_list_names_the_decision_rule_by_its_label():
     assert shown["decision"] == ("balanced", "train.decision.balanced")
     shown = dict(models_ui._config(SimpleNamespace(config={"target_transform": "log1p"})))
     assert shown["target_transform"] == ("log1p", "train.transform.log1p")
+    costs = {"decision": "cost", "cost_miss": 40.0, "cost_false_alarm": 0.5}
+    shown = dict(models_ui._config(SimpleNamespace(config=costs)))
+    assert shown["decision"] == ("cost", "train.decision.cost")
+    assert (shown["cost_miss"][0], shown["cost_false_alarm"][0]) == ("40.0", "0.5")
+
+
+def test_the_settings_list_leaves_out_costs_that_are_not_set_and_every_setting_has_a_label():
+    unset = TrainConfig(target="y").to_dict()
+    shown = dict(models_ui._config(SimpleNamespace(config=unset)))
+    assert "cost_miss" not in shown and "cost_false_alarm" not in shown
+    set_costs = TrainConfig(target="y", decision="cost", cost_miss=3, cost_false_alarm=1)
+    shown = dict(models_ui._config(SimpleNamespace(config=set_costs.to_dict())))
+    assert shown["cost_miss"] == ("3", None)
+    for lang in i18n.LANGUAGES:
+        catalog = i18n.catalog(lang)
+        for name in TrainConfig.__dataclass_fields__:
+            plain = name in ("target", "max_runtime_secs", "ignored_columns")
+            assert f"{'model.cfg.' if plain else 'train.f.'}{name}" in catalog, (lang, name)
 
 
 def test_metrics_tab_names_and_explains_the_extra_metrics(world):

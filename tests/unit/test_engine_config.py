@@ -33,6 +33,56 @@ def test_a_job_payload_with_the_decision_builds_a_config():
     assert TrainConfig.from_dict({"target": "y", "target_transform": "log1p"}).target_transform
 
 
+def test_the_cost_decision_takes_two_costs_and_an_old_config_has_none():
+    config = TrainConfig.from_dict(
+        {"target": "y", "decision": "cost", "cost_miss": 40, "cost_false_alarm": 0.5}
+    )
+    assert (config.decision, config.cost_miss, config.cost_false_alarm) == ("cost", 40, 0.5)
+    assert config.to_dict()["cost_miss"] == 40
+    plain = TrainConfig(target="y")
+    assert (plain.cost_miss, plain.cost_false_alarm) == (None, None)
+    del plain.__dict__["cost_miss"], plain.__dict__["cost_false_alarm"]  # saved before them
+    assert (plain.cost_miss, plain.cost_false_alarm) == (None, None)
+    assert TrainConfig.from_dict({"target": "y", "decision": "tuned"}).cost_miss is None
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {},  # no cost at all
+        {"cost_miss": 5},
+        {"cost_false_alarm": 5},
+        {"cost_miss": 0, "cost_false_alarm": 5},
+        {"cost_miss": 5, "cost_false_alarm": -1},
+        {"cost_miss": float("nan"), "cost_false_alarm": 5},
+        {"cost_miss": 5, "cost_false_alarm": float("inf")},
+        {"cost_miss": True, "cost_false_alarm": 5},
+        {"cost_miss": 1e12 * 1.001, "cost_false_alarm": 5},
+        {"cost_miss": 5, "cost_false_alarm": 1e300},
+        {"cost_miss": "5", "cost_false_alarm": 5},
+    ],
+)
+def test_the_cost_decision_needs_both_costs_above_zero(changes):
+    with pytest.raises(ConfigError, match="decision 'cost' needs cost_"):
+        TrainConfig(target="y", decision="cost", **changes).validate()
+
+
+def test_the_cost_decision_takes_costs_up_to_the_cap():
+    config = TrainConfig(target="y", decision="cost", cost_miss=1e12, cost_false_alarm=1e-9)
+    assert config.validate() is config
+
+
+@pytest.mark.parametrize("decision", ["argmax", "balanced", "tuned"])
+def test_the_costs_are_refused_without_the_cost_decision(decision):
+    for changes in (
+        {"cost_miss": 5},
+        {"cost_false_alarm": 1},
+        {"cost_miss": 5, "cost_false_alarm": 1},
+    ):
+        with pytest.raises(ConfigError, match="used with decision 'cost' only"):
+            TrainConfig(target="y", decision=decision, **changes).validate()
+
+
 def test_a_config_saved_before_the_settings_reads_their_defaults():
     config = TrainConfig(target="y")
     del config.__dict__["decision"], config.__dict__["target_transform"]

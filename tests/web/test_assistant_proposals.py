@@ -105,6 +105,32 @@ def test_the_card_shows_the_settings_that_are_not_the_default(setup):
     assert "Ranking metric" in html and "Quadratic weighted kappa (classification)" in html
 
 
+def test_the_card_shows_the_costs_and_names_the_class_of_a_miss(setup):
+    world, proposal = proposal_of(setup)
+    page = f"/projects/{world.p}/assistant?c={proposal.conversation_id}"
+    changed = dict(proposal.config, decision="cost", cost_miss=40.0, cost_false_alarm=0.5)
+    warning = {
+        "code": "cost_class",
+        "message": "a miss is a row of the class 'legit'",
+        "params": {"cls": "legit", "miss": "40", "alarm": "0.5"},
+    }
+    with closing(connect(world.client)) as conn:
+        conn.execute(
+            "UPDATE chat_proposals SET config_json = ?, details_json = ? WHERE id = ?",
+            (json.dumps(changed), json.dumps({"warnings": [warning]}), proposal.id),
+        )
+        conn.commit()
+    world.login("ed")
+    html = world.client.get(page).text
+    assert "Lowest cost" in html and "Cost of a miss" in html and "Cost of a false alarm" in html
+    assert ">40.0<" in html and ">0.5<" in html
+    assert "a miss is a row of the class “legit”" in html and "costs 40" in html
+    world.client.cookies.set(i18n.LANG_COOKIE, "ja")
+    html = world.client.get(page).text
+    assert "見逃しのコスト" in html and "「legit」(後ろに並ぶクラス)" in html
+    assert "assistant.warn." not in html and "train.f." not in html
+
+
 def test_the_card_explains_in_the_language_of_the_page(setup):
     world, proposal = proposal_of(setup)
     details = {
