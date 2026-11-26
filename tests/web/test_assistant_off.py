@@ -73,15 +73,23 @@ def test_no_page_offers_the_assistant(off, username, mode):
         assert MARKS.search(r.text) is None, (template, MARKS.search(r.text)[0])
 
 
-def test_the_same_pages_offer_it_when_it_is_on(make_client):
-    """The check above looks for what these pages really hold."""
-    on = _world(make_client)  # ollama on an address nothing listens on: never ready
+def test_the_same_pages_offer_it_when_it_is_on(make_client, monkeypatch):
+    """The check above looks for what these pages really hold: with a ready assistant (no
+    banner), the project's tab, the links and the comments."""
+    monkeypatch.setattr(LlmMonitor, "start", lambda self: None)  # nothing is probed
+    on = _world(make_client)
+    on.client.app.state.llm_monitor._update(state="ready")
     on.login("ed")
-    for template in (P, P + "/jobs/{failed}", P + "/datasets/{train}/analyze"):
-        text = on.client.get(on.path(template)).text
-        assert 'href="/projects/' in text and MARKS.search(text) is not None, template
-    found = set(MARKS.findall(on.client.get(on.path(P + "/models/{model}/summary")).text))
-    assert {"assistant-note", "data-llm-banner", "/assistant?"} <= found
+    expected = {
+        P: {'/assistant"'},
+        P + "/jobs/{failed}": {'/assistant"', "/assistant?", "assistant-note"},
+        P + "/datasets/{train}/analyze": {'/assistant"', "/assistant?", "assistant-note"},
+        P + "/models/{model}/summary": {'/assistant"', "/assistant?", "assistant-note"},
+    }
+    for template, marks in expected.items():
+        assert set(MARKS.findall(on.client.get(on.path(template)).text)) == marks, template
+    on.client.app.state.llm_monitor._update(state="unreachable")
+    assert "data-llm-banner" in MARKS.findall(on.client.get(on.path(P)).text)
 
 
 def test_the_assistants_routes_are_not_found(off):

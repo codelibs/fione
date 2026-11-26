@@ -20,7 +20,7 @@ the default, leaves it off):
   Claude 5 family of models (adaptive thinking; it sends the beta header that binds thinking
   blocks to the request that made them).
 
-While it is off, no page shows the assistant, its chat or its comments, and the **System** page
+While it is off, no page shows its chat, its comments or links to them, and the **System** page
 says it is off. A `FIONE_LLM_*` setting of a model (base URL, model, API key, extra body, automatic
 download) without a provider stops Fione at start.
 

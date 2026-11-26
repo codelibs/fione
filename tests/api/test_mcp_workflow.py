@@ -6,6 +6,7 @@ import logging
 import re
 import signal
 import threading
+import time
 from contextlib import closing
 from functools import cache
 from urllib.parse import urlsplit
@@ -14,7 +15,15 @@ import pytest
 from test_mcp import bearer, call, iris_dataset, rpc
 from test_mcp_actions import CONFIG, writes  # noqa: F401  (the fixture)
 
-from api_helpers import FAST_CONFIG, add_user, connect, iris_frame, store_model, tiny_model
+from api_helpers import (
+    ASSISTANT_OFF,
+    FAST_CONFIG,
+    add_user,
+    connect,
+    iris_frame,
+    store_model,
+    tiny_model,
+)
 from fione.auth.roles import ProjectAccess, Role
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
@@ -836,3 +845,43 @@ def test_the_log_line_has_no_cell_values(writes, caplog):  # noqa: F811
     assert "<2 items>" in log and f"<{len(csv_text)} chars>" in log
     for value in ("alice-cell", "salary", "90000", "ssn-123-45-6789", "5.1"):
         assert value not in log
+
+
+def test_an_ai_tool_trains_and_predicts_without_the_assistant(make_client, monkeypatch):
+    """The flow of an MCP client such as Claude Code, with real workers and no language model
+    in Fione: create, upload, propose, train, wait, read the leaderboard and predict."""
+    monkeypatch.delenv("FIONE_JOB_HANDLER_MODULES", raising=False)
+    client = make_client(
+        start_runner=True, mcp_enabled=True, mcp_write_enabled=True, **ASSISTANT_OFF
+    )
+    headers = bearer(client, add_user(client, "ed", Role.EDITOR))
+
+    def ok(name, arguments):
+        out = call(client, headers, name, arguments)
+        assert out["isError"] is False, out
+        return out["structuredContent"]
+
+    project_id = ok("create_project", {"name": "Iris"})["project_id"]
+    csv_text = iris_frame().to_csv(index=False)
+    dataset = ok(
+        "upload_dataset",
+        {"project_id": project_id, "name": "iris", "type": "train", "csv_text": csv_text},
+    )
+    proposed = ok(
+        "propose_training_config",
+        {"dataset_id": dataset["id"], "target": "species"},
+    )
+    config = proposed["config"] | {k: v for k, v in FAST_CONFIG.items() if k != "target"}
+    job_id = ok(
+        "start_training",
+        {"project_id": project_id, "dataset_id": dataset["id"], "config": config},
+    )["job_id"]
+    deadline = time.monotonic() + 300
+    while not (job := ok("wait_for_job", {"job_id": job_id, "timeout_secs": 15}))["done"]:
+        assert time.monotonic() < deadline, job
+    assert job["status"] == "done", job
+    model_id = job["result"]["model_id"]
+    assert ok("get_leaderboard", {"model_id": model_id})["model"]
+    rows = iris_frame().drop(columns=["species"]).head(3).to_dict(orient="records")
+    predicted = ok("predict", {"project_id": project_id, "model_id": model_id, "rows": rows})
+    assert len(predicted["predictions"]) == 3
