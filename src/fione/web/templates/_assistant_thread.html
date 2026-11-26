@@ -18,7 +18,7 @@
     </li>
     {% else %}
     <li class="chat-message chat-message-assistant" data-state="{{ line.state }}">
-      <p class="chat-message__who">{{ mascot("happy", "mascot mascot-xs") }}{{ t('fione.name') }}</p>
+      <p class="chat-message__who">{{ mascot("happy", "mascot mascot-xs") }}{{ t('assistant.name') }}</p>
       {% if line.text %}<div class="chat-text">{{ line.text }}</div>{% endif %}
       {% if line.proposal %}{% with card = line.proposal %}{% include "_assistant_proposal.html" %}{% endwith %}{% endif %}
       {% if line.state == "running" %}

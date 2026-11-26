@@ -1201,6 +1201,7 @@
   "why.click_hint": "This model takes a while to explain here, so the reasons are worked out when you ask.",
   "why.approximate_ensemble": "These reasons are approximate: the model combines several models, and their reasons are combined too. Before rounding, they add up to the prediction.",
   "nav.section.assistant": "Assistant",
+  "assistant.name": "Assistant",
   "assistant.title": "Ask the assistant",
   "assistant.lead": "The assistant reads this project's datasets and models and answers your questions. It cannot change anything; a training it suggests starts only when someone confirms it.",
   "assistant.ask_link": "Ask the assistant",
