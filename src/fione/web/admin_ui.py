@@ -26,6 +26,7 @@ from fione.auth import service as auth_service
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import Role
 from fione.auth.service import UserConflict, UsernameError, UserNotFound
+from fione.switches import mcp_switches, set_switch
 from fione.web.access import SmallForm, admin_only, field, form_auth, parse_id, signed_in
 from fione.web.easyml import STOP_POLLING
 from fione.web.views import (
@@ -237,6 +238,8 @@ def _system_context(request: Request, conn) -> dict:
         "llm_status": llm_status(request),
         "llm_context_tokens": settings.llm_context_tokens,
         "llm_ollama": settings.llm_provider == "ollama",
+        "mcp": mcp_switches(conn, settings),
+        "mcp_url": (settings.public_url or str(request.base_url).rstrip("/")) + "/mcp",
     }
 
 
@@ -279,6 +282,18 @@ def llm_pull(request: Request, conn: Conn, form: SmallForm) -> Response:
     _post_admin(request, conn, form)
     request.app.state.llm_monitor.pull_now()
     return RedirectResponse("/admin/system", 303)
+
+
+@router.post("/admin/system/mcp")
+def mcp_switch(request: Request, conn: Conn, form: SmallForm) -> Response:
+    """Turn MCP, or its tools that change things, on or off (within what the server's
+    settings allow)."""
+    auth = _post_admin(request, conn, form)
+    name, enabled = field(form, "name"), field(form, "enabled")
+    if name not in ("mcp", "mcp_write") or enabled not in ("true", "false"):
+        raise UiError(422, "error.generic")
+    set_switch(conn, name, enabled == "true", auth.user.id)
+    return RedirectResponse("/admin/system#mcp-title", 303)
 
 
 # --- the consent a remote language model needs ---------------------------------------------

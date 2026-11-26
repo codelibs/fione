@@ -90,10 +90,12 @@ class Settings(BaseSettings):
     # ollama: pull the model when the server lacks it. Off: a host Ollama is the user's;
     # an administrator pulls on the system page.
     llm_auto_pull: bool = False
-    # The read-only tools over MCP at /mcp, for an API token; off unless set.
-    mcp_enabled: bool = False
-    # Also the tools that start training, prediction and module jobs over MCP; needs mcp_enabled.
-    mcp_write_enabled: bool = False
+    # The read-only tools over MCP at /mcp, for an API token. False keeps MCP off whatever the
+    # System page's switch says; true lets that switch decide (see fione.switches).
+    mcp_enabled: bool = True
+    # Also the tools that create projects, add datasets and start jobs over MCP; needs
+    # mcp_enabled, and the System page can switch them off.
+    mcp_write_enabled: bool = True
     # Unset: the provider's default (_LLM_DEFAULT_TOKENS).
     llm_max_tokens: int = Field(1024, ge=64, le=64000)  # per completion
     llm_context_tokens: int = Field(16384, le=262144)  # the budget of one request

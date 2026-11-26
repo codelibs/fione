@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from fione import db
 from fione.api import routes_jobs
 from fione.auth import service as auth_service
+from fione.switches import mcp_switches
 from fione.tools import ToolContext, ToolError, call_tool, list_actions, list_tools
 from fione.version import __version__
 
@@ -125,6 +126,10 @@ def _handle(request: Request, body: bytes) -> Response:
     if origin is not None and not _origin_allowed(origin, settings.public_url):
         return Response(status_code=403)
     with closing(db.connect(request.app.state.db_path)) as conn:
+        switches = mcp_switches(conn, settings)
+        if not switches.enabled:  # switched off on the System page
+            return Response(status_code=404)
+        request.state.mcp_writes = switches.writes
         token = _bearer(request)
         user = auth_service.user_from_token(conn, token) if token else None
         if user is None:
@@ -196,7 +201,7 @@ def _request_id(body: bytes):
 
 
 def _writes(request: Request) -> bool:
-    return request.app.state.settings.mcp_write_enabled
+    return request.state.mcp_writes
 
 
 def _tools(writes: bool) -> list[dict]:

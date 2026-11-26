@@ -37,6 +37,9 @@ def make_settings(data_dir, **overrides) -> Settings:
         # server pass the fake's.
         "llm_base_url": "http://127.0.0.1:9/v1",
         "llm_provider": "ollama",
+        # MCP is on by default; tests that use it say so (test_mcp_switches covers the default)
+        "mcp_enabled": False,
+        "mcp_write_enabled": False,
         **overrides,
     }
     return Settings(**values)

@@ -227,6 +227,14 @@ MIGRATIONS: list[str] = [
         used_at REAL
     );
     """,
+    """
+    CREATE TABLE switches (
+        name TEXT PRIMARY KEY CHECK (name IN ('mcp', 'mcp_write')),
+        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        changed_at REAL NOT NULL
+    );
+    """,
 ]
 
 

@@ -128,7 +128,8 @@ export and import, and project sharing. Administrators also manage users, Python
 system status from that menu.
 
 To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.md)). To use it
-from AI tools such as Claude Code or Codex, switch on [MCP](mcp.md). To ask questions about your
+from AI tools such as Claude Code or Codex, create an API token on the **Account** page and give
+it to the tool with the `/mcp` address (see [MCP](mcp.md)). To ask questions about your
 data and models in plain language in the browser, set up [the assistant](assistant.md) (it needs
 a language model: Ollama or Claude).
 

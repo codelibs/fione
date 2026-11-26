@@ -1,12 +1,26 @@
 # MCP
 
 Fione serves tools to MCP clients (an AI tool such as Claude Code or Codex, or an editor that
-speaks MCP): read-only tools, and, with a second switch, tools that create projects, upload
-datasets, start jobs and predict (see below). The client's own language model decides what to
-call; the tools, the proposed training configuration and Join included, are Fione's own
-computations, so MCP needs no language model in Fione and works with the
-[assistant](assistant.md) off. It is **off by default**; set `FIONE_MCP_ENABLED=true` (in
-`docker/.env` for Compose). The endpoint is `/mcp` on Fione's own port, for example `http://127.0.0.1:8080/mcp`.
+speaks MCP): read-only tools, and tools that create projects, upload datasets, start jobs and
+predict (see below). The client's own language model decides what to call; the tools, the
+proposed training configuration and Join included, are Fione's own computations, so MCP needs no
+language model in Fione and works with the [assistant](assistant.md) off. The endpoint is `/mcp`
+on Fione's own port, for example `http://127.0.0.1:8080/mcp`.
+
+**Behind a reverse proxy, block `/mcp` unless you want MCP clients outside your network.** The
+Compose stack publishes Fione on `127.0.0.1` only.
+
+## On and off
+
+MCP is **on by default**, with the tools that change things. Nothing answers without an API token,
+which each person creates for themselves, and a token has the same rights as its owner in the
+REST API. An administrator switches MCP, or only the tools that change things, off and on again on
+the **System** page; the change applies to the next call, outstanding upload URLs included. The
+server's settings set the limit: `FIONE_MCP_ENABLED=false` keeps MCP off and
+`FIONE_MCP_WRITE_ENABLED=false` keeps the tools that change things off, whatever the System page
+says (in `docker/.env` for Compose).
+
+## Connecting a client
 
 1. Create an API token on the **Account** page.
 2. Give the client the URL and the header `Authorization: Bearer <the token>`. Many clients take
@@ -19,11 +33,9 @@ computations, so MCP needs no language model in Fione and works with the
 
 The client acts as the token's owner and sees the projects that person can read: it can list
 projects, datasets and models and read their descriptions, results and explanations, and it can
-get a proposed training configuration or Join back, which is not saved. With the first switch alone
-it cannot start or change anything. It never receives example values. A token has the same rights as
-you, so keep it secret.
-Behind a reverse proxy, block `/mcp` unless you want MCP clients outside your network. At most
-two tool calls run at once.
+get a proposed training configuration or Join back, which is not saved. With the tools that
+change things off, it cannot start or change anything. It never receives example values. A token
+has the same rights as you, so keep it secret. At most two tool calls run at once.
 
 ## Claude Code
 
@@ -43,7 +55,7 @@ codex mcp add fione --url http://127.0.0.1:8080/mcp --bearer-token-env-var FIONE
 
 ## Starting jobs from an MCP client
 
-With `FIONE_MCP_WRITE_ENABLED=true` as well, the client also gets the tools below, as the
+While the tools that change things are on, the client also gets the tools below, as the
 token's user. `create_project` needs the role of an editor or an administrator; `upload_dataset`,
 `create_upload_url`, `start_training`, `start_batch_predict`, `run_module` and `cancel_job` need
 write access to the project (an owner or editor, as for the REST API); the others need only read

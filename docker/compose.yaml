@@ -59,8 +59,10 @@ services:
       FIONE_LLM_MODEL: ${FIONE_LLM_MODEL:-}
       FIONE_LLM_API_KEY: ${FIONE_LLM_API_KEY:-}
       FIONE_LLM_AUTO_PULL: ${FIONE_LLM_AUTO_PULL:-false}
-      FIONE_MCP_ENABLED: ${FIONE_MCP_ENABLED:-false}
-      FIONE_MCP_WRITE_ENABLED: ${FIONE_MCP_WRITE_ENABLED:-false}
+      # MCP for AI tools with an API token: on unless set to false (the System page can also
+      # switch it off).
+      FIONE_MCP_ENABLED: ${FIONE_MCP_ENABLED:-true}
+      FIONE_MCP_WRITE_ENABLED: ${FIONE_MCP_WRITE_ENABLED:-true}
     # Reaches the host's Ollama on Linux as well (Docker Desktop has the name already).
     extra_hosts:
       - "host.docker.internal:host-gateway"
