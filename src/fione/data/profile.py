@@ -99,6 +99,18 @@ _DERIVED_SINGLES = 8  # key columns that are combined in pairs
 _DERIVED_RATIO = 0.001  # of the variation of log(target) that the ratio to the column must keep
 _DERIVED_RATE = 0.9  # of the variation of the ratio that the categories must explain
 _DERIVED_SECS = 1.0  # the search for such columns stops after this long
+# A target that two columns with few values fix together (every combination of their values, over
+# at least ``_PAIRED_MIN_GROUP`` rows, has one target value, and the combinations cover
+# ``_PAIRED_SHARE`` of the rows) while neither fixes it alone: the AND of two decisions, a code made
+# of two letters. The ``_PAIRED_TOP`` columns that leave the target least uncertain are paired.
+_PAIRED_MAX_VALUES = 10  # values of a column, a missing one counted
+_PAIRED_MAX_CLASSES = 20
+_PAIRED_MIN_GROUP = 20
+_PAIRED_SHARE = 0.99
+_PAIRED_TOP = 12
+_PAIRED_ROWS = 100_000
+_PAIRED_RANK_ROWS = 20_000  # rows the columns are ranked on
+_PAIRED_SECS = 1.0
 
 
 def leak_code(reason: str) -> str:
@@ -142,6 +154,16 @@ class DerivedTarget:
 
 
 @dataclass
+class PairedTarget:
+    """A target that the columns ``first`` and ``second`` fix together: every combination of their
+    values has one target value (``share`` of the rows lie in such combinations)."""
+
+    first: str
+    second: str
+    share: float
+
+
+@dataclass
 class DatasetProfile:
     n_rows: int
     n_cols: int
@@ -151,6 +173,8 @@ class DatasetProfile:
     leak_partial: bool = False  # the leak check's time budget ran out before every column
     derived: DerivedTarget | None = None  # see ``derived_target``
     derived_cut: bool = False  # the search for it ran out of time: do not keep the result
+    paired: PairedTarget | None = None  # see ``paired_target``
+    paired_cut: bool = False  # the search for it ran out of time: do not keep the result
 
 
 @dataclass
@@ -159,6 +183,8 @@ class LeakCheck:
     partial: bool
     derived: DerivedTarget | None = None
     derived_cut: bool = False  # ``derived_target`` ran out of time (not a ``partial`` check)
+    paired: PairedTarget | None = None
+    paired_cut: bool = False  # ``paired_target`` ran out of time
 
 
 def _is_plain_numeric(dtype) -> bool:
@@ -617,6 +643,97 @@ def derived_target(
     return best, False
 
 
+def paired_target(
+    df: pd.DataFrame,
+    columns: list[ColumnProfile],
+    target: str,
+    *,
+    time_budget: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[PairedTarget | None, bool]:
+    """``(found, cut)``: the two columns that fix the target of 2 to ``_PAIRED_MAX_CLASSES``
+    values together, or None, and whether the search was cut short by ``time_budget`` seconds
+    (``_PAIRED_SECS``; nothing is found then). Of the columns with 2 to ``_PAIRED_MAX_VALUES``
+    values (``_PAIRED_ROWS`` rows at most), the ``_PAIRED_TOP`` that leave the target least
+    uncertain are paired. A pair counts when its combinations of ``_PAIRED_MIN_GROUP`` rows or
+    more that hold one target value hold ``_PAIRED_SHARE`` of the rows of every target value
+    (so a rare value, a flag on 0.3% of the rows, must be fixed too), and no column does so
+    alone (one that fixes the target on every row is a value that determines it, which the leak
+    check names)."""
+    start = clock()
+    budget = _PAIRED_SECS if time_budget is None else time_budget
+    if target not in df.columns:
+        return None, False
+    rows = np.flatnonzero(df[target].notna().to_numpy())
+    if len(rows) < _PAIRED_MIN_GROUP * 4:
+        return None, False
+    if len(rows) > _PAIRED_ROWS:
+        rows = np.sort(np.random.default_rng(0).choice(rows, _PAIRED_ROWS, replace=False))
+    y, _ = pd.factorize(df[target].iloc[rows])
+    classes = int(y.max()) + 1
+    if not 2 <= classes <= _PAIRED_MAX_CLASSES:
+        return None, False
+
+    def table(code: np.ndarray, size: int) -> np.ndarray:
+        return np.bincount(code * classes + y, minlength=size * classes).reshape(size, classes)
+
+    def fixed_share(counts: np.ndarray) -> float:
+        """The least, over the target values, of the share of its rows that lie in combinations
+        of enough rows that hold that value only."""
+        total = counts.sum(1)
+        pure = (counts.max(1) == total) & (total >= _PAIRED_MIN_GROUP)
+        return float((counts[pure].sum(0) / counts.sum(0)).min())
+
+    # The columns are ranked on a sample (fewer rows than the pairs are judged on: a table of
+    # thousands of columns is ranked in a fraction of a second); only the best are read in full.
+    few = rows
+    if len(rows) > _PAIRED_RANK_ROWS:
+        few = np.sort(np.random.default_rng(1).choice(rows, _PAIRED_RANK_ROWS, replace=False))
+    y_few, _ = pd.factorize(df[target].iloc[few])
+    candidates = [
+        c.name
+        for c in columns
+        if c.name != target
+        and c.kind not in ("constant", "text")
+        and 2 <= c.n_unique <= _PAIRED_MAX_VALUES
+    ]
+    sample = df[candidates].iloc[few]  # one take of the rows for all the columns
+    ranked = []
+    for name in candidates:
+        if clock() - start > budget:
+            return None, True
+        code, _ = pd.factorize(sample[name], use_na_sentinel=False)
+        size = int(code.max()) + 1
+        if not 2 <= size <= _PAIRED_MAX_VALUES:
+            continue
+        counts = np.bincount(code * classes + y_few, minlength=size * classes).reshape(
+            size, classes
+        )
+        total = counts.sum(1)
+        p = counts / np.maximum(total[:, None], 1)
+        entropy = -(np.where(p > 0, p * np.log(np.where(p > 0, p, 1.0)), 0.0)).sum(1)
+        ranked.append((float((total * entropy).sum() / len(few)), name))
+    ranked.sort()
+    codes, alone = {}, {}
+    for _, name in ranked[:_PAIRED_TOP]:
+        code, _ = pd.factorize(df[name].iloc[rows], use_na_sentinel=False)
+        size = int(code.max()) + 1
+        if not 2 <= size <= _PAIRED_MAX_VALUES:
+            continue
+        codes[name] = (code.astype(np.int64), size)
+        alone[name] = fixed_share(table(codes[name][0], size))
+    for a, b in itertools.combinations(list(codes), 2):
+        if clock() - start > budget:
+            return None, True
+        if alone[a] >= 1.0 or alone[b] >= 1.0:
+            continue
+        (ca, sa), (cb, sb) = codes[a], codes[b]
+        share = fixed_share(table(ca * sb + cb, sa * sb))
+        if share >= _PAIRED_SHARE:
+            return PairedTarget(*sorted((a, b)), share), False
+    return None, False
+
+
 def leak_check(
     df: pd.DataFrame,
     columns: list[ColumnProfile],
@@ -636,7 +753,8 @@ def leak_check(
     target (no score below ``min_rows``), and ``flag_scores`` picks the suspects. Columns are
     scored in profile order until ``time_budget`` seconds have passed; ``partial`` is then
     true. Each column is listed at most once, with its first reason. With ``derived`` the
-    result also holds what ``derived_target`` finds (a training run does not look)."""
+    result also holds what ``derived_target`` and ``paired_target`` find (a training run does
+    not look)."""
     start = clock()
     suspects = _value_suspects(df, columns, target)
     listed = {s.column for s in suspects}
@@ -663,7 +781,8 @@ def leak_check(
             suspects.append(LeakSuspect(name, reason, scores[name]))
     suspects.sort(key=lambda s: (-s.score, s.column))
     found, cut = derived_target(df, columns, target) if derived else (None, False)
-    return LeakCheck(suspects, partial, found, cut)
+    paired, paired_cut = paired_target(df, columns, target) if derived else (None, False)
+    return LeakCheck(suspects, partial, found, cut, paired, paired_cut)
 
 
 def training_leak_suspects(
@@ -729,4 +848,6 @@ def profile_dataset(
         leak_partial=check.partial,
         derived=check.derived,
         derived_cut=check.derived_cut,
+        paired=check.paired,
+        paired_cut=check.paired_cut,
     )

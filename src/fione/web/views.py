@@ -11,6 +11,7 @@ import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
+from string import Formatter
 from typing import Annotated
 from urllib.parse import unquote, urlencode, urlsplit
 
@@ -145,6 +146,24 @@ def ui_mode(request: Request) -> str:
     return "detailed" if request.cookies.get(MODE_COOKIE) == "detailed" else "simple"
 
 
+def warning_texts(warnings, lang: str) -> list[str]:
+    """A proposal's warnings in ``lang``: a warning without a translation for its code, or
+    without the figures that translation needs, is shown as its own (English) message."""
+    texts = []
+    for w in warnings or []:
+        if not isinstance(w, dict):
+            texts.append(str(w))
+            continue
+        key, params = f"assistant.warn.{w.get('code')}", w.get("params")
+        template = i18n.catalog(lang).get(key) or i18n.catalog(i18n.DEFAULT_LANGUAGE).get(key)
+        needed = {name for _, name, _, _ in Formatter().parse(template or "") if name}
+        if template is None or not isinstance(params, dict) or not needed <= params.keys():
+            texts.append(str(w.get("message", "")))
+        else:
+            texts.append(i18n.t(key, lang, **params))
+    return texts
+
+
 def render(
     request: Request, template: str, auth: Auth | None = None, *, status: int = 200, **context
 ) -> HTMLResponse:
@@ -165,6 +184,8 @@ def render(
             "static": _static,
             "version": __version__,
             "mode": ui_mode(request),
+            # Whether the assistant has a language model: off, no page shows it.
+            "assistant_on": request.app.state.settings.assistant_enabled,
             # The assistant's state, read by the banner of a full page only.
             "llm_snapshot": lambda: llm_status(request),
             **context,  # may override ``here``: where the language switch returns to

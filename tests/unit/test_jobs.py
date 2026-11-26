@@ -266,6 +266,18 @@ def test_worker_env_round_trips_through_settings(settings, db_path, monkeypatch)
     assert read.llm_provider == "ollama"
 
 
+def test_worker_env_round_trips_with_the_assistant_off(settings, db_path, monkeypatch):
+    """The settings without the assistant pass a worker's own check of them."""
+    off = settings.model_copy(update={"llm_provider": "none", "llm_base_url": "", "llm_model": ""})
+    for key in [k for k in os.environ if k.startswith("FIONE_")]:
+        monkeypatch.delenv(key)
+    for key, value in worker_env(off, db_path).items():
+        if key.startswith("FIONE_"):
+            monkeypatch.setenv(key, value)
+    read = Settings()
+    assert read.llm_provider == "none" and not read.assistant_enabled
+
+
 def test_short_job_limit_setting_reads_env(monkeypatch):
     monkeypatch.setenv("FIONE_MAX_CONCURRENT_SHORT_JOBS", "9")
     assert Settings().max_concurrent_short_jobs == 9

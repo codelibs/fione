@@ -1310,6 +1310,129 @@ def test_propose_says_a_whole_number_target_may_be_classes_and_keeps_the_task(en
     assert "integer_labels" not in codes(counts)
 
 
+def _survival_table(n=2000, seed=0, target="futime", flag="death"):
+    """People followed for some days; ``death`` is 1 when they died by the end, else the follow-up
+    ended first (27% of them died); the days are skewed."""
+    rng = np.random.default_rng(seed)
+    age = rng.integers(50, 95, n)
+    days = np.round(rng.gamma(2.0, 1500, n) * np.exp(-(age - 70) / 40)).astype(int)
+    return pd.DataFrame(
+        {
+            "age": age,
+            "x": rng.normal(size=n),
+            target: days,
+            flag: (rng.random(n) < 0.27).astype(int),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "flag", "found"),
+    [
+        ("futime", "death", "death"),
+        ("duration_days", "churned", None),  # a duration in days is not named like a time here
+        ("duration", "churned", "churned"),
+        ("Tenure", "Exited", "Exited"),
+        ("survival_time", "is_dead", "is_dead"),
+        ("followUpTime", "event", "event"),
+        ("time_to_failure", "failed", "failed"),
+        ("futime", "status", "status"),  # `status` counts next to a strong time name
+        ("futime", "outcome", None),  # a column not named like an event
+        ("price", "death", None),  # a target not named like a time
+        ("deadline_days", "is_dead", None),
+        ("overtime", "prevented", None),
+        ("time_of_day", "status", None),
+        ("lifetime_value", "churn", None),
+        ("time", "status", None),  # `status` alone is too weak
+    ],
+)
+def test_a_time_target_next_to_an_event_flag_is_found_by_the_names(target, flag, found):
+    frame = _survival_table(target=target, flag=flag)
+    got = builtin.survival_event_column(
+        profile_dataset(frame, target), target, frame[target], "regression"
+    )
+    assert got == found
+
+
+def test_a_survival_hint_needs_a_flag_of_0_and_1_and_a_time_of_0_or_more():
+    frame = _survival_table()
+    profile = profile_dataset(frame, "futime")
+
+    def found(f, task="regression", target="futime"):
+        return builtin.survival_event_column(profile_dataset(f, target), target, f[target], task)
+
+    assert found(frame.assign(death=frame.death * 2)) is None  # 0 and 2
+    assert (
+        found(frame.assign(death=(frame.death + (frame.x > 1) * 0.5).clip(0, 1))) is None
+    )  # 0, 0.5, 1
+    assert found(frame.assign(death=0)) is None  # no event at all
+    assert (
+        found(frame.assign(death=frame.death.astype(float).where(frame.index > 5))) is None
+    )  # missing
+    assert found(frame.assign(death=np.where(frame.death == 1, "dead", "alive"))) is None
+    assert found(frame.assign(futime=frame.futime - 100)) is None  # a negative time
+    assert found(frame.assign(futime=frame.futime % 15)) is None  # 15 values: a class
+    assert builtin.survival_event_column(profile, "futime", frame.futime, "classification") is None
+
+
+def test_propose_names_the_event_column_of_a_time_target_and_changes_nothing(env):
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "follow_up", DatasetType.TRAIN, [_survival_table()]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "futime"})
+    assert "survival_event" in codes(result)  # translated in both languages
+    warning = next(w for w in result["warnings"] if w["code"] == "survival_event")
+    assert warning["params"] == {"column": "death"} and "event_column" in warning["message"]
+    assert result["config"]["event_column"] is None and result["config"]["task"] == "regression"
+    other = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "age"})
+    assert "survival_event" not in codes(other)
+
+
+def test_propose_refuses_an_event_column_with_missing_values_or_without_an_event(env):
+    frame = _survival_table().assign(
+        gaps=lambda d: d.death.astype(float).where(d.index > 5), none=0
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "ev_bad", DatasetType.TRAIN, [frame]
+    )
+    for column, text in (("gaps", "must hold only 0"), ("none", "has no event")):
+        with pytest.raises(ToolError, match=text):
+            call(
+                env,
+                "propose_training_config",
+                {"dataset_id": ds.id, "target": "futime", "event_column": column},
+            )
+
+
+def test_propose_sets_the_event_column_when_asked_and_checks_it(env):
+    ds = ingest.ingest_batches(
+        env.storage,
+        env.conn,
+        env.project.id,
+        "follow_up_ev",
+        DatasetType.TRAIN,
+        [_survival_table()],
+    )
+    args = {"dataset_id": ds.id, "target": "futime", "event_column": "death"}
+    result = call(env, "propose_training_config", args)
+    assert result["config"]["event_column"] == "death" and result["config"]["sort_metric"] == "auto"
+    found = codes(result)
+    assert "survival_event" not in found and "skewed_target" not in found
+    named = call(env, "propose_training_config", {**args, "sort_metric": "concordance"})
+    assert named["config"]["sort_metric"] == "concordance"  # the metric a survival run allows
+    assert TrainConfig.from_dict(result["config"]).validate()  # the config trains as proposed
+    for bad, text in (
+        ({"event_column": "futime"}, "other than the target"),
+        ({"event_column": "age"}, "must hold only 0"),
+        ({"event_column": "death", "target": "death"}, "other than the target"),
+        ({"event_column": "death", "target": "x"}, "0 or more"),
+        ({"event_column": "nope"}, "column"),
+        ({"sort_metric": "rmse"}, "must be auto or concordance"),
+    ):
+        with pytest.raises(ToolError, match=text):
+            call(env, "propose_training_config", {**args, **bad})
+
+
 def test_the_recommended_metric_follows_the_problem():
     rare = pd.Series([0] * 95 + [1] * 5)
     assert builtin.recommended_metric(rare, "classification") == "aucpr"
@@ -3269,6 +3392,154 @@ def test_a_column_named_like_an_identifier_comes_before_one_named_for_the_entity
     )
 
 
+@pytest.mark.parametrize(
+    ("name", "named"),
+    [
+        ("iid", True),
+        ("pid", True),
+        ("uid", True),
+        ("user_iid", True),
+        ("id", True),
+        ("pid2", True),
+        ("PID", True),
+        ("UID", True),
+        ("Pid", True),
+        ("IID", True),
+        ("Uid", True),
+        ("kid", False),
+        ("bid", False),
+        ("mid", False),
+        ("paid", False),
+        ("valid", False),
+        ("Tidy", False),
+        ("Cider", False),
+        ("Paid", False),
+        ("Valid", False),
+        ("Squid", False),
+        ("Said", False),
+        ("Void", False),
+        ("Acid", False),
+    ],
+)
+def test_an_id_fused_to_the_initial_of_what_it_numbers_is_named_like_an_identifier(name, named):
+    assert bool(builtin._IDENTIFIER.search(name)) is named
+
+
+def _persons_by_waves(waves, first_wave=1, rows=10, per_wave=30, seed=0):
+    """Dates of persons met in blocks (waves): ``id`` numbers the person inside a wave (1 to 30 in
+    every wave), ``iid`` the person in the whole data."""
+    rng = np.random.default_rng(seed + first_wave)
+    wave = np.repeat(np.arange(first_wave, first_wave + waves), per_wave * rows)
+    number = np.tile(np.repeat(np.arange(1, per_wave + 1), rows), waves)
+    return pd.DataFrame(
+        {
+            "wave": wave,
+            "id": number,
+            "iid": wave * 100 + number,
+            "x": rng.normal(size=len(wave)),
+            "match": rng.integers(0, 2, len(wave)),
+        }
+    )
+
+
+def _ingest_persons(env, name, kind, frame):
+    return ingest.ingest_batches(env.storage, env.conn, env.project.id, name, kind, [frame])
+
+
+def test_propose_groups_by_the_person_not_the_number_inside_a_block_for_other_test_persons(
+    env,
+):
+    train = _ingest_persons(env, "dates", DatasetType.TRAIN, _persons_by_waves(8))
+    test = _ingest_persons(
+        env,
+        "later_dates",
+        DatasetType.TEST,
+        _persons_by_waves(2, first_wave=9).drop(columns="match"),
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": train.id, "target": "match"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+        projects.delete_dataset(env.conn, env.storage, train.id)
+    found = codes(result)
+    assert "group_column_for_test" in found and "repeated_id_in_test" not in found
+    warning = next(w for w in result["warnings"] if w["code"] == "group_column_for_test")
+    assert warning["params"]["column"] == "iid" and result["config"]["cv_group_column"] == "iid"
+
+
+def test_propose_keeps_the_first_repeated_column_when_every_one_repeats_in_the_test_data(env):
+    frame = _persons_by_waves(8)
+    train = _ingest_persons(env, "dates_same", DatasetType.TRAIN, frame)
+    test = _ingest_persons(env, "same_dates", DatasetType.TEST, frame.drop(columns="match"))
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": train.id, "target": "match"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+        projects.delete_dataset(env.conn, env.storage, train.id)
+    warning = next(w for w in result["warnings"] if w["code"] == "repeated_id_in_test")
+    assert warning["params"]["column"] == "id" and result["config"]["cv_group_column"] is None
+
+
+def _two_ids(n_ids=40, rows=10, seed=0):
+    """``id`` and ``user_id`` both repeat over rows (40 values on 10 rows each)."""
+    rng = np.random.default_rng(seed)
+    ids = np.repeat(np.arange(n_ids), rows)
+    return pd.DataFrame(
+        {
+            "id": ids,
+            "user_id": (ids * 7) % n_ids + 100,
+            "x": rng.normal(size=len(ids)),
+            "y": ids % 2,
+        }
+    )
+
+
+def _propose_with_test(env, name, train, test):
+    return _propose_with_test_target(env, name, train, test, target="y")
+
+
+def test_a_column_the_test_data_lacks_does_not_replace_a_first_one_the_test_data_repeats(env):
+    train = _two_ids()
+    result = _propose_with_test(env, "two_ids", train, train.drop(columns=["user_id", "y"]))
+    warning = next(w for w in result["warnings"] if w["code"] == "repeated_id_in_test")
+    assert warning["params"]["column"] == "id" and result["config"]["cv_group_column"] is None
+
+
+def test_a_first_column_the_test_data_lacks_stays_the_choice(env):
+    train = _two_ids()
+    result = _propose_with_test(env, "two_ids_lack", train, train.drop(columns=["id", "y"]))
+    assert "group_column_not_in_test" in codes(result)
+    assert result["config"]["cv_group_column"] == "id"
+
+
+def test_a_later_column_the_test_data_holds_other_values_of_is_chosen_not_a_lacking_later_one(env):
+    # `iid` is not first (after `id`); a third column `uid` is lacking in the test data
+    train = _persons_by_waves(8).assign(uid=lambda d: d.iid * 3)
+    test = _persons_by_waves(2, first_wave=9).drop(columns="match")
+    result = _propose_with_test_target(env, "lacking_later", train, test)
+    assert result["config"]["cv_group_column"] == "iid"
+
+
+def _propose_with_test_target(env, name, train, test, target="match"):
+    train_ds = _ingest_persons(env, name, DatasetType.TRAIN, train)
+    test_ds = _ingest_persons(env, name + "_test", DatasetType.TEST, test)
+    try:
+        return call(env, "propose_training_config", {"dataset_id": train_ds.id, "target": target})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test_ds.id)
+        projects.delete_dataset(env.conn, env.storage, train_ds.id)
+
+
+def test_text_ids_in_the_test_data_are_compared_with_the_numbers_of_the_training_rows(env):
+    train = _persons_by_waves(8)
+    test = _persons_by_waves(2, first_wave=1).drop(columns="match")  # the same persons
+    test = test.assign(id=test.id.astype(str), iid=test.iid.astype(str))
+    result = _propose_with_test_target(env, "text_ids", train, test)
+    found = codes(result)
+    assert "repeated_id_in_test" in found and "group_column_for_test" not in found
+    assert result["config"]["cv_group_column"] is None
+
+
 def test_a_column_that_names_the_target_of_a_few_rows_each_is_found_by_its_values_not_its_name():
     """Households of three rows share their label: a column of codes, named for nothing, that
     gives the label away on its own is the group to keep together. Where the label does not follow
@@ -3410,6 +3681,41 @@ def test_a_target_that_may_be_computed_from_columns_is_warned_about_and_nothing_
     assert "leak_derived_pair" in codes(result)  # translated in both languages
     assert result["config"]["ignored_columns"] == []
     assert result["ignored_suggestions"] == []
+
+
+def _decisions_table(n=3000, seed=0):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame(
+        {
+            "decision": rng.integers(0, 2, n),
+            "decision_other": rng.integers(0, 2, n),
+            "rating": rng.integers(1, 6, n),
+            "noise": rng.normal(size=n),
+        }
+    )
+    df["match"] = df.decision & df.decision_other
+    return df
+
+
+def test_a_target_that_two_columns_fix_together_is_warned_about_and_nothing_is_ignored(env):
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "decisions", DatasetType.TRAIN, [_decisions_table()]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "match"})
+    warning = next(w for w in result["warnings"] if w["code"] == "leak_pair")
+    assert warning["params"] == {"first": "decision", "second": "decision_other"}
+    assert "'decision'" in warning["message"] and "ignored_columns" in warning["message"]
+    assert "leak_pair" in codes(result)  # translated in both languages
+    assert result["config"]["ignored_columns"] == [] and result["ignored_suggestions"] == []
+
+
+def test_no_pair_warning_for_a_target_that_the_columns_do_not_give(env):
+    frame = _decisions_table().assign(match=np.random.default_rng(1).integers(0, 2, 3000))
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "decisions_noise", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "match"})
+    assert "leak_pair" not in codes(result)
 
 
 def test_no_derived_target_warning_for_a_target_that_the_columns_do_not_give(env):

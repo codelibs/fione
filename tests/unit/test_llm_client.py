@@ -351,6 +351,7 @@ def test_settings_rules(tmp_path, monkeypatch):
     assert settings.llm_extra_body == {"reasoning_effort": "none"}
     assert check(llm_provider="ollama", llm_extra_body={}).llm_extra_body == {}
 
+    monkeypatch.setenv("FIONE_LLM_PROVIDER", "ollama")
     monkeypatch.setenv("FIONE_LLM_BASE_URL", "")
     monkeypatch.setenv("FIONE_LLM_API_KEY", "")
     monkeypatch.setenv("FIONE_LLM_EXTRA_BODY", "")
@@ -373,6 +374,35 @@ def test_settings_rules(tmp_path, monkeypatch):
     with pytest.raises(ValidationError) as raised:
         check(llm_api_key=KEY, llm_model="a b")
     assert KEY not in str(raised.value)
+
+
+def test_the_assistant_is_off_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("FIONE_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("FIONE_LLM_EXTRA_BODY", raising=False)
+    compose = {  # what Compose passes when docker/.env sets none of them
+        "FIONE_LLM_BASE_URL": "",
+        "FIONE_LLM_MODEL": "",
+        "FIONE_LLM_API_KEY": "",
+        "FIONE_LLM_AUTO_PULL": "false",
+    }
+    for name, value in compose.items():
+        monkeypatch.setenv(name, value)
+    settings = Settings(data_dir=tmp_path)
+    assert settings.llm_provider == "none" and not settings.assistant_enabled
+    assert (settings.llm_base_url, settings.llm_model, settings.llm_extra_body) == ("", "", {})
+    assert make_settings(tmp_path, llm_provider="ollama").assistant_enabled
+    for name, value in (
+        ("FIONE_LLM_BASE_URL", "http://ollama:11434/v1"),
+        ("FIONE_LLM_MODEL", "gemma4:12b"),
+        ("FIONE_LLM_API_KEY", KEY),
+        ("FIONE_LLM_EXTRA_BODY", '{"top_p": 0.5}'),
+        ("FIONE_LLM_AUTO_PULL", "true"),
+    ):
+        monkeypatch.setenv(name, value)
+        with pytest.raises(ValidationError, match=f"{name}.*FIONE_LLM_PROVIDER") as raised:
+            Settings(data_dir=tmp_path)  # meant for a provider that is not set
+        assert KEY not in str(raised.value)
+        monkeypatch.setenv(name, compose.get(name, ""))
 
 
 def test_claude_requires_an_api_key(tmp_path):

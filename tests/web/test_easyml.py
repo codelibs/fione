@@ -16,11 +16,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from api_helpers import add_user, connect, iris_csv, iris_frame, login
+from api_helpers import ASSISTANT_OFF, add_user, connect, iris_csv, iris_frame, login
 from fione import i18n
 from fione.auth import service as auth
 from fione.auth.roles import Role
-from fione.data.profile import DerivedTarget
+from fione.data.profile import DerivedTarget, PairedTarget
 from fione.engine.artifact import save_model
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
@@ -113,10 +113,11 @@ def owner(make_client):
 
 @pytest.fixture
 def runner_owner(make_client, monkeypatch):
-    """As ``owner``, with the job runner in process and fast training configs."""
+    """As ``owner``, with the job runner in process and fast training configs, and the
+    assistant off as by default: the whole flow needs no language model."""
     monkeypatch.delenv("FIONE_JOB_HANDLER_MODULES", raising=False)
     monkeypatch.setattr(easyml, "EASYML_CONFIG", FAST)
-    client = make_client(start_runner=True)
+    client = make_client(start_runner=True, **ASSISTANT_OFF)
     add_user(client, "ed", Role.EDITOR)
     csrf = login(client, "ed")
     r = client.post(
@@ -163,7 +164,7 @@ def test_the_iris_flow_ends_with_a_star_rating_and_a_prediction_download(runner_
     summary = client.get(summary_url).text
     assert 1 <= stars_of(summary) <= 5
     assert stars_of(summary) >= 4  # iris is easy: well above always guessing one species
-    assert "right about" in summary and "Assistant" in summary
+    assert "right about" in summary and "Guide" in summary
     assert "Enough models were tried" in summary  # max_models = 1
     assert "/api/v1/models/" in summary and "docker run" in summary
     model_id = summary_url.split("/")[-2]
@@ -636,6 +637,40 @@ def test_a_repeated_id_the_test_data_holds_too_is_not_suggested_for_grouping(own
     assert "looks like an ID that appears in several rows" not in page
 
 
+def _persons_by_waves(waves, first_wave=1, rows=10, per_wave=30):
+    """Dates of persons in blocks: ``id`` restarts in every wave, ``iid`` is the person."""
+    wave = np.repeat(np.arange(first_wave, first_wave + waves), per_wave * rows)
+    number = np.tile(np.repeat(np.arange(1, per_wave + 1), rows), waves)
+    rng = np.random.default_rng(first_wave)
+    return pd.DataFrame(
+        {"wave": wave, "id": number, "iid": wave * 100 + number, "x": rng.normal(size=len(wave))}
+    ).assign(label=rng.integers(0, 2, len(wave)))
+
+
+def _add_test_dataset(owner, frame):
+    from fione.projects.ingest import ingest_csv
+    from fione.projects.service import DatasetType
+
+    client, pid, _ = owner
+    with closing(connect(client)) as conn:
+        content = io.BytesIO(frame.to_csv(index=False).encode())
+        ingest_csv(client.app.state.storage, conn, pid, "later", DatasetType.TEST, content)
+
+
+def test_the_tip_names_the_person_not_the_number_inside_a_block_for_other_test_persons(owner):
+    _add_test_dataset(owner, _persons_by_waves(2, first_wave=9).drop(columns="label"))
+    page = tips_page(owner, _persons_by_waves(8))
+    assert "looks like an ID that appears in several rows" in page and "“iid”" in page
+    assert "has a value that the training data has too" not in page
+
+
+def test_the_tip_keeps_the_first_column_the_test_data_repeats_when_another_is_lacking(owner):
+    train = _persons_by_waves(8)
+    _add_test_dataset(owner, train.drop(columns=["label", "iid"]))  # lacks `iid`, repeats `id`
+    page = tips_page(owner, train)
+    assert "has a value that the training data has too" in page and "“id”" in page
+
+
 def test_the_tips_are_for_the_detailed_view_where_the_settings_are(owner):
     rare = pd.Series(["a"] * 380 + ["b"] * 20)
     assert "rarest class" not in tips_page(owner, tip_frame(rare), detailed=False)
@@ -727,6 +762,7 @@ def test_the_derived_target_note_goes_when_its_columns_are_unchecked():
             leak_suspects=[],
             leak_partial=False,
             derived=DerivedTarget("quantity", ("category", "tier"), 0.999),
+            paired=None,
         ),
     )
     dataset = types.SimpleNamespace(type=DatasetType.TRAIN, n_cols=5, n_rows=199)
@@ -739,6 +775,9 @@ def test_the_derived_target_note_goes_when_its_columns_are_unchecked():
     assert "analysis.warn.leak_derived_pair" not in codes({"noise"})
     found.profile.derived = DerivedTarget("quantity", ("category",), 0.999)
     assert "analysis.warn.leak_derived" in codes({"category"})
+    found.profile.paired = PairedTarget("decision", "decision_other", 1.0)
+    assert "analysis.warn.leak_pair" in codes({"decision", "noise"})  # one of them is checked
+    assert "analysis.warn.leak_pair" not in codes({"noise"})
 
 
 def test_the_pro_form_run_time_follows_the_size_of_the_data(owner, monkeypatch):
@@ -800,13 +839,16 @@ def test_an_id_in_the_order_of_the_target_stays_unchecked_with_both_notes(owner)
     assert not any("They stay checked" in text for text in alerts(page))  # it is not
 
 
-def spy_leak_check(monkeypatch, partial=False) -> list[str]:
-    """The targets ``leak_check`` runs for; with ``partial``, every check ran out of time."""
+def spy_leak_check(monkeypatch, partial=False, paired_cut=False) -> list[str]:
+    """The targets ``leak_check`` runs for; with ``partial``, every check ran out of time, with
+    ``paired_cut`` only the search for a pair of columns."""
     calls, original = [], builtin.leak_check
 
     def spy(df, columns, target, **kwargs):
         calls.append(target)
         check = original(df, columns, target, **kwargs)
+        if paired_cut:
+            return dataclasses.replace(check, paired_cut=True)
         return dataclasses.replace(check, partial=True) if partial else check
 
     monkeypatch.setattr(builtin, "leak_check", spy)
@@ -830,6 +872,39 @@ def test_the_leak_check_runs_once_per_dataset_and_target(owner, monkeypatch):
     r = client.post(base + "/train", data={"csrf_token": csrf, "target": "label"})
     assert r.status_code == 422
     assert calls == ["label", "x"]
+
+
+def _decisions_csv(n=600):
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(
+        {
+            "decision": rng.integers(0, 2, n),
+            "decision_other": rng.integers(0, 2, n),
+            "x": rng.normal(size=n),
+        }
+    )
+    frame["match"] = frame.decision & frame.decision_other
+    return frame.to_csv(index=False).encode()
+
+
+PAIR_NOTE = "The answer looks fixed by the columns “decision” and “decision_other” together"
+
+
+def test_the_pair_note_stays_on_the_cached_second_view(owner):
+    client, pid, csrf = owner
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, _decisions_csv()))
+    for _ in range(2):  # the second view reads the cached leak check
+        page = client.get(url, params={"target": "match"}).text
+        assert any(text.startswith(PAIR_NOTE) for text in alerts(page))
+
+
+def test_a_cut_search_for_a_pair_is_checked_again(owner, monkeypatch):
+    client, pid, csrf = owner
+    calls = spy_leak_check(monkeypatch, paired_cut=True)
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, _decisions_csv()))
+    for _ in range(2):
+        assert client.get(url, params={"target": "match"}).status_code == 200
+    assert calls == ["match", "match"]  # not kept
 
 
 def test_a_partial_leak_check_is_noted_and_checked_again(owner, monkeypatch):
@@ -1028,7 +1103,7 @@ def test_the_wizard_in_japanese_uses_the_product_terms(make_client):
     for term in ("データ分析", "予測する列", "入力する列", "最大実行時間", "実行"):
         assert term in analysis, term
     summary = world.client.get(world.path("/projects/{p}/models/{model}/summary"), headers=ja).text
-    assert "予測結果サマリー" in summary and "アシスタント" in summary
+    assert "予測結果サマリー" in summary and "ガイド" in summary
     assert re.search(r'aria-label="5 段階中 星 \d つ"', summary)
 
 

@@ -53,6 +53,7 @@ from fione.projects.ingest import read_dataset, read_dataset_rows, read_dataset_
 from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.schema import clean_text
 from fione.tools.builtin import (
+    _LINK_DATASETS,
     RARE_CLASS_SHARE,
     class_count,
     is_skewed_target,
@@ -60,7 +61,7 @@ from fione.tools.builtin import (
     propose,
     rare_class_share,
     recommended_metric,
-    repeated_id_column,
+    repeated_id_choice,
     repeated_values_in_test,
     runtime_need_secs,
     sample_profile,
@@ -173,6 +174,7 @@ def dashboard(request: Request, conn: Conn, pid: str) -> Response:
         training=training,
         latest_train=train_sets[0] if train_sets else None,
         members=members,
+        join_targets=join_targets(datasets),
     )
 
 
@@ -217,6 +219,16 @@ class RunForm:
     task: str
     runtime: str  # a preset (minutes) or "custom"
     custom: str = ""
+
+
+def join_targets(datasets: list[Dataset]) -> list[tuple[str, list[str]]]:
+    """The columns a join can be proposed for, by train dataset (name, columns), among the
+    datasets the link search reads (the oldest ``_LINK_DATASETS``): none unless two of them are
+    train datasets (another table is uploaded as one; the test data and the predictions of one
+    table are not tables to join)."""
+    examined = sorted(datasets, key=lambda d: d.id)[:_LINK_DATASETS]
+    trains = [d for d in examined if d.type == DatasetType.TRAIN]
+    return [(d.name, _names(d)) for d in trains] if len(trains) >= 2 else []
 
 
 def _default_target(names: list[str], kinds: dict[str, str]) -> str:
@@ -272,11 +284,15 @@ def _leak_check(request: Request, dataset: Dataset, target: str):
             found.profile.leak_partial,
             found.profile.derived,
             found.profile.derived_cut,
+            found.profile.paired,
+            found.profile.paired_cut,
         )
         return check, found.task
 
     entry = request.app.state.ui_leaks.get(
-        (dataset.id, target), compute, keep=lambda e: not e[0].partial and not e[0].derived_cut
+        (dataset.id, target),
+        compute,
+        keep=lambda e: not (e[0].partial or e[0].derived_cut or e[0].paired_cut),
     )
     return (made[0] if made else None), entry
 
@@ -367,6 +383,11 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
             params["second"] = derived.keys[1]
         code = "leak_derived" if len(derived.keys) == 1 else "leak_derived_pair"
         out.append(("warning", f"analysis.warn.{code}", params))
+    paired = found.profile.paired
+    if paired is not None and {paired.first, paired.second} & inputs:
+        out.append(
+            ("warning", "analysis.warn.leak_pair", {"first": paired.first, "second": paired.second})
+        )
     if found.profile.leak_partial:
         out.append(("info", "analysis.warn.leak_partial", {}))
     classes = class_count(found.y, task)
@@ -396,7 +417,16 @@ def _tips(request: Request, conn, dataset: Dataset, found, task: str) -> list[tu
         tips.append(("analysis.tip.rare_class", {"share": _pct(share)}))
     if (ordered := ordered_classes(found.y, task)) is not None:
         tips.append(("analysis.tip.ordered_classes", {"low": ordered[0], "high": ordered[1]}))
-    if (repeated := repeated_id_column(found.profile, found.target.name)) is not None:
+    if (
+        repeated := repeated_id_choice(
+            _storage(request),
+            conn,
+            dataset,
+            found.profile,
+            found.target.name,
+            _profile_rows(dataset),
+        )
+    ) is not None:
         shared = repeated_values_in_test(
             _storage(request), conn, dataset, repeated.name, _profile_rows(dataset)
         )

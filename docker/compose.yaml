@@ -16,10 +16,9 @@
 # Without FIONE_TRUST_PROXY every client seems to come from the proxy's address, so the
 # per-address limit of 50 failed sign-ins per 15 minutes is shared by all users.
 #
-# The assistant talks to an Ollama on the host by default (macOS: the Ollama app;
-# it cannot use the GPU from a container): http://host.docker.internal:11434/v1 with
-# gemma4:12b-mlx. An administrator downloads the model with the button on the system page.
-# Linux, or no Ollama on the host: run one in Compose, see "The assistant" in docker/.env.example.
+# The assistant is off unless FIONE_LLM_PROVIDER is set (see "The assistant" in
+# docker/.env.example): the Ollama app on the host (macOS; it cannot use the GPU from a
+# container), an Ollama in Compose (Linux), or Claude. MCP clients need none of it.
 #
 # The serving image (prediction API for one downloaded model) is built only on request:
 #   docker compose -f docker/compose.yaml --env-file docker/.env --profile serving build
@@ -52,16 +51,18 @@ services:
       # FIONE_COOKIE_SECURE: "true"
       # Fione's origin as browsers reach it: the MCP endpoint accepts browser requests from it.
       FIONE_PUBLIC_URL: ${FIONE_PUBLIC_URL:-}
-      # The assistant: the language model, Ollama (default: the host's) or Claude. An empty
+      # The assistant's language model: none (off, the default), ollama or claude. An empty
       # base URL or model is the provider's default (host Ollama, gemma4:12b-mlx; Claude, the
       # Anthropic API); Claude needs FIONE_LLM_API_KEY.
       FIONE_LLM_BASE_URL: ${FIONE_LLM_BASE_URL:-}
-      FIONE_LLM_PROVIDER: ${FIONE_LLM_PROVIDER:-ollama}
+      FIONE_LLM_PROVIDER: ${FIONE_LLM_PROVIDER:-none}
       FIONE_LLM_MODEL: ${FIONE_LLM_MODEL:-}
       FIONE_LLM_API_KEY: ${FIONE_LLM_API_KEY:-}
       FIONE_LLM_AUTO_PULL: ${FIONE_LLM_AUTO_PULL:-false}
-      FIONE_MCP_ENABLED: ${FIONE_MCP_ENABLED:-false}
-      FIONE_MCP_WRITE_ENABLED: ${FIONE_MCP_WRITE_ENABLED:-false}
+      # MCP for AI tools with an API token: on unless set to false (the System page can also
+      # switch it off).
+      FIONE_MCP_ENABLED: ${FIONE_MCP_ENABLED:-true}
+      FIONE_MCP_WRITE_ENABLED: ${FIONE_MCP_WRITE_ENABLED:-true}
     # Reaches the host's Ollama on Linux as well (Docker Desktop has the name already).
     extra_hosts:
       - "host.docker.internal:host-gateway"

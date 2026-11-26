@@ -1,5 +1,6 @@
 """The LLM provider's status for the system page and the assistant.
 
+With ``llm_provider`` ``none`` the status is ``off`` for good: no thread, no request.
 ``LlmMonitor`` keeps a ``LlmStatus`` up to date in a daemon thread that ``stop`` ends. For
 ``ollama`` it checks the server, finds out whether the model is there and pulls it when it is
 not (``llm_auto_pull``, or an administrator's request). For ``claude`` it asks the Models API
@@ -39,7 +40,7 @@ from fione.schema import clean_text
 log = logging.getLogger("fione.assistant")
 
 LlmState = Literal[
-    "checking", "unreachable", "missing", "pulling", "consent_required", "ready", "error"
+    "off", "checking", "unreachable", "missing", "pulling", "consent_required", "ready", "error"
 ]
 
 OLLAMA_DEFAULT_CONTEXT = 4096  # what Ollama serves unless it is configured otherwise
@@ -148,6 +149,7 @@ class LlmMonitor:
         self._http = http or httpx.Client()
         self._owns_http = http is None
         self._model = settings.llm_model
+        self._off = not settings.assistant_enabled
         self._ollama = settings.llm_provider == "ollama"
         if self._ollama:
             self._root = native_root(settings.llm_base_url)
@@ -167,6 +169,18 @@ class LlmMonitor:
         self._pulling = False
         self._pull_blocked = False  # a pull failed: only an administrator starts the next
         self._consent_found = False  # the host, which never changes, has a consent
+        if self._off:  # no server to check, nothing to consent to
+            self._status = LlmStatus(
+                state="off",
+                model=None,
+                local=True,
+                host=None,
+                completed=None,
+                total=None,
+                error_code=None,
+                server_context=None,
+            )
+            return
         self._status = LlmStatus(
             state="checking",
             model=settings.llm_model,
@@ -282,7 +296,7 @@ class LlmMonitor:
     # --- the thread
 
     def start(self) -> None:
-        if self._thread is None:
+        if self._thread is None and not self._off:
             self._thread = threading.Thread(target=self._run, name="llm-monitor", daemon=True)
             self._thread.start()
 
