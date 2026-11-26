@@ -79,7 +79,8 @@ class ToolContext:
 
 
 _TOOLS: dict[str, Tool] = {}
-# Tools that start work, for MCP clients only (``FIONE_MCP_WRITE_ENABLED``): never in the chat.
+# Tools that start work, for MCP clients only (``fione.switches.McpSwitches.writes``): never in
+# the chat.
 _ACTIONS: dict[str, Tool] = {}
 
 

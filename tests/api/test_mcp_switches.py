@@ -48,6 +48,7 @@ def test_switching_mcp_off_stops_it_at_once(world):
     r = switch(client, csrf, "mcp", False)
     assert (r.status_code, r.headers["location"]) == (303, "/admin/system#mcp-title")
     assert tools(client, headers) == 404
+    assert client.get("/mcp", headers=headers).status_code == 404  # any method
     page = client.get("/admin/system").text
     assert 'data-switch="mcp">Off' in page and 'data-switch="mcp_write">Off' in page
     switch(client, csrf, "mcp", True)
@@ -75,16 +76,21 @@ def test_switching_the_write_tools_off_hides_them_and_stops_upload_urls(world):
 )
 def test_a_setting_of_false_is_never_widened(make_client, settings, locked):
     client = make_client(**settings)
-    user, _ = new_project(client)
+    user, project_id = new_project(client)
     headers = bearer(client, user)
+    token = make_token(client, user, project_id)
     add_user(client, "admin", Role.ADMIN)
     csrf = login(client, "admin")
     for name in ("mcp", "mcp_write"):
         switch(client, csrf, name, True)
     if settings["mcp_enabled"]:
         assert WRITE_TOOL not in tools(client, headers)
+        params = {"name": "create_project", "arguments": {"name": "X"}}
+        called = post(client, rpc("tools/call", params), headers).json()["result"]
+        assert called["isError"] is True
     else:
         assert tools(client, headers) == 404
+    assert put(client, token).status_code == 404 and datasets(client, project_id) == []
     page = client.get("/admin/system").text
     assert f"{locked}=false" in page
 

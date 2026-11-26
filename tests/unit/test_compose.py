@@ -94,7 +94,7 @@ def test_e2e_uses_the_fake_llm():
     assert env["FIONE_LLM_BASE_URL"] == "http://fake-llm:11434/v1"
     assert env["FIONE_LLM_AUTO_PULL"] == "true" and env["FIONE_MCP_ENABLED"] == "true"
     assert E2E["services"]["fione"]["depends_on"]["fake-llm"]["condition"] == "service_healthy"
-    # for the tests only: the real default stays off
+    assert env["FIONE_LLM_PROVIDER"] == "ollama"  # the real default is none
     real = SERVICES["fione"]["environment"]
     assert real["FIONE_LLM_AUTO_PULL"].endswith(":-false}")
     assert "COMPOSE_PROFILES" not in (ROOT / "docker" / "e2e.env").read_text()
