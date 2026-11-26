@@ -29,6 +29,7 @@ training and the explain job stored; none of them loads a model or computes anyt
 """
 
 import dataclasses
+import itertools
 import math
 import re
 import time
@@ -1080,6 +1081,143 @@ def date_time_column(
     return None
 
 
+# A table of series: a key of one or two columns that, with the date column, is unique on 99% of the
+# rows (``PANEL_DUPLICATES``), with ``PANEL_ROWS`` rows or more for each series on average, and
+# series that cover at least half of the dates between them (``PANEL_COVERAGE``: a regular panel
+# of stores by weeks, not random times of events) and at least ``PANEL_MIN_SERIES`` of them.
+# Columns of at most ``PANEL_KEY_VALUES`` values;
+# a column of the calendar (named hour, month, weekday... or one of those parts of the dates) is no
+# series.
+PANEL_KEY_VALUES = 5000
+PANEL_MIN_SERIES = 5
+PANEL_ROWS = 20
+PANEL_DUPLICATES = 0.01
+PANEL_COVERAGE = 0.5
+PANEL_MAX_KEYS = 8  # candidate columns read
+PANEL_MAX_ROWS = 500_000  # rows of a dataset up to which the check reads its candidate columns
+_CALENDAR_FOLLOWERS = {
+    "of",
+    "in",
+    "no",
+    "num",
+    "number",
+    "idx",
+    "index",
+    "id",
+}  # month_of_year, week_no
+_NAME_TOKENS = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|[0-9]+")
+_CALENDAR_WORDS = {
+    *("hour", "hours", "hr", "hrs", "month", "months", "mon", "week", "weeks"),
+    *("weekday", "weekdays", "dow", "wday", "quarter"),
+    *("dayofweek", "dayofmonth", "dayofyear", "weekofyear", "monthofyear"),
+}
+
+
+def panel_series(
+    ctx: ToolContext,
+    dataset: Dataset,
+    profile: DatasetProfile,
+    target: str,
+    date: tuple[str, pd.Series],
+) -> tuple[tuple[str, ...], str] | None:
+    """``(key columns, date column)`` when the rows of ``dataset`` look like a panel of series: the
+    column of dates ``date`` (its name and its dates, as ``date_time_column`` found them) sits
+    next to a key of one or two columns (``panel_key``), for a dataset of at most
+    ``PANEL_MAX_ROWS`` rows (the candidates are read whole); else None."""
+    if dataset.n_rows > PANEL_MAX_ROWS:
+        return None
+    names = panel_key_columns(profile, target, date[0])
+    if not names:
+        return None
+    frame = ingest.read_dataset(ctx.storage, dataset, names)
+    key = panel_key(frame, date[1].reset_index(drop=True))
+    return (key, date[0]) if key else None
+
+
+def _calendar_like(col: ColumnProfile) -> bool:
+    """Whether the name of ``col`` says it is a part of the calendar: its last word is one of
+    ``_CALENDAR_WORDS`` (``hour``, ``pickupHour``, ``order_month``), or it starts with one followed
+    by ``of``, ``in``, ``no``, ``num``, ``idx``... (``hour_of_day``, ``week_no``), or it is
+    ``day_of_...``. Words are whole: ``monitor_id`` and ``hr_dept`` are not."""
+    words = [w.lower() for w in _NAME_TOKENS.findall(col.name)]
+    if not words:
+        return False
+    return (
+        words[-1] in _CALENDAR_WORDS
+        or (len(words) >= 2 and words[0] in _CALENDAR_WORDS and words[1] in _CALENDAR_FOLLOWERS)
+        or words[:2] == ["day", "of"]
+    )
+
+
+def panel_key_columns(profile: DatasetProfile, target: str, date: str) -> list[str]:
+    """The columns of ``profile`` that may be a series key: plain-named, other than the target and
+    the date, of 2 to ``PANEL_KEY_VALUES`` values with ``PANEL_ROWS`` rows each on average, not a
+    part of the calendar; at most ``PANEL_MAX_KEYS``, those of fewest values first."""
+    found = [
+        col
+        for col in profile.columns
+        if col.name not in (target, date)
+        and col.kind in ("numeric", "categorical", "text", "id")
+        and 2 <= col.n_unique <= PANEL_KEY_VALUES
+        and profile.n_rows >= PANEL_ROWS * col.n_unique
+        and _is_plain(col.name)
+        and not _calendar_like(col)
+    ]
+    return [col.name for col in sorted(found, key=lambda col: col.n_unique)[:PANEL_MAX_KEYS]]
+
+
+def panel_key(frame: pd.DataFrame, dates: pd.Series) -> tuple[str, ...] | None:
+    """The one or two columns of ``frame`` (the key candidates, as long as ``dates``) whose
+    combination with ``dates`` is unique on all but ``PANEL_DUPLICATES`` of the rows, with
+    ``PANEL_ROWS`` rows or more for each value on average and series that cover at least
+    ``PANEL_COVERAGE`` of the dates between them; one column before two; else None."""
+    n, days = len(frame), dates.nunique()
+    if n == 0 or days == 0:
+        return None
+    parts = [  # a column that is one of these parts of the dates gives no series
+        dates.dt.hour, dates.dt.day, dates.dt.month, dates.dt.day_of_week, dates.dt.quarter,
+        dates.dt.isocalendar().week, dates.dt.year,
+    ]  # fmt: skip
+    own = [pd.factorize(part)[0] for part in parts]
+    frame = frame.loc[
+        :,
+        [
+            c
+            for c in frame.columns
+            if not any(
+                len(np.unique(pd.factorize(frame[c])[0] * (n + 1) + code))
+                == frame[c].nunique()
+                == len(np.unique(code))
+                for code in own
+            )
+        ],
+    ]
+    day = pd.factorize(dates)[0]
+    codes = {c: pd.factorize(frame[c])[0].astype(np.int64) for c in frame.columns}
+
+    def regular(*names: str) -> bool:
+        key = np.zeros(n, dtype=np.int64)
+        for name in names:
+            key = key * (codes[name].max() + 2) + codes[name] + 1
+        series = len(np.unique(key))
+        if (
+            series < PANEL_MIN_SERIES
+            or n / series < PANEL_ROWS
+            or n / (series * days) < PANEL_COVERAGE
+        ):
+            return False
+        both = key * (days + 1) + day
+        return 1 - len(np.unique(both)) / n < PANEL_DUPLICATES
+
+    for name in frame.columns:
+        if regular(name):
+            return (name,)
+    for first, second in itertools.combinations(frame.columns, 2):
+        if regular(first, second):
+            return (first, second)
+    return None
+
+
 @dataclasses.dataclass(frozen=True)
 class Proposal:
     """What a training proposal rests on, with the dataset's raw column names."""
@@ -1663,6 +1801,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 column=column,
             )
         )
+    panel_date = None
     repeated = None
     if time_index is None and time_arg is None:
         repeated = repeated_time_column(ctx, dataset, profile, target)
@@ -1690,6 +1829,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         and (date := date_time_column(ctx, dataset, profile, target))
         and _order_works(found, date[1])
     ):
+        panel_date = date
         column = clean_text(date[0])
         raw = ingest.read_dataset(ctx.storage, dataset, [date[0]])[date[0]]
         first = None if pd.api.types.is_datetime64_any_dtype(raw) else is_day_first(raw)
@@ -1716,6 +1856,28 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                     column=column,
                 )
             )
+    if (
+        panel_date is not None
+        and time_index is None
+        and time_arg is None
+        and not repeated
+        and "group_column" not in args  # the groups would have to end at several different times
+        and (series := panel_series(ctx, dataset, profile, target, panel_date))
+    ):
+        keys, column = [clean_text(name) for name in series[0]], clean_text(series[1])
+        names = ", ".join(f"'{name}'" for name in keys)
+        warnings.append(
+            _warning(
+                "series_key",
+                f"the rows look like a panel of series: there is one row for each date of "
+                f"'{column}' in each combination of {names}. If you will predict later dates of "
+                "these series, lags and rolling statistics per series (the lag and rolling "
+                "modules, with lags at least as long as the horizon) usually help most, and "
+                "time_column validates later rows after earlier ones",
+                keys=", ".join(keys),
+                column=column,
+            )
+        )
     if "sort_metric" in overrides:
         overrides["sort_metric"] = _metric_for(overrides["sort_metric"], found.y, task)
     if overrides.get("decision") == "tuned" and task == "classification":
