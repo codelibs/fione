@@ -110,8 +110,10 @@ def _switches(request: Request):
 
 
 async def mcp_endpoint(request: Request) -> Response:
-    """Answer one JSON-RPC message. The body is read here (``BodyLimit`` caps it while it is
-    received); everything after runs in a worker thread, off the event loop."""
+    """Answer one JSON-RPC message. The switches are read first, briefly in a worker thread
+    (one indexed read, before the slots, so a switched-off MCP answers at once); the body is read
+    here (``BodyLimit`` caps it while it is received); everything after runs in a worker thread,
+    off the event loop."""
     switches = await run_in_threadpool(_switches, request)
     if not switches.enabled:  # by the settings, or switched off on the System page
         return Response(status_code=404)
@@ -119,7 +121,8 @@ async def mcp_endpoint(request: Request) -> Response:
     if request.method != "POST":
         return Response(status_code=405, headers={"Allow": "POST"})
     body = await request.body()
-    # Waiting for a slot costs a coroutine, not one of the worker threads every page uses.
+    # Waiting for a slot costs a coroutine, not one of the worker threads every page uses
+    # (the switches above took one only for their read).
     slots = request.app.state.mcp_slots
     try:
         await asyncio.wait_for(slots.acquire(), BUSY_WAIT_SECS)
