@@ -139,6 +139,9 @@ class TrainConfig:
     # models then learn a score that grows with the time (``fione.engine.survival``), and
     # ``concordance`` ranks them. The column is not a feature.
     event_column: str | None = None
+    # Weight of the extra rows given to ``AutoML.fit`` among the rows the models learn from (1: as
+    # the rows of the data). Scores are never weighted.
+    extra_weight: float = 1.0
 
     def validate(self) -> "TrainConfig":
         """Raise ConfigError for the first invalid value; return self when everything is valid."""
@@ -218,6 +221,9 @@ class TrainConfig:
                 raise ConfigError("quantile needs a regression, not a classification")
         elif "pinball" in (self.stopping_metric.lower(), self.sort_metric.lower()):
             raise ConfigError("the pinball metric needs a quantile")
+        weight = self.extra_weight
+        if not isinstance(weight, int | float) or isinstance(weight, bool) or not 0 < weight <= 1e6:
+            raise ConfigError(f"extra_weight must be a number above 0, got {weight!r}")
         event = self.event_column
         if event is None:
             if "concordance" in (self.stopping_metric.lower(), self.sort_metric.lower()):

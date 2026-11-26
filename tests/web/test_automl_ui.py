@@ -455,6 +455,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "cv_repeats": None,
         "quantile": None,  # not on the form
         "event_column": None,  # not on the form
+        "extra_weight": 1.0,  # not on the form
     }
     assert {f.name for f in dataclasses.fields(TrainConfig)} == set(expected)  # all covered
     assert config.to_dict() == expected
