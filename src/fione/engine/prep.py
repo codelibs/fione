@@ -347,6 +347,7 @@ class Prep:
     _logged: tuple = ()
     _knots: dict = {}  # linear view column -> where the splines view bends it (old: none)
     prose: tuple = ()
+    all_different: frozenset = frozenset()  # frequency columns whose values are all different
     dayfirst: tuple = ()  # date string columns that put the day before the month
     integer_dates: dict = {}  # whole-number date column -> its format (``integer_date_format``)
     timed: tuple = ()  # date columns that carry a time of day
@@ -429,6 +430,11 @@ class Prep:
             )
         )
         self.fill = {column: float(X[column].notna().mean()) for column, _ in self._plan}
+        self.all_different = frozenset(
+            column
+            for column, kind in self._plan
+            if kind == "frequency" and X[column].nunique() == int(X[column].notna().sum())
+        )
         self.prose = tuple(
             [c for c, kind in self._plan if kind in ("category", "frequency") and is_prose(X[c])][
                 :MAX_PROSE
@@ -714,6 +720,25 @@ class Prep:
             base[position] = values.codes.astype(float)
         filled = base.fillna(self._medians)  # a block per column again
         return filled.copy() if filled.shape[1] > CONSOLIDATE_COLUMNS else filled
+
+    @property
+    def reads_only_prose(self) -> bool:
+        """Whether no input but prose carries anything for the tree and linear views: every column
+        is a prose column read only as words, or one whose values are all different (an id, whose
+        frequency is a constant), and no derived feature stands beside them. Those views then hold
+        constants, and only the text views read anything."""
+        levels = {*self._level_at.values(), *self._native_at.values()}
+
+        def carries(column: str, kind: str) -> bool:
+            if column in self.prose:
+                return column in levels  # a prose that repeats is read as levels too
+            return not (kind == "frequency" and column in self.all_different)
+
+        return bool(
+            self.prose
+            and not self.groups
+            and not any(carries(column, kind) for column, kind in self._plan)
+        )
 
     @property
     def spline_width(self) -> int:
