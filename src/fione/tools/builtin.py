@@ -53,7 +53,7 @@ from fione.data.profile import (
 )
 from fione.engine import diagnostics as diag
 from fione.engine import metrics
-from fione.engine.automl import FEATURE_MAX_COLUMNS
+from fione.engine.automl import FEATURE_MAX_COLUMNS, _event_flags
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.explain import PD_GRID
 from fione.engine.prep import MAX_PROSE, _sorted_labels, infer_task, validate_target
@@ -852,6 +852,76 @@ def integer_labels(y: pd.Series, task: str) -> tuple[int, int] | None:
     return len(values), int(counts.min())
 
 
+# A number to predict that is named like a time, next to a column of 0 and 1 named like an event
+# that may or may not have happened by the end of the follow-up: a survival table (the time is cut
+# short for the rows where the event did not happen). The names are read by whole words (``is_dead``
+# has the word dead, ``deadline_days`` and ``prevented`` have neither).
+_NAME_WORDS = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|[0-9]+")
+_TIME_NAMES = {"futime", "time", "duration", "tenure", "survival", "followup"}  # the whole name
+_TIME_LEADS = {("time", "to"), ("days", "to"), ("months", "to"), ("weeks", "to")}  # time_to_event
+_TIME_TAILS = {
+    "survival",
+    "follow",
+    "followup",
+    "event",
+    "os",
+    "pfs",
+}  # survival_time, follow_up_time
+_EVENT_WORDS = {
+    *("event", "death", "dead", "died", "censor", "censored", "churn", "churned", "exited"),
+    *("attrition", "relapse", "cancelled", "canceled", "terminated", "failed", "failure"),
+}
+_STRONG_TIME_WORDS = {"futime", "survival", "followup", "follow"}  # next to which ``status`` counts
+
+
+def _words(name: str) -> list[str]:
+    return [w.lower() for w in _NAME_WORDS.findall(name)]
+
+
+def _is_time_name(words: list[str]) -> bool:
+    return (
+        (len(words) == 1 and words[0] in _TIME_NAMES)
+        or tuple(words[:2]) in _TIME_LEADS
+        or (len(words) >= 2 and words[-1] in {"time", "duration"} and words[-2] in _TIME_TAILS)
+        or (len(words) >= 3 and words[-2:] == ["up", "time"] and words[-3] == "follow")
+    )
+
+
+def survival_event_column(
+    profile: DatasetProfile, target: str, y: pd.Series, task: str
+) -> str | None:
+    """The first column of 0 and 1 (no missing value, both present) named like an event
+    (``_EVENT_WORDS``) when the target is a number of 0 or more with more than 20 values named like
+    a time (``_is_time_name``): the rows where it is 0 have a time that was cut short, which
+    ``event_column`` lets the model use. A column named ``status`` counts next to a strongly
+    named time (``futime``, ``survival``, ``follow``). Else None."""
+    y = y.dropna()
+    time_words = _words(target)
+    if (
+        task != "regression"
+        or not _is_time_name(time_words)
+        or not pd.api.types.is_numeric_dtype(y)
+        or pd.api.types.is_bool_dtype(y)
+        or y.nunique() <= 20
+        or float(y.min()) < 0
+    ):
+        return None
+    strong = bool(_STRONG_TIME_WORDS & set(time_words))
+    for col in profile.columns:
+        words = set(_words(col.name))
+        named = bool(_EVENT_WORDS & words) or (strong and "status" in words)
+        if col.name == target or not named or col.n_unique != 2 or col.missing_rate > 0:
+            continue
+        stats = col.stats or {}  # a few values of numbers are profiled as categories
+        if (
+            col.kind in ("numeric", "categorical")
+            and (stats.get("min"), stats.get("max")) == (0, 1)
+            and stats.get("mean", 0) > 0
+        ):
+            return col.name
+    return None
+
+
 def rare_class_share(y: pd.Series, task: str) -> float | None:
     """The share of the rarest class when it is under ``RARE_CLASS_SHARE`` and under
     ``RARE_CLASS_EVEN`` of an even share, 1 / classes (where ``decision="balanced"`` may pay),
@@ -1183,7 +1253,7 @@ def _warning(code: str, message: str, **params) -> dict:
     return {"code": code, "message": message, "params": params}
 
 
-def _metric_for(name, y: pd.Series, task: str) -> str:
+def _metric_for(name, y: pd.Series, task: str, survival: bool = False) -> str:
     """The metric ``name`` the user's goal names, if it fits the task and the target."""
     name = str(name).lower()
     if name == "auto":
@@ -1192,7 +1262,7 @@ def _metric_for(name, y: pd.Series, task: str) -> str:
     numbers = y.to_numpy(dtype=float) if task == "regression" else np.zeros(1, dtype=int)
     classes = int(y.nunique()) if task == "classification" else 0
     try:
-        name = metrics.resolve(name, task, "sort_metric")
+        name = metrics.resolve(name, task, "sort_metric", survival=survival)
         metrics.check(name, numbers, classes, "sort_metric")
     except ConfigError as e:
         raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
@@ -1339,6 +1409,29 @@ def _columns_not_in_test(absent: list[str]) -> dict | None:
     )
 
 
+def _event_column(ctx, dataset, names, target, found, asked) -> str | None:
+    """The ``event_column`` the user asked for, checked: another plain column of 0 and 1 (1: the
+    event happened), for a target that is a number of 0 or more (the time to the event)."""
+    if asked is None:
+        return None
+    event = _resolve_column(names, asked)
+    if event == target or not _is_plain(event):
+        raise ToolError("event_column must be a plain-text column other than the target")
+    y = found.y.dropna()
+    if (
+        found.task != "regression"
+        or not pd.api.types.is_numeric_dtype(y)
+        or (len(y) and float(y.min()) < 0)
+    ):
+        raise ToolError("event_column needs a target that is a number of 0 or more: the time")
+    flags = ingest.read_dataset(ctx.storage, dataset, [event])[event]
+    try:  # the engine's own check: only 0 or 1 (no missing value), and one event at least
+        _event_flags(flags, event, found.y.to_numpy(dtype=float, na_value=0.0))
+    except ConfigError as e:
+        raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
+    return event
+
+
 def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     dataset = _dataset(ctx, args["dataset_id"])
     names = [name for name, _ in dataset.schema]
@@ -1349,6 +1442,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     rows = min(_SAMPLE_ROWS, _PROPOSE_CELLS // max(1, len(columns)))
     found = propose(ctx.storage, dataset, target, columns, rows)
     profile, task = found.profile, found.task
+    event = _event_column(ctx, dataset, names, target, found, args.get("event_column"))
 
     warnings: list[dict] = []
     suggestions: list[dict] = []
@@ -1544,7 +1638,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         ignored.append(name)
     if warning := _columns_empty_in_test([n for n in empty if n not in set(left_empty)]):
         warnings.append(warning)
-    if is_skewed_target(found.y, task):
+    if event is None and is_skewed_target(found.y, task):
         warnings.append(
             _warning(
                 "skewed_target",
@@ -1586,7 +1680,23 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 rows=f"{labels[1]:,}",
             )
         )
+    if event is None and (candidate := survival_event_column(profile, target, found.y, task)):
+        column = clean_text(candidate)
+        warnings.append(
+            _warning(
+                "survival_event",
+                f"the target looks like a time and '{column}' like whether the event happened "
+                "(1) or the follow-up ended first (0): if so, event_column '{column}' lets the "
+                "model learn from the times that were cut short (survival) and scores it by the "
+                "concordance. Propose again with event_column to set it".replace(
+                    "{column}", column
+                ),
+                column=column,
+            )
+        )
     overrides = {"sort_metric": recommended_metric(found.y, task)}
+    if event is not None:
+        overrides["event_column"] = event
     overrides |= {
         k: args[k]
         for k in (
@@ -1711,7 +1821,9 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
             )
         )
     if "sort_metric" in overrides:
-        overrides["sort_metric"] = _metric_for(overrides["sort_metric"], found.y, task)
+        overrides["sort_metric"] = _metric_for(
+            overrides["sort_metric"], found.y, task, survival=event is not None
+        )
     if overrides.get("decision") == "tuned" and task == "classification":
         try:
             name = metrics.resolve(overrides["sort_metric"], task, "sort_metric")
@@ -2548,7 +2660,8 @@ for _tool in (
         "max_runtime_secs; decision ('balanced': a rare class, balanced accuracy); "
         "target_transform ('log1p': a skewed target, RMSLE); sort_metric (the score the goal "
         "names: f1, qwk, rmsle, ...); group_column (a repeating id, like a customer, whose "
-        "rows stay together).",
+        "rows stay together); event_column (a column of 0 and 1, 1 when the event happened, "
+        "next to a target that is the time to it, cut short where it is 0: survival).",
         _schema(
             {
                 "dataset_id": _ID,
@@ -2559,6 +2672,7 @@ for _tool in (
                 "target_transform": {"type": "string", "enum": ["none", "log1p"]},
                 "sort_metric": {"type": "string"},
                 "group_column": _COLUMN,
+                "event_column": _COLUMN,
             },
             ["dataset_id", "target"],
         ),

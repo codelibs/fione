@@ -457,6 +457,13 @@ the event happened at the target's time and 0 where the row was last seen at tha
 (`event_column` in the API; the target is then a regression, and the column is not a feature). The
 models learn a score that grows with the time, and a prediction is that score: a higher one is a
 longer time, and it is not a time in the target's units.
+The assistant's proposal takes `event_column` too (a column other than the target, of 0 and 1 on
+every row with at least one 1, for a target of 0 or more; `sort_metric` may then be `auto` or
+`concordance`), sets no `target_transform` and gives no skew warning then. When it is not given,
+the proposal warns that the target looks like a time when its name is one (`time`, `futime`,
+`duration`, `tenure`, `survival_time`, `time_to_failure`, ...) and a column of 0 and 1 without a
+missing value is named by a word like an event (`event`, `death`, `churn`, `failed`, ...; `status`
+only next to `futime`, `survival` or `follow`).
 
 The score is the probability, by the Kaplan-Meier estimate of all the training rows, that the event
 has happened by the row's time (a row with an event) or by the time it is expected to last (a
