@@ -532,11 +532,13 @@ The time the assistant proposes (2 to 30 minutes) is what the data needs to try 
 from its cells (rows times input columns, a table of fewer than 30 input columns counting as 30,
 since a trial of such a table costs more than its cells: the boosting rounds, the date and
 category encodings and the folds are work per row; a table of nothing but text counts its own
-columns), or, for text, from its characters if that is more. When the data needs more than 1.5 times the longest time the assistant proposes (30
-minutes), which holds from about 15 million cells on (500,000 rows of 30 columns or fewer), its
-proposal warns that many models may be cut by time and each kind tried with few settings. A
-longer `max_runtime_secs` is allowed, and so
-is training on a part of the rows (made with **Split into train, valid and test**).
+columns), times the number of classes over ten (at most 30 times) for a classification target of
+more than ten classes, since a boosting round grows one tree per class, or, for text, from its
+characters if that is more. When the data needs more than 1.5 times the longest time the assistant
+proposes (30 minutes), which holds from about 15 million cells on (500,000 rows of 30 columns or
+fewer; 1.5 million with 100 classes), its proposal warns that many models may be cut by time and
+each kind tried with few settings. A longer `max_runtime_secs` is allowed, and so is training on a
+part of the rows (made with **Split into train, valid and test**).
 
 The first part is only learned from. The scores, the ensemble weights, the diagnostics and the
 cross-validation predictions cover the other parts; a row of the first part has no prediction
