@@ -1,37 +1,46 @@
 # The assistant
 
-The assistant answers questions about a project's datasets and models in plain language, and can
-suggest a training run that a person then confirms. It also exposes the same read-only tools
-to other programs over MCP.
+The assistant is an optional chat in the browser: it answers questions about a project's
+datasets and models in plain language, comments on pages, and can suggest a training run that a
+person then confirms. It is off unless a language model is set (below). Everything else in Fione
+works without it, the EasyML wizard's analysis, rating and explanations included. AI tools such as
+Claude Code or Codex use Fione over [MCP](mcp.md) with their own model, and need no assistant.
 
-The assistant reads, and only reads. (MCP clients can also start jobs when the administrator
-allows it; see MCP.) It cannot start a training, change a dataset or delete
+The assistant reads, and only reads. It cannot start a training, change a dataset or delete
 anything; a training it suggests starts only when someone who can edit the project presses
 the button on the suggestion.
 
 ## Setting it up
 
-The assistant needs a language model, from one of two providers (`FIONE_LLM_PROVIDER`):
+The assistant needs a language model, from one of two providers (`FIONE_LLM_PROVIDER`; `none`,
+the default, leaves it off):
 
-- `ollama` (the default): an [Ollama](https://ollama.com) server.
+- `ollama`: an [Ollama](https://ollama.com) server.
 - `claude`: Claude through the Anthropic API, with an API key. The client is written for the
   Claude 5 family of models (adaptive thinking; it sends the beta header that binds thinking
   blocks to the request that made them).
 
+While it is off, no page shows its chat, its comments or links to them, and the **System** page
+says it is off. A model setting without a provider (`FIONE_LLM_BASE_URL`, `FIONE_LLM_MODEL`,
+`FIONE_LLM_API_KEY`, `FIONE_LLM_EXTRA_BODY`, `FIONE_LLM_AUTO_PULL=true`) stops Fione at start.
+
 Nothing is installed with Fione and no model is bundled. Ways to set it up:
 
-- **macOS (the default).** Install the Ollama app on the Mac. The Compose stack reaches it at
+- **macOS.** Install the Ollama app on the Mac and set `FIONE_LLM_PROVIDER=ollama` in
+  `docker/.env`. The Compose stack reaches it at
   `http://host.docker.internal:11434/v1` and asks for `gemma4:12b-mlx`, which runs on the Mac's
   GPU (a container cannot use it, so Ollama runs on the host). Ollama's default context of
   4096 tokens is too small for the assistant's tools: start it with `OLLAMA_CONTEXT_LENGTH=16384`
   (see Ollama's FAQ for how to set it for the app). Then an administrator downloads the model
-  with the button on the **System** page. Nothing needs to be set in `docker/.env`.
+  with the button on the **System** page.
 - **Linux, or no Ollama on the host.** Run Ollama in Compose: uncomment the block "Linux, or no
-  Ollama on the host" in `docker/.env` (`COMPOSE_PROFILES=ollama`, `FIONE_LLM_BASE_URL`,
-  `FIONE_LLM_MODEL=gemma4:12b`, `FIONE_LLM_AUTO_PULL=true`) and start the stack as usual. It
+  Ollama on the host" in `docker/.env` (`FIONE_LLM_PROVIDER=ollama`, `COMPOSE_PROFILES=ollama`,
+  `FIONE_LLM_BASE_URL`, `FIONE_LLM_MODEL=gemma4:12b`, `FIONE_LLM_AUTO_PULL=true`) and start the
+  stack as usual. It
   runs on the CPU only, so answers are slow, and the image (about 3.8 GB) and the model
   (about 8 GB) are downloaded on the first start.
-- **Another Ollama server**: set `FIONE_LLM_BASE_URL` (ending in `/v1`) and `FIONE_LLM_MODEL`,
+- **Another Ollama server**: set `FIONE_LLM_PROVIDER=ollama`, `FIONE_LLM_BASE_URL` (ending in
+  `/v1`) and `FIONE_LLM_MODEL`,
   and `FIONE_LLM_API_KEY` if a proxy in front of it asks for one. The assistant turns the
   model's reasoning output off; change that with `FIONE_LLM_EXTRA_BODY`.
 - **Claude.** Set `FIONE_LLM_PROVIDER=claude` and `FIONE_LLM_API_KEY` (Fione refuses to start
@@ -74,7 +83,7 @@ administrator finishes the setup. A local Ollama (the host's Ollama, the `ollama
 
 The model download is about 8 GB. The System page shows its progress.
 
-When the assistant cannot answer (the server is not reachable, the model is missing or being
+When the assistant is set up but cannot answer (the server is not reachable, the model is missing or being
 downloaded, the API key is refused, or the consent is missing), every signed-in person sees a
 banner on each page that says why, with a link to the System page (to the setup page for the
 consent) for administrators and, inside a project, to its assistant for everyone else. The
@@ -134,7 +143,7 @@ the points of a curve, and the messages of a job, including the failure message 
 by any member of the project, without a question: the column names, statistics and example values
 it reads go to the same model host. All of it goes to the configured model server. Claude, and an
 Ollama on another machine, need an administrator's one-time consent first. MCP clients never receive
-example values (see MCP).
+example values (see [MCP](mcp.md)).
 
 With Claude, or an Ollama on another machine, the chat page and every assistant's comment show a
 warning with its host name.
@@ -267,122 +276,6 @@ calls a tool again when it needs the figures). The results of `describe_dataset`
 `find_table_links` end with the next call to make, because a small model asked for a proposal
 otherwise tends to answer in text, which cannot be confirmed. A proposal the model makes is
 acknowledged to it in a few lines; the card has the settings.
-
-## MCP
-
-Fione can serve the same read-only tools to MCP clients (an AI assistant or an editor that
-speaks MCP), and, with a second switch, tools that create projects, upload datasets, start jobs
-and predict (see below). It is **off by
-default**; set `FIONE_MCP_ENABLED=true` (in `docker/.env` for
-Compose). The endpoint is `/mcp` on Fione's own port, for example `http://127.0.0.1:8080/mcp`.
-
-1. Create an API token on the **Account** page.
-2. Give the client the URL and the header `Authorization: Bearer <the token>`. Many clients take
-   a configuration like this:
-
-   ```json
-   {"mcpServers": {"fione": {"type": "http", "url": "http://127.0.0.1:8080/mcp",
-                             "headers": {"Authorization": "Bearer <your token>"}}}}
-   ```
-
-The client acts as the token's owner and sees the projects that person can read: it can list
-projects, datasets and models and read their descriptions, results and explanations, and it can
-get a proposed training configuration or Join back, which is not saved. With the first switch alone
-it cannot start or change anything. It never receives example values. A token has the same rights as
-you, so keep it secret.
-Behind a reverse proxy, block `/mcp` unless you want MCP clients outside your network. At most
-two tool calls run at once.
-
-### Claude Code
-
-Claude Code takes the same URL and header:
-
-```
-claude mcp add --transport http fione http://127.0.0.1:8080/mcp \
-  --header "Authorization: Bearer <your token>"
-```
-
-Codex reads the token from an environment variable:
-
-```
-export FIONE_TOKEN=<your token>
-codex mcp add fione --url http://127.0.0.1:8080/mcp --bearer-token-env-var FIONE_TOKEN
-```
-
-### Starting jobs from an MCP client
-
-With `FIONE_MCP_WRITE_ENABLED=true` as well, the client also gets the tools below, as the
-token's user. `create_project` needs the role of an editor or an administrator; `upload_dataset`,
-`create_upload_url`, `start_training`, `start_batch_predict`, `run_module` and `cancel_job` need
-write access to the project (an owner or editor, as for the REST API); the others need only read
-access:
-
-| Tool | What it does |
-|---|---|
-| `create_project` | Creates a project the user owns and returns its `project_id`. |
-| `upload_dataset` | Adds a dataset (type `train`, `test` or `predict`) from CSV text sent inline, at most 512 KiB of UTF-8. |
-| `create_upload_url` | Returns a one-time URL for a CSV file of any size up to `FIONE_MAX_UPLOAD_BYTES`. |
-| `start_training`, `start_batch_predict`, `run_module` | Queue a job and return its `job_id`. `list_modules` gives each module's parameters. |
-| `get_job`, `wait_for_job`, `list_jobs` | Show a job's status and, once finished, its result (`model_id` of a training, `dataset_id` of a batch prediction); the newest 50 jobs. |
-| `cancel_job` | Cancels a queued or running job. |
-| `predict` | Predicts 1 to 1000 rows now, given as objects. |
-| `get_predictions` | Reads the predictions of a finished batch prediction, in pages. |
-
-They delete nothing, and no tool returns example values. Fione cannot ask a person to confirm, so the
-client's own approval step is the only one: the tools are marked as changing things so that a
-client asks. A token has the rights of its user; for a client that must not start jobs, use the
-token of a user who can only read.
-
-**Waiting for a job.** `wait_for_job` waits up to `timeout_secs` (default 10, at most 15) and
-returns the job with `done` set to whether it has finished; call it again while `done` is
-false. A waiting call holds one of the two MCP slots, which is why the wait is short. A job's
-`message` is not sent over MCP: it is `null` and `message_hidden` is `true`; the status and
-`get_training_events` tell what happened.
-
-**Uploading a dataset.** `upload_dataset` is for small files. For a larger one, a client that
-has a shell calls `create_upload_url` and sends the file with the `example` command it returns,
-`curl -T file.csv '<url>'` (an HTTP PUT of the raw CSV; no credentials are needed, so keep the
-URL private). The URL is valid for 15 minutes and for one successful upload: a failed upload (a
-CSV that does not parse, a file over the limit) does not use it up. It begins with
-`FIONE_PUBLIC_URL` when that is set, otherwise with the address of the request; behind a
-reverse proxy set `FIONE_PUBLIC_URL`, so that the URL is the public one. The URL carries the
-token: Fione's own logs and its access log hide it, but a proxy's access log records it, so
-redact paths that start with `/api/v1/uploads/` there.
-
-**Predicting.** `predict` takes `rows`, each an object with a value for every column the model
-reads (other keys are ignored), and returns one prediction per row in order: `predict` and, for
-classification, `p_<class>` for each class. The rows are not stored. The result must fit in
-32 KiB; a larger request is refused with about how many rows fit, and for more rows you
-upload a `predict` dataset, run `start_batch_predict` and read the result with
-`get_predictions`. `get_predictions` returns the prediction columns only, never the input
-values, `limit` rows at a time from `offset`; when the page is cut to fit 32 KiB, `truncated` is true
-and the next page starts at `offset` plus the rows returned.
-
-An example with Claude Code, which has a shell:
-
-1. `create_project` with a name.
-2. `create_upload_url` for that project (`name`, type `train`), then `curl -T train.csv '<url>'`
-   in the shell. The answer describes the dataset.
-3. `describe_dataset`, then `propose_training_config` with the `target` column.
-4. `start_training` with the proposed `config`, then `wait_for_job` with the returned `job_id`
-   until `done` is true; the finished job's result has the `model_id`.
-5. `get_leaderboard`, then `predict` with `rows` as objects,
-   one value for each column the model reads.
-
-An example with Claude Desktop, which has no shell: the same steps, but in step 2 call
-`upload_dataset` with the CSV text in `csv_text` (at most 512 KiB). For more rows than `predict`
-takes, call `upload_dataset` with type `predict`, `start_batch_predict`, `wait_for_job`, and then
-`get_predictions` with the result `dataset_id`.
-
-The result of `propose_join` has the keys `proposal` (`true`), `kind` (`join`), `config` (the
-parameters of the Join module), `warnings` and `rationale`, with the warnings as below.
-`propose_first_join` takes the project and `target`, the column to predict, and has the same
-keys and `dataset_id`, the base dataset it chose.
-
-The result of `propose_training_config` has the keys `proposal` (`true`), `config`,
-`ignored_suggestions`, `warnings` and `rationale`. Each warning is an object `{code, message, params}`: `message` is an English
-sentence, and `code` with `params` is what the Training proposal card translates. Each entry of
-`ignored_suggestions` is `{column, reason, code}`, with `reason` in English too.
 
 ## Troubleshooting
 

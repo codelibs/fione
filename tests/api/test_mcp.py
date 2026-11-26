@@ -9,7 +9,7 @@ from contextlib import closing
 
 import pytest
 
-from api_helpers import add_user, connect, iris_frame, login
+from api_helpers import ASSISTANT_OFF, add_user, connect, iris_frame, login
 from fione.auth import service as auth_service
 from fione.auth.roles import Role
 from fione.projects import service as projects
@@ -28,7 +28,7 @@ def rpc(method, params=None, id=1):
 
 @pytest.fixture
 def mcp(make_client):
-    client = make_client(mcp_enabled=True)
+    client = make_client(mcp_enabled=True, **ASSISTANT_OFF)  # MCP needs no assistant
     user = add_user(client, "ed", Role.EDITOR)
     return client, user
 

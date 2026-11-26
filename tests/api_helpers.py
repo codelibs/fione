@@ -19,6 +19,10 @@ PW = "password-123"
 CSV = b"a,b,label\n1,x,yes\n2,y,no\n3,x,yes\n4,z,no\n"
 
 
+# The settings of a Fione without the assistant (the default outside the tests).
+ASSISTANT_OFF = {"llm_provider": "none", "llm_base_url": ""}
+
+
 def make_settings(data_dir, **overrides) -> Settings:
     values = {
         "data_dir": data_dir,

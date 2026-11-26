@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from api_helpers import add_user, connect, iris_csv, iris_frame, login
+from api_helpers import ASSISTANT_OFF, add_user, connect, iris_csv, iris_frame, login
 from fione import i18n
 from fione.auth import service as auth
 from fione.auth.roles import Role
@@ -113,10 +113,11 @@ def owner(make_client):
 
 @pytest.fixture
 def runner_owner(make_client, monkeypatch):
-    """As ``owner``, with the job runner in process and fast training configs."""
+    """As ``owner``, with the job runner in process and fast training configs, and the
+    assistant off as by default: the whole flow needs no language model."""
     monkeypatch.delenv("FIONE_JOB_HANDLER_MODULES", raising=False)
     monkeypatch.setattr(easyml, "EASYML_CONFIG", FAST)
-    client = make_client(start_runner=True)
+    client = make_client(start_runner=True, **ASSISTANT_OFF)
     add_user(client, "ed", Role.EDITOR)
     csrf = login(client, "ed")
     r = client.post(
@@ -163,7 +164,7 @@ def test_the_iris_flow_ends_with_a_star_rating_and_a_prediction_download(runner_
     summary = client.get(summary_url).text
     assert 1 <= stars_of(summary) <= 5
     assert stars_of(summary) >= 4  # iris is easy: well above always guessing one species
-    assert "right about" in summary and "Assistant" in summary
+    assert "right about" in summary and "Guide" in summary
     assert "Enough models were tried" in summary  # max_models = 1
     assert "/api/v1/models/" in summary and "docker run" in summary
     model_id = summary_url.split("/")[-2]
@@ -1028,7 +1029,7 @@ def test_the_wizard_in_japanese_uses_the_product_terms(make_client):
     for term in ("データ分析", "予測する列", "入力する列", "最大実行時間", "実行"):
         assert term in analysis, term
     summary = world.client.get(world.path("/projects/{p}/models/{model}/summary"), headers=ja).text
-    assert "予測結果サマリー" in summary and "アシスタント" in summary
+    assert "予測結果サマリー" in summary and "ガイド" in summary
     assert re.search(r'aria-label="5 段階中 星 \d つ"', summary)
 
 

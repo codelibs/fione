@@ -165,6 +165,8 @@ def render(
             "static": _static,
             "version": __version__,
             "mode": ui_mode(request),
+            # Whether the assistant has a language model: off, no page shows it.
+            "assistant_on": request.app.state.settings.assistant_enabled,
             # The assistant's state, read by the banner of a full page only.
             "llm_snapshot": lambda: llm_status(request),
             **context,  # may override ``here``: where the language switch returns to
