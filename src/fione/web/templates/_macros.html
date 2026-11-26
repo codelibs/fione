@@ -93,7 +93,7 @@
 {% endmacro %}
 
 {% macro mascot(mood="happy", cls="mascot") %}
-{# The assistant, the guide: a friendly round face (decorative; the speech bubble says it all). #}
+{# The guide: a friendly round face (decorative; the speech bubble says it all). #}
 <svg class="{{ cls }} mascot-{{ mood }}" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true" focusable="false">
   <path class="mascot__antenna" d="M32 10V4" fill="none" stroke-width="2.5" stroke-linecap="round"/>
   <circle class="mascot__tip" cx="32" cy="4" r="3"/>
@@ -114,7 +114,7 @@
 {% endmacro %}
 
 {% macro guide(t, text, mood="happy") %}
-{# The assistant saying ``text``. #}
+{# The guide saying ``text``: rule-based words, no language model. #}
 <div class="guide">
   {{ mascot(mood) }}
   <div class="guide__bubble">

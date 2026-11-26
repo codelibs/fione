@@ -136,7 +136,7 @@
   "action.back_project": "Back to the project",
   "time.utc": "{time} UTC",
   "time.uploaded": "Uploaded {time} UTC",
-  "fione.name": "Assistant",
+  "fione.name": "Guide",
   "fione.message.1": "This model could not beat a simple guess yet. Check that the column to predict is the right one and that the input columns relate to it, then run again.",
   "fione.message.2": "The model is a little better than guessing. More rows, more useful columns or a longer run may help.",
   "fione.message.3": "Not bad! The model is useful. More data or a longer run may make it better still.",

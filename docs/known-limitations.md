@@ -203,7 +203,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
   the exact checks run. Scores use at most 10,000 rows, datasets under 200 rows are not
   scored, and after 3 s the check stops and says that some columns were not scored.
 - **A number computed from other columns is named, not left out.** For a number to predict that
-  is above 0, the assistant's proposal and the analysis page look for a number column and one or
+  is above 0, the training proposal and the analysis page look for a number column and one or
   two category columns (of 2 to 300 values, 20 rows per combination on average) such that, within
   each combination of the categories, the target is nearly a fixed multiple of the column (an
   amount times the rate of its currency and period). They warn that the target looks like the

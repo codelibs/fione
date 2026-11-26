@@ -113,5 +113,5 @@ keys and `dataset_id`, the base dataset it chose.
 
 The result of `propose_training_config` has the keys `proposal` (`true`), `config`,
 `ignored_suggestions`, `warnings` and `rationale`. Each warning is an object `{code, message, params}`: `message` is an English
-sentence, and `code` with `params` is what the Training proposal card translates. Each entry of
+sentence, and `code` with `params` name the warning in a form any language can be built from. Each entry of
 `ignored_suggestions` is `{column, reason, code}`, with `reason` in English too.
