@@ -35,6 +35,7 @@ from fione.engine.families import (
     LightGBM,
     Linear,
     LinearBoost,
+    OffsetBoost,
     TextLinear,
     TextModel,
     XGBoost,
@@ -111,9 +112,11 @@ def cap_threads(model: TrainedModel, threads: int = THREADS) -> TrainedModel:
             if _lowered(member.spec.n_jobs, threads):
                 member.spec.n_jobs = threads
             continue
-        for one in member.models:
-            if isinstance(one, TextModel):  # its linear model has no thread count
+        for fitted in member.models:
+            if isinstance(fitted, TextModel):  # its linear model has no thread count
                 continue
+            # LinearBoost: the trees boosted from the linear model's margin carry the count
+            one = fitted.booster if isinstance(fitted, OffsetBoost) else fitted
             if "n_jobs" in one.get_params() and _lowered(one.get_params()["n_jobs"], threads):
                 one.set_params(n_jobs=threads)  # not Ridge and the network, which have none
     return model

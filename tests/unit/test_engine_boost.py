@@ -1,6 +1,7 @@
 """LinearBoost: small trees boosted from a linear model's margin; the small-tree start trials."""
 
 import pickle
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -148,3 +149,18 @@ def test_explanations_count_the_width_of_the_linear_view():
         spec=FAMILIES["LinearBoost"]("classification", 2), models=[SimpleNamespace(linear=linear)]
     )
     assert _width(SimpleNamespace(members=[member]), 5) == 300
+
+
+def test_the_explain_job_caps_the_threads_of_its_trees():
+    df = _data(n=300)
+    X, y = df.drop(columns="y"), df["y"].to_numpy()
+    view = Prep().fit(X).linear(X)
+    spec = FAMILIES["LinearBoost"]("classification", 2)
+    spec.n_jobs = 8
+    model = spec.fit(
+        spec.defaults, view.iloc[:200], y[:200], view.iloc[200:], y[200:], Deadline(60)
+    )
+    before = spec.predict(model, view)
+    explain.cap_threads(SimpleNamespace(members=[SimpleNamespace(spec=spec, models=[model])]), 2)
+    assert model.booster.get_params()["n_jobs"] == 2
+    np.testing.assert_array_equal(spec.predict(model, view), before)
