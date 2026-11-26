@@ -582,8 +582,25 @@ def test_a_base_family_without_a_model_for_lack_of_time_is_reported(monkeypatch)
     assert [n["family"] for n in notices] == ["TextLinear"]
     message = notices[0]["message"]
     # Its first trial could have half of the 100 s (more than its share, about 24 s).
-    assert "did not finish in the search time it could have (50 s)" in message
-    assert "its folds need at least about 40 s" in message
+    # the least its folds take (40 s) is under that: the trial took longer than the 50 s
+    assert "the first trial took longer than the search time it could have (50 s)" in message
+    assert "though its folds need at least about 40 s" in message
+    assert "did not finish" not in message
+
+
+def test_the_message_of_a_family_without_time_does_not_contradict_the_time_it_needs():
+    from fione.engine.automl import _no_time_message
+
+    short = _no_time_message("CatBoost", 154, 19613)  # the least it takes is far over the time
+    assert "did not finish in the search time it could have (154 s)" in short
+    assert "its folds need at least about 19613 s" in short
+    over = _no_time_message("RandomForest", 106, 96)  # the least fits, the trial was slower
+    assert "took longer than the search time it could have (106 s)" in over
+    assert "though its folds need at least about 96 s" in over
+    assert "did not finish" not in over
+    equal = _no_time_message("XGBoost", 90, 90)
+    assert "took longer" in equal
+    assert _no_time_message("TextLinear", 12, None).endswith("(12 s) was too short")
 
 
 def test_a_first_trial_may_take_half_of_the_time_left_but_a_late_family_gets_its_share(
