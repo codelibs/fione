@@ -304,6 +304,32 @@ def test_training_needs_a_train_dataset_of_the_project(env):
     assert viewer.status_code == 403
 
 
+def test_extra_datasets_are_checked_and_queued_with_the_job(env):
+    url = f"/api/v1/projects/{env.p}/jobs/automl"
+    other = upload(env.client, env.p, iris_csv(), name="more", headers=env.h["owner"]).json()["id"]
+    test_set = upload(env.client, env.p, iris_csv(), type="test", headers=env.h["owner"])
+    cases = [
+        ({"extra_dataset_ids": [env.dq]}, 404),  # another project's
+        ({"extra_dataset_ids": [test_set.json()["id"]]}, 422),  # not a train dataset
+        ({"extra_dataset_ids": [env.d]}, 422),  # the main dataset itself
+        ({"extra_dataset_ids": [2**63]}, 422),
+        ({"extra_dataset_ids": list(range(1, 13))}, 422),  # too many
+    ]
+    for extra, status in cases:
+        body = {"dataset_id": env.d, "config": FAST_CONFIG, **extra}
+        r = env.client.post(url, json=body, headers=env.h["owner"])
+        assert r.status_code == status, (extra, r.text)
+    assert job_count(env) == 0
+    body = {"dataset_id": env.d, "config": FAST_CONFIG, "extra_dataset_ids": [other, other]}
+    r = env.client.post(url, json=body, headers=env.h["owner"])
+    assert r.status_code == 201
+    assert r.json()["payload"]["extra_dataset_ids"] == [other]  # once
+    r = env.client.post(
+        url, json={"dataset_id": env.d, "config": FAST_CONFIG}, headers=env.h["owner"]
+    )
+    assert "extra_dataset_ids" not in r.json()["payload"]
+
+
 def test_batch_predict_checks_the_model_dataset_and_columns(env):
     model = a_model(env, env.p)
     other = a_model(env, env.q)

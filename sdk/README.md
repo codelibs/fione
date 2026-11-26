@@ -54,8 +54,10 @@ print(fione.models(project["id"]))  # one row per model of the project
 predictions = fione.predict(project["id"], model_id, new_rows)  # a "predict" column
 ```
 
-- `train(project_id, dataset_id, target, *, name=None, **config)` takes the other training
-  options as keyword arguments. The dataset must be a `train` dataset.
+- `train(project_id, dataset_id, target, *, name=None, extra_dataset_ids=None, **config)` takes
+  the other training options as keyword arguments. The dataset must be a `train` dataset;
+  `extra_dataset_ids` are other `train` datasets whose rows are only learned from, never
+  validated.
 - `wait(timeout=None, poll=1.0, max_poll=10.0)` polls, doubling the interval up to
   `max_poll`. It raises `fione_sdk.JobFailed` (a `FioneError`) when the job failed or was
   cancelled: `code` is `"failed"` or `"cancelled"`, `message` the job's message, `job` the

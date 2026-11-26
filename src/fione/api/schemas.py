@@ -94,6 +94,7 @@ class AutomlIn(Body):
     dataset_id: DbId
     config: dict[str, Any]  # a TrainConfig; checked by models.service.submit_training
     name: Name | None = None
+    extra_dataset_ids: list[DbId] | None = None  # train datasets that are only learned from
 
 
 class BatchPredictIn(Body):
