@@ -221,11 +221,11 @@ class RunForm:
 
 
 def join_targets(datasets: list[Dataset]) -> list[tuple[str, list[str]]]:
-    """The columns a join can be proposed for, by train dataset (name, columns): none when
-    the project has fewer than two datasets, so there is nothing to join."""
-    if len(datasets) < 2:
-        return []
-    return [(d.name, _names(d)) for d in datasets if d.type == DatasetType.TRAIN]
+    """The columns a join can be proposed for, by train dataset (name, columns): none unless
+    the project has two train datasets (another table is uploaded as one; the test data and
+    the predictions of one table are not tables to join)."""
+    trains = [d for d in datasets if d.type == DatasetType.TRAIN]
+    return [(d.name, _names(d)) for d in trains] if len(trains) >= 2 else []
 
 
 def _default_target(names: list[str], kinds: dict[str, str]) -> str:

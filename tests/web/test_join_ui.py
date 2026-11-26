@@ -80,13 +80,14 @@ def shown(html: str) -> str:
 # --- where the button is ------------------------------------------------------------------
 
 
-def test_the_button_shows_only_with_two_datasets(make_client):
+def test_the_button_shows_only_with_two_train_datasets(make_client):
     client = make_client(**ASSISTANT_OFF)
     owner = add_user(client, "ed", Role.EDITOR)
     with closing(connect(client)) as conn:
         pid = projects.create_project(conn, owner, "Shop").id
     login(client, "ed")
     ingest(client, pid, "customers", CUSTOMERS)
+    ingest(client, pid, "customers_test", CUSTOMERS, DatasetType.TEST)  # one table's test data
     for page in (f"/projects/{pid}", f"/projects/{pid}/datasets"):
         html = client.get(page).text
         assert "data-join-form" not in html and "Propose a join" not in html
