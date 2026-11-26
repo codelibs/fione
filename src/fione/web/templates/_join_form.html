@@ -1,0 +1,27 @@
+{# Asks for the first join of the project's datasets for a column to predict (``join_targets``:
+   the columns of each train dataset). The link search can take 30 seconds, so the proposal is
+   loaded into #join-proposal after the page; without JavaScript the form opens it as a page. #}
+<section class="card card-padded stack-tight" aria-labelledby="join-title" data-join-form>
+  <h2 class="section-header__title" id="join-title">{{ t('join.title') }}</h2>
+  <p class="text-muted text-sm">{{ t('join.lead') }}</p>
+  <form class="stack-tight" method="get" action="/projects/{{ ctx.project.id }}/join" hx-get="/projects/{{ ctx.project.id }}/join" hx-target="#join-proposal" hx-swap="innerHTML">
+    <div class="field">
+      <label class="field__label" for="join-target">{{ t('analysis.target_label') }}</label>
+      <div class="cluster">
+        <select class="input" id="join-target" name="target" required>
+          <option value="">{{ t('join.choose') }}</option>
+          {% for name, columns in join_targets %}
+          <optgroup label="{{ name }}">
+            {% for column in columns %}
+            <option value="{{ column }}">{{ column }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-secondary"><span class="spinner" aria-hidden="true"></span>{{ t('join.propose') }}</button>
+      </div>
+    </div>
+    <p class="htmx-indicator text-muted text-sm">{{ t('join.searching') }}</p>
+  </form>
+  <div id="join-proposal" aria-live="polite"></div>
+</section>

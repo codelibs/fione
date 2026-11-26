@@ -97,5 +97,7 @@
     <p class="empty-line text-muted">{{ t('project.datasets_empty') }}</p>
     {% endif %}
   </section>
+
+  {% if join_targets %}{% include "_join_form.html" %}{% endif %}
 </div>
 {% endblock %}
