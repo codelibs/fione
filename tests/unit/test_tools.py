@@ -1310,6 +1310,129 @@ def test_propose_says_a_whole_number_target_may_be_classes_and_keeps_the_task(en
     assert "integer_labels" not in codes(counts)
 
 
+def _survival_table(n=2000, seed=0, target="futime", flag="death"):
+    """People followed for some days; ``death`` is 1 when they died by the end, else the follow-up
+    ended first (27% of them died); the days are skewed."""
+    rng = np.random.default_rng(seed)
+    age = rng.integers(50, 95, n)
+    days = np.round(rng.gamma(2.0, 1500, n) * np.exp(-(age - 70) / 40)).astype(int)
+    return pd.DataFrame(
+        {
+            "age": age,
+            "x": rng.normal(size=n),
+            target: days,
+            flag: (rng.random(n) < 0.27).astype(int),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "flag", "found"),
+    [
+        ("futime", "death", "death"),
+        ("duration_days", "churned", None),  # a duration in days is not named like a time here
+        ("duration", "churned", "churned"),
+        ("Tenure", "Exited", "Exited"),
+        ("survival_time", "is_dead", "is_dead"),
+        ("followUpTime", "event", "event"),
+        ("time_to_failure", "failed", "failed"),
+        ("futime", "status", "status"),  # `status` counts next to a strong time name
+        ("futime", "outcome", None),  # a column not named like an event
+        ("price", "death", None),  # a target not named like a time
+        ("deadline_days", "is_dead", None),
+        ("overtime", "prevented", None),
+        ("time_of_day", "status", None),
+        ("lifetime_value", "churn", None),
+        ("time", "status", None),  # `status` alone is too weak
+    ],
+)
+def test_a_time_target_next_to_an_event_flag_is_found_by_the_names(target, flag, found):
+    frame = _survival_table(target=target, flag=flag)
+    got = builtin.survival_event_column(
+        profile_dataset(frame, target), target, frame[target], "regression"
+    )
+    assert got == found
+
+
+def test_a_survival_hint_needs_a_flag_of_0_and_1_and_a_time_of_0_or_more():
+    frame = _survival_table()
+    profile = profile_dataset(frame, "futime")
+
+    def found(f, task="regression", target="futime"):
+        return builtin.survival_event_column(profile_dataset(f, target), target, f[target], task)
+
+    assert found(frame.assign(death=frame.death * 2)) is None  # 0 and 2
+    assert (
+        found(frame.assign(death=(frame.death + (frame.x > 1) * 0.5).clip(0, 1))) is None
+    )  # 0, 0.5, 1
+    assert found(frame.assign(death=0)) is None  # no event at all
+    assert (
+        found(frame.assign(death=frame.death.astype(float).where(frame.index > 5))) is None
+    )  # missing
+    assert found(frame.assign(death=np.where(frame.death == 1, "dead", "alive"))) is None
+    assert found(frame.assign(futime=frame.futime - 100)) is None  # a negative time
+    assert found(frame.assign(futime=frame.futime % 15)) is None  # 15 values: a class
+    assert builtin.survival_event_column(profile, "futime", frame.futime, "classification") is None
+
+
+def test_propose_names_the_event_column_of_a_time_target_and_changes_nothing(env):
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "follow_up", DatasetType.TRAIN, [_survival_table()]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "futime"})
+    assert "survival_event" in codes(result)  # translated in both languages
+    warning = next(w for w in result["warnings"] if w["code"] == "survival_event")
+    assert warning["params"] == {"column": "death"} and "event_column" in warning["message"]
+    assert result["config"]["event_column"] is None and result["config"]["task"] == "regression"
+    other = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "age"})
+    assert "survival_event" not in codes(other)
+
+
+def test_propose_refuses_an_event_column_with_missing_values_or_without_an_event(env):
+    frame = _survival_table().assign(
+        gaps=lambda d: d.death.astype(float).where(d.index > 5), none=0
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "ev_bad", DatasetType.TRAIN, [frame]
+    )
+    for column, text in (("gaps", "must hold only 0"), ("none", "has no event")):
+        with pytest.raises(ToolError, match=text):
+            call(
+                env,
+                "propose_training_config",
+                {"dataset_id": ds.id, "target": "futime", "event_column": column},
+            )
+
+
+def test_propose_sets_the_event_column_when_asked_and_checks_it(env):
+    ds = ingest.ingest_batches(
+        env.storage,
+        env.conn,
+        env.project.id,
+        "follow_up_ev",
+        DatasetType.TRAIN,
+        [_survival_table()],
+    )
+    args = {"dataset_id": ds.id, "target": "futime", "event_column": "death"}
+    result = call(env, "propose_training_config", args)
+    assert result["config"]["event_column"] == "death" and result["config"]["sort_metric"] == "auto"
+    found = codes(result)
+    assert "survival_event" not in found and "skewed_target" not in found
+    named = call(env, "propose_training_config", {**args, "sort_metric": "concordance"})
+    assert named["config"]["sort_metric"] == "concordance"  # the metric a survival run allows
+    assert TrainConfig.from_dict(result["config"]).validate()  # the config trains as proposed
+    for bad, text in (
+        ({"event_column": "futime"}, "other than the target"),
+        ({"event_column": "age"}, "must hold only 0"),
+        ({"event_column": "death", "target": "death"}, "other than the target"),
+        ({"event_column": "death", "target": "x"}, "0 or more"),
+        ({"event_column": "nope"}, "column"),
+        ({"sort_metric": "rmse"}, "must be auto or concordance"),
+    ):
+        with pytest.raises(ToolError, match=text):
+            call(env, "propose_training_config", {**args, **bad})
+
+
 def test_the_recommended_metric_follows_the_problem():
     rare = pd.Series([0] * 95 + [1] * 5)
     assert builtin.recommended_metric(rare, "classification") == "aucpr"
