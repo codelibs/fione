@@ -637,6 +637,40 @@ def test_a_repeated_id_the_test_data_holds_too_is_not_suggested_for_grouping(own
     assert "looks like an ID that appears in several rows" not in page
 
 
+def _persons_by_waves(waves, first_wave=1, rows=10, per_wave=30):
+    """Dates of persons in blocks: ``id`` restarts in every wave, ``iid`` is the person."""
+    wave = np.repeat(np.arange(first_wave, first_wave + waves), per_wave * rows)
+    number = np.tile(np.repeat(np.arange(1, per_wave + 1), rows), waves)
+    rng = np.random.default_rng(first_wave)
+    return pd.DataFrame(
+        {"wave": wave, "id": number, "iid": wave * 100 + number, "x": rng.normal(size=len(wave))}
+    ).assign(label=rng.integers(0, 2, len(wave)))
+
+
+def _add_test_dataset(owner, frame):
+    from fione.projects.ingest import ingest_csv
+    from fione.projects.service import DatasetType
+
+    client, pid, _ = owner
+    with closing(connect(client)) as conn:
+        content = io.BytesIO(frame.to_csv(index=False).encode())
+        ingest_csv(client.app.state.storage, conn, pid, "later", DatasetType.TEST, content)
+
+
+def test_the_tip_names_the_person_not_the_number_inside_a_block_for_other_test_persons(owner):
+    _add_test_dataset(owner, _persons_by_waves(2, first_wave=9).drop(columns="label"))
+    page = tips_page(owner, _persons_by_waves(8))
+    assert "looks like an ID that appears in several rows" in page and "“iid”" in page
+    assert "has a value that the training data has too" not in page
+
+
+def test_the_tip_keeps_the_first_column_the_test_data_repeats_when_another_is_lacking(owner):
+    train = _persons_by_waves(8)
+    _add_test_dataset(owner, train.drop(columns=["label", "iid"]))  # lacks `iid`, repeats `id`
+    page = tips_page(owner, train)
+    assert "has a value that the training data has too" in page and "“id”" in page
+
+
 def test_the_tips_are_for_the_detailed_view_where_the_settings_are(owner):
     rare = pd.Series(["a"] * 380 + ["b"] * 20)
     assert "rarest class" not in tips_page(owner, tip_frame(rare), detailed=False)

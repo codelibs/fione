@@ -606,6 +606,7 @@ rarest value, so its rows look like a very small group, and the validation, whos
 counted too, cannot show that: leave the group column out when the rows to predict hold other groups.
 The training proposal sets the column itself when the project has a test dataset that holds it and at
 most 10% of the test rows have a value the training rows hold (it warns instead when 90% or more do).
+Of several repeated columns named like an identifier (`id`, `user_id`, or an id fused to the initial of what it numbers: `iid`, `pid`, `uid`), it takes the first whose values the test data does not repeat, as a person's `iid` against a subject number `id` that restarts in every block of the data; if none is, the first.
 It proposes a repeated column that the project's test datasets all lack as well (and leaves it out of the inputs): the test rows cannot be matched to the training rows by it.
 A training run says so when such a column holds codes (values of 8 characters or more with a digit
 and no space) on about 3 rows or more each, and holds at least 5% of what the model relies on. It also says so when the group

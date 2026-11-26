@@ -2916,6 +2916,154 @@ def test_a_column_named_like_an_identifier_comes_before_one_named_for_the_entity
     )
 
 
+@pytest.mark.parametrize(
+    ("name", "named"),
+    [
+        ("iid", True),
+        ("pid", True),
+        ("uid", True),
+        ("user_iid", True),
+        ("id", True),
+        ("pid2", True),
+        ("PID", True),
+        ("UID", True),
+        ("Pid", True),
+        ("IID", True),
+        ("Uid", True),
+        ("kid", False),
+        ("bid", False),
+        ("mid", False),
+        ("paid", False),
+        ("valid", False),
+        ("Tidy", False),
+        ("Cider", False),
+        ("Paid", False),
+        ("Valid", False),
+        ("Squid", False),
+        ("Said", False),
+        ("Void", False),
+        ("Acid", False),
+    ],
+)
+def test_an_id_fused_to_the_initial_of_what_it_numbers_is_named_like_an_identifier(name, named):
+    assert bool(builtin._IDENTIFIER.search(name)) is named
+
+
+def _persons_by_waves(waves, first_wave=1, rows=10, per_wave=30, seed=0):
+    """Dates of persons met in blocks (waves): ``id`` numbers the person inside a wave (1 to 30 in
+    every wave), ``iid`` the person in the whole data."""
+    rng = np.random.default_rng(seed + first_wave)
+    wave = np.repeat(np.arange(first_wave, first_wave + waves), per_wave * rows)
+    number = np.tile(np.repeat(np.arange(1, per_wave + 1), rows), waves)
+    return pd.DataFrame(
+        {
+            "wave": wave,
+            "id": number,
+            "iid": wave * 100 + number,
+            "x": rng.normal(size=len(wave)),
+            "match": rng.integers(0, 2, len(wave)),
+        }
+    )
+
+
+def _ingest_persons(env, name, kind, frame):
+    return ingest.ingest_batches(env.storage, env.conn, env.project.id, name, kind, [frame])
+
+
+def test_propose_groups_by_the_person_not_the_number_inside_a_block_for_other_test_persons(
+    env,
+):
+    train = _ingest_persons(env, "dates", DatasetType.TRAIN, _persons_by_waves(8))
+    test = _ingest_persons(
+        env,
+        "later_dates",
+        DatasetType.TEST,
+        _persons_by_waves(2, first_wave=9).drop(columns="match"),
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": train.id, "target": "match"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+        projects.delete_dataset(env.conn, env.storage, train.id)
+    found = codes(result)
+    assert "group_column_for_test" in found and "repeated_id_in_test" not in found
+    warning = next(w for w in result["warnings"] if w["code"] == "group_column_for_test")
+    assert warning["params"]["column"] == "iid" and result["config"]["cv_group_column"] == "iid"
+
+
+def test_propose_keeps_the_first_repeated_column_when_every_one_repeats_in_the_test_data(env):
+    frame = _persons_by_waves(8)
+    train = _ingest_persons(env, "dates_same", DatasetType.TRAIN, frame)
+    test = _ingest_persons(env, "same_dates", DatasetType.TEST, frame.drop(columns="match"))
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": train.id, "target": "match"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+        projects.delete_dataset(env.conn, env.storage, train.id)
+    warning = next(w for w in result["warnings"] if w["code"] == "repeated_id_in_test")
+    assert warning["params"]["column"] == "id" and result["config"]["cv_group_column"] is None
+
+
+def _two_ids(n_ids=40, rows=10, seed=0):
+    """``id`` and ``user_id`` both repeat over rows (40 values on 10 rows each)."""
+    rng = np.random.default_rng(seed)
+    ids = np.repeat(np.arange(n_ids), rows)
+    return pd.DataFrame(
+        {
+            "id": ids,
+            "user_id": (ids * 7) % n_ids + 100,
+            "x": rng.normal(size=len(ids)),
+            "y": ids % 2,
+        }
+    )
+
+
+def _propose_with_test(env, name, train, test):
+    return _propose_with_test_target(env, name, train, test, target="y")
+
+
+def test_a_column_the_test_data_lacks_does_not_replace_a_first_one_the_test_data_repeats(env):
+    train = _two_ids()
+    result = _propose_with_test(env, "two_ids", train, train.drop(columns=["user_id", "y"]))
+    warning = next(w for w in result["warnings"] if w["code"] == "repeated_id_in_test")
+    assert warning["params"]["column"] == "id" and result["config"]["cv_group_column"] is None
+
+
+def test_a_first_column_the_test_data_lacks_stays_the_choice(env):
+    train = _two_ids()
+    result = _propose_with_test(env, "two_ids_lack", train, train.drop(columns=["id", "y"]))
+    assert "group_column_not_in_test" in codes(result)
+    assert result["config"]["cv_group_column"] == "id"
+
+
+def test_a_later_column_the_test_data_holds_other_values_of_is_chosen_not_a_lacking_later_one(env):
+    # `iid` is not first (after `id`); a third column `uid` is lacking in the test data
+    train = _persons_by_waves(8).assign(uid=lambda d: d.iid * 3)
+    test = _persons_by_waves(2, first_wave=9).drop(columns="match")
+    result = _propose_with_test_target(env, "lacking_later", train, test)
+    assert result["config"]["cv_group_column"] == "iid"
+
+
+def _propose_with_test_target(env, name, train, test, target="match"):
+    train_ds = _ingest_persons(env, name, DatasetType.TRAIN, train)
+    test_ds = _ingest_persons(env, name + "_test", DatasetType.TEST, test)
+    try:
+        return call(env, "propose_training_config", {"dataset_id": train_ds.id, "target": target})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test_ds.id)
+        projects.delete_dataset(env.conn, env.storage, train_ds.id)
+
+
+def test_text_ids_in_the_test_data_are_compared_with_the_numbers_of_the_training_rows(env):
+    train = _persons_by_waves(8)
+    test = _persons_by_waves(2, first_wave=1).drop(columns="match")  # the same persons
+    test = test.assign(id=test.id.astype(str), iid=test.iid.astype(str))
+    result = _propose_with_test_target(env, "text_ids", train, test)
+    found = codes(result)
+    assert "repeated_id_in_test" in found and "group_column_for_test" not in found
+    assert result["config"]["cv_group_column"] is None
+
+
 def test_a_column_that_names_the_target_of_a_few_rows_each_is_found_by_its_values_not_its_name():
     """Households of three rows share their label: a column of codes, named for nothing, that
     gives the label away on its own is the group to keep together. Where the label does not follow
