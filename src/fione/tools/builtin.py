@@ -706,7 +706,7 @@ SECS_PER_TEXT_CHAR = 2.8e-5
 # it took with 10 classes (each family within 25 % of that), so the table term counts
 # ``classes / CLASS_COST_FROM`` times, up to ``MAX_CLASS_FACTOR``.
 CLASS_COST_FROM = 10
-MAX_CLASS_FACTOR = 10
+MAX_CLASS_FACTOR = 30  # the 30 measured at 355 classes; more classes are not measured
 MAX_RUNTIME_SECS = 1800
 MIN_RUNTIME_SECS = 120
 # The proposal warns when the run time it proposes is capped at MAX_RUNTIME_SECS and the data

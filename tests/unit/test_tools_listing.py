@@ -899,10 +899,22 @@ def test_the_run_time_need_of_a_text_grows_with_the_classes_to_tell_apart():
 
 @pytest.mark.parametrize(
     ("classes", "factor"),
-    [(0, 1), (1, 1), (2, 1), (3, 1), (10, 1), (11, 1.1), (20, 2), (50, 5), (100, 10), (355, 10)],
+    [
+        (0, 1),
+        (1, 1),
+        (2, 1),
+        (3, 1),
+        (10, 1),
+        (11, 1.1),
+        (20, 2),
+        (50, 5),
+        (100, 10),
+        (355, 30),
+        (1000, 30),
+    ],
 )
 def test_the_run_time_need_of_a_table_grows_with_the_classes_past_ten(classes, factor):
-    # a boosting round grows one tree per class: the cells count classes / 10 times, at most 10
+    # a boosting round grows one tree per class: the cells count classes / 10 times, at most 30
     dataset = SimpleNamespace(n_rows=100_000, n_cols=61)
     base = 100_000 * 60 * builtin.SECS_PER_CELL * builtin.TRIALS_WANTED
     assert runtime_need_secs(dataset, None, classes) == pytest.approx(factor * base)
