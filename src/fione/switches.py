@@ -32,8 +32,11 @@ class McpSwitches:
         return self.enabled and self.writes_allowed and self.stored_writes
 
 
-def mcp_switches(conn: sqlite3.Connection, settings: Settings) -> McpSwitches:
-    stored = dict(conn.execute("SELECT name, enabled FROM switches").fetchall())
+def mcp_switches(conn: sqlite3.Connection | None, settings: Settings) -> McpSwitches:
+    """The switches; without ``conn`` the stored ones count as on (for a caller that knows the
+    settings keep MCP off whatever is stored)."""
+    rows = conn.execute("SELECT name, enabled FROM switches").fetchall() if conn else []
+    stored = dict(rows)
     return McpSwitches(
         allowed=settings.mcp_enabled,
         writes_allowed=settings.mcp_write_enabled,

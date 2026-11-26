@@ -1,8 +1,8 @@
 """The MCP workflow tools: create a project, upload a dataset inline, follow and cancel jobs,
 and predict, as the token's user with the access the REST routes ask for (create a project as
 an editor, write to upload or cancel, read to look or predict). Like the other action tools,
-they are for MCP clients only and only when ``FIONE_MCP_WRITE_ENABLED`` is set; the chat never
-lists them."""
+they are for MCP clients only and only while MCP's tools that change things are on
+(``fione.switches.McpSwitches.writes``); the chat never lists them."""
 
 import io
 import json

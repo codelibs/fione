@@ -1,4 +1,5 @@
-"""Tools that start work, for MCP clients only and only when ``FIONE_MCP_WRITE_ENABLED`` is set.
+"""Tools that start work, for MCP clients only and only while MCP's tools that change things are
+on (``fione.switches.McpSwitches.writes``).
 
 Each calls the service the REST route calls, as the token's user: the same checks, the same
 write access to the project, the same job. The chat assistant never lists or calls them."""

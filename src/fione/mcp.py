@@ -1,10 +1,11 @@
 """A minimal, stateless MCP endpoint (Streamable HTTP, JSON-RPC over POST) for the assistant's
-read-only tools and, when allowed, the action tools, at ``/mcp`` on Fione's own port. Off unless
-``FIONE_MCP_ENABLED`` is set.
+read-only tools and, when allowed, the action tools, at ``/mcp`` on Fione's own port. On unless
+``FIONE_MCP_ENABLED`` is false or an administrator switched it off (``fione.switches``).
 
 Only an API token (``Authorization: Bearer``) opens it: cookies are never read. It lists and
 calls the registry's tools as the token's user and nothing else: no stored proposals, and never
-example values from a dataset. With ``FIONE_MCP_WRITE_ENABLED`` it also has the action tools,
+example values from a dataset. While its tools that change things are on
+(``fione.switches.McpSwitches.writes``) it also has the action tools,
 which queue jobs where the token's user has write access; they delete nothing.
 """
 
@@ -100,11 +101,21 @@ def _accepts_json(request: Request) -> bool:
     return accept is None or "application/json" in accept or "*/*" in accept
 
 
+def _switches(request: Request):
+    settings = request.app.state.settings
+    if not settings.mcp_enabled:  # off for good: no database read
+        return mcp_switches(None, settings)
+    with closing(db.connect(request.app.state.db_path)) as conn:
+        return mcp_switches(conn, settings)
+
+
 async def mcp_endpoint(request: Request) -> Response:
     """Answer one JSON-RPC message. The body is read here (``BodyLimit`` caps it while it is
     received); everything after runs in a worker thread, off the event loop."""
-    if not request.app.state.settings.mcp_enabled:
+    switches = await run_in_threadpool(_switches, request)
+    if not switches.enabled:  # by the settings, or switched off on the System page
         return Response(status_code=404)
+    request.state.mcp_writes = switches.writes
     if request.method != "POST":
         return Response(status_code=405, headers={"Allow": "POST"})
     body = await request.body()
@@ -126,10 +137,6 @@ def _handle(request: Request, body: bytes) -> Response:
     if origin is not None and not _origin_allowed(origin, settings.public_url):
         return Response(status_code=403)
     with closing(db.connect(request.app.state.db_path)) as conn:
-        switches = mcp_switches(conn, settings)
-        if not switches.enabled:  # switched off on the System page
-            return Response(status_code=404)
-        request.state.mcp_writes = switches.writes
         token = _bearer(request)
         user = auth_service.user_from_token(conn, token) if token else None
         if user is None:
