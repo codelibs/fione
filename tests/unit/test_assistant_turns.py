@@ -830,9 +830,9 @@ def test_budget_drops_old_rounds(env, fake_llm):
     for n in range(30):
         add_history_round(env.conn, env.conversation.id, n, 5000)
     fake = fake_llm([describe(env.iris.id), {"text": "ok"}])
-    settings = settings_for(env, fake, llm_context_tokens=5800, llm_max_tokens=256)
+    settings = settings_for(env, fake, llm_context_tokens=5950, llm_max_tokens=256)
     turn(env, settings, "The newest question")
-    budget = budget_bytes(5800, 256, list_tools())
+    budget = budget_bytes(5950, 256, list_tools())
     assert len(fake.requests) == 2
     for request in fake.requests:
         messages = request["messages"]

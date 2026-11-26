@@ -552,6 +552,121 @@ def test_tuned_decision_for_qwk_fits_cut_points_for_ordered_classes(monkeypatch)
     assert ensemble == pytest.approx(model.metrics["qwk"])
 
 
+COSTS = {"decision": "cost", "cost_miss": 20.0, "cost_false_alarm": 1.0}
+
+
+def test_cost_decision_predicts_at_the_threshold_of_the_lowest_cost(monkeypatch):
+    df = _binary(4_000, weights=[0.95], class_sep=0.6, flip_y=0.01)
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    fit = {"families": ["LightGBM"], "target": "y", "max_models": 1}  # the metric is log loss
+    events = []
+    plain = _fit(df, **fit)
+    model = _fit(df, events, keep_cv_predictions=True, **COSTS, **fit)
+    t = model.class_prior[1]
+    assert 0 < t < 0.5 and model.class_prior[0] == pytest.approx(1 - t)  # a miss costs more
+    proba = model.predict_proba(df).to_numpy()
+    assert (model.predict(df) == (proba[:, 1] > t).astype(int)).all()
+    np.testing.assert_allclose(proba, plain.predict_proba(df).to_numpy(), atol=0.1)
+    # the threshold is the cheapest of all, on the validation predictions the scores are
+    truth, p1 = df["y"].to_numpy(), model.cv_predictions[:, 1]
+
+    def cost(at):
+        return (20.0 * ((truth == 1) & (p1 <= at)) + 1.0 * ((truth == 0) & (p1 > at))).mean()
+
+    cuts = np.concatenate([[1.0], np.unique(p1)[::-1], [0.0]])
+    cheapest = min(cost(at) for at in (cuts[:-1] + cuts[1:]) / 2)
+    assert cost(t) == pytest.approx(cheapest)
+    assert cost(t) < cost(0.5)
+    notice = [
+        e.data for e in events if e.type == "notice" and e.data.get("kind") == "decision_cost"
+    ]
+    assert len(notice) == 1
+    assert notice[0]["threshold"] == pytest.approx(t)
+    assert notice[0]["cost_per_row"] == pytest.approx(cost(t))
+    assert notice[0]["cost_per_row_argmax"] == pytest.approx(cost(0.5))
+    # the rule is the model's: the accuracy and the confusion matrix follow it
+    assert model.metrics["accuracy"] == pytest.approx(((p1 > t).astype(int) == truth).mean())
+    assert plain.class_prior is None
+
+
+def test_cost_decision_does_not_need_a_metric_that_counts_right_answers_and_leaves_the_ranking(
+    monkeypatch,
+):
+    df = _binary(1_500, weights=[0.9], flip_y=0.02)
+    monkeypatch.setattr(automl_module, "BAG_EXTRA", 0)
+    fit = {"families": ["LightGBM"], "target": "y", "max_models": 1, "keep_cv_predictions": True}
+    plain = _fit(df, sort_metric="auc", **fit)
+    model = _fit(df, sort_metric="auc", **COSTS, **fit)
+    with pytest.raises(ConfigError, match="sort_metric"):  # tuned needs a metric of right answers
+        _fit(df, sort_metric="auc", **{**fit, "decision": "tuned"})
+    assert _fit(df, sort_metric="f1", **COSTS, **fit).class_prior is not None
+    # the models are ranked by the metric, which does not depend on the threshold
+    assert model.metrics["auc"] == pytest.approx(plain.metrics["auc"])
+    board = model.leaderboard.set_index("model")["cv_score"]
+    np.testing.assert_allclose(
+        board.to_numpy(),
+        plain.leaderboard.set_index("model")["cv_score"].reindex(board.index).to_numpy(),
+    )
+
+
+def test_cost_decision_follows_the_probabilities_delivered_when_they_are_shifted():
+    df = _binary(1_500, weights=[0.9], flip_y=0.02)
+    model = _fit(
+        df,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        sort_metric="balanced_logloss",
+        **COSTS,
+    )
+    t = model.class_prior[1]
+    assert model.proba_shift is not None
+    proba = model.predict_proba(df).to_numpy()
+    assert (model.predict(df) == (proba[:, 1] > t).astype(int)).all()
+
+
+def test_cost_decision_misses_are_the_class_listed_last_and_the_notice_names_it():
+    df = _binary(1_500, weights=[0.9], flip_y=0.02)  # 1 is the rarer class
+    df["y"] = df["y"].map({0: "legit", 1: "fraud"})  # sorted: fraud, legit; legit is the miss
+    events = []
+    model = _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        max_models=1,
+        keep_cv_predictions=True,
+        **COSTS,
+    )
+    assert list(model.classes_) == ["fraud", "legit"]
+    t = model.class_prior[1]  # the threshold on the probability of the class listed last
+    proba = model.predict_proba(df)
+    assert (model.predict(df) == np.where(proba["legit"] > t, "legit", "fraud")).all()
+    notice = next(e.data for e in events if e.data.get("kind") == "decision_cost")
+    assert notice["positive_class"] == "legit"
+    assert "the class 'legit' is predicted above" in notice["message"]
+    # a miss (cost 20) is a "legit" row given "fraud": t is the cheapest threshold for that
+    legit, p1 = df["y"].to_numpy() == "legit", model.cv_predictions[:, 1]
+
+    def cost(at):
+        return (20.0 * (legit & (p1 <= at)) + 1.0 * (~legit & (p1 > at))).mean()
+
+    cuts = np.concatenate([[1.0], np.unique(p1)[::-1], [0.0]])
+    assert cost(t) == pytest.approx(min(cost(at) for at in (cuts[:-1] + cuts[1:]) / 2))
+
+
+def test_cost_decision_needs_two_classes_and_is_ignored_for_regression():
+    three = _binary(600, n_classes=3, n_clusters_per_class=1)
+    with pytest.raises(ConfigError, match="decision 'cost' needs a target with two classes"):
+        _fit(three, target="y", **COSTS)
+    df = _binary(300)
+    df["y"] = df["x0"] + 0.1
+    events = []
+    model = _fit(df, events, families=["LightGBM"], target="y", max_models=1, **COSTS)
+    assert model.class_prior is None
+    assert any("decision is ignored" in e.data["message"] for e in events if e.type == "notice")
+
+
 def test_the_default_decision_leaves_no_prior():
     assert _fit(_binary(300), families=["LightGBM"], target="y", max_models=1).class_prior is None
 

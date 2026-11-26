@@ -25,6 +25,12 @@
     <dt>{{ t('train.f.decision') }}</dt>
     <dd>{{ t('train.decision.' ~ c.decision) }}</dd>
     {% endif %}
+    {% if c.decision == "cost" %}
+    <dt>{{ t('train.f.cost_miss') }}</dt>
+    <dd>{{ c.cost_miss }}</dd>
+    <dt>{{ t('train.f.cost_false_alarm') }}</dt>
+    <dd>{{ c.cost_false_alarm }}</dd>
+    {% endif %}
     {% if (c.target_transform | default("none")) != "none" %}
     <dt>{{ t('train.f.target_transform') }}</dt>
     <dd>{{ t('train.transform.' ~ c.target_transform) }}</dd>

@@ -567,6 +567,13 @@ def check_tuned(sort_metric: str, classes: int) -> None:
         )
 
 
+def check_cost(classes: int) -> None:
+    """ConfigError unless ``decision="cost"`` can be fitted: the costs are those of the second
+    class missed and of the first class flagged as the second, so there are two classes."""
+    if classes != 2:
+        raise ConfigError("decision 'cost' needs a target with two classes")
+
+
 def _from_counts(name: str, tp, fp, fn, tn) -> np.ndarray:
     """The metric of the 2x2 tables (arrays of counts; the second class is the positive one)."""
     n = tp + fp + fn + tn
@@ -656,7 +663,25 @@ def tune_prior(name: str, y: np.ndarray, pred: np.ndarray) -> np.ndarray:
         return tune_rating_cuts(y, pred)
     if pred.shape[1] > 2:
         return tune_cuts(y, pred)
-    p1 = pred[:, 1]
+    sign = 1.0 if name in HIGHER_IS_BETTER else -1.0
+    return _best_threshold(
+        y, pred[:, 1], lambda tp, fp, fn, tn: sign * _from_counts(name, tp, fp, fn, tn)
+    )
+
+
+def tune_cost(y: np.ndarray, pred: np.ndarray, miss: float, false_alarm: float) -> np.ndarray:
+    """The ``prior`` (two classes, as ``tune_prior`` gives it) of the threshold with the lowest
+    cost on ``pred``: ``miss`` for each row of the second class given the first, ``false_alarm``
+    for each row of the first class given the second."""
+    return _best_threshold(y, pred[:, 1], lambda tp, fp, fn, tn: -(miss * fn + false_alarm * fp))
+
+
+def _best_threshold(y: np.ndarray, p1: np.ndarray, score) -> np.ndarray:
+    """``(1 - t, t)`` for the threshold t that gives the largest ``score(tp, fp, fn, tn)`` (counts
+    of the second class as the positive one; non-finite values are not chosen) when the second
+    class is predicted for a probability ``p1`` above it. The thresholds tried are the midpoints
+    between neighbouring probabilities (so no row sits on the threshold), all judged from one
+    sort. Of equal values the one nearest to 0.5 wins."""
     order = np.argsort(-p1, kind="stable")
     ranked, positive = p1[order], (y[order] == 1)
     cut = np.append(np.flatnonzero(np.diff(ranked) != 0), len(ranked) - 1)  # last row of a value
@@ -665,14 +690,26 @@ def tune_prior(name: str, y: np.ndarray, pred: np.ndarray) -> np.ndarray:
     tp = np.concatenate([[0.0], np.cumsum(positive)[cut]])
     fp = np.concatenate([[0.0], cut + 1.0]) - tp
     total = float(positive.sum())
-    scored = _from_counts(name, tp, fp, total - tp, (len(y) - total) - fp)
+    scored = score(tp, fp, total - tp, (len(y) - total) - fp)
     t = (np.concatenate([[1.0], values]) + np.concatenate([values, [0.0]])) / 2.0
     t = np.clip(t, 1e-6, 1 - 1e-6)
-    sign = 1.0 if name in HIGHER_IS_BETTER else -1.0
-    score = np.where(np.isfinite(scored), sign * scored, -np.inf)
-    best = np.flatnonzero(score == score.max())
+    # a candidate the clipped threshold does not give (none flagged above a probability of 1, all
+    # flagged below a probability of 0) is not one: ``choose`` would flag other rows than counted
+    flagged = len(values) - np.searchsorted(values[::-1], t, side="right")
+    scored = np.where(np.isfinite(scored) & (flagged == np.arange(len(t))), scored, -np.inf)
+    best = np.flatnonzero(scored == scored.max())
     t = float(t[best[np.argmin(np.abs(t[best] - 0.5))]])
     return np.array([1.0 - t, t])
+
+
+def cost_per_row(
+    y: np.ndarray, pred: np.ndarray, prior: np.ndarray | None, miss: float, false_alarm: float
+) -> float:
+    """The mean cost of the classes ``choose`` gives for ``pred`` under ``prior``."""
+    chosen = choose(pred, prior)
+    missed = float(((y == 1) & (chosen == 0)).sum())
+    alarms = float(((y == 0) & (chosen == 1)).sum())
+    return (miss * missed + false_alarm * alarms) / len(y)
 
 
 def loss(

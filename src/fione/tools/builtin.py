@@ -1897,6 +1897,8 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         for k in (
             "max_runtime_secs",
             "decision",
+            "cost_miss",
+            "cost_false_alarm",
             "target_transform",
             "sort_metric",
         )
@@ -2067,6 +2069,11 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
             metrics.check_tuned(name, int(found.y.nunique()))
         except ConfigError as e:
             raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
+    if overrides.get("decision") == "cost" and task == "classification":
+        try:
+            metrics.check_cost(int(found.y.nunique()))
+        except ConfigError as e:
+            raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
     if overrides.get("decision", "argmax") != "argmax" and task != "classification":
         raise ToolError("decision applies to a classification target only")
     if overrides.get("target_transform", "none") != "none":
@@ -2084,6 +2091,24 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         ).validate()
     except ConfigError as e:
         raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
+    if config.decision == "cost":
+        positive, miss, alarm = (
+            _sorted_labels(found.y.dropna())[1],
+            config.cost_miss,
+            config.cost_false_alarm,
+        )
+        name = clean_text(positive)
+        warnings.append(
+            _warning(
+                "cost_class",
+                f"decision 'cost': a miss is a row of the class '{name}' (the one listed last) "
+                f"given the other class, and costs {miss:g}; a false alarm is a row of the "
+                f"other class given '{name}', and costs {alarm:g}",
+                cls=name,
+                miss=f"{miss:g}",
+                alarm=f"{alarm:g}",
+            )
+        )
     need = runtime_need_secs(dataset, profile, classes)
     if "max_runtime_secs" not in args and need > config.max_runtime_secs * RUNTIME_SHORT_FACTOR:
         need_minutes, limit_minutes = math.ceil(need / 60), config.max_runtime_secs // 60
@@ -2894,7 +2919,8 @@ for _tool in (
         "propose_training_config",
         "Propose a training configuration for a dataset and target; the user confirms it. "
         "Set the optional settings only if the goal calls for them: "
-        "max_runtime_secs; decision ('balanced': a rare class, balanced accuracy); "
+        "max_runtime_secs; decision ('balanced': a rare class, balanced accuracy; 'cost': a miss "
+        "of the class listed last (name it) costs cost_miss, a false alarm cost_false_alarm); "
         "target_transform ('log1p': a skewed target, RMSLE); sort_metric (the score the goal "
         "names: f1, qwk, rmsle, ...); group_column (a repeating id, like a customer, whose "
         "rows stay together); event_column (a column of 0 and 1, 1 when the event happened, "
@@ -2907,7 +2933,9 @@ for _tool in (
                 "target": _COLUMN,
                 "notes": {"type": "string", "maxLength": 2000},
                 "max_runtime_secs": {"type": "integer", "minimum": 1},
-                "decision": {"type": "string", "enum": ["argmax", "balanced", "tuned"]},
+                "decision": {"type": "string", "enum": ["argmax", "balanced", "tuned", "cost"]},
+                "cost_miss": {"type": "number"},
+                "cost_false_alarm": {"type": "number"},
                 "target_transform": {"type": "string", "enum": ["none", "log1p"]},
                 "sort_metric": {"type": "string"},
                 "group_column": _COLUMN,

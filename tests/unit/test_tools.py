@@ -2345,6 +2345,52 @@ def test_propose_refuses_a_tuned_decision_that_cannot_be_fitted(env):
     assert (config["decision"], config["sort_metric"]) == ("tuned", "f1")
 
 
+def test_propose_takes_the_costs_of_a_cost_decision_and_refuses_what_cannot_be_fitted(env):
+    base = {"dataset_id": env.dataset.id, "target": "label", "decision": "cost"}
+    costs = {"cost_miss": 40, "cost_false_alarm": 0.5}
+    result = call(env, "propose_training_config", {**base, **costs})
+    config = result["config"]  # no metric named
+    # the class of a miss is the one listed last in sorted order, and the proposal names it
+    last = sorted({SECRET, JA_LABEL})[1]
+    assert "cost_class" in codes(result)
+    found = next(w for w in result["warnings"] if w["code"] == "cost_class")
+    assert found["params"] == {"cls": clean_text(last), "miss": "40", "alarm": "0.5"}
+    assert f"'{clean_text(last)}'" in found["message"]
+    assert "cost_class" not in codes(
+        call(env, "propose_training_config", {**base, "decision": "tuned", "sort_metric": "f1"})
+    )
+    assert (config["decision"], config["cost_miss"], config["cost_false_alarm"]) == (
+        "cost",
+        40,
+        0.5,
+    )
+    plain = call(
+        env, "propose_training_config", {"dataset_id": base["dataset_id"], "target": "label"}
+    )
+    assert (plain["config"]["cost_miss"], plain["config"]["cost_false_alarm"]) == (None, None)
+    for arguments in (base, {**base, "cost_miss": 40}, {**base, **costs, "cost_miss": 0}):
+        with pytest.raises(ToolError, match="decision 'cost' needs cost_"):
+            call(env, "propose_training_config", arguments)
+    with pytest.raises(ToolError, match="used with decision 'cost' only"):
+        call(env, "propose_training_config", {**base, **costs, "decision": "balanced"})
+    with pytest.raises(ToolError, match="cost_miss"):  # a number
+        call(env, "propose_training_config", {**base, **costs, "cost_miss": "high"})
+    kinds = pd.DataFrame({"x": np.arange(300, dtype=float), "kind": ["a", "b", "c"] * 100})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "kinds", DatasetType.TRAIN, [kinds]
+    )
+    with pytest.raises(ToolError, match="needs a target with two classes"):
+        call(
+            env, "propose_training_config", {**base, **costs, "dataset_id": ds.id, "target": "kind"}
+        )
+    numbers = pd.DataFrame({"x": np.arange(300, dtype=float), "y": np.arange(300) % 7 + 0.5})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "numbers", DatasetType.TRAIN, [numbers]
+    )
+    with pytest.raises(ToolError, match="classification"):
+        call(env, "propose_training_config", {**base, **costs, "dataset_id": ds.id, "target": "y"})
+
+
 def test_propose_refuses_a_metric_the_target_values_cannot_use(env):
     frame = pd.DataFrame({"x": np.arange(300, dtype=float), "signed": np.linspace(-5, 5, 300)})
     ds = ingest.ingest_batches(

@@ -225,6 +225,21 @@ the same validation predictions the scores are reported on, so those scores are 
 optimistic, most with few rows or few cases of the rare class. The stopping metric, and the
 ensemble's progress scores while training, are evaluated at 0.5.
 
+When a miss and a false alarm cost different amounts (a fraud let through, a customer asked to
+confirm a payment that was fine), `decision: "cost"` (two classes, in the API and in the
+assistant's proposal) takes `cost_miss`, the cost of a row of the class listed last (the largest
+label in sorted order; the proposal and the notice name it) that is given the other class, and
+`cost_false_alarm`, the cost of the opposite. Both are numbers above 0 and up to 1e12 in the same
+unit, and are refused without this decision. It picks the probability threshold with the lowest total cost on
+the validation predictions instead of 0.5, and a notice gives the cost per row at that threshold
+and at the most probable class. A cost is one number for every row: a cost that differs by row,
+such as the amount of each payment, is not used. Unlike `tuned`, it works with any `sort_metric`
+(log loss or AUC too): the metric ranks the models and does not depend on the threshold, which
+only decides the predicted label. The threshold is stored with the model and used like the one
+above, and the probabilities do not change. It is chosen on the same validation predictions the
+cost is reported on, so that cost is somewhat optimistic, most with few rows of the rare class.
+For regression the decision is ignored.
+
 For ordered classes (a rating of 0 to 4, an adoption speed) scored by `qwk`, the class with the
 largest probability is a poor answer: it is far from the truth more often than the middle one.
 With `decision: "tuned"` and `sort_metric: "qwk"`, for up to 50 classes in the order of their

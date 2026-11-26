@@ -342,14 +342,16 @@ def _config(record: ModelRecord) -> list[tuple[str, tuple[str, str | None]]]:
     config = record.config if isinstance(record.config, dict) else {}
     out = []
     for name in TrainConfig.__dataclass_fields__:
-        if name not in config:
+        if name not in config or (
+            name in ("cost_miss", "cost_false_alarm") and config[name] is None
+        ):
             continue
         value, key = config[name], None
         if isinstance(value, bool):
             key = "common.yes" if value else "common.no"
         elif name == "task" and value in ("auto", "classification", "regression"):
             key = f"train.task.{value}"
-        elif name == "decision" and value in ("argmax", "balanced", "tuned"):
+        elif name == "decision" and value in ("argmax", "balanced", "tuned", "cost"):
             key = f"train.decision.{value}"
         elif name == "target_transform" and value in ("none", "log1p"):
             key = f"train.transform.{value}"

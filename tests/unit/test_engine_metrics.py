@@ -313,6 +313,123 @@ def test_tune_prior_is_the_best_threshold_by_brute_force(name):
     assert not ((p1 == prior[1]).any())  # no row sits on the threshold
 
 
+def _ties(seed=3, n=400):
+    rng = np.random.default_rng(seed)
+    y = (rng.random(n) < 0.2).astype(int)
+    p1 = np.round(np.clip(0.15 + 0.5 * y + rng.normal(0, 0.25, n), 0.01, 0.99), 1)  # many ties
+    return y, p1, np.column_stack([1 - p1, p1])
+
+
+def _cost(y, p1, t, miss, alarm):
+    chosen = p1 > t
+    return miss * ((y == 1) & ~chosen).sum() + alarm * ((y == 0) & chosen).sum()
+
+
+@pytest.mark.parametrize("costs", [(1.0, 1.0), (40.0, 1.0), (1.0, 40.0), (0.5, 7.0), (1e-3, 2e3)])
+def test_tune_cost_is_the_cheapest_threshold_by_brute_force(costs):
+    miss, alarm = costs
+    y, p1, pred = _ties()
+    prior = metrics.tune_cost(y, pred, miss, alarm)
+    assert prior.sum() == pytest.approx(1.0) and (prior > 0).all()
+    assert not (p1 == prior[1]).any()  # no row sits on the threshold
+    # every cut of the distinct probabilities, none and all predicted positive included
+    cuts = np.concatenate([[1.0], np.unique(p1)[::-1], [0.0]])
+    every = {t: _cost(y, p1, t, miss, alarm) for t in (cuts[:-1] + cuts[1:]) / 2 if 0 < t < 1}
+    assert _cost(y, p1, prior[1], miss, alarm) == pytest.approx(min(every.values()))
+    assert metrics.cost_per_row(y, pred, prior, miss, alarm) == pytest.approx(
+        min(every.values()) / len(y)
+    )
+
+
+def test_tune_cost_moves_the_threshold_with_the_costs_and_with_equal_costs_counts_errors():
+    y, _, pred = _ties()
+    cheap_alarm = metrics.tune_cost(y, pred, 40.0, 1.0)[1]
+    dear_alarm = metrics.tune_cost(y, pred, 1.0, 40.0)[1]
+    assert cheap_alarm < 0.5 < dear_alarm  # a miss is dear: flag more; a false alarm: flag less
+    # a cost of 1 each is the error count: the threshold of the accuracy
+    np.testing.assert_allclose(
+        metrics.tune_cost(y, pred, 3.0, 3.0), metrics.tune_prior("accuracy", y, pred)
+    )
+    # on probabilities that are right, the threshold is that of the costs: alarm / (miss + alarm)
+    rng = np.random.default_rng(0)
+    p = rng.random(20_000)
+    truth = (rng.random(20_000) < p).astype(int)
+    found = metrics.tune_cost(truth, np.column_stack([1 - p, p]), 9.0, 1.0)[1]
+    assert found == pytest.approx(0.1, abs=0.03)
+
+
+def test_tune_cost_ties_go_to_the_threshold_nearest_to_one_half():
+    y = np.array([0, 0, 1, 1])
+    flat = np.tile([0.6, 0.4], (4, 1))  # one probability: all or none flagged, at equal cost
+    assert metrics.tune_cost(y, flat, 1.0, 1.0)[1] == pytest.approx(0.7)  # none: (0.4 + 1) / 2
+    assert metrics.tune_cost(y, flat, 1.0, 2.0)[1] == pytest.approx(0.7)  # none is the cheapest
+    assert metrics.tune_cost(y, flat, 2.0, 1.0)[1] == pytest.approx(0.2)  # all: (0.4 + 0) / 2
+    high = np.tile([0.4, 0.6], (4, 1))  # none: (0.6 + 1) / 2 = 0.8, all: (0.6 + 0) / 2 = 0.3
+    assert metrics.tune_cost(y, high, 1.0, 1.0)[1] == pytest.approx(0.3)
+
+
+def _realised_cost(y, pred, t, miss, alarm):
+    return metrics.cost_per_row(y, pred, np.array([1 - t, t]), miss, alarm) * len(y)
+
+
+@pytest.mark.parametrize("costs", [(1000.0, 1.0), (1.0, 1000.0), (3.0, 3.0)])
+@pytest.mark.parametrize("hard", ["both", "ones", "zeros"])
+def test_tune_cost_counts_what_choose_gives_when_probabilities_are_exactly_0_or_1(costs, hard):
+    miss, alarm = costs
+    rng = np.random.default_rng(1)
+    y = (rng.random(300) < 0.3).astype(int)
+    p1 = np.where(rng.random(300) < 0.8, y, 1 - y).astype(float)  # a wrong answer 1 time in 5
+    if hard == "ones":
+        p1 = np.where(p1 == 1, 1.0, 0.4)
+    if hard == "zeros":
+        p1 = np.where(p1 == 1, 0.6, 0.0)
+    pred = np.column_stack([1 - p1, p1])
+    prior = metrics.tune_cost(y, pred, miss, alarm)
+    # what the rows are given is what choose gives, and no threshold that choose can give is
+    # cheaper (a probability of exactly 1 is always flagged and of exactly 0 never)
+    given = metrics.choose(pred, prior)
+    counted = miss * ((y == 1) & (given == 0)).sum() + alarm * ((y == 0) & (given == 1)).sum()
+    every = [_realised_cost(y, pred, t, miss, alarm) for t in (1e-6, 0.3, 0.5, 0.7, 1 - 1e-6)]
+    assert counted == pytest.approx(_realised_cost(y, pred, prior[1], miss, alarm))
+    assert counted <= min(every) + 1e-9
+
+
+def test_tune_cost_does_not_pick_an_end_that_the_threshold_cannot_give():
+    # 100 positives at 0.5, 50 negatives at 1.0 (always flagged) and 50 negatives at 0.0
+    y = np.array([1] * 100 + [0] * 100)
+    p1 = np.array([0.5] * 100 + [1.0] * 50 + [0.0] * 50)
+    miss, alarm = 5.0, 20.0
+    # flagging none would cost 500 but a probability of 1 is always flagged (1,500); flagging 0.5
+    # and up costs 1,000; flagging all is out of reach, as 0 is never flagged
+    prior = metrics.tune_cost(y, np.column_stack([1 - p1, p1]), miss, alarm)
+    assert _realised_cost(y, np.column_stack([1 - p1, p1]), prior[1], miss, alarm) == 1000
+    assert 0 < prior[1] < 0.5
+    # the same rows from the other side: 100 negatives at 0.5, 50 positives at 0.0 and 50 at 1.0
+    y, p1 = 1 - y, 1 - p1
+    prior = metrics.tune_cost(y, np.column_stack([1 - p1, p1]), alarm, miss)
+    assert _realised_cost(y, np.column_stack([1 - p1, p1]), prior[1], alarm, miss) == 1000
+    assert 0.5 < prior[1] < 1
+
+
+def test_tune_cost_with_all_probabilities_exactly_one_or_zero():
+    y = np.array([0, 0, 1, 1, 1])
+    for value in (0.0, 1.0):
+        pred = np.tile([1 - value, value], (5, 1))
+        for costs in ((9.0, 1.0), (1.0, 9.0)):
+            prior = metrics.tune_cost(y, pred, *costs)
+            given = metrics.choose(pred, prior)
+            assert len(set(given)) == 1  # all alike
+            realised = _realised_cost(y, pred, prior[1], *costs)
+            assert realised == min(_realised_cost(y, pred, t, *costs) for t in (1e-6, 1 - 1e-6))
+
+
+def test_check_cost_wants_two_classes_and_no_metric():
+    metrics.check_cost(2)
+    for classes in (1, 3, 10):
+        with pytest.raises(ConfigError, match="needs a target with two classes"):
+            metrics.check_cost(classes)
+
+
 def test_tune_prior_can_predict_nothing_or_everything():
     y = np.array([0, 0, 0, 0, 1])
     flat = np.tile([0.8, 0.2], (5, 1))

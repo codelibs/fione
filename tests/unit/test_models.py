@@ -417,6 +417,25 @@ def test_a_tuned_decision_needs_a_metric_that_counts_right_answers(conn, storage
     assert job.payload["config"]["decision"] == "tuned"
 
 
+def test_a_cost_decision_needs_two_classes_but_no_metric_that_counts_right_answers(
+    conn, storage, owner, project, dataset
+):
+    costs = {**CONFIG, "decision": "cost", "cost_miss": 9, "cost_false_alarm": 1}
+    with pytest.raises(ConfigError, match="decision 'cost' needs a target with two classes"):
+        models.submit_training(conn, storage, owner, project.id, dataset.id, costs)
+    frame = pd.read_csv(io.BytesIO(iris_csv()))
+    two = frame[frame["species"] != "virginica"]
+    data = io.BytesIO(two.to_csv(index=False).encode())
+    two_classes = ingest_csv(storage, conn, project.id, "two_costs", DatasetType.TRAIN, data)
+    for config in (costs, {**costs, "sort_metric": "auc"}, {**costs, "sort_metric": "f1"}):
+        job = models.submit_training(conn, storage, owner, project.id, two_classes.id, config)
+        assert job.payload["config"]["cost_miss"] == 9
+    with pytest.raises(ConfigError, match="decision 'cost' needs cost_miss"):
+        models.submit_training(
+            conn, storage, owner, project.id, two_classes.id, {**CONFIG, "decision": "cost"}
+        )
+
+
 def test_the_largest_seed_and_task_metrics_are_accepted(conn, storage, owner, project, dataset):
     config = {**CONFIG, "seed": 2**32 - 1, "sort_metric": "AUC", "stopping_metric": "accuracy"}
     job = models.submit_training(conn, storage, owner, project.id, dataset.id, config)

@@ -46,7 +46,8 @@ class TrainedModel:
     fold_assignment: np.ndarray | None = None
     diagnostics: dict | None = None  # fione.engine.diagnostics of the OOF predictions; JSON
     features: list[dict] | None = None  # derived-feature groups tried, and why (engine.features)
-    # The classes' shares (decision="balanced"), or (1 - t, t) for the threshold t ("tuned").
+    # The classes' shares (decision="balanced"), or (1 - t, t) for the threshold t ("tuned",
+    # "cost").
     class_prior: np.ndarray | None = None
     # The classes' shares of the training data when the probabilities are delivered shifted to
     # equal class priors (sort_metric="balanced_logloss"); older models have none.

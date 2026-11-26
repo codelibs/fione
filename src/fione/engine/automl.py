@@ -1144,6 +1144,27 @@ class AutoML:
             empty=len(empty),
         )
 
+    def _cost_threshold(self, y: np.ndarray, blended: np.ndarray, positive) -> np.ndarray:
+        """The prior of the threshold with the lowest cost on the validation predictions, and a
+        notice with what that cost is per row against the most probable class."""
+        miss, alarm = self.config.cost_miss, self.config.cost_false_alarm
+        prior = metrics.tune_cost(y, blended, miss, alarm)
+        fitted = metrics.cost_per_row(y, blended, prior, miss, alarm)
+        argmax = metrics.cost_per_row(y, blended, None, miss, alarm)
+        self._notice(
+            f"decision 'cost': the class '{positive}' is predicted above a probability of "
+            f"{prior[1]:.3g}; on the validation rows a miss (a row of '{positive}' given the "
+            f"other class) costs {miss:g} and a false alarm {alarm:g}, which comes to "
+            f"{fitted:.4g} per row (the most probable class: {argmax:.4g}); the threshold is "
+            "chosen on the same rows, so it is somewhat optimistic",
+            kind="decision_cost",
+            positive_class=str(positive),
+            threshold=float(prior[1]),
+            cost_per_row=float(fitted),
+            cost_per_row_argmax=float(argmax),
+        )
+        return prior
+
     def _zero_inflated_notice(self, y: np.ndarray) -> None:
         """Say when a target of 0 or more is almost always exactly 0: its score rests on the
         few other rows. A quantile is a level of its own, so it gets none."""
@@ -1344,12 +1365,15 @@ class AutoML:
             metrics.check(name, y_seen, len(classes), field)
         prior = None
         tuned = c.decision == "tuned" and task == "classification"
-        if c.decision in ("balanced", "tuned") and task == "regression":
+        cost = c.decision == "cost" and task == "classification"
+        if c.decision in ("balanced", "tuned", "cost") and task == "regression":
             self._notice("decision is ignored for regression")
         elif c.decision == "balanced":
             prior = _learned_mix(y, mix_weight, len(classes))
         elif tuned:  # the threshold is fitted on the final blend, after the search
             metrics.check_tuned(sort_metric, len(classes))
+        elif cost:  # as is this one, whatever the metric that ranks the models
+            metrics.check_cost(len(classes))
         elif sort_metric == "qwk" and 2 < len(classes) <= metrics.MAX_ORDINAL_CLASSES:
             self._notice(
                 "qwk at the most probable class is far below what the same probabilities give "
@@ -1554,6 +1578,8 @@ class AutoML:
         blended = original(_blend(oof, final))
         if tuned or rating_cuts:
             prior = metrics.tune_prior(sort_metric, y_seen[rows], blended)
+        elif cost:
+            prior = self._cost_threshold(y_seen[rows], blended, classes[1])
         try:
             # (the diagnostics read one target column: a survival fit has none in its own units)
             found = (
