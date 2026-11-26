@@ -2787,8 +2787,23 @@ def test_the_derived_features_notice_counts_the_groups_that_ran_out_of_time(monk
     _fit(_binary(300), events, families=["LightGBM"], target="y", max_models=1)
     notice = next(e.data for e in events if e.data.get("kind") == "features")
     assert "none added" in notice["message"]
-    assert "2 of 3 groups were not judged for lack of time" in notice["message"]
-    assert notice["unjudged"] == 2
+    assert "2 of 3 groups were not judged for lack of time: topics, tokens (" in notice["message"]
+    assert notice["unjudged"] == 2 and notice["unjudged_groups"] == ["topics", "tokens"]
+
+
+def test_the_derived_features_notice_names_at_most_five_unjudged_groups(monkeypatch):
+    from fione.engine.features import Verdict
+
+    def fake(X, y, task, nfolds, seed, deadline, should_stop, row_groups=None):
+        return [], [Verdict(f"group {i}", 0, False, 0.0, "time") for i in range(7)]
+
+    monkeypatch.setattr(automl_module, "select_groups", fake)
+    events = []
+    _fit(_binary(300), events, families=["LightGBM"], target="y", max_models=1)
+    notice = next(e.data for e in events if e.data.get("kind") == "features")
+    assert "7 of 7 groups were not judged for lack of time: group 0, " in notice["message"]
+    assert "group 4 and 2 more (" in notice["message"]
+    assert len(notice["unjudged_groups"]) == 7
 
 
 def test_columns_with_one_value_or_none_are_named_when_they_are_left_out():
