@@ -1381,6 +1381,36 @@ def test_propose_groups_by_the_repeated_column_when_the_test_data_holds_other_va
         assert warning["params"]["column"] == "user_id"
 
 
+def test_propose_groups_by_a_repeated_column_the_test_data_lacks(env, grouped):
+    ds = grouped()
+    test = ingest.ingest_batches(
+        env.storage,
+        env.conn,
+        env.project.id,
+        "later",
+        DatasetType.TEST,
+        [pd.DataFrame({"x": np.zeros(30)})],
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, test.id)
+    found = codes(result)
+    assert "group_column_not_in_test" in found
+    assert {"repeated_id", "repeated_id_in_test", "group_column_for_test"}.isdisjoint(found)
+    assert result["config"]["cv_group_column"] == "user_id"
+    assert "user_id" in result["config"]["ignored_columns"]  # it is not an input either
+    warning = next(w for w in result["warnings"] if w["code"] == "group_column_not_in_test")
+    assert warning["params"]["column"] == "user_id"
+
+
+def test_propose_only_hints_at_a_repeated_column_when_there_is_no_test_data(env, grouped):
+    ds = grouped()
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    assert "group_column_not_in_test" not in codes(result)
+    assert result["config"]["cv_group_column"] is None
+
+
 def test_a_group_column_the_user_names_is_kept_when_the_test_data_holds_other_values(env, grouped):
     ds = grouped()
     test = _ids_dataset(env, DatasetType.TEST, np.arange(100, 140))
