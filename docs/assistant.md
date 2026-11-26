@@ -199,9 +199,9 @@ repeat) is also put to the model (a train dataset, when there are two or more), 
 and with the names of the columns alone: which
 column of the dataset names the same thing as a column of another dataset, whatever its name
 (`shop` and `store_nbr`). The values must confirm the answer: one side has one row per value and
-most values of the other are among them. Such a link says `meaning`. Over MCP, and when the
-model gives no answer (or none within 30 seconds), only the links found by names and values are
-reported.
+most values of the other are among them. Such a link says `meaning`. Over MCP, from the
+**Propose a join** button, and when the model gives no answer (or none within 30 seconds), only
+the links found by names and values are reported.
 A link also says how the datasets
 relate: one dataset has one row per value and the other several (a customer and their purchases), or both repeat (rows of two
 tables for the same day). Columns with fewer than 20 values are not reported when both sides
@@ -227,7 +227,9 @@ best link joins to, among the links that have one row per key on a side. The oth
 summarized when it has several rows per key, and looked up as it is when it has one (a table of
 sales gets its stores' columns). A link on the column to predict itself is left out: a table that
 holds a row for each class would hand the answer to the join. A pair of datasets the person names is proposed with
-`propose_join`.
+`propose_join`. The same first join needs no assistant: the **Propose a join** button of the project's
+dashboard and **Datasets** page proposes it for the column chosen there (see
+[Joining datasets](quickstart.md#joining-datasets)), and MCP clients call `propose_first_join`.
 
 A join key is one column, or several that identify a row together (a shop and an item; the
 assistant names them comma-separated in `key`, and the Join module takes them as `keys`): the rows match when every part is the same, and a row with a part missing matches

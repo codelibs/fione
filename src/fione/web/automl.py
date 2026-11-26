@@ -30,12 +30,24 @@ from fione.engine.config import MAX_CV_REPEATS, ConfigError, TargetError, TrainC
 from fione.jobs import store
 from fione.jobs.store import TERMINAL, Job, JobStatus
 from fione.models import service as models
+from fione.modules import service as modules
 from fione.modules.registry import redact
 from fione.projects import service as projects
 from fione.projects.ingest import read_dataset_rows
-from fione.projects.service import Dataset, DatasetType
+from fione.projects.service import Dataset, DatasetNotFound, DatasetType, ProjectNotFound
+from fione.tools import ToolContext, ToolError, call_tool
 from fione.tools.builtin import class_count
-from fione.web.access import Ctx, action, dataset_in, job_in, page
+from fione.tools.registry import NOT_ALLOWED
+from fione.web.access import (
+    Ctx,
+    SmallForm,
+    action,
+    dataset_in,
+    field,
+    job_in,
+    page,
+    same_site,
+)
 from fione.web.easyml import (
     MAX_FORM_FIELDS,
     STOP_POLLING,
@@ -49,10 +61,11 @@ from fione.web.easyml import (
     _profile,
     _tips,
     _warnings,
+    join_targets,
     recommended_runtime,
 )
 from fione.web.uploads import UploadProblem, receive_csv, size_text, upload_context
-from fione.web.views import UiError, language, render
+from fione.web.views import UiError, language, render, warning_texts
 
 log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
@@ -188,6 +201,7 @@ def _datasets_view(request: Request, conn, ctx: Ctx, *, status=200, problem=None
         kinds=[t.value for t in DatasetType],
         limit=size_text(request.app.state.settings.max_upload_bytes),
         problem=problem,
+        join_targets=join_targets(projects.list_datasets(conn, ctx.project.id)),
     )
 
 
@@ -233,6 +247,129 @@ def delete_dataset(request: Request, conn: Conn, pid: str, did: str, form: Poste
     dataset = dataset_in(conn, ctx, did)
     projects.delete_dataset(conn, request.app.state.storage, dataset.id)
     return RedirectResponse(f"/projects/{pid}/datasets", 303)
+
+
+# --- the first join of the project's datasets ---------------------------------------------
+
+# The refusals of propose_first_join, by the tool's code -> what the page says.
+JOIN_REFUSALS = {
+    "no_target": "join.error.no_target",
+    "no_target_column": "join.error.no_column",
+    "no_link": "join.error.no_link",
+}
+JOIN_FIELDS = ("dataset_id", "other_dataset_id", "key", "other_key", "summarize", "columns")
+
+
+def _tool_context(request: Request, conn, ctx: Ctx) -> ToolContext:
+    """The tools as MCP calls them (never example values), kept to the path's project."""
+    return ToolContext(
+        conn,
+        request.app.state.storage,
+        ctx.auth.user,
+        allow_samples=False,
+        project_id=ctx.project.id,
+        via="ui",
+    )
+
+
+def _join_fields(base_id: int, config: dict) -> dict[str, str]:
+    """What the form posts for a proposed Join: the datasets, the keys (several,
+    comma-separated), the summary and the columns, as ``propose_join`` takes them."""
+    return {
+        "dataset_id": str(base_id),
+        "other_dataset_id": str(config["other_dataset_id"]),
+        "key": ", ".join(config.get("keys") or [config["key"]]),
+        "other_key": ", ".join(config.get("other_keys") or [config["other_key"]]),
+        "summarize": "true" if config["summarize"] else "false",
+        "columns": ", ".join(config["columns"]),
+    }
+
+
+def _first_join(request: Request, conn, ctx: Ctx, target: str) -> dict:
+    """The first join for the column ``target``, or the message that says why there is none."""
+    if not target.strip():  # the link search is not worth its time without a column
+        return {"message": "join.error.no_target", "params": {}}
+    try:
+        found = call_tool(
+            "propose_first_join",
+            {"project_id": ctx.project.id, "target": target},
+            _tool_context(request, conn, ctx),
+        )
+    except ToolError as e:
+        key = JOIN_REFUSALS.get(e.code, "join.error.failed")
+        return {"message": key, "params": {"column": target}}
+    config, base_id = found["config"], found["dataset_id"]
+    names = {d.id: d.name for d in projects.list_datasets(conn, ctx.project.id)}
+    return {
+        "config": config,
+        "base_name": names.get(base_id),
+        "other_name": names.get(config["other_dataset_id"]),
+        "warnings": warning_texts(found.get("warnings"), language(request)),
+        "fields": _join_fields(base_id, config),
+    }
+
+
+@router.get("/projects/{pid}/join")
+def join_proposal(request: Request, conn: Conn, pid: str, target: str = "") -> Response:
+    """The first join of the project's datasets for the column ``target``: the fragment the
+    datasets page and the dashboard load (a page without HTMX). Whatever goes wrong, HTMX gets
+    a 200 that says it, so the page never waits on a request that failed."""
+    fragment = bool(request.headers.get("hx-request"))
+    try:
+        ctx = page(request, conn, pid)
+        join = _first_join(request, conn, ctx, target)
+    except UiError as e:
+        if not fragment or e.status == 401:  # 401: HTMX is sent to the login page
+            raise
+        return render(request, "_join_proposal.html", join={"message": e.key, "params": {}})
+    except Exception:
+        if not fragment:
+            raise
+        log.exception("the join proposal of project %s could not be shown", pid)
+        join = {"message": "join.error.failed", "params": {}}
+        return render(request, "_join_proposal.html", join=join)
+    template = "_join_proposal.html" if fragment else "join.html"
+    return _view(request, template, ctx, "datasets", join=join)
+
+
+@router.post("/projects/{pid}/join")
+def create_join(request: Request, conn: Conn, pid: str, form: SmallForm) -> Response:
+    """Start the Join that was shown. The posted proposal goes through ``propose_join`` again
+    and must come back as posted; the tool's configuration is what runs."""
+    same_site(request)
+    ctx = action(request, conn, pid, field(form, "csrf_token"))
+    posted = {name: field(form, name) for name in JOIN_FIELDS}
+    ids = [posted["dataset_id"], posted["other_dataset_id"]]
+    if not all(i.isascii() and i.isdigit() and len(i) <= 18 for i in ids):
+        raise UiError(409, "join.error.changed")
+    args = {
+        "dataset_id": int(ids[0]),
+        "other_dataset_id": int(ids[1]),
+        "key": posted["key"],
+        "other_key": posted["other_key"],
+        "summarize": posted["summarize"] == "true",
+        "columns": posted["columns"],
+    }
+    try:
+        checked = call_tool("propose_join", args, _tool_context(request, conn, ctx))
+    except ToolError as e:
+        gone = str(e) == NOT_ALLOWED  # a dataset deleted, or never one of this project
+        key = "assistant.proposal.dataset_gone" if gone else "join.error.changed"
+        raise UiError(409, key) from None
+    config = checked["config"]
+    if _join_fields(args["dataset_id"], config) != posted:
+        raise UiError(409, "join.error.changed")
+    try:
+        job = modules.submit_module(conn, ctx.auth.user, pid, "join", args["dataset_id"], config)
+    except DatasetNotFound:
+        raise UiError(409, "assistant.proposal.dataset_gone") from None
+    except ProjectNotFound:
+        raise UiError(404, "error.not_found") from None
+    except PermissionError:
+        raise UiError(403, "error.forbidden") from None
+    except ValueError:
+        raise UiError(422, "join.error.start") from None
+    return RedirectResponse(f"/projects/{pid}/jobs/{job.id}", 303)
 
 
 # --- dataset detail -----------------------------------------------------------------------

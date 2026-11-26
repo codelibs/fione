@@ -1,0 +1,20 @@
+{# The facts of a Join of two datasets, as proposed: the base dataset (``base_name``), the
+   dataset to add (``other_name``; either None once it is gone), the key, the summary and the
+   columns of the configuration ``c``, then what the result is. Every text is escaped. #}
+  <dl class="chat-proposal__facts text-sm">
+    <dt>{{ t('assistant.proposal.join_base') }}</dt>
+    <dd>{% if base_name %}{{ base_name }}{% else %}{{ t('assistant.proposal.dataset_gone') }}{% endif %}</dd>
+    <dt>{{ t('assistant.proposal.join_other') }}</dt>
+    <dd>{% if other_name %}{{ other_name }}{% else %}{{ t('assistant.proposal.dataset_gone') }}{% endif %}</dd>
+    <dt>{{ t('assistant.proposal.join_key') }}</dt>
+    {% if c.get("keys") %}
+    <dd>{{ c.get("keys") | join(", ") }}{% if c.get("other_keys") %} = {{ c.get("other_keys") | join(", ") }}{% endif %}</dd>
+    {% else %}
+    <dd>{{ c.key }}{% if c.other_key %} = {{ c.other_key }}{% endif %}</dd>
+    {% endif %}
+    <dt>{{ t('assistant.proposal.join_summarize') }}</dt>
+    <dd>{{ t('assistant.proposal.join_summarize_yes' if c.summarize else 'assistant.proposal.join_summarize_no') }}</dd>
+    <dt>{{ t('assistant.proposal.join_columns') }}</dt>
+    <dd>{% if c.columns %}{{ c.columns | join(", ") }}{% else %}{{ t('assistant.proposal.join_columns_all') }}{% endif %}</dd>
+  </dl>
+  <p class="text-muted text-sm">{{ t('assistant.proposal.join_result') }}</p>

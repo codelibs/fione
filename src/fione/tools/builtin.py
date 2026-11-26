@@ -2278,17 +2278,22 @@ def _propose_first_join(ctx: ToolContext, args: dict) -> dict:
     if not args.get("target"):
         raise ToolError(
             "the first join depends on the column to predict: ask the user which column it is, "
-            "then call again with target"
+            "then call again with target",
+            code="no_target",
         )
     wanted = args["target"].lower()
     holders = {d.id for d in datasets if any(n.lower() == wanted for n, _ in d.schema)}
     if not holders:
-        raise ToolError(f"no dataset of the project has a column named {args['target']!r}")
+        raise ToolError(
+            f"no dataset of the project has a column named {args['target']!r}",
+            code="no_target_column",
+        )
     chosen = _first_join(links, holders, wanted)
     if chosen is None:
         raise ToolError(
             "no dataset with that column has a link that a join can follow; call "
-            "find_table_links to see how the datasets relate"
+            "find_table_links to see how the datasets relate",
+            code="no_link",
         )
     link, base = chosen
     other = next(d for d in link["datasets"] if d != base)

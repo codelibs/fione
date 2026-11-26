@@ -18,7 +18,6 @@ again by itself.
 
 import logging
 from dataclasses import dataclass
-from string import Formatter
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse, Response
@@ -57,7 +56,7 @@ from fione.web.access import (
     same_site,
 )
 from fione.web.easyml import STOP_POLLING
-from fione.web.views import UiError, language, llm_status, render, to_consent
+from fione.web.views import UiError, language, llm_status, render, to_consent, warning_texts
 
 log = logging.getLogger(__name__)
 
@@ -94,21 +93,7 @@ class Card:
     other_name: str | None = None  # of a join: the dataset to add; None once it is gone
 
     def warnings(self, lang: str) -> list[str]:
-        """The warnings in ``lang``: a warning without a translation for its code, or without
-        the figures that translation needs, is shown as its own (English) message."""
-        texts = []
-        for w in self.proposal.details.get("warnings") or []:
-            if not isinstance(w, dict):
-                texts.append(str(w))
-                continue
-            key, params = f"assistant.warn.{w.get('code')}", w.get("params")
-            template = i18n.catalog(lang).get(key) or i18n.catalog(i18n.DEFAULT_LANGUAGE).get(key)
-            needed = {name for _, name, _, _ in Formatter().parse(template or "") if name}
-            if template is None or not isinstance(params, dict) or not needed <= params.keys():
-                texts.append(str(w.get("message", "")))
-            else:
-                texts.append(i18n.t(key, lang, **params))
-        return texts
+        return warning_texts(self.proposal.details.get("warnings"), lang)
 
 
 def _tool_names() -> set[str]:

@@ -173,6 +173,7 @@ def dashboard(request: Request, conn: Conn, pid: str) -> Response:
         training=training,
         latest_train=train_sets[0] if train_sets else None,
         members=members,
+        join_targets=join_targets(datasets),
     )
 
 
@@ -217,6 +218,14 @@ class RunForm:
     task: str
     runtime: str  # a preset (minutes) or "custom"
     custom: str = ""
+
+
+def join_targets(datasets: list[Dataset]) -> list[tuple[str, list[str]]]:
+    """The columns a join can be proposed for, by train dataset (name, columns): none when
+    the project has fewer than two datasets, so there is nothing to join."""
+    if len(datasets) < 2:
+        return []
+    return [(d.name, _names(d)) for d in datasets if d.type == DatasetType.TRAIN]
 
 
 def _default_target(names: list[str], kinds: dict[str, str]) -> str:

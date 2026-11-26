@@ -268,6 +268,26 @@ trees boosted from a linear model, is a late candidate of every table: it runs a
 takes the time they leave. LinearSpline, a linear model with a piecewise linear curve for each
 number that has many values, follows it on the tables that have such numbers.
 
+## Joining datasets
+
+When a project holds two or more datasets, one of them training data, the project's dashboard
+and its **Datasets** page show **Join datasets**. Choose the column to predict and press
+**Propose a join**: Fione looks for the columns that link the datasets, by their names and
+values, and proposes the first join. No language model is used. The base is the dataset that
+has the column to predict, and the dataset to add is the one its best link joins to; when the
+dataset to add has several rows per key, they are summarized to one row per key (the number of
+rows, and the mean, minimum, maximum and sum of each number). The proposal shows the key,
+whether the rows are summarized, the columns added and what to check (a key that repeats, few
+matching keys, a result over the limit). Anyone who can read the project sees it; a person who
+can edit the project presses **Create the joined dataset**, which starts a Join job and opens
+it. Fione checks the proposal again before the job starts. The result is a new dataset, and the
+base dataset stays as it is. Join only what is known when the model predicts.
+
+The search reads the first 8 datasets of the project and stops after 30 seconds;
+[Several tables](assistant.md#several-tables) says how the links are found. To join two
+datasets of your choice, or to set the summary's statistics, run the **Join datasets by key
+columns** module.
+
 ## Data with one column per time
 
 Sales kept as one column per day (`d_1`, `d_2`, ...) have a column for every time and no column
