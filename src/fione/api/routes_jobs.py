@@ -61,7 +61,9 @@ def _job(conn, user: User, job_id: int, need) -> Job:
 @router.post("/projects/{project_id}/jobs/automl", status_code=201)
 def submit_automl(body: AutomlIn, ctx: Writer, conn: Conn, request: Request) -> dict:
     """Queue AutoML training on a train dataset; an invalid config, or a target column the
-    engine would refuse (gaps, one value, too few rows...), is a 422 and nothing is queued."""
+    engine would refuse (gaps, one value, too few rows...), is a 422 and nothing is queued.
+    ``extra_dataset_ids`` are other train datasets of the project whose rows are only learned
+    from (never validated); the scores count the main dataset alone."""
     with service_errors():
         job = models.submit_training(
             conn,
@@ -71,6 +73,7 @@ def submit_automl(body: AutomlIn, ctx: Writer, conn: Conn, request: Request) -> 
             body.dataset_id,
             body.config,
             name=body.name,
+            extra_dataset_ids=body.extra_dataset_ids,
         )
     return job_out(job, admin=_admin(ctx.user))
 

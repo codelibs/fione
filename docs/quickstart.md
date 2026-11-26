@@ -552,7 +552,7 @@ of the last fold, which learned from the most rows.
 With few rows, one random split into folds is noisy: a search over many trials then picks
 settings that happened to score well on that split, and the model does worse on new data than
 its score says. Up to 2,000 rows Fione therefore draws the folds three times with other seeds
-(twice up to 5,000 rows) and judges each trial by the mean of the repeats' scores; the ensemble
+(twice up to 5,000 rows, the rows of extra training data counted) and judges each trial by the mean of the repeats' scores; the ensemble
 is chosen on all repeats. The models, the diagnostics, the leaderboard and the cross-validation
 predictions come from the first repeat. Set "Repeats of cross-validation" (`cv_repeats` in the
 API) to choose the number yourself (1 to 10); 1 turns it off. With as few groups as folds
@@ -603,6 +603,37 @@ to an event) does not tell its rows' labels; the model's own cross-validation sc
 counts of all the training rows, and a notice says so when such a group is kept.
 
 A group column and a time column can be used together (see "Data that follows time").
+
+## Extra training data
+
+More rows of the same kind often help more than any setting: older data, another store's
+history, a public data set of the same task. Joining them to the training data would make them
+part of the validation, and the score would be measured on rows that are not like the ones to
+predict. Give them as extra data instead (`extra_dataset_ids` in the API, the assistant's
+`start_training` and the SDK's `train`, other `train` datasets of the project): the models learn
+from them in every fold and in the final fit, and they are never validated, so every score, the
+out-of-fold predictions and the leaderboard count the rows of the main dataset alone.
+
+- The extra datasets need the target column and every column the model reads (columns left in
+  `ignored_columns` are not needed). Their values are read as the main dataset's columns are; a
+  value that cannot be, or a class the main dataset lacks, is refused (a class only the extra
+  rows hold could not be validated).
+- A row whose inputs equal those of a row of the main dataset is left out, since the validation
+  would find it learned. Near copies are not found: leave them out of the extra data.
+- `extra_weight` (in the training configuration, 1 by default) weights the extra rows against the
+  main rows in training; lower it for rows that are less alike (say, labelled by a proxy). Scores
+  are never weighted.
+- With a group column (`cv_group_column`), extra rows that have the column are left out of the
+  folds that validate their group; extra rows without it are learned from in every fold, and a
+  notice says so.
+- The class shares that `decision` `balanced` corrects for are those of all the rows learned
+  from, extra rows included. Not with `time_column` or `event_column`.
+- The search time is shared, and every fold fits the extra rows too: a large extra data set means
+  fewer trials, the proposal's run time does not count it, and the folds are repeated by the number
+  of all rows (see "Repeating the cross-validation"), so a large one is validated on one split.
+  Give a run with extra rows a longer `max_runtime_secs`, and read the leaderboard to see that the
+  family that suits the data (the text model, for text) had more than its first trial. The limits
+  on the size of the text and one-hot views (see the known limitations) count all rows.
 
 ## Derived features
 

@@ -156,6 +156,66 @@ def test_a_training_job_runs_end_to_end(conn, runner, owner, project, dataset, s
     assert "trial" in types and types.index("stopped") < types.index("ensemble")
 
 
+def test_extra_datasets_are_learned_from_and_never_validated(conn, runner, owner, project, storage):
+    frame = iris_frame().sample(frac=1, random_state=0).reset_index(drop=True)
+    main = add_dataset(conn, storage, project, frame.iloc[:90], "main")
+    more = add_dataset(conn, storage, project, frame.iloc[90:], "more")
+    job = models.submit_training(
+        conn, storage, owner, project.id, main.id, CONFIG, extra_dataset_ids=[more.id]
+    )
+    assert store.get_job(conn, job.id).payload["extra_dataset_ids"] == [more.id]
+    done = wait_done(conn, job.id)
+    assert done.status is JobStatus.DONE, done.message
+    events = [e for _, e in store.events_since(conn, job.id)]
+    started = next(e for e in events if e.type == "started")
+    notices = {e.data.get("kind"): e.data for e in events if e.type == "notice"}
+    dropped = notices.get("extra_duplicates", {}).get("dropped", 0)  # iris repeats some rows
+    assert started.data["n_rows"] == 90
+    assert started.data["n_extra_rows"] + dropped == 60
+    assert "extra_rows" in notices
+    record = models.get_model(conn, done.result["model_id"])
+    assert record.dataset_id == main.id  # the model belongs to the main dataset
+
+
+def test_a_deleted_extra_dataset_fails_the_job_plainly(conn, runner, owner, project, storage):
+    frame = iris_frame()
+    main = add_dataset(conn, storage, project, frame, "main")
+    payload = {"dataset_id": main.id, "config": TrainConfig(**CONFIG).to_dict(), "name": None}
+    job = store.enqueue(
+        conn, "automl", project.id, owner.id, {**payload, "extra_dataset_ids": [999999]}
+    )
+    done = wait_done(conn, job.id)
+    assert done.status is JobStatus.FAILED
+    assert done.message == "an extra dataset no longer exists"
+
+
+def test_extra_datasets_that_do_not_fit_are_refused_before_a_job_is_queued(
+    conn, owner, project, storage
+):
+    frame = iris_frame()
+    main = add_dataset(conn, storage, project, frame, "main")
+    narrow = add_dataset(conn, storage, project, frame.drop(columns=["petal width (cm)"]), "narrow")
+    with pytest.raises(Exception, match="lacks columns.*petal width"):
+        models.submit_training(
+            conn, storage, owner, project.id, main.id, CONFIG, extra_dataset_ids=[narrow.id]
+        )
+    with pytest.raises(Exception, match="time column"):
+        models.submit_training(
+            conn,
+            storage,
+            owner,
+            project.id,
+            main.id,
+            {**CONFIG, "time_column": "sepal length (cm)"},
+            extra_dataset_ids=[narrow.id],
+        )
+    ignoring = {**CONFIG, "ignored_columns": ["petal width (cm)"]}  # the column is not read
+    job = models.submit_training(
+        conn, storage, owner, project.id, main.id, ignoring, extra_dataset_ids=[narrow.id]
+    )
+    assert store.get_job(conn, job.id).payload["extra_dataset_ids"] == [narrow.id]
+
+
 def test_missing_target_values_fail_the_job_with_a_plain_message(
     conn, runner, owner, project, storage
 ):

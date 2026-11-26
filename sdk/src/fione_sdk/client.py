@@ -158,14 +158,26 @@ class Client:
         self._request("DELETE", f"/projects/{project_id}/datasets/{dataset_id}")
 
     def train(
-        self, project_id: str, dataset_id: int, target: str, *, name: str | None = None, **config
+        self,
+        project_id: str,
+        dataset_id: int,
+        target: str,
+        *,
+        name: str | None = None,
+        extra_dataset_ids: list[int] | None = None,
+        **config,
     ) -> Job:
         """Queue AutoML training on a ``train`` dataset; ``config`` holds the other training
-        options (``max_runtime_secs``, ``max_models``, ``nfolds``...). Returns the job:
-        ``job.wait()`` blocks until it is done, then ``job.result["model_id"]`` is the model."""
+        options (``max_runtime_secs``, ``max_models``, ``nfolds``...). ``extra_dataset_ids`` are
+        other ``train`` datasets (with the target and the same columns) whose rows are only
+        learned from, never validated; ``extra_weight`` in ``config`` weights them. Returns the
+        job: ``job.wait()`` blocks until it is done, then ``job.result["model_id"]`` is the
+        model."""
         body: dict[str, Any] = {"dataset_id": dataset_id, "config": {"target": target, **config}}
         if name is not None:
             body["name"] = name
+        if extra_dataset_ids:
+            body["extra_dataset_ids"] = list(extra_dataset_ids)
         return Job(self, self._json("POST", f"/projects/{project_id}/jobs/automl", json=body))
 
     def job(self, job_id: int) -> Job:

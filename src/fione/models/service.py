@@ -19,7 +19,7 @@ from fione.jobs.store import Job
 from fione.predict import batch
 from fione.projects import service as projects
 from fione.projects.ingest import read_dataset
-from fione.projects.service import DatasetNotFound, DatasetType
+from fione.projects.service import Dataset, DatasetNotFound, DatasetType
 from fione.storage import Storage
 
 log = logging.getLogger(__name__)
@@ -271,11 +271,16 @@ def submit_training(
     config: TrainConfig | dict,
     *,
     name: str | None = None,
+    extra_dataset_ids: list[int] | None = None,
 ) -> Job:
     """Queue an ``automl`` job after checking everything the user can get wrong up front,
     the target column included: the whole column goes through the engine's own
     ``validate_target`` (``TargetError`` for gaps, a single value, too few rows...), and the
-    metrics must apply to the resolved task (``ConfigError``)."""
+    metrics must apply to the resolved task (``ConfigError``).
+
+    ``extra_dataset_ids``: train datasets of the project whose rows are only learned from, never
+    validated (``AutoML.fit``'s ``extra``). Each must hold the target and every column the model
+    reads."""
     projects.require_project(conn, project_id)
     if not can_access_project(conn, user, project_id, "write"):
         raise PermissionError("write access to the project is required")
@@ -298,8 +303,47 @@ def submit_training(
     if config.event_column is not None and config.event_column not in columns:
         raise ConfigError(f"event column '{config.event_column}' is not in the data")
     check_target(storage, dataset, config.target, config.task, config.nfolds, config)
+    extra_ids = _check_extra_datasets(conn, config, dataset, columns, extra_dataset_ids)
     payload = {"dataset_id": dataset_id, "config": config.to_dict(), "name": name}
+    if extra_ids:
+        payload["extra_dataset_ids"] = extra_ids
     return store.enqueue(conn, "automl", project_id, user.id, payload)
+
+
+MAX_EXTRA_DATASETS = 10
+
+
+def _check_extra_datasets(
+    conn: sqlite3.Connection,
+    config: TrainConfig,
+    dataset: Dataset,
+    columns: set[str],
+    ids: list[int] | None,
+) -> list[int]:
+    """The ids of the extra datasets, each once, after checking that they are train datasets of
+    the project other than ``dataset`` that hold the target and the columns the model reads."""
+    ids = list(dict.fromkeys(ids or []))
+    if not ids:
+        return []
+    if len(ids) > MAX_EXTRA_DATASETS:
+        raise ConfigError(f"at most {MAX_EXTRA_DATASETS} extra datasets can be used")
+    if config.time_column is not None or config.event_column is not None:
+        raise ConfigError("extra datasets cannot be used with a time column or an event column")
+    ignored = {config.target, *config.ignored_columns}
+    needed = [name for name in columns if name not in ignored]
+    for extra_id in ids:
+        extra = projects.get_dataset(conn, extra_id)
+        if extra.project_id != dataset.project_id:
+            raise DatasetNotFound(extra_id)
+        if extra.type != DatasetType.TRAIN or extra.id == dataset.id:
+            raise ValueError("extra datasets must be other train datasets of the project")
+        have = {column for column, _ in extra.schema}
+        lacking = [name for name in [config.target, *needed] if name not in have]
+        if lacking:
+            raise ConfigError(
+                f"extra dataset '{extra.name}' lacks columns of the data: {', '.join(lacking[:5])}"
+            )
+    return ids
 
 
 def check_target(

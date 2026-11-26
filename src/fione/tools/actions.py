@@ -94,6 +94,7 @@ def _start_training(ctx: ToolContext, args: dict) -> dict:
             args["dataset_id"],
             args["config"],
             name=_name(args),
+            extra_dataset_ids=args.get("extra_dataset_ids"),
         ),
     )
 
@@ -152,12 +153,19 @@ for _tool in (
         "start_training",
         "Queue AutoML training on a train dataset of a project; returns the job to follow. "
         "`config` is the training configuration (`target` is required); "
-        "propose_training_config suggests one.",
+        "propose_training_config suggests one. `extra_dataset_ids` lists other train datasets "
+        "of the project (with the target and the same columns) whose rows are only learned "
+        "from, never validated.",
         _schema(
             {
                 "project_id": _PROJECT,
                 "dataset_id": _ID,
                 "config": {"type": "object", "description": "the training configuration"},
+                "extra_dataset_ids": {
+                    "type": "array",
+                    "items": _ID,
+                    "description": "train datasets whose rows are only learned from",
+                },
                 "name": _NAME,
             },
             ["project_id", "dataset_id", "config"],

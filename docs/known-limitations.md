@@ -90,6 +90,13 @@ What this release does not do, or does with a catch. Japanese summary at the end
   and a late candidate whose model would be over the size limit is not run.
 - **On a heavily loaded machine the time budget buys fewer boosting rounds**; CatBoost is
   affected most.
+- **Extra training data costs every fold.** Each fold fits the extra rows too, so a large extra
+  data set leaves time for fewer trials (the later candidates, such as the character n-grams, may
+  not get a first trial); the proposal's run time and the check on the size of the views count
+  the rows of the main dataset or all rows as noted in [Extra training
+  data](quickstart.md#extra-training-data). Near copies of the main rows are not found, only
+  exact ones, and the model's record does not say which extra datasets were used (the job's
+  payload does).
 - **Training and engine messages are in English** in the Japanese UI.
 
 ## Explanations and leak warnings
@@ -312,6 +319,7 @@ What this release does not do, or does with a catch. Japanese summary at the end
 - 実行中のジョブのキャンセルには最大 10 秒かかります。プロジェクトに属さないジョブは `GET /api/v1/jobs` に出ません。削除中にストレージが失敗すると、ファイルが残ることがあります。
 - 全モデルのエクスポートは、プロジェクトごとに最新の 1 つだけ残ります。
 - エンジンは実際には最大実行時間の約 3 分の 2 を使います。文章の列があるデータでは、後発候補（TextLinearWide、TextLinearChar、TextLinearPlain）を、他のファミリーの後に、探索時間の 15%（TextLinear 以外のファミリーから取り分けます）と他のファミリーが使い残した分でだけ試します（最終リフィット用の時間には入り込みませんが、探索時間の終わりに実行中の分割の学習は中断されません）。TextLinearChar は文章が約 500 万文字を超えるときと、空白のない文章の列があるときは試さず、TextLinearPlain は派生特徴量が採用されなかったときは試さず、モデルがサイズ上限を超える候補も試しません。MAE、MEDAE、SMAPE で順位を付ける回帰では、ブースティング系の中央値版（LightGBM_L1、XGBoost_L1、CatBoost_L1）も後発候補として同じ時間を使うため、短い実行では LinearWide が試されないことがあります。LinearBoost（線形モデルの予測から小さな木をブーストする候補）はどの表でも後発候補なので、文章がない表でも探索時間の 15% がその分取り分けられます。文章用の候補と LinearWide の後、中央値版の前に実行され、それらが残した時間を使います。LinearSpline（値の種類が多い数値ごとに折れ線の曲線を持つ線形モデル）は、そうした数値がある表の後発候補で、LinearBoost の直後に実行され、残った時間を使います（MAE、MEDAE、SMAPE で順位を付ける回帰では中央値版が後に続くため、取り分はごくわずかです）。学習やエンジンのメッセージは日本語画面でも英語です。
+- 追加の学習データは、すべての fold の学習に使うため時間がかかります。大きいと試行の数が減り、後発候補（文字 n-gram など）は最初の試行に届かないことがあります。提案の実行時間は追加データの行を数えません。主データの行とほぼ同じ内容の行は、完全に一致するものしか見つけられません。モデルの記録には、使った追加データセットが残りません（ジョブの入力には残ります）。
 - 寄与度は近似です。各行の寄与度は予測値（分類では確率、回帰では目的変数の単位。log-odds ではありません）に丸め誤差の範囲で一致しますが、各ライブラリの TreeSHAP（RandomForest と ExtraTrees は Saabas、Linear と LinearSpline と TextLinear（と LinearBoost の線形部分、木の部分は TreeSHAP）は係数×平均からの差、DeepLearning は平均からの積分勾配）を確率に変換してアンサンブルで合成したもので、厳密な Shapley 値ではありません。説明するのは 1 行につき 1 つの出力です（2 クラスでは 2 番目のクラス、それ以上では予測したクラス、回帰では値）。
 - 交差検証のスコアは、数百行のデータではかなり高く出ることがあります。同じ学習を繰り返しても同程度ずれることがあり、その場合は通知でお知らせします。
 - 派生特徴量（文字列の語と話題、件数、和・比、グループ平均など）は、元の列にまとめて寄与度・重要度を数えます。複数の列から作る特徴量は、それらの列に等分します。このバージョンで学習したモデルは、派生特徴量の有無にかかわらず、それより前のインストールで使わないでください（警告なしに読み込めますが、予測や説明が正しくなくなります）。派生特徴量を採用するかの判定は、交差検証と同じ行を（別の分割と厳しい基準で）使うため、学習のスコアはやや楽観的です。小さいデータでは損失の 1% 程度の本物の改善でも基準を満たさず、採用されないことがあります。

@@ -6,6 +6,8 @@ import time
 import uuid
 from datetime import datetime
 
+import pandas as pd
+
 from fione.config import load_secret
 from fione.engine.artifact import save_model
 from fione.engine.automl import AutoML
@@ -59,11 +61,24 @@ def automl(ctx: JobContext) -> None:
             raise projects.DatasetNotFound(dataset.id)
     except projects.DatasetNotFound as e:
         raise JobUserError("the dataset no longer exists") from e
+    extra_ids = payload.get("extra_dataset_ids") or []
+    try:
+        extras = [projects.get_dataset(ctx.conn, extra_id) for extra_id in extra_ids]
+        if any(extra.project_id != project_id for extra in extras):
+            raise projects.DatasetNotFound(extra_ids[0])
+    except projects.DatasetNotFound as e:
+        raise JobUserError("an extra dataset no longer exists") from e
     start = time.monotonic()
     try:
         config = TrainConfig.from_dict(payload["config"])
         frame = read_dataset(ctx.storage, dataset)
-        model = AutoML(config, emit=ctx.emit, should_stop=ctx.should_stop).fit(frame)
+        extra = (
+            pd.concat([read_dataset(ctx.storage, e) for e in extras], ignore_index=True)
+            if extras
+            else None
+        )
+        engine = AutoML(config, emit=ctx.emit, should_stop=ctx.should_stop)
+        model = engine.fit(frame) if extra is None else engine.fit(frame, extra=extra)
     except USER_ERRORS as e:
         raise JobUserError(str(e)) from e
     elapsed = time.monotonic() - start
