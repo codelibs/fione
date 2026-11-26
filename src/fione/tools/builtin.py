@@ -1501,6 +1501,20 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                     column=column,
                 )
             )
+        elif repeated.name in left_out_here:
+            # The test data lacks the column, so its rows cannot be matched to the training rows
+            # by it: they are about other values, as in the case below.
+            overrides["cv_group_column"] = repeated.name
+            warnings.append(
+                _warning(
+                    "group_column_not_in_test",
+                    f"column '{column}' repeats over rows and the test data of this project lacks "
+                    "it, so the test rows are about values the training rows may not hold; it is "
+                    "proposed as group_column (and left out as a feature): the validation holds "
+                    "out whole values. Leave group_column empty to validate on shuffled rows",
+                    column=column,
+                )
+            )
         elif _is_plain(repeated.name) and other_values_in_test(
             ctx.storage, ctx.conn, dataset, repeated.name, rows
         ):
