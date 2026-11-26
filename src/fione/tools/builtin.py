@@ -718,6 +718,13 @@ RARE_CLASS_EVEN = 0.5
 # measure that few values cover (an age of 17 to 24, a year) does not start there.
 ORDERED_CLASSES_MIN = 3
 ORDERED_CLASSES_MAX = 10
+# A whole-number target read as a number (more than 20 values) that may be class labels instead:
+# it takes every whole number from 0 or 1 up, between these many values, each on at least this many
+# rows. The rarest value of a count, an amount or an age has a few rows, and an hour or a day of
+# the month has fewer than the lowest number of values.
+INTEGER_LABELS_MIN = 50
+INTEGER_LABELS_MAX = 1000
+INTEGER_LABELS_ROWS = 100
 # A column named like an identifier (id, user_id, userId, 顧客ID, 番号) or like whom the rows are
 # about (subject, patient, customer, query, ... alone) that holds each value in several rows, at
 # least REPEATED_ID_GROUPS values, may tie rows together: suggest cv_group_column.
@@ -804,6 +811,31 @@ def ordered_classes(y: pd.Series, task: str) -> tuple[int, int] | None:
     if values[0] not in (0, 1):
         return None
     return int(values[0]), int(values[-1])
+
+
+def integer_labels(y: pd.Series, task: str) -> tuple[int, int] | None:
+    """The number of values and the rows of the rarest one of a regression target of whole numbers
+    that may be class labels: ``INTEGER_LABELS_MIN`` to ``INTEGER_LABELS_MAX`` values that are all
+    the whole numbers from 0 or 1 up, each on ``INTEGER_LABELS_ROWS`` rows or more; else None. One
+    count of the values of the whole target column."""
+    y = y.dropna()
+    if (
+        task != "regression"
+        or pd.api.types.is_bool_dtype(y)
+        or not pd.api.types.is_numeric_dtype(y)
+    ):
+        return None
+    if y.iloc[:100_000].nunique() > INTEGER_LABELS_MAX:  # a measure: no count of the whole column
+        return None
+    counts = y.value_counts()
+    if not INTEGER_LABELS_MIN <= len(counts) <= INTEGER_LABELS_MAX:
+        return None
+    values = np.sort(counts.index.to_numpy(dtype=float))
+    if (values != np.round(values)).any() or values[0] not in (0, 1):
+        return None
+    if values[-1] - values[0] + 1 != len(values) or counts.min() < INTEGER_LABELS_ROWS:
+        return None
+    return len(values), int(counts.min())
 
 
 def rare_class_share(y: pd.Series, task: str) -> float | None:
@@ -1465,6 +1497,17 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 "sort_metric 'rounded_qwk' is the alternative",
                 low=str(low),
                 high=str(high),
+            )
+        )
+    if (labels := integer_labels(found.y, task)) is not None:
+        warnings.append(
+            _warning(
+                "integer_labels",
+                f"the target is whole numbers with {labels[0]} values, each on at least "
+                f"{labels[1]} rows; if they are classes (labels, not amounts), task "
+                "'classification' predicts the class; the proposal reads them as a number",
+                values=str(labels[0]),
+                rows=f"{labels[1]:,}",
             )
         )
     overrides = {"sort_metric": recommended_metric(found.y, task)}

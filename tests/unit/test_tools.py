@@ -1271,6 +1271,45 @@ def test_propose_suggests_the_kappa_for_ordered_classes_besides_a_rare_class(env
     assert "ordered_classes" not in codes(other)
 
 
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (np.repeat(np.arange(355), 120), (355, 120)),  # class numbers from 0
+        (np.repeat(np.arange(1, 105), 382), (104, 382)),  # a category code from 1
+        (np.repeat(np.arange(50), 100), (50, 100)),  # the fewest values, the fewest rows
+        (np.repeat(np.arange(24), 700), None),  # an hour of the day: fewer than 50 values
+        (np.repeat(np.arange(50), 99), None),  # a value on 99 rows only
+        (np.repeat(np.arange(18, 80), 500), None),  # an age: not from 0 or 1
+        (np.repeat(np.delete(np.arange(60), 30), 200), None),  # a gap
+        (np.repeat(np.arange(0, 1001), 100), None),  # more than 1,000 values
+        (np.repeat(np.arange(60) + 0.5, 200), None),  # not whole numbers
+        (np.repeat([str(i) for i in range(60)], 200), None),  # text
+        (np.round(np.random.default_rng(0).exponential(40, 20_000)), None),  # a count: rare values
+    ],
+)
+def test_integer_labels_are_a_whole_number_target_of_every_value_from_zero_or_one(values, expected):
+    assert builtin.integer_labels(pd.Series(values), "regression") == expected
+    assert builtin.integer_labels(pd.Series(values), "classification") is None
+
+
+def test_propose_says_a_whole_number_target_may_be_classes_and_keeps_the_task(env):
+    rng = np.random.default_rng(0)
+    classes = rng.integers(0, 60, 12_000)  # 60 values on about 200 rows each
+    frame = pd.DataFrame(
+        {"x": rng.normal(size=12_000), "class": classes, "count": rng.poisson(30, 12_000)}
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "labels", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "class"})
+    assert "integer_labels" in codes(result)  # also in en and ja
+    warning = next(w for w in result["warnings"] if w["code"] == "integer_labels")
+    assert warning["params"]["values"] == "60" and "classification" in warning["message"]
+    assert result["config"]["task"] == "regression"  # a hint, not a choice
+    counts = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "count"})
+    assert "integer_labels" not in codes(counts)
+
+
 def test_the_recommended_metric_follows_the_problem():
     rare = pd.Series([0] * 95 + [1] * 5)
     assert builtin.recommended_metric(rare, "classification") == "aucpr"
