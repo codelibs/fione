@@ -319,7 +319,9 @@ the rows to predict their lags, put them in the same dataset (with the target em
 adding the lags. Training refuses a target with missing values, so take the rows to learn from
 with **Slice rows** (such as `month < 34`, or `sales is not empty` for the rows where `sales`
 has a value; `is empty` selects the others) before training, and the rows to predict with
-another slice for the prediction. A lag cannot reach beyond the end of the history, so rows to predict
+another slice for the prediction. A date column is compared with a date written year-month-day
+(`ordered >= 2015-07-01`, or `ordered < 2015-07-01 08:30` with a time of day; without one it is
+midnight, in the time zone of the column if it has one). A lag cannot reach beyond the end of the history, so rows to predict
 that lie further ahead than the lag have it empty: a prediction run reports the columns that
 the model learned from filled in and the rows to predict mostly lack, and a model that leans on
 them is not to be trusted.
@@ -398,6 +400,11 @@ An expression is built from:
   `min2(x, y)` and `max2(x, y)` (the smaller and larger of two values), `mod2(x, y)` (the remainder of `x` over `y`, with the sign of `y`; empty for a `y` of 0:
   `mod2(month_index, 12)` is the month of the year), `clip(x, low, high)`, `isnull(x)` (1 where `x` is empty) and `where(condition, x, y)`
   (`x` where the condition is true, `y` elsewhere).
+- `days(column)` for a column of dates, or of text written year-month-day (`2015-07-01`, with a time
+  of day if you like): the days since 1970-01-01, with the time of day as a fraction, and empty
+  for a missing date. The difference of two such columns is the days between them, and a column
+  of plain numbers is written without it. Text in another order (`7/1/2015`) is refused, since
+  it could be read as two different days.
 - `rowsum`, `rowmean` and `rowcount` of any number of values on one row, which skip the empty ones:
   `rowsum(a, b, c)`, or a pattern in quotes for every column whose name matches it (`*` for any
   characters, also none; it is the only wildcard), such as `rowsum("flag_*_on")`, which gives the number

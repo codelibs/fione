@@ -2509,3 +2509,272 @@ def test_calc_builds_the_great_circle_distance_and_the_bearing_between_two_point
         " - sin(radians(lat1)) * cos(radians(lat2)) * cos(radians(lon2 - lon1))"
     )
     np.testing.assert_allclose(calc(f"atan2({y}, {x})", df), bearing)
+
+
+def days_of(values):
+    """The days since 1970-01-01 (a fraction for a time of day), as pandas counts them."""
+    spans = (pd.to_datetime(values) - pd.Timestamp(0)) / pd.Timedelta(days=1)
+    return np.asarray(spans, dtype=float)
+
+
+def test_calc_days_counts_the_days_since_1970_of_dates_and_of_text_dates():
+    stamps = ["2020-01-01 12:00", "2021-03-01 00:00", None, "1969-12-31 06:00"]
+    df = pd.DataFrame(
+        {
+            "when": pd.to_datetime(stamps).as_unit("ms"),
+            "text": stamps,
+            "day": ["2020-01-01", "2020-01-02", "2020-01-03", None],
+            "slash": ["2020/1/1", "2020/1/2", "2020/1/3", None],
+            "eight": ["20200101", "20200102", "20200103", None],
+            "a b": pd.to_datetime(stamps).as_unit("s"),
+        }
+    )
+    expected = days_of(stamps)  # the time of day is a fraction; a missing date is empty
+    np.testing.assert_allclose(calc("days(when)", df), expected)
+    np.testing.assert_allclose(calc("days(text)", df), expected)
+    np.testing.assert_allclose(calc('days(col("a b"))', df), expected)
+    days = days_of(["2020-01-01", "2020-01-02", "2020-01-03", None])
+    for name in ("day", "slash", "eight"):
+        np.testing.assert_allclose(calc(f"days({name})", df), days)
+    np.testing.assert_allclose(calc("days(text) - days(when)", df), [0, 0, np.nan, 0])
+    assert calc("days(when) < 18262.75", df).tolist() == [1, 0, 0, 1]  # empty: false
+    assert calc("isnull(days(day))", df).tolist() == [0, 0, 0, 1]
+
+
+def test_calc_days_reads_a_date_far_from_1970_and_one_with_a_zone():
+    far = pd.DataFrame({"d": pd.to_datetime(["1000-01-01", "3000-06-15"]).as_unit("s")})
+    expected = (far["d"] - pd.Timestamp(0).as_unit("s")) / pd.Timedelta(days=1)
+    np.testing.assert_allclose(calc("days(d)", far), expected.to_numpy())
+    assert calc("days(d)", far)[0] == -354285  # 1000-01-01
+    tokyo = pd.to_datetime(["2020-01-01 09:00", None]).tz_localize("Asia/Tokyo").as_unit("ms")
+    # the wall time of the column's zone
+    np.testing.assert_allclose(
+        calc("days(d)", pd.DataFrame({"d": tokyo})), [float(days_of("2020-01-01 09:00")), np.nan]
+    )
+
+
+def test_calc_days_of_nothing_is_empty_and_of_an_empty_table_is_an_empty_column():
+    dates = pd.DataFrame({"d": pd.to_datetime([None, None]).as_unit("ms")})
+    assert np.isnan(calc("days(d)", dates)).all()
+    none = pd.DataFrame({"d": pd.Series([None, None], dtype=object)})
+    assert np.isnan(calc("days(d)", none)).all()
+    for dtype in ("datetime64[ms]", "object"):
+        empty = pd.DataFrame({"d": pd.Series([], dtype=dtype)})
+        assert calc("days(d)", empty).shape == (0,)
+
+
+def test_calc_days_refuses_what_is_not_a_date_and_leaves_numbers_as_they_are():
+    df = pd.DataFrame(
+        {
+            "n": [1.0, 2.0],
+            "i": [1, 2],
+            "flag": [True, False],
+            "first": ["7/1/2015", "7/2/2015"],
+            "word": ["a", "b"],
+            "mixed": ["2020-01-01", "2020-01-02 10:00"],
+            "d": pd.to_datetime(["2020-01-01", "2020-01-02"]),
+        }
+    )
+    for name in ("n", "i", "flag"):  # a number is not a date, even as nanoseconds from 1970
+        with pytest.raises(ModuleError, match=f"column '{name}' holds numbers, not dates"):
+            calc(f"days({name})", df)
+    with pytest.raises(ModuleError, match="column 'first' has text that is not a date written"):
+        calc("days(first)", df)
+    with pytest.raises(ModuleError, match="column 'word' has text that is not a date written"):
+        calc("days(word)", df)
+    with pytest.raises(ModuleError, match="column 'mixed' has dates that cannot be read"):
+        calc("days(mixed)", df)
+    # a date is still not a number in the rest of the language
+    with pytest.raises(ModuleError, match="column 'd' is not numeric"):
+        calc("d + 1", df)
+    np.testing.assert_allclose(calc("n + i", df), [2.0, 4.0])
+    for text, message in (
+        ("days(n + 1)", "takes a column name"),
+        ("days(1)", "takes a column name"),
+        ('days("d")', "takes a column name"),
+        ("days()", "takes 1 argument"),
+        ("days(d, d)", "takes 1 argument"),
+        ("days(nope)", "unknown column 'nope'"),
+        ('days(col("nope"))', "unknown column 'nope'"),
+        ("days(d=d)", "takes no named arguments"),
+    ):
+        with pytest.raises(ModuleError, match=message):
+            calc(text, df)
+
+
+def test_rslice_compares_a_date_column_with_a_date_written_year_month_day():
+    stamps = ["2020-01-01 08:30", "2020-01-02 00:00", None, "2020-01-03 23:59"]
+    df = pd.DataFrame({"id": [1, 2, 3, 4], "d": pd.to_datetime(stamps).as_unit("ms")})
+
+    def ids(conditions):
+        out, _ = run_op("rslice", df, {"row_conditions": conditions})
+        return out["id"].tolist()
+
+    assert ids("d < 2020-01-02") == [1]
+    assert ids("d <= 2020-01-02") == [1, 2]  # a date without a time is midnight
+    assert ids("d >= 2020-01-02") == [2, 4]  # an empty date matches nothing
+    assert ids("d > 2020/1/2") == [4]
+    assert ids("d == 2020-01-02") == [2]
+    assert ids("d != 2020-01-02") == [1, 3, 4]  # as for numbers, an empty value differs
+    assert ids("d == 2020-01-01 08:30") == [1]
+    assert ids("d < 2020-01-01 08:30:01 & d > 2020-01-01T08:00") == [1]
+    assert ids("d >= 20200102 & d < 20200103") == [2]
+    assert ids("d is empty") == [3]
+    assert ids("d is not empty & id > 1") == [2, 4]
+    assert ids("d < 1900-01-01 | d >= 2020-01-03") == [4]
+    assert ids("d >= 2020-01-01 & d < 2020-01-01") == []
+    for text in ("yesterday", "2020-13-45", "01/02/2020", "2020-01", "3", "2020-01-01Z"):
+        with pytest.raises(ModuleError, match="does not fit column 'd'; write a date as"):
+            run_op("rslice", df, {"row_conditions": f"d < {text}"})
+    far, _ = run_op("rslice", df, {"row_conditions": "d > 9999-01-01"})
+    assert far.empty
+    none = pd.DataFrame({"d": pd.to_datetime([None, None]).as_unit("ms")})
+    out, _ = run_op("rslice", none, {"row_conditions": "d > 2020-01-01"})
+    assert out.empty
+    out, _ = run_op("rslice", df.iloc[:0], {"row_conditions": "d > 2020-01-01"})
+    assert out.empty
+
+
+def test_rslice_reads_a_date_in_the_zone_of_the_column():
+    stamps = pd.to_datetime(["2020-01-01 09:00", "2020-01-02 09:00"]).tz_localize("Asia/Tokyo")
+    df = pd.DataFrame({"id": [1, 2], "d": stamps.as_unit("ms")})
+
+    def ids(conditions):
+        out, _ = run_op("rslice", df, {"row_conditions": conditions})
+        return out["id"].tolist()
+
+    assert ids("d >= 2020-01-02") == [2]
+    assert ids("d == 2020-01-01 09:00") == [1]  # the wall time of the column's zone
+    # a zone that is given is converted: 09:00 in Tokyo is 00:00 UTC
+    assert ids("d < 2020-01-01T00:00:00+00:00") == []
+    assert ids("d <= 2020-01-01T00:00:00+00:00") == [1]
+    naive = pd.DataFrame({"d": pd.to_datetime(["2020-01-01"])})
+    with pytest.raises(ModuleError, match="does not fit column 'd'"):
+        run_op("rslice", naive, {"row_conditions": "d < 2020-01-01T00:00:00+00:00"})
+
+
+def test_rslice_and_replace_on_other_columns_are_as_they_were():
+    df = pd.DataFrame(
+        {
+            "n": [1, 2, 3],
+            "x": [1.5, 2.5, np.nan],
+            "s": ["2020-01-01", "b", "c"],
+            "f": [True, False, True],
+        }
+    )
+    assert run_op("rslice", df, {"row_conditions": "n >= 2"})[0]["n"].tolist() == [2, 3]
+    assert run_op("rslice", df, {"row_conditions": "s < b"})[0]["n"].tolist() == [1]  # text is text
+    assert run_op("rslice", df, {"row_conditions": "f == true"})[0]["n"].tolist() == [1, 3]
+    for text in ("n < 2020-01-01", "x < 2020-01-01", "f == 2020-01-01"):
+        with pytest.raises(ModuleError, match="does not fit column"):
+            run_op("rslice", df, {"row_conditions": text})
+    stamps = pd.DataFrame({"d": pd.to_datetime(["2020-01-01", "2020-02-01"])})
+    out, _ = run_op(
+        "replace",
+        stamps,
+        {"column": "d", "value": "2021-05-06", "row_conditions": "d > 2020-01-15"},
+    )
+    assert out["d"].tolist() == [pd.Timestamp("2020-01-01"), pd.Timestamp("2021-05-06")]
+
+
+def test_dates_build_a_customer_table_with_a_history_and_a_label_as_pandas_does():
+    rng = np.random.default_rng(7)
+    n = 400
+    minutes = pd.to_timedelta(rng.integers(0, 330 * 24 * 60, n), unit="min")
+    lines = pd.DataFrame(
+        {
+            "customer": rng.integers(1, 61, n),
+            "ordered": (pd.Timestamp("2011-01-01") + minutes).as_unit("ms"),
+            "amount": rng.gamma(2.0, 20.0, n).round(2),
+        }
+    )
+    lines.loc[rng.choice(n, 15, replace=False), "ordered"] = pd.NaT  # no date: in neither part
+    customers = pd.DataFrame({"customer": np.arange(1, 71)})  # some never bought
+    cut, end = "2011-07-01", "2011-10-01"
+    stamps = lines["ordered"]
+
+    with_days, _ = run_op("calc", lines, {"name": "day", "expression": "days(ordered)"})
+    history, _ = run_op("rslice", with_days, {"row_conditions": f"ordered < {cut}"})
+    in_window = f"ordered >= {cut} & ordered < {end}"
+    window, _ = run_op("rslice", with_days, {"row_conditions": in_window})
+    # the same rows by pandas
+    assert len(history) == int((stamps < pd.Timestamp(cut)).sum())
+    assert len(window) == int(((stamps >= pd.Timestamp(cut)) & (stamps < pd.Timestamp(end))).sum())
+    assert len(history) + len(window) < n  # the empty dates and the later days are in neither
+
+    join = {"other_dataset_id": 1, "key": "customer", "summarize": True, "stats": "last,max,sum"}
+    summary, _ = run_op("join", customers, {**join, "columns": ["day", "amount"]}, history)
+    cut_day = float(days_of(cut))
+    summary, _ = run_op("calc", summary, {"name": "recency", "expression": f"{cut_day} - day_max"})
+    bought, _ = run_op("join", customers, {**join, "columns": ["amount"]}, window)
+    summary["label"] = (bought["rows"].fillna(0) > 0).astype(int)
+
+    old = lines[stamps < pd.Timestamp(cut)]
+    by = (
+        old.groupby("customer")
+        .agg(rows=("amount", "size"), amount_sum=("amount", "sum"), last=("ordered", "max"))
+        .reindex(customers["customer"])
+    )
+    assert summary["rows"].fillna(0).tolist() == by["rows"].fillna(0).tolist()
+    np.testing.assert_allclose(
+        summary["amount_sum"].to_numpy(float), by["amount_sum"].to_numpy(float)
+    )
+    since = (pd.Timestamp(cut) - by["last"]).dt.total_seconds().to_numpy() / 86400
+    np.testing.assert_allclose(summary["recency"].to_numpy(float), since)
+    assert summary["recency"].min() > 0  # the last purchase of the history is before the cut
+    later = lines[(stamps >= pd.Timestamp(cut)) & (stamps < pd.Timestamp(end))]
+    expected = customers["customer"].isin(later["customer"]).astype(int)
+    assert summary["label"].tolist() == expected.tolist()
+    assert 0 < summary["label"].sum() < len(summary)  # both labels are there
+
+
+def test_a_date_that_the_clock_skips_or_shows_twice_is_refused_in_the_zone_of_the_column():
+    stamps = pd.to_datetime(["2020-03-08 12:00", "2020-11-01 12:00"]).tz_localize(
+        "America/New_York"
+    )
+    df = pd.DataFrame({"d": stamps.as_unit("ms")})
+    for text in ("2020-03-08 02:30", "2020-11-01 01:30"):  # skipped; shown twice
+        with pytest.raises(ModuleError, match="does not exist or is ambiguous in the time zone"):
+            run_op("rslice", df, {"row_conditions": f"d < {text}"})
+        with pytest.raises(ModuleError, match="does not exist or is ambiguous in the time zone"):
+            run_op("replace", df, {"column": "d", "value": text})
+    out, _ = run_op("rslice", df, {"row_conditions": "d < 2020-03-08 03:30"})  # a time that exists
+    assert out.empty
+    out, _ = run_op("rslice", df, {"row_conditions": "d >= 2020-11-01 00:30"})
+    assert len(out) == 1
+
+
+def test_replace_refuses_a_date_that_the_column_cannot_hold():
+    df = pd.DataFrame({"d": pd.to_datetime(["2020-01-01", "2020-02-01"]).astype("datetime64[ns]")})
+    for conditions in ("", "d > 2020-01-15", "d > 2030-01-01"):  # also when no row is changed
+        with pytest.raises(ModuleError, match="out of the range of the dates of 'd'"):
+            run_op(
+                "replace",
+                df,
+                {"column": "d", "value": "9999-01-01", "row_conditions": conditions},
+            )
+    wide = df.astype({"d": "datetime64[ms]"})
+    out, _ = run_op("replace", wide, {"column": "d", "value": "9999-01-01"})
+    assert (out["d"] == pd.Timestamp("9999-01-01")).all()
+
+
+def test_calc_reads_a_date_column_once_however_often_it_is_used(monkeypatch):
+    df = pd.DataFrame({"d": ["2020-01-01", "2020-01-05"], "e": ["2020-01-02", "2020-01-03"]})
+    calls = []
+    real = registry.read_dates
+
+    def counting(values, label, *args, **kwargs):
+        calls.append(label)
+        return real(values, label, *args, **kwargs)
+
+    monkeypatch.setattr(registry, "read_dates", counting)
+    values = calc("days(d) - days(e) + days(d) * 0 + days(col('d')) + days(e)", df)
+    np.testing.assert_allclose(values, 2 * days_of(df["d"]))  # d - e + 0 + d + e
+    assert sorted(calls) == ["column 'd'", "column 'e'"]
+
+
+def test_the_order_column_keeps_its_message_for_dates_in_mixed_formats():
+    df = pd.DataFrame({"t": ["2020-01-01", "2020-01-02 10:00"], "g": ["a", "a"], "v": [1.0, 2.0]})
+    with pytest.raises(ModuleError) as raised:
+        run_op("rolling", df, {"order": "t", "by": ["g"], "columns": ["v"]})
+    assert str(raised.value) == "order column 't' has dates that cannot be read in one format"
