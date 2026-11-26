@@ -1386,3 +1386,14 @@ def test_a_failed_prediction_comment_removal_keeps_its_job_and_output(chat, monk
         assert r.status_code == 200, path
         assert notes_left(chat) == (set(), 0), path
         make_note(chat, "prediction", job.id)  # for the job's turn
+
+
+def test_the_assistants_answers_are_signed_assistant_not_guide(chat):
+    """The chat speaks as the assistant; "Guide" is the rule-based guide of the rating."""
+    cid = new_conversation(chat)
+    with closing(connect(chat.client)) as conn:
+        store.add_message(conn, cid, "user", "hi")
+        store.add_message(conn, cid, "assistant", "Hello")
+    who = re.findall(r'chat-message__who">(.*?)</p>', page_of(chat, f"?c={cid}").text, re.S)
+    answers = [w for w in who if "mascot" in w]
+    assert answers and all(w.endswith("Assistant") for w in answers), who
