@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 
 from fione.auth.roles import ProjectAccess, Role, can_access_project, project_access
-from fione.data.frames import is_counter_name, is_time_counter, parse_datetimes
+from fione.data.frames import is_counter_name, is_day_first, is_time_counter, parse_datetimes
 from fione.data.profile import (
     DETERMINES,
     PREDICTS_ALONE,
@@ -53,7 +53,7 @@ from fione.data.profile import (
 )
 from fione.engine import diagnostics as diag
 from fione.engine import metrics
-from fione.engine.automl import FEATURE_MAX_COLUMNS, _event_flags
+from fione.engine.automl import FEATURE_MAX_COLUMNS, _event_flags, _time_values
 from fione.engine.config import ConfigError, TrainConfig
 from fione.engine.explain import PD_GRID
 from fione.engine.prep import MAX_PROSE, _sorted_labels, infer_task, validate_target
@@ -954,6 +954,46 @@ TEST_SEEN_SHARE = 0.9
 TEST_UNSEEN_SHARE = 0.1
 
 
+# The dates of the test data are all after the training ones when at least this share of them is
+# after the last training date: the rows to predict are later, which a validation in time mimics.
+TEST_LATER_SHARE = 0.99
+
+
+def _utc_naive(dates):
+    """``dates`` (a series of datetimes, or one timestamp) as naive UTC: a date with an offset is
+    converted, a naive one is taken as UTC, so that dates of both kinds can be compared."""
+    if isinstance(dates, pd.Timestamp):
+        return dates.tz_convert("UTC").tz_localize(None) if dates.tzinfo else dates
+    return dates.dt.tz_convert("UTC").dt.tz_localize(None) if dates.dt.tz is not None else dates
+
+
+def test_dates_later(
+    storage,
+    conn,
+    dataset: Dataset,
+    column: str,
+    last: pd.Timestamp,
+    dayfirst: bool | None = None,
+    sample_rows: int = _SAMPLE_ROWS,
+) -> bool:
+    """Whether every test dataset of the project that holds ``column`` has, in at least
+    ``TEST_LATER_SHARE`` of its rows (a sample of ``sample_rows``), a date after ``last`` (the last
+    date of the training rows), and at least one test dataset holds it. The dates are read as the
+    training ones (``dayfirst``) and compared in UTC."""
+    if dataset.type != DatasetType.TRAIN:
+        return False
+    last = _utc_naive(last)
+    shares = []
+    for other in projects.list_datasets(conn, dataset.project_id):
+        if other.type != DatasetType.TEST or column not in {name for name, _ in other.schema}:
+            continue
+        values = ingest.read_dataset_runs(storage, other, sample_rows, [column])[column]
+        dates = _utc_naive(parse_datetimes(values, dayfirst).dropna())
+        if len(dates):
+            shares.append(float((dates > last).mean()))
+    return bool(shares) and all(share >= TEST_LATER_SHARE for share in shares)
+
+
 def test_seen_shares(
     storage, conn, dataset: Dataset, column: str, sample_rows: int = _SAMPLE_ROWS
 ) -> list[float]:
@@ -1465,14 +1505,31 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 more=f"{more:,}",
             )
         )
-    time_index = time_index_column(profile, target, dataset.n_rows)
+    time_arg = None
+    if "time_column" in args:
+        time_arg = _resolve_column(names, args["time_column"])
+        if time_arg == target or not _is_plain(time_arg):
+            raise ToolError("time_column must be a plain-text column other than the target")
+        try:  # as the engine reads it: numbers, or dates (text a date can be read from)
+            order = _time_values(ingest.read_dataset(ctx.storage, dataset, [time_arg]), time_arg)
+        except ConfigError as e:
+            raise ToolError(clean_text(e, _MESSAGE_CHARS)) from None
+        if not _order_works(found, order):
+            raise ToolError(
+                "time_column needs, for a classification, every class before the later parts "
+                "when the rows are put in its order"
+            )
+    time_index = None if time_arg else time_index_column(profile, target, dataset.n_rows)
     if time_index is not None and (
         "group_column" in args  # the groups would have to end at several different times
         or not _is_plain(time_index.name)
         or not _time_order_works(ctx, dataset, time_index.name, found)
     ):
         time_index = None
-    ignore = {col.name for col in found.ignore} - {time_index.name if time_index else None}
+    ignore = {col.name for col in found.ignore} - {
+        time_index.name if time_index else None,
+        time_arg,
+    }
     id_names = [c.name for c in profile.columns if c.name in ignore and c.kind == "id"]
     listed_ids = set(id_names[:_MAX_IGNORED_LISTED])
     unlisted_ids = len(id_names) - len(listed_ids)  # these stay in the training
@@ -1770,6 +1827,8 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                     column=column,
                 )
             )
+    if time_arg is not None:
+        overrides["time_column"] = time_arg
     if time_index is not None:
         overrides["time_column"] = time_index.name
         column = clean_text(time_index.name)
@@ -1784,7 +1843,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
             )
         )
     repeated = None
-    if time_index is None:
+    if time_index is None and time_arg is None:
         repeated = repeated_time_column(ctx, dataset, profile, target)
     if repeated:
         column = clean_text(repeated[0])
@@ -1805,21 +1864,37 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         )
     elif (
         time_index is None
+        and time_arg is None
         and "group_column" not in args  # the groups would have to end at several different times
         and (date := date_time_column(ctx, dataset, profile, target))
         and _order_works(found, date[1])
     ):
         column = clean_text(date[0])
-        warnings.append(
-            _warning(
-                "time_hint",
-                f"column '{column}' holds dates, so it may order the rows in time. If you will "
-                "predict later dates, time_column set to it validates later rows after earlier "
-                "ones, so the score is not too good; it turns the search for derived features "
-                "off",
-                column=column,
+        raw = ingest.read_dataset(ctx.storage, dataset, [date[0]])[date[0]]
+        first = None if pd.api.types.is_datetime64_any_dtype(raw) else is_day_first(raw)
+        if test_dates_later(ctx.storage, ctx.conn, dataset, date[0], date[1].max(), first, rows):
+            warnings.append(
+                _warning(
+                    "time_test_later",
+                    f"the dates in column '{column}' of the test data are all later than those of "
+                    "the training rows, so the rows to predict follow the ones the model learns "
+                    "from: time_column set to it validates later rows after earlier ones, so the "
+                    "score is not too good; it turns the search for derived features off. Leave "
+                    "time_column empty to validate on shuffled rows",
+                    column=column,
+                )
             )
-        )
+        else:
+            warnings.append(
+                _warning(
+                    "time_hint",
+                    f"column '{column}' holds dates, so it may order the rows in time. If you will "
+                    "predict later dates, time_column set to it validates later rows after earlier "
+                    "ones, so the score is not too good; it turns the search for derived features "
+                    "off",
+                    column=column,
+                )
+            )
     if "sort_metric" in overrides:
         overrides["sort_metric"] = _metric_for(
             overrides["sort_metric"], found.y, task, survival=event is not None
@@ -2661,7 +2736,9 @@ for _tool in (
         "target_transform ('log1p': a skewed target, RMSLE); sort_metric (the score the goal "
         "names: f1, qwk, rmsle, ...); group_column (a repeating id, like a customer, whose "
         "rows stay together); event_column (a column of 0 and 1, 1 when the event happened, "
-        "next to a target that is the time to it, cut short where it is 0: survival).",
+        "next to a target that is the time to it, cut short where it is 0: survival); "
+        "time_column (a date or time column when the rows to predict are later: the "
+        "validation follows its order).",
         _schema(
             {
                 "dataset_id": _ID,
@@ -2673,6 +2750,7 @@ for _tool in (
                 "sort_metric": {"type": "string"},
                 "group_column": _COLUMN,
                 "event_column": _COLUMN,
+                "time_column": _COLUMN,
             },
             ["dataset_id", "target"],
         ),

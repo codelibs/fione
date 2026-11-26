@@ -494,6 +494,11 @@ A notice gives the rows (and, for a date column, the days) of the first part, wh
 learned from, and of each validation part. When the dates span over two years and the first part
 spans less than one, a second notice says that the first folds learn from less than a yearly
 cycle, so their scores may be pessimistic, and that a smaller `nfolds` makes the parts longer.
+The assistant's proposal does not set it for you, but takes it (`time_column`, a column other than
+the target with a value on every row). When a column of dates exists and a test dataset of the
+project holds it with at least 99% of its dates after the last training date, the proposal says so
+(the rows to predict are later) instead of the general hint about dates, and says that the time
+order turns the search for derived features off.
 With a group column too ("Keep related rows together by"), each group is ordered by its
 last row and all its rows are in one part, so no group has rows on both sides of a fold, and a
 fold learns only from groups that end no later than the ones it predicts. Rows are not ordered

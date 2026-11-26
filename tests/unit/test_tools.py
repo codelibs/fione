@@ -1859,6 +1859,186 @@ def test_propose_only_warns_about_a_date_column_that_may_order_the_rows(env, str
     assert "when" not in result["config"]["ignored_columns"]
 
 
+def _propose_dated_with_test(env, test_dates, **args):
+    """The dated table (400 days from 2020-01-01) and a test dataset of ``test_dates`` (a list of
+    dates, or None for none)."""
+    ds = _dated(env)
+    tests = []
+    try:
+        if test_dates is not None:
+            frame = pd.DataFrame({"when": test_dates, "x": np.zeros(len(test_dates))})
+            tests.append(
+                ingest.ingest_batches(
+                    env.storage, env.conn, env.project.id, "later", DatasetType.TEST, [frame]
+                )
+            )
+        return call(
+            env, "propose_training_config", {"dataset_id": ds.id, "target": "label", **args}
+        )
+    finally:
+        for other in [*tests, ds]:
+            projects.delete_dataset(env.conn, env.storage, other.id)
+
+
+def _days_after(first, n=300, step=1):
+    return list(pd.Timestamp(first) + pd.to_timedelta(np.arange(n) * step, unit="D"))
+
+
+def test_propose_says_when_the_test_dates_are_all_later_and_changes_nothing(env):
+    result = _propose_dated_with_test(env, _days_after("2021-06-01"))
+    assert "time_test_later" in codes(result)  # translated in both languages
+    found = [w["code"] for w in result["warnings"]]
+    assert "time_hint" not in found  # said once
+    warning = next(w for w in result["warnings"] if w["code"] == "time_test_later")
+    assert warning["params"] == {"column": "when"} and "turns the search" in warning["message"]
+    assert result["config"]["time_column"] is None
+
+
+@pytest.mark.parametrize(
+    ("offset", "later"),
+    [
+        (-200, False),  # inside the training dates
+        (1, True),  # the first test date is the day after the last training one
+        (-2, True),  # 3 of the 300 test dates are not later: 99%
+        (-3, False),  # 4 of 300 are not
+    ],
+)
+def test_propose_needs_99_percent_of_the_test_dates_to_be_later(env, offset, later):
+    first = _dated_last_day(env) + pd.Timedelta(days=offset)
+    found = codes(_propose_dated_with_test(env, _days_after(first)))
+    assert ("time_test_later" in found) is later and ("time_hint" in found) is not later
+
+
+def _dated_last_day(env):
+    ds = _dated(env)
+    try:
+        return pd.to_datetime(ingest.read_dataset(env.storage, ds, ["when"])["when"]).max()
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+
+
+def test_propose_keeps_the_hint_without_a_test_dataset_and_leaves_a_given_column_alone(env):
+    assert "time_hint" in codes(_propose_dated_with_test(env, None))
+    given = _propose_dated_with_test(env, _days_after("2021-06-01"), time_column="when")
+    found = codes(given)
+    assert "time_hint" not in found and "time_test_later" not in found
+    assert given["config"]["time_column"] == "when"
+
+
+def _propose_with_datasets(env, train, tests, target="label", **args):
+    """The proposal for ``train`` (a frame) with one test dataset for each frame of ``tests``."""
+    made = [
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "tr", DatasetType.TRAIN, [train]
+        )
+    ]
+    for i, frame in enumerate(tests):
+        made.append(
+            ingest.ingest_batches(
+                env.storage, env.conn, env.project.id, f"te{i}", DatasetType.TEST, [frame]
+            )
+        )
+    try:
+        return call(
+            env, "propose_training_config", {"dataset_id": made[0].id, "target": target, **args}
+        )
+    finally:
+        for ds in reversed(made):
+            projects.delete_dataset(env.conn, env.storage, ds.id)
+
+
+def _train_strings(fmt="%Y-%m-%d", n=600, **extra):
+    rng = np.random.default_rng(0)
+    dates = pd.Timestamp("2021-01-01") + pd.to_timedelta(np.arange(n) % 60, unit="D")
+    frame = pd.DataFrame(
+        {"when": dates.strftime(fmt), "x": rng.normal(size=n), "label": rng.integers(0, 2, n)}
+    )
+    return frame.assign(**extra)
+
+
+def _test_strings(values):
+    return pd.DataFrame({"when": list(values), "x": np.zeros(len(values))})
+
+
+@pytest.mark.parametrize(
+    ("train_suffix", "test_values", "later"),
+    [
+        ("", ["2021-06-01T00:00:00+09:00"] * 50, True),  # a fixed offset in the test data
+        ("", ["2021-06-01T00:00:00+09:00", "2021-06-02T00:00:00-05:00"] * 25, True),  # mixed
+        ("", ["2021-02-01T00:00:00+09:00"] * 50, False),  # the offset puts it in the training range
+        (
+            "+00:00",
+            ["2021-06-01 00:00:00"] * 50,
+            True,
+        ),  # offsets in the training data, none in the test
+        ("+09:00", ["2021-03-01 00:00:00"] * 50, True),  # UTC, after the last training day
+    ],
+)
+def test_the_test_dates_are_compared_with_the_training_ones_whatever_their_offsets(
+    env, train_suffix, test_values, later
+):
+    train = _train_strings("%Y-%m-%dT%H:%M:%S" if train_suffix else "%Y-%m-%d")
+    if train_suffix:
+        train["when"] = train.when + train_suffix
+    found = codes(_propose_with_datasets(env, train, [_test_strings(test_values)]))
+    assert ("time_test_later" in found) is later  # and no crash on naive against aware dates
+
+
+def test_the_test_dates_are_read_day_first_when_the_training_ones_are(env):
+    train = _train_strings("%d/%m/%Y")  # 01/01/2021 to 01/03/2021 (days up to 31: day first)
+    last = pd.Timestamp("2021-01-01") + pd.Timedelta(days=59)
+    test = _test_strings(
+        [f"{d:02d}/03/2021" for d in range(2, 13)] * 5
+    )  # read month first: Feb to Dec
+    assert last < pd.Timestamp("2021-03-02")
+    assert "time_test_later" in codes(_propose_with_datasets(env, train, [test]))
+
+
+def test_one_test_dataset_inside_the_training_dates_keeps_the_general_hint(env):
+    train = _train_strings()
+    later = _test_strings(["2021-06-01"] * 50)
+    inside = _test_strings(["2021-01-15"] * 50)
+    found = codes(_propose_with_datasets(env, train, [later, inside]))
+    assert "time_hint" in found and "time_test_later" not in found
+    assert "time_test_later" in codes(_propose_with_datasets(env, train, [later, later]))
+
+
+def test_a_counter_given_as_the_time_column_is_not_ignored(env):
+    train = _train_strings().assign(row_no=lambda d: np.arange(len(d)))
+    result = _propose_with_datasets(env, train, [], time_column="row_no")
+    assert result["config"]["time_column"] == "row_no"
+    assert "row_no" not in result["config"]["ignored_columns"]
+    plain = _propose_with_datasets(env, train, [])
+    assert "row_no" in plain["config"]["ignored_columns"]  # an ID column otherwise
+
+
+def test_the_time_column_is_checked_as_the_engine_reads_it(env):
+    base = _train_strings("%d/%m/%Y").assign(city=lambda d: "city" + (d.index % 7).astype(str))
+    with pytest.raises(ToolError, match="must hold numbers or dates"):
+        _propose_with_datasets(env, base, [], time_column="city")
+    with_gaps = base.assign(when=base.when.where(base.index > 5))
+    with pytest.raises(ToolError, match="missing values"):
+        _propose_with_datasets(env, with_gaps, [], time_column="when")
+    # a class that only appears in the last days (in the order of the dates, whatever the strings
+    # sort like) cannot be validated in time order
+    dates = pd.to_datetime(base.when, format="%d/%m/%Y")
+    late = base.assign(label=(dates > dates.quantile(0.9)).astype(int))
+    with pytest.raises(ToolError, match="every class before the later parts"):
+        _propose_with_datasets(env, late, [], time_column="when")
+    assert (
+        _propose_with_datasets(env, base, [], time_column="when")["config"]["time_column"] == "when"
+    )
+
+
+def test_propose_checks_the_time_column_it_is_given(env):
+    for bad, text in (
+        ({"time_column": "label"}, "other than the target"),
+        ({"time_column": "nope"}, "column"),
+    ):
+        with pytest.raises(ToolError, match=text):
+            _propose_dated_with_test(env, None, **bad)
+
+
 def test_propose_reads_day_first_dates_as_the_engine_does(env):
     result = _propose_dated(env, dayfirst=True)  # 13/01/2020 is a date, the 13th of January
     assert next(w for w in result["warnings"] if w["code"] == "time_hint")["params"] == {
