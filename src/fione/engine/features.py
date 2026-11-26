@@ -86,6 +86,7 @@ DECISIVE_GAIN = 0.05  # share of the loss a group saves to be kept when time end
 MAX_CANDIDATES = 40
 ENCODING_ROWS = 100_000  # rows the encodings of values are judged on: fewer show no gain
 ENCODING_ROWS_MAX = 300_000  # ... and more rows show more: judged on as many as the time covers
+ENCODING_MARGIN = 1.2  # of the time the repeats still to do took in the first, kept in hand
 ENCODING_FOLDS = 5  # a training row's encoding is read from the other folds
 ENCODING_SMOOTHING = 20.0  # rows' worth of the overall rate a value's own rate is pulled towards
 ENCODING_MIN_LEVELS = 20  # a number needs this many distinct keys ...
@@ -1827,14 +1828,16 @@ def _judge_encoding(
     is kept only when it cuts the loss by ``DECISIVE_GAIN`` on one repeat and passes on two
     others, which takes half the fits (for a group whose pre-screen is strong: the time left at
     the start covers them, not the full judgment); a gain that is not decisive is left for the
-    full judgment later (False: no verdict was made). ``_OutOfTime`` leaves it unjudged."""
+    full judgment later (False: no verdict was made; True: over, and a group left without a
+    verdict is listed as not judged). The repeats still to do are timed on the first one (the
+    fits of a repeat take little more on many rows than on few: a time read from the gate's few
+    rows would be far too long); when the time left does not cover them, or the deadline passes
+    before they are done, the group is left unjudged and never kept on fewer repeats."""
     wide = gate
-    repeats = 2 * (1 + FINAL_REPEATS if decisive_only else 1 + GATE_REPEATS + FINAL_REPEATS)
     unit = gate.secs([]) / len(gate.X)  # seconds of one fit per row
     least = getattr(group, "judge_rows", ENCODING_ROWS)
+    repeats = 2 * (1 + FINAL_REPEATS if decisive_only else 1 + GATE_REPEATS + FINAL_REPEATS)
     rows_wide = encoding_rows(len(all_rows), unit * repeats, deadline.remaining(), least)
-    if unit * rows_wide * repeats > deadline.remaining():
-        return False  # not enough time left for the judgment: listed as not judged
     if len(gate.X) < rows_wide:
         rows = _sample(all_y, gate.task, gate.seed, rows_wide)
         wide = new_gate(all_rows.iloc[rows].reset_index(drop=True), all_y[rows], None)
@@ -1851,6 +1854,8 @@ def _judge_encoding(
                 )
             )
             return True
+        # the repeats to come, each with and without the group, at the pace of the first ones
+        pair = wide.secs(kept) + wide.secs([*kept, group])
         if decisive_only:
             gain = _share(wide.losses(kept, range(1)), trial)
             start = (
@@ -1859,12 +1864,16 @@ def _judge_encoding(
             fresh = range(start, start + FINAL_REPEATS)
             if gain < DECISIVE_GAIN or not passes(wide.losses(kept, range(1)), trial):
                 return False  # not decisive: the full judgment, later, decides
+            if ENCODING_MARGIN * FINAL_REPEATS * pair > deadline.remaining():
+                return True  # no verdict: listed as not judged for lack of time
             if not passes(wide.losses(kept, fresh), wide.losses([*kept, group], fresh)):
                 verdicts.append(Verdict(group.label, width, False, gain, "final check"))
             else:
                 kept.append(group)
                 verdicts.append(Verdict(group.label, width, True, gain, "adopted"))
             return True
+        if ENCODING_MARGIN * (GATE_REPEATS - 1 + FINAL_REPEATS) * pair > deadline.remaining():
+            return True  # no verdict: listed as not judged for lack of time
         both = range(GATE_REPEATS)
         before, after = wide.losses(kept, both), wide.losses([*kept, group], both)
         gain = _share(before, after)

@@ -725,11 +725,12 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   rows, at most 100,000, and up to 300,000 when the time covers them: a sample holds too few rows
   of each value to show the gain), and this may use part of the time that is left for the other
   groups. It is kept when its loss falls by at least 5 % on one repeat of the folds and passes on
-  two other repeats; otherwise it is judged last, with the usual thresholds. The group is not
-  built for a target of three classes or more, or with a group column for validation. The
-  validation cannot see the risk of a column whose values the data to predict does not share
-  (rows of people, shops or items that the training rows do not hold): the rate then falls back
-  to the overall one, and the model has learnt to lean on the column.
+  two other repeats; otherwise it is judged last, with the usual thresholds. The judgment times its
+  first repeat and goes on only when the time left covers the rest; it is never kept on fewer
+  repeats. The group is not built for a target of three classes or more, or with a group column
+  for validation. The validation cannot see the risk of a column whose values the data to predict
+  does not share (rows of people, shops or items that the training rows do not hold): the rate
+  then falls back to the overall one, and the model has learnt to lean on the column.
 
 A column of a comma-delimited CSV in which every value is a number written with thousands
 separators (`16,853`, `-1,234.5`; plain digits may be mixed in, and at least one value must have
