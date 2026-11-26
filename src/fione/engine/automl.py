@@ -1197,8 +1197,13 @@ class AutoML:
     def _notice(self, message: str, **data) -> None:
         self._event("notice", message=message, **data)
 
-    def fit(self, df: pd.DataFrame) -> TrainedModel:
-        """Train on ``df``, which holds the target column and the features."""
+    def fit(self, df: pd.DataFrame, extra: pd.DataFrame | None = None) -> TrainedModel:
+        """Train on ``df``, which holds the target column and the features.
+
+        ``extra``: more rows of the same kind (the target and the input columns), which are only
+        learned from: they join the training rows of every fold and of the final fit, and are
+        never validated, so every score counts the rows of ``df`` alone (see ``extra_weight``).
+        """
         deadline = Deadline(self.config.max_runtime_secs)
         start = time.monotonic()
         c = self.config
@@ -1210,9 +1215,18 @@ class AutoML:
         survival = c.event_column is not None
         if survival and c.event_column not in df.columns:
             raise ConfigError(f"event column '{c.event_column}' is not in the data")
+        if extra is not None and (survival or c.time_column is not None):
+            raise ConfigError("extra rows cannot be used with an event_column or a time_column")
         not_features = [c.target, *c.ignored_columns, *([c.event_column] if survival else [])]
+        own_df, own = df, len(df)
+        if extra is not None:
+            own_df = df.reset_index(drop=True)  # (numbered as the joined rows are)
+        notices: list[Event] = []
+        extra = None if extra is None else self._extra_rows(own_df, extra, not_features, notices)
+        df = own_df if extra is None else pd.concat([own_df, extra], ignore_index=True)
         X = df.drop(columns=not_features)
-        target = df[c.target]
+        X_own = X.iloc[:own]
+        target = own_df[c.target]  # (the notices and the label type are those of the own rows)
         task: Task = infer_task(target) if c.task == "auto" else c.task
         if c.quantile is not None and task != "regression":
             raise ConfigError("quantile needs a regression, but the target is a classification")
@@ -1222,8 +1236,9 @@ class AutoML:
         stopping_metric = metrics.resolve(
             c.stopping_metric, task, "stopping_metric", c.quantile, survival
         )
-        notices: list[Event] = []
         y, classes, nfolds = validate_target(target, task, c.nfolds, notices.append)
+        if extra is not None:
+            y = np.concatenate([y, self._extra_target(extra[c.target], task, classes)])
         if c.quantile is not None:
             notices.append(
                 Event(
@@ -1240,12 +1255,15 @@ class AutoML:
                 )
             )
         # Folds in time order are one fixed partition: another seed would not change them.
+        # (repeats are paid for by the rows every fold fits, the extra rows included)
         repeats = 1 if c.time_column else c.cv_repeats or repeats_for(len(X))
-        row_groups = None
+        row_groups = extra_groups = None
         if c.cv_group_column is not None:
             if c.cv_group_column not in df.columns:
                 raise ConfigError(f"cv_group_column '{c.cv_group_column}' is not in the data")
-            row_groups = pd.factorize(df[c.cv_group_column], use_na_sentinel=False)[0]
+            # (the own rows' groups come first: they are numbered as they would be without extra)
+            codes = pd.factorize(df[c.cv_group_column], use_na_sentinel=False)[0]
+            row_groups, extra_groups = codes[:own], codes[own:]
             distinct = int(row_groups.max()) + 1
             if distinct < 2:
                 raise ConfigError(
@@ -1269,7 +1287,8 @@ class AutoML:
         self._event(
             "started",
             config=c.to_dict(),
-            n_rows=len(X),
+            n_rows=own,
+            n_extra_rows=len(X) - own,
             n_cols=X.shape[1],
             task=task,
             nfolds=nfolds,
@@ -1290,6 +1309,11 @@ class AutoML:
                 f"the rows are weighted by their share of {sort_metric}, in training "
                 "and in the blend"
             )
+        mix_weight = None  # the weights of the extra rows alone, for the class mix below
+        if extra is not None and c.extra_weight != 1.0:  # (training only: scores stay unweighted)
+            mix_weight = np.ones(len(y))
+            mix_weight[own:] = c.extra_weight
+            weight = mix_weight if weight is None else weight * mix_weight
         y_seen = y  # the target as the user gave it; ``y`` is what the models learn
         if survival:
             # the time and the event flag, in two columns so that a metric reads both; the
@@ -1311,9 +1335,9 @@ class AutoML:
             y = np.log1p(y)
         if task == "regression" and not survival:
             if c.task == "auto" and c.quantile is None:
-                self._notice_class_codes(y_seen)
-            self._zero_inflated_notice(y_seen)
-            self._target_scale_notices(y_seen, sort_metric)
+                self._notice_class_codes(y_seen[:own])
+            self._zero_inflated_notice(y_seen[:own])
+            self._target_scale_notices(y_seen[:own], sort_metric)
         # What is reported and ranked is in the target's own units.
         original = np.expm1 if y is not y_seen and not survival else _same
         for field, name in (("sort_metric", sort_metric), ("stopping_metric", stopping_metric)):
@@ -1323,7 +1347,7 @@ class AutoML:
         if c.decision in ("balanced", "tuned") and task == "regression":
             self._notice("decision is ignored for regression")
         elif c.decision == "balanced":
-            prior = np.bincount(y) / len(y)
+            prior = _learned_mix(y, mix_weight, len(classes))
         elif tuned:  # the threshold is fitted on the final blend, after the search
             metrics.check_tuned(sort_metric, len(classes))
         elif sort_metric == "qwk" and 2 < len(classes) <= metrics.MAX_ORDINAL_CLASSES:
@@ -1336,7 +1360,7 @@ class AutoML:
         # the model delivers them so (the label is then the largest of them)
         shift = None
         if task == "classification" and sort_metric == "balanced_logloss":
-            shift = np.bincount(y, minlength=len(classes)) / len(y)
+            shift = _learned_mix(y, mix_weight, len(classes))
             # every score, the blend's, the diagnostics and the OOF predictions are of the
             # probabilities as delivered
             original = lambda p: metrics.shift_to_equal_priors(p, shift)  # noqa: E731
@@ -1353,7 +1377,7 @@ class AutoML:
             (ratings == np.round(ratings)).all()
         )
         if c.time_column is None and c.quantile is None:
-            groups, tried = self._engineer(X, y, task, nfolds, deadline, row_groups)
+            groups, tried = self._engineer(X_own, y[:own], task, nfolds, deadline, row_groups)
         else:  # the gate judges a feature on shuffled folds (the future) and on squared error
             groups, tried = [], None
             if c.feature_engineering:
@@ -1368,9 +1392,9 @@ class AutoML:
         self._leaked = set()
         leak_secs = min(LEAK_SECS, LEAK_SHARE * max(deadline.remaining(), 0.0))
         leak_start = time.monotonic()
-        self._notice_leaks(prep, X, target, leak_secs)
+        self._notice_leaks(prep, X_own, target, leak_secs)
         self._notice_derived_leaks(
-            prep, X, target, max(leak_secs - (time.monotonic() - leak_start), 0.0)
+            prep, X_own, target, max(leak_secs - (time.monotonic() - leak_start), 0.0)
         )
         dates: list[str] = []
         if c.time_column is None:
@@ -1387,23 +1411,26 @@ class AutoML:
                     columns=dates[:3],
                 )
             if row_groups is None:
-                if not self._notice_repeated_values(prep, X) and not self._notice_repeated_rows(
-                    prep, X
+                if not self._notice_repeated_values(prep, X_own) and not self._notice_repeated_rows(
+                    prep, X_own
                 ):
-                    self._notice_repeated_texts(prep, X)
+                    self._notice_repeated_texts(prep, X_own)
                 if (
                     not dates
-                    and not self._notice_sorted_column(prep, X)
-                    and not self._notice_time_index(prep, X)
+                    and not self._notice_sorted_column(prep, X_own)
+                    and not self._notice_time_index(prep, X_own)
                 ):
                     if task == "regression" and not survival:
-                        self._notice_ordered_target(y_seen)
+                        self._notice_ordered_target(y_seen[:own])
                     elif task == "classification":
-                        self._notice_ordered_target(y, classes=True)
-            folds = repeat_folds(y, task, nfolds, c.seed, row_groups, repeats)
-            first_run = folds[:nfolds]  # reported: the other repeats only judge the search
+                        self._notice_ordered_target(y[:own], classes=True)
+            # the folds are drawn over the own rows; the extra rows join every fold's training side
+            folds = repeat_folds(y[:own], task, nfolds, c.seed, row_groups, repeats)
             if row_groups is not None and task == "classification":
-                self._check_classes_in_training(y, folds, classes)
+                self._check_classes_in_training(y[:own], folds, classes)
+            if extra is not None:
+                folds = _with_extra_rows(folds, own, len(y) - own, row_groups, extra_groups)
+            first_run = folds[:nfolds]  # reported: the other repeats only judge the search
         else:
             few = {}
             if row_groups is not None:
@@ -1419,7 +1446,9 @@ class AutoML:
             if row_groups is not None:
                 self._notice_lopsided_parts(folds, len(y), nfolds)
         if task == "regression" and not survival and c.quantile is None:
-            self._notice_missing_history(df, X, y_seen, c.time_column or next(iter(dates), None))
+            self._notice_missing_history(
+                own_df, X_own, y_seen[:own], c.time_column or next(iter(dates), None)
+            )
         rows = covered(folds, len(y))  # the rows some fold predicts (all but the first part)
         families = self._without_wide_linear_view(prep, len(X))
         # The words are read only from prose columns.
@@ -1553,7 +1582,7 @@ class AutoML:
             tuned or rating_cuts,
             c.quantile,
         )
-        assignment = np.full(len(y), -1, dtype=np.int64)  # -1: never validated
+        assignment = np.full(own, -1, dtype=np.int64)  # -1: never validated
         for i, (_, valid) in enumerate(first_run):
             assignment[valid] = i
         model = TrainedModel(
@@ -1570,7 +1599,7 @@ class AutoML:
             prep=prep,
             members=members,
             label_dtype=target.dtype,
-            cv_predictions=_spread(blended, rows, len(y)) if c.keep_cv_predictions else None,
+            cv_predictions=_spread(blended, rows, own) if c.keep_cv_predictions else None,
             cv_models={n: r.models for n, r in results.items() if "#" not in n}
             if c.keep_cv_models
             else None,
@@ -1580,13 +1609,13 @@ class AutoML:
             class_prior=prior,
             proba_shift=shift,
             target_floor=0.0
-            if task == "regression" and not survival and not rating_cuts and y_seen.min() >= 0
+            if task == "regression" and not survival and not rating_cuts and y_seen[:own].min() >= 0
             else None,
         )
         if task == "regression" and not survival and c.quantile is None and not rating_cuts:
             self._notice_baseline(X, y_seen[rows], rows, blended, sort_metric)
-        named = self._notice_frequency_encoded_values(prep, X, model.feature_importance)
-        self._notice_group_column_input(X, model.feature_importance, named)
+        named = self._notice_frequency_encoded_values(prep, X_own, model.feature_importance)
+        self._notice_group_column_input(X_own, model.feature_importance, named)
         median_ran = any(member.spec.median for member in members)
         said = self._notice_constant(
             y_seen, rows, first_run, blended, sort_metric, c.quantile, median_ran
@@ -1681,6 +1710,102 @@ class AutoML:
         left_out = [name for name in self.families if name not in kept]
         self._notice_wide_linear_view(left_out, prep, n_rows)
         return kept
+
+    def _extra_rows(
+        self, own: pd.DataFrame, extra: pd.DataFrame, not_features: list[str], notices: list[Event]
+    ) -> pd.DataFrame | None:
+        """The ``extra`` rows as they join the training: only the columns the models read (and the
+        group column), typed as in ``own``, without the rows whose inputs an own row has too (such
+        a row would be learned from in a fold that validates its twin, and the score would be too
+        good); None when nothing is left. A column the rows lack, or a value that does not fit the
+        column's type, is a ``ConfigError``."""
+        c = self.config
+        inputs = [name for name in own.columns if name not in not_features]
+        group = c.cv_group_column
+        wanted = [c.target, *inputs]
+        missing = [name for name in wanted if name not in extra.columns]
+        if missing:
+            raise ConfigError(
+                f"the extra rows lack columns of the data: {', '.join(map(str, missing[:5]))}"
+                + (f" and {len(missing) - 5} more" if len(missing) > 5 else "")
+            )
+        keep = [*wanted, *([group] if group in extra.columns and group not in wanted else [])]
+        extra = extra[keep].reset_index(drop=True)
+        for name in keep:
+            extra[name] = _typed_like(own[name], extra[name], name)
+        if group is not None and group not in extra.columns:
+            extra[group] = np.nan
+            notices.append(
+                Event(
+                    "notice",
+                    data={
+                        "message": f"the extra rows have no column '{group}', so none of them is "
+                        "held out with a group: they are learned from in every fold",
+                        "kind": "extra_without_group",
+                    },
+                )
+            )
+        twin = pd.util.hash_pandas_object(extra[inputs], index=False).isin(
+            pd.util.hash_pandas_object(own[inputs], index=False)
+        )
+        if twin.any():
+            notices.append(
+                Event(
+                    "notice",
+                    data={
+                        "message": f"{int(twin.sum()):,} of {len(extra):,} extra rows hold the "
+                        "same inputs as a row of the data and are left out, as the validation "
+                        "would find them learned",
+                        "kind": "extra_duplicates",
+                        "dropped": int(twin.sum()),
+                    },
+                )
+            )
+            extra = extra[~twin].reset_index(drop=True)
+        if not len(extra):
+            notices.append(
+                Event(
+                    "notice",
+                    data={"message": "no extra row is left to learn from", "kind": "extra_rows"},
+                )
+            )
+            return None
+        notices.append(
+            Event(
+                "notice",
+                data={
+                    "message": f"{len(extra):,} extra rows join the training rows of every fold "
+                    f"and of the final fit (weight {c.extra_weight:g}); the scores count the "
+                    f"{len(own):,} rows of the data only",
+                    "kind": "extra_rows",
+                    "rows": len(extra),
+                },
+            )
+        )
+        return extra
+
+    @staticmethod
+    def _extra_target(values: pd.Series, task: Task, classes: list) -> np.ndarray:
+        """The target of the extra rows as ``validate_target`` coded the data's: class codes for
+        labels the data has, floats for a regression."""
+        if values.isna().any():
+            raise ConfigError("the extra rows have a target with missing values")
+        if task == "regression":
+            try:
+                coded = pd.to_numeric(values).to_numpy(dtype=float)
+            except (TypeError, ValueError) as e:
+                raise ConfigError("the target of the extra rows must be numeric") from e
+            if not np.isfinite(coded).all():
+                raise ConfigError("the extra rows have an infinite target")
+            return coded
+        coded = pd.Index(classes).get_indexer(values)
+        if (coded < 0).any():
+            unknown = list(dict.fromkeys(values[coded < 0].astype(str)))
+            raise ConfigError(
+                "the extra rows have labels the data lacks, which could not be validated: "
+                + ", ".join(unknown[:5])
+            )
+        return coded.astype(np.int64)
 
     def _notice_wide_linear_view(self, left_out: list[str], prep: Prep, n_rows: int) -> None:
         self._notice(
@@ -2120,6 +2245,48 @@ def _spread(values: np.ndarray, rows: np.ndarray, n: int) -> np.ndarray:
 
 def _blend(oof: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
     return sum(w * oof[name] for name, w in weights.items() if w > 0)
+
+
+def _typed_like(own: pd.Series, values: pd.Series, name: str) -> pd.Series:
+    """``values`` (a column of the extra rows) in the type of ``own``, the same column of the data,
+    so that joining them leaves a column of one type."""
+    if values.dtype == own.dtype:
+        return values
+    try:
+        if pd.api.types.is_numeric_dtype(own) and not pd.api.types.is_bool_dtype(own):
+            return pd.to_numeric(values)  # (a gap or a fraction makes it a float, as the join does)
+        return values.astype(own.dtype)
+    except (TypeError, ValueError, OverflowError) as e:
+        raise ConfigError(
+            f"the column '{name}' of the extra rows cannot be read as {own.dtype}, the type of "
+            "the data's"
+        ) from e
+
+
+def _learned_mix(y: np.ndarray, weight: np.ndarray | None, classes: int) -> np.ndarray:
+    """The share of each class among the rows the models learn from (weighted, as they are)."""
+    counts = np.bincount(y, weights=weight, minlength=classes)
+    return counts / counts.sum()
+
+
+def _with_extra_rows(
+    folds: list,
+    own: int,
+    extra: int,
+    own_groups: np.ndarray | None,
+    extra_groups: np.ndarray | None,
+) -> list:
+    """``folds`` (over the first ``own`` rows) with the ``extra`` rows that follow them added to
+    every fold's training rows. With groups, the extra rows of a group that a fold validates are
+    left out of that fold's training rows."""
+    added = np.arange(own, own + extra)
+    out = []
+    for train, valid in folds:
+        keep = added
+        if own_groups is not None and extra_groups is not None:
+            keep = added[~np.isin(extra_groups, np.unique(own_groups[valid]))]
+        out.append((np.concatenate([train, keep]), valid))
+    return out
 
 
 def _same(values: np.ndarray) -> np.ndarray:
