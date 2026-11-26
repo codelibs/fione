@@ -1781,6 +1781,109 @@ def test_the_encodings_are_judged_on_more_rows_when_the_time_covers_them():
     assert encoding_rows(50_000, 1e-4, 10_000) == 50_000  # never more rows than there are
 
 
+class _FakeGate:
+    """A gate whose repeats cost a set time and whose group lowers every fold's loss by 10 %."""
+
+    task = "classification"
+    seed = 0
+
+    def __init__(self, rows, secs, cut_after=None):
+        self.X = pd.DataFrame({"a": np.arange(rows)})
+        self.cost, self.cut_after, self.computed = secs, cut_after, set()
+
+    def secs(self, groups):
+        return self.cost[bool(groups)]
+
+    def fitted(self, group):
+        return type("Fitted", (), {"names": ["rates"]})()
+
+    def losses(self, groups, repeats):
+        done = []
+        for repeat in repeats:
+            if self.cut_after is not None and repeat >= self.cut_after:
+                raise features._OutOfTime
+            self.computed.add(repeat)
+            base = 1.0 + 0.01 * np.arange(5)
+            done.append(base * (0.9 if groups else 1.0))
+        return np.concatenate(done)
+
+
+def _judge(wide_secs, remaining, gate_secs=None, cut_after=None, decisive_only=False):
+    """What ``_judge_encoding`` does for a gate of 100 rows, a wide gate whose repeats take
+    ``wide_secs`` (without and with the group), and ``remaining`` seconds; the kept groups, the
+    verdicts, the repeats the wide gate computed and what it returned."""
+    group = type("Group", (), {"label": "rates", "uses_target": True})()
+    wide = _FakeGate(5000, wide_secs, cut_after)
+    narrow = _FakeGate(100, gate_secs or {False: 1.0, True: 1.0})
+    deadline = type("Left", (), {"remaining": lambda self: remaining})()
+    all_rows, all_y = pd.DataFrame({"a": np.arange(5000)}), np.arange(5000) % 2
+    kept, verdicts = [], []
+    over = features._judge_encoding(
+        group, kept, verdicts, narrow, lambda *a: wide, all_rows, all_y, deadline, decisive_only
+    )
+    return kept, verdicts, wide.computed, over
+
+
+def test_an_encoding_is_judged_when_the_first_repeat_shows_the_rest_fit_in_the_time_left():
+    kept, verdicts, computed, _ = _judge({False: 1.0, True: 1.0}, remaining=20)
+    assert [v.reason for v in verdicts] == ["adopted"] and len(kept) == 1
+    assert computed == {0, 1, 2, 3, 4}
+
+
+def test_an_encoding_is_judged_though_the_gates_few_rows_would_have_predicted_too_long():
+    # 400 s of fits at the pace of the 100-row gate scaled to the rows; the repeats take 1 s
+    kept, verdicts, *_ = _judge(
+        {False: 1.0, True: 1.0}, remaining=20, gate_secs={False: 50.0, True: 50.0}
+    )
+    assert [v.reason for v in verdicts] == ["adopted"] and len(kept) == 1
+
+
+def test_an_encoding_is_left_unjudged_when_the_first_repeat_shows_the_rest_will_not_fit():
+    kept, verdicts, computed, _ = _judge({False: 20.0, True: 20.0}, remaining=100)
+    assert kept == [] and verdicts == []  # no verdict: listed as not judged for lack of time
+    assert computed == {0}  # nothing but the first repeat was spent
+
+
+def test_an_encoding_cut_by_the_deadline_is_never_kept_on_fewer_repeats():
+    kept, verdicts, computed, _ = _judge({False: 1.0, True: 1.0}, remaining=100, cut_after=3)
+    assert kept == [] and verdicts == []
+    assert computed == {0, 1, 2}
+
+
+def test_a_decisive_judgment_the_time_does_not_cover_is_over_and_unjudged_without_a_second_try():
+    # the first repeat shows 2 s for the pair; the two fresh repeats need 1.2 * 2 * 40 = 96 s
+    kept, verdicts, computed, over = _judge(
+        {False: 20.0, True: 20.0}, remaining=60, decisive_only=True
+    )
+    assert over is True  # the caller does not send it to the full judgment, which would refit it
+    assert kept == [] and verdicts == [] and computed == {0}
+
+
+def test_a_decisive_judgment_the_time_covers_adopts_the_group_on_two_fresh_repeats():
+    kept, verdicts, computed, over = _judge(
+        {False: 20.0, True: 20.0}, remaining=100, decisive_only=True
+    )
+    assert over is True and [v.reason for v in verdicts] == ["adopted"] and len(kept) == 1
+    assert computed == {0, 7, 8}  # the first repeat and the two fresh ones
+
+
+@pytest.mark.parametrize(
+    ("remaining", "judged"), [(9.7, True), (9.5, False)], ids=["just enough", "just short"]
+)
+def test_the_full_judgment_needs_a_fifth_more_than_the_four_pairs_still_to_do(remaining, judged):
+    # a pair takes 2 s; the repeats to do are the two more of the gate's and the two fresh ones
+    kept, verdicts, *_ = _judge({False: 1.0, True: 1.0}, remaining=remaining)
+    assert bool(verdicts) is judged and len(kept) == judged
+
+
+@pytest.mark.parametrize(
+    ("remaining", "judged"), [(4.9, True), (4.7, False)], ids=["just enough", "just short"]
+)
+def test_the_decisive_judgment_needs_a_fifth_more_than_the_two_pairs_still_to_do(remaining, judged):
+    kept, verdicts, *_ = _judge({False: 1.0, True: 1.0}, remaining=remaining, decisive_only=True)
+    assert bool(verdicts) is judged and len(kept) == judged
+
+
 def _odds(rate):
     """The log-odds of a rate: what a classification's encodings are."""
     return float(np.log(rate / (1 - rate)))
