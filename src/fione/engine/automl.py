@@ -2172,6 +2172,12 @@ def _no_time_message(name: str, allowed: float, needed: float | None) -> str:
     can take longer than that and still be cut short."""
     if needed is None:
         return f"{name}: no model, the search time it could have ({allowed:.0f} s) was too short"
+    if needed <= allowed:  # the least it takes fits, and the trial took longer
+        return (
+            f"{name}: no model, the first trial took longer than the search time it could have "
+            f"({allowed:.0f} s), though its folds need at least about {needed:.0f} s; a longer "
+            "max_runtime_secs would let it run"
+        )
     return (
         f"{name}: no model, the first trial did not finish in the search time it could have "
         f"({allowed:.0f} s); its folds need at least about {needed:.0f} s, and a longer "
