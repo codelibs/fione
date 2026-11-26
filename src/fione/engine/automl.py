@@ -1465,6 +1465,8 @@ class AutoML:
         if median and (self.explicit or sort_metric in MEDIAN_METRICS):
             late = [*late, *self.median]
         families = [*families, *late]
+        if prep.reads_only_prose and not self.explicit:
+            families = self._text_families_only(families)
 
         left = deadline.remaining()
         reserve = max(MIN_RESERVE_SECS, RESERVE_SHARE * left)
@@ -1806,6 +1808,20 @@ class AutoML:
                 + ", ".join(unknown[:5])
             )
         return coded.astype(np.int64)
+
+    def _text_families_only(self, families: list[str]) -> list[str]:
+        """``families`` without those that read a view of no more than a constant (see
+        ``Prep.reads_only_prose``), unless that leaves none."""
+        kept = [name for name in families if FAMILIES[name].view.startswith("text")]
+        if not kept or kept == families:
+            return families
+        self._notice(
+            f"{', '.join(n for n in families if n not in kept)} left out: the only input is "
+            "text, which only the text families read",
+            kind="families_left_out",
+            families=[n for n in families if n not in kept],
+        )
+        return kept
 
     def _notice_wide_linear_view(self, left_out: list[str], prep: Prep, n_rows: int) -> None:
         self._notice(
