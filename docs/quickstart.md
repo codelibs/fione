@@ -237,6 +237,12 @@ ranked by `rounded_qwk` is the alternative: it needs no decision, and its cut po
 the blend. The suggestion is a hint, since codes and counts of the same shape (digits 0 to 9, a
 number of children) are not ordered ratings.
 
+With the prediction type left to Fione, a target of text or of at most 20 whole numbers is a
+classification and any other number a regression. When the target is whole numbers that are every
+value from 0 or 1 up to a number between 50 and 1,000, each on 100 rows or more (class numbers, a
+category code), the assistant's proposal still reads it as a regression and warns that the values
+may be classes; setting the prediction type to classification trains on them as classes.
+
 ## Text columns
 
 A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product, or that take a thousand different values or more, such as a search query; so is a column of notations without spaces, such as molecules written as SMILES or DNA sequences, whose values are mostly different, 15 characters or longer and of varying length) is read in two ways. Its
