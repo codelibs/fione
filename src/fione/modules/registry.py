@@ -6,6 +6,7 @@ serialized Python object, so loading one cannot run code.
 """
 
 import re
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -27,6 +28,35 @@ _PATH = re.compile(r"/(?:[^\s/:'\"]+/)+[^\s:'\"]*")
 
 class ModuleError(ValueError):
     """A problem with the data or parameters given to a module; the message is for the user."""
+
+
+# Text read as a date: a day as 2015-07-01 or 2015/07/01 (a time of day may follow), or 20150701.
+# A month, a year, a quarter or a day-first date would be read as other days, so they are refused.
+DATE_TEXT = re.compile(r"\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T].*)?|\d{8})\s*")
+
+
+def read_dates(
+    values: pd.Series, label: str, expected: str = "dates", hint: str = " (use 2015-07-01)"
+) -> pd.Series:
+    """The timestamps of a column of dates, or of text with year, month and day in that order;
+    a missing date stays missing and a time zone is dropped (the time of day on the wall)."""
+    kind = pd.api.types.infer_dtype(values, skipna=True)
+    # only dates and text: numbers held as objects would be read as nanoseconds from 1970
+    if kind not in ("string", "datetime", "datetime64", "date"):
+        raise ModuleError(f"{label} must hold {expected}")
+    if kind == "string" and not values.dropna().astype(str).map(DATE_TEXT.fullmatch).notna().all():
+        raise ModuleError(
+            f"{label} has text that is not a date written year-month-day, such as 2015-07-01"
+        )
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)  # "could not infer format"
+            stamps = pd.to_datetime(values)
+    except (ValueError, TypeError):
+        raise ModuleError(f"{label} has dates that cannot be read in one format{hint}") from None
+    if stamps.dt.tz is not None:
+        stamps = stamps.dt.tz_localize(None)
+    return stamps
 
 
 @dataclass(frozen=True)

@@ -6,11 +6,11 @@ Each takes one frame (``cbind``, ``concat``, ``join`` and ``rbind`` a second one
 
 import operator
 import re
-import warnings
 
 import numpy as np
 import pandas as pd
 from pandas.api.indexers import BaseIndexer
+from pandas.errors import OutOfBoundsDatetime
 
 from fione.modules import registry
 from fione.modules.expression import evaluate
@@ -238,35 +238,11 @@ def _lags(text: str) -> list[int]:
     return list(dict.fromkeys(lags))
 
 
-# Text read as a date: a day as 2015-07-01 or 2015/07/01 (a time of day may follow), or 20150701.
-# A month, a year, a quarter or a day-first date would be read as other days, so they are refused.
-_DATE_TEXT = re.compile(r"\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T].*)?|\d{8})\s*")
-
-
 def _day_numbers(values, name):
     """The days since 1970-01-01 of a column of dates (or of text with year, month and day in
     that order), as whole numbers; a date with a time of day is refused, and a missing date
     stays missing."""
-    bad = ModuleError(f"time column '{name}' must hold whole numbers or dates")
-    kind = pd.api.types.infer_dtype(values, skipna=True)
-    # only dates and text: numbers held as objects would be read as nanoseconds from 1970
-    if kind not in ("string", "datetime", "datetime64", "date"):
-        raise bad
-    if kind == "string" and not values.dropna().astype(str).map(_DATE_TEXT.fullmatch).notna().all():
-        raise ModuleError(
-            f"time column '{name}' has text that is not a date written year-month-day, "
-            "such as 2015-07-01"
-        )
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)  # "could not infer format"
-            stamps = pd.to_datetime(values)
-    except (ValueError, TypeError):
-        raise ModuleError(
-            f"time column '{name}' has dates that cannot be read in one format (use 2015-07-01)"
-        ) from None
-    if stamps.dt.tz is not None:
-        stamps = stamps.dt.tz_localize(None)
+    stamps = registry.read_dates(values, f"time column '{name}'", "whole numbers or dates")
     if not (stamps.isna() | (stamps == stamps.dt.normalize())).all():
         raise ModuleError(f"time column '{name}' has a time of day; it must hold whole days")
     epoch = pd.Timestamp(0).as_unit(stamps.dt.unit)  # a date far from 1970 is out of range in ns
@@ -414,23 +390,7 @@ def _order_values(values, name):
     of day may follow)."""
     kind = pd.api.types.infer_dtype(values, skipna=True)
     if kind in ("string", "date", "datetime", "datetime64"):
-        if kind == "string" and not (
-            values.dropna().astype(str).map(_DATE_TEXT.fullmatch).notna().all()
-        ):
-            raise ModuleError(
-                f"order column '{name}' has text that is not a date written year-month-day, "
-                "such as 2015-07-01"
-            )
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)  # "could not infer format"
-                values = pd.to_datetime(values)
-        except (ValueError, TypeError):
-            raise ModuleError(
-                f"order column '{name}' has dates that cannot be read in one format"
-            ) from None
-        if values.dt.tz is not None:
-            values = values.dt.tz_localize(None)
+        values = registry.read_dates(values, f"order column '{name}'", hint="")
     elif pd.api.types.is_bool_dtype(values) or not (
         pd.api.types.is_numeric_dtype(values) or pd.api.types.is_datetime64_any_dtype(values)
     ):
@@ -792,9 +752,35 @@ def _typed(series: pd.Series, column: str, text: str):
             return float(text)
     except ValueError:
         raise ModuleError(f"'{text}' does not fit column '{column}'") from None
+    if pd.api.types.is_datetime64_any_dtype(dtype):
+        return _date_literal(text, column, getattr(dtype, "tz", None))
     if pd.api.types.is_string_dtype(dtype) or pd.api.types.is_object_dtype(dtype):
         return text
     raise ModuleError(f"column '{column}' of type {dtype} is not supported here")
+
+
+def _date_literal(text: str, column: str, zone) -> pd.Timestamp:
+    """``text`` as a date written year-month-day (a time of day may follow, else midnight), in
+    the time zone of the column if it has one."""
+    bad = ModuleError(f"'{text}' does not fit column '{column}'; write a date as 2015-07-01")
+    if registry.DATE_TEXT.fullmatch(text) is None:
+        raise bad
+    try:
+        stamp = pd.Timestamp(text.strip())
+    except (ValueError, OverflowError):
+        raise bad from None
+    if pd.isna(stamp):
+        raise bad
+    if zone is None:
+        if stamp.tzinfo is not None:
+            raise bad
+        return stamp
+    try:
+        return stamp.tz_localize(zone) if stamp.tzinfo is None else stamp.tz_convert(zone)
+    except ValueError:  # a time that the clock skips or shows twice when it is put back
+        raise ModuleError(
+            f"'{text}' does not exist or is ambiguous in the time zone of column '{column}'"
+        ) from None
 
 
 def _comparison(df: pd.DataFrame, text: str) -> np.ndarray:
@@ -831,7 +817,12 @@ def replace(df, params, ctx):
     column = require_column(df, params["column"])
     value = _typed(df[column], column, params["value"])
     df = df.copy()
-    df.loc[row_mask(df, params["row_conditions"]), column] = value
+    try:
+        df.loc[row_mask(df, params["row_conditions"]), column] = value
+    except OutOfBoundsDatetime:
+        raise ModuleError(
+            f"'{params['value']}' is out of the range of the dates of '{column}'"
+        ) from None
     return df
 
 
@@ -916,8 +907,8 @@ _op(
                 'numbers and columns (col("a b") for a name with spaces or symbols); + - * / **;'
                 " == != < <= > >= & | ~ (give 1 or 0); abs sqrt log log1p exp floor sin cos"
                 " radians min2 max2 mod2 atan2 clip isnull where(cond, x, y); rowsum rowmean"
-                ' rowcount of values and quoted patterns ("flag_*"); nan. An infinite result is'
-                " empty."
+                ' rowcount of values and quoted patterns ("flag_*"); days(date column) for the'
+                " days since 1970-01-01; nan. An infinite result is empty."
             ),
         },
     },

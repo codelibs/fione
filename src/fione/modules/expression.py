@@ -62,6 +62,7 @@ FUNCTIONS = (
     "where",
     "isnull",
     "clip",
+    "days",
 )
 
 
@@ -103,6 +104,7 @@ class _Evaluator:
         self.df = df
         self.rows = len(df)
         self.columns: dict[str, np.ndarray] = {}
+        self.dates: dict = {}  # the days of each date column read, so that it is read once
         self.infinite = np.zeros(self.rows, dtype=bool)  # rows where a step came out infinite
         self.operands = 0  # the columns and values a row function reads, over the expression
         self.labels: list[tuple[str, object]] | None = None  # (text, label) of each column
@@ -189,17 +191,22 @@ class _Evaluator:
             raise ModuleError("the number is too large")
         return np.float64(number)
 
-    def name(self, name: str):
+    def find(self, name: str):
+        """The label of the column written as ``name``, or None; Python reads a name as NFKC (a
+        full-width digit is a digit), so does a column's name."""
         if name in self.df.columns:
-            return self.column(name)
-        # Python reads a name as NFKC (a full-width digit is a digit): so does a column's name
+            return name
         if self.same_text is None:
             self.same_text = {}
             for c in self.df.columns:
                 self.same_text.setdefault(unicodedata.normalize("NFKC", str(c)), []).append(c)
         same = self.same_text.get(name, [])
-        if len(same) == 1:
-            return self.column(same[0])
+        return same[0] if len(same) == 1 else None
+
+    def name(self, name: str):
+        label = self.find(name)
+        if label is not None:
+            return self.column(label)
         if name == "nan":
             return np.float64("nan")
         raise ModuleError(
@@ -218,6 +225,8 @@ class _Evaluator:
         args = node.args
         if name == "col":
             return self.column(self.text(name, args))
+        if name == "days":
+            return self.days(args)
         if name in _ROW_FUNCTIONS:
             return self.row_function(name, args, depth)
         count = {"where": 3, "clip": 3, "isnull": 1}.get(name, 2 if name in _TWO_FUNCTIONS else 1)
@@ -233,6 +242,42 @@ class _Evaluator:
         if name == "where":
             return np.where(_truth(values[0]), values[1], values[2])
         return self.finite(np.clip(values[0], values[1], values[2]))
+
+    def days(self, args: list) -> np.ndarray:
+        """The days since 1970-01-01 of the column named by the argument, with the time of day
+        as a fraction; a missing date is empty."""
+        if len(args) != 1:
+            raise ModuleError("days() takes 1 argument")
+        arg = args[0]
+        if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name) and arg.func.id == "col":
+            label = self.text("col", arg.args)
+            if label not in self.df.columns:
+                raise ModuleError(f"unknown column '{label}'")
+        elif isinstance(arg, ast.Name):
+            if (label := self.find(arg.id)) is None:
+                raise ModuleError(
+                    f"unknown column '{arg.id}'; write a column name with spaces or symbols as"
+                    f' col("{arg.id}")'
+                )
+        else:
+            raise ModuleError(
+                'days() takes a column name, such as days(ordered) or days(col("a b"))'
+            )
+        if label not in self.dates:
+            self.dates[label] = self.read_days(label)
+        return self.dates[label]
+
+    def read_days(self, label) -> np.ndarray:
+        series = self.df[label]
+        if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+            raise ModuleError(f"column '{label}' holds numbers, not dates; use it without days()")
+        if pd.api.types.infer_dtype(series, skipna=True) == "empty":
+            return np.full(self.rows, np.nan)
+        stamps = registry.read_dates(series, f"column '{label}'")
+        # in the unit of the dates: a date far from 1970 is out of range in nanoseconds
+        epoch = pd.Timestamp(0).as_unit(stamps.dt.unit)
+        spans = (stamps - epoch) / pd.Timedelta(days=1)
+        return spans.to_numpy(dtype="float64", na_value=np.nan)
 
     @staticmethod
     def text(function: str, args: list) -> str:
