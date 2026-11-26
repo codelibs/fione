@@ -474,7 +474,11 @@ of shuffled parts is then probably better than on later dates. The models read s
 column as a number and also as its year, month, day, day of the week, day of the year, week of
 the year and, with an hour or a Unix time, hour of the day. A column of dates (or of text a date
 can be read from) is read the same way, and as the seconds since 1970 too, except when it is the
-time column (see below).
+time column (see below). The linear models and the neural network leave out the number itself of a
+whole-number date (a Unix time, 20240131, ...) whose training rows all fall in one year (and of
+one that is the time column when other inputs move with time, with its year): within a year the
+number is a straight line through month and day, and a later year would be read far outside what
+they learned.
 A notice also points this out for a whole-number column named like a time that runs through 20 or
 more consecutive numbers (a few may be missing), in a sorted file or a shuffled one. With each
 value on one row, a name such as `date`, `day` or `week_no` is enough (a counter of days or
@@ -497,7 +501,8 @@ latest period it knows; the validation parts lie just after the rows they learn 
 show that. The inputs that move with time keep a level that changes over time learnable, and a
 notice names them. Without such an input the time column is read as it is, since nothing else
 would carry that level. A whole-number time column that holds a date (20141021, a Unix time)
-keeps its number and its date parts.
+keeps its number and its date parts for the trees; the linear models and the neural network leave out
+its number and its year.
 A notice also points this out for a whole-number column named like a time that runs through 20 or
 more consecutive numbers (a few may be missing), in a sorted file or a shuffled one. With each
 value on one row, a name such as `date`, `day` or `week_no` is enough (a counter of days or
@@ -518,7 +523,8 @@ values of what grows, and a tree reads them as the latest period it knows. On ta
 or daily rows and on tables of forecast origins this scored better than reading them (the
 validation parts lie just after the rows they learn from and do not show the difference), and
 it scored the same where a level moves with time. A whole-number time column that holds a date
-(20141021, a Unix time) keeps its number and its date parts; to keep a counter as an input, give
+(20141021, a Unix time) keeps its number and its date parts for the trees, while the linear models and
+the neural network leave out its number and its year; to keep a counter as an input, give
 the model a copy of it under another name. A counter that is the only input is kept.
 
 The time the assistant proposes (2 to 30 minutes) is what the data needs to try about 30 models,

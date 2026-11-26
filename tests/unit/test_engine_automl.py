@@ -3463,6 +3463,25 @@ def test_a_time_counter_is_not_an_input_when_another_input_moves_with_time():
     assert len(model.predict(later)) == 20  # the counter is not needed to predict
 
 
+def test_the_notice_of_a_whole_number_date_time_column_names_the_linear_models():
+    events = []
+    df = _trend_table(copy=False)
+    days = pd.Timestamp("2015-07-01") + pd.to_timedelta(df["day"], unit="D")
+    df["week_no"] = df["day"] // 7
+    df["day"] = days.dt.strftime("%Y%m%d").astype("int64")
+    _fit(
+        df,
+        events,
+        target="y",
+        families=["LightGBM"],
+        max_models=1,
+        nfolds=3,
+        time_column="day",
+    )
+    (notice,) = [e.data for e in events if e.data.get("kind") == "time_trend_left_out"]
+    assert "'day'" in notice["message"] and "by the linear models" in notice["message"]
+
+
 def test_a_time_counter_is_an_input_when_nothing_else_moves_with_time():
     events = []
     model = _fit(
