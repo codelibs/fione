@@ -20,8 +20,9 @@ import logging
 from dataclasses import dataclass
 from string import Formatter
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fione import db, i18n
 from fione.api.deps import Conn
@@ -59,7 +60,15 @@ from fione.web.easyml import STOP_POLLING
 from fione.web.views import UiError, language, llm_status, render, to_consent
 
 log = logging.getLogger(__name__)
-router = APIRouter(include_in_schema=False)
+
+
+def _assistant_on(request: Request) -> None:
+    """Every page and action of the assistant is not found while it is off (``none``)."""
+    if not request.app.state.settings.assistant_enabled:
+        raise StarletteHTTPException(404)
+
+
+router = APIRouter(include_in_schema=False, dependencies=[Depends(_assistant_on)])
 
 ACTIVE = ("queued", "running")
 EXAMPLES = ("1", "2", "3")  # the suggested questions of an empty conversation

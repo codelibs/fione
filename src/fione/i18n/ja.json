@@ -1023,6 +1023,8 @@
   "system.disk_note": "ディスクの空き容量はここには表示されません。サーバーで確認してください。",
   "system.llm_title": "LLM アシスタント",
   "system.llm_state": "状態",
+  "system.llm_state.off": "オフ",
+  "system.llm_off_hint": "言語モデルが設定されていないので、アシスタントのチャットとコメントは表示しません。ほかの機能は MCP クライアントも含めてすべて使えます。アシスタントを使うには FIONE_LLM_PROVIDER に ollama か claude を設定します。",
   "system.llm_state.checking": "確認中",
   "system.llm_state.unreachable": "接続できません",
   "system.llm_state.missing": "モデルがありません",

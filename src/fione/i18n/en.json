@@ -1023,6 +1023,8 @@
   "system.disk_note": "Free disk space is not reported here: check it on the server.",
   "system.llm_title": "LLM assistant",
   "system.llm_state": "Status",
+  "system.llm_state.off": "Off",
+  "system.llm_off_hint": "No language model is set, so the assistant's chat and comments are not shown. Everything else works without it, MCP clients included. To use the assistant, set FIONE_LLM_PROVIDER to ollama or claude.",
   "system.llm_state.checking": "Checking",
   "system.llm_state.unreachable": "Not reachable",
   "system.llm_state.missing": "Model missing",

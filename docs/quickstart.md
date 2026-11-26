@@ -72,12 +72,12 @@ This writes `iris.csv`: 150 rows, four measurements and the `species` column.
    which columns to learn from. Columns that are a copy of the answer, or whose value decides
    it, and columns that only identify rows are unchecked, with the reason. A column that only
    predicts the answer suspiciously well stays checked, with a warning: check that its value is
-   known when you make predictions. Above it, the Assistant comments on the data in plain
-   words and may propose a training you can start with one button.
+   known when you make predictions. With [the assistant](assistant.md) on, it also comments on
+   the data in plain words above and may propose a training you can start with one button.
 4. Under **Maximum run time** choose **1 min**, then press **Run**.
 5. The progress page shows what is being tried. When training ends, the
    **Prediction summary** opens: the best model, a rating from 1 to 5 stars, what the score
-   means in plain words, and a short comment from the Assistant.
+   means in plain words (and a short comment from the assistant when it is on).
 
 ## 6. Make predictions
 
@@ -127,9 +127,10 @@ the job list, the models with their leaderboard, variable importance and score h
 export and import, and project sharing. Administrators also manage users, Python modules and the
 system status from that menu.
 
-To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.md)). To ask
-questions about your data and models in plain language, use [the assistant](assistant.md)
-(it needs a language model: Ollama or Claude).
+To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.md)). To use it
+from AI tools such as Claude Code or Codex, switch on [MCP](mcp.md). To ask questions about your
+data and models in plain language in the browser, set up [the assistant](assistant.md) (it needs
+a language model: Ollama or Claude).
 
 ## Choosing the score
 

@@ -79,9 +79,9 @@ class Settings(BaseSettings):
     # Fione's origin as browsers reach it (behind a TLS proxy Fione cannot know its scheme):
     # the MCP endpoint accepts browser requests from it.
     public_url: str | None = None
-    # LLM assistant: Ollama, or Claude through the Anthropic API (which needs llm_api_key).
-    # An empty llm_base_url or llm_model is the provider's default.
-    llm_provider: Literal["ollama", "claude"] = "ollama"
+    # LLM assistant: off (none), Ollama, or Claude through the Anthropic API (which needs
+    # llm_api_key). An empty llm_base_url or llm_model is the provider's default.
+    llm_provider: Literal["none", "ollama", "claude"] = "none"
     llm_base_url: str = ""
     llm_api_key: SecretStr | None = None
     llm_model: str = ""
@@ -136,11 +136,36 @@ class Settings(BaseSettings):
         else:
             self.public_url = _normal_origin("public_url", self.public_url)
 
+    @property
+    def assistant_enabled(self) -> bool:
+        """Whether the assistant has a language model (``llm_provider`` is not ``none``)."""
+        return self.llm_provider != "none"
+
     def _check_llm(self) -> None:
         """Empty values are unset and get the provider's default; the base URL is kept without
-        a trailing slash, and the extra body defaults to what turns thinking off."""
+        a trailing slash, and the extra body defaults to what turns thinking off. With the
+        assistant off, a model setting is refused: it was meant for a provider."""
         if self.llm_api_key is not None and not self.llm_api_key.get_secret_value():
             self.llm_api_key = None
+        if not self.assistant_enabled:
+            set_ = [
+                name
+                for name, value in (
+                    ("FIONE_LLM_BASE_URL", self.llm_base_url),
+                    ("FIONE_LLM_MODEL", self.llm_model),
+                    ("FIONE_LLM_API_KEY", self.llm_api_key),
+                    ("FIONE_LLM_EXTRA_BODY", self.llm_extra_body),
+                    ("FIONE_LLM_AUTO_PULL", self.llm_auto_pull),
+                )
+                if value
+            ]
+            if set_:
+                raise ValueError(
+                    f"{', '.join(set_)} set while the assistant is off: set FIONE_LLM_PROVIDER"
+                    " to ollama or claude, or leave them unset"
+                )
+            self.llm_extra_body = {}
+            return
         if self.llm_api_key is not None and not _VISIBLE_ASCII.fullmatch(
             self.llm_api_key.get_secret_value()
         ):
