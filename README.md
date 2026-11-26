@@ -10,7 +10,7 @@ Documentation: [fione.codelibs.org](https://fione.codelibs.org/) (English) and
 
 ## Features
 
-- **Use it from AI tools**: with MCP switched on, MCP clients such as Claude Code, Claude Desktop
+- **Use it from AI tools**: with an API token, MCP clients such as Claude Code, Claude Desktop
   or Codex can create a project, upload a CSV, train, wait for the job, read the leaderboard and
   predict on your Fione server. They bring their own language model: Fione needs none for
   this. See [MCP](docs/mcp.md) and the [guide](https://fione.codelibs.org/guide/mcp.html).
@@ -62,10 +62,10 @@ pandas frames, with an API token. See [sdk/README.md](sdk/README.md).
 
 ## MCP and the assistant
 
-MCP clients such as Claude Code or Codex can read your projects at `/mcp` with an API token
-(`FIONE_MCP_ENABLED=true`, off by default), and a second switch lets them also create projects,
-upload datasets, queue training, prediction and module jobs, follow them and predict rows. See
-[MCP](docs/mcp.md).
+MCP clients such as Claude Code or Codex use Fione at `/mcp` with an API token: they read your
+projects, create projects, upload datasets, queue training, prediction and module jobs, follow
+them and predict rows. MCP is on by default; an administrator switches it, or the tools that
+change things, off on the System page. See [MCP](docs/mcp.md).
 
 The assistant is an optional chat in the browser, off by default: it answers questions about a
 project's datasets and models, comments on pages, and suggests a training run that a person

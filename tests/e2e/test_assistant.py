@@ -191,7 +191,8 @@ def test_mcp_from_outside(stack, admin, data):
 
     assert rpc("initialize", {"protocolVersion": "2025-11-25"})["serverInfo"]["name"] == "fione"
     tools = rpc("tools/list")["tools"]
-    assert len(tools) == 14 and all(t["annotations"]["readOnlyHint"] for t in tools)
+    # on by default with the tools that change things: 14 that read, 13 that start or follow jobs
+    assert len(tools) == 27 and "start_training" in {t["name"] for t in tools}
     listed = rpc("tools/call", {"name": "list_projects", "arguments": {}})
     assert listed["isError"] is False
     assert [p["id"] for p in listed["structuredContent"]["projects"]] == [pid]

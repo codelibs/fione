@@ -24,6 +24,7 @@ from fione.auth.roles import can_access_project
 from fione.projects import upload_tokens
 from fione.projects.ingest import IngestError, ingest_error_message
 from fione.projects.upload_tokens import UploadToken
+from fione.switches import mcp_switches
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
@@ -59,7 +60,7 @@ async def put_upload(token: str, request: Request, conn: Conn) -> dict:
     """Ingest the request body (a CSV) as the token's dataset and answer the dataset, as the
     REST upload does. The token is consumed only by a successful ingest."""
     settings = request.app.state.settings
-    if not (settings.mcp_enabled and settings.mcp_write_enabled):
+    if not (await run_in_threadpool(mcp_switches, conn, settings)).writes:
         raise _refused()
     claimed = await run_in_threadpool(_claim, conn, token)
     if claimed is None:

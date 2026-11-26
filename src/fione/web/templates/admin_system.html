@@ -10,6 +10,32 @@
   </header>
   <p class="visually-hidden" id="system-announce" aria-live="polite" aria-atomic="true"></p>
   {% include "_system_status.html" %}
+  <section class="card card-padded stack-tight" aria-labelledby="mcp-title">
+    <h2 class="section-header__title" id="mcp-title">{{ t('system.mcp_title') }}</h2>
+    <p class="text-muted text-sm">{{ t('system.mcp_lead', url=mcp_url) }}</p>
+    <dl class="facts facts-stacked">
+      {% for name, label, allowed, setting, stored, on in [
+           ("mcp", "system.mcp_read", mcp.allowed, "FIONE_MCP_ENABLED", mcp.stored, mcp.enabled),
+           ("mcp_write", "system.mcp_write", mcp.allowed and mcp.writes_allowed, "FIONE_MCP_WRITE_ENABLED" if mcp.allowed else "FIONE_MCP_ENABLED", mcp.stored_writes, mcp.writes)] %}
+      <div><dt>{{ t(label) }}</dt><dd class="cluster">
+        <span class="badge badge-{{ 'success' if on else 'neutral' }}" data-switch="{{ name }}">{{ t('system.switch_on' if on else 'system.switch_off') }}</span>
+        {% if not allowed %}
+        <span class="text-muted text-sm">{{ t('system.mcp_locked', name=setting) }}</span>
+        {% elif name == "mcp_write" and not mcp.enabled %}
+        <span class="text-muted text-sm">{{ t('system.mcp_write_needs_mcp') }}</span>
+        {% else %}
+        <form method="post" action="/admin/system/mcp">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="name" value="{{ name }}">
+          <input type="hidden" name="enabled" value="{{ 'false' if stored else 'true' }}">
+          <button type="submit" class="btn btn-secondary btn-sm">{{ t('system.turn_off' if stored else 'system.turn_on') }}</button>
+        </form>
+        {% endif %}
+      </dd></div>
+      {% endfor %}
+    </dl>
+    <p class="text-muted text-sm">{{ t('system.mcp_write_hint') }}</p>
+  </section>
   {% if llm_ollama and llm_status.state != 'ready' %}
   <section class="card card-padded stack-tight" aria-labelledby="llm-controls-title">
     <h2 class="section-header__title" id="llm-controls-title">{{ t('system.llm_controls_title') }}</h2>
