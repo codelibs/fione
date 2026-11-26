@@ -218,6 +218,15 @@ What this release does not do, or does with a catch. Japanese summary at the end
   20% or more, or a target computed from three categories; they add nothing to `ignored_columns`
   (unchecking the columns in the analysis page removes the note), and name a target that is
   really a unit price times a quantity known at prediction time too. A training run does not look.
+- **A target that two columns fix together is named, not left out.** For a target of 2 to 20
+  values, the proposal and the analysis page look at the 12 columns of 2 to 10 values that leave
+  the target least uncertain (a missing value counts as one) and warn that the target looks fixed
+  by two of them when, in combinations of 20 rows or more that hold a single target value, they
+  hold 99% or more of the rows of every target value (a rare value too), while neither column
+  fixes it on every row alone (a match that needs both sides to say yes; a column that does so
+  is named by the exact checks). They read at most 100,000 rows and stop after a second; they see no
+  triple of columns, a combination with fewer than 20 rows, or a rule with noise, and add nothing
+  to `ignored_columns`. A training run does not look.
 - **A training run names the columns the same check flags**, in a notice before the search:
   at most 5 of them, with the reason, and it never stops the run. The check runs on at most
   10,000 rows of the columns the models will read, within 5% of the time and 3 s, so on a table
