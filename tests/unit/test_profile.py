@@ -1457,3 +1457,158 @@ def test_a_training_run_does_not_look_for_a_derived_target():
         ).derived
         is None
     )
+
+
+def _decisions(n=3000, seed=0, target="and"):
+    """Two decisions, a rating, a noise column and a target they fix: both said yes, or one only."""
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame(
+        {
+            "decision": rng.integers(0, 2, n),
+            "decision_other": rng.integers(0, 2, n),
+            "rating": rng.integers(1, 6, n),
+            "noise": rng.normal(size=n),
+        }
+    )
+    d, o = df.decision, df.decision_other
+    df["match"] = {"and": d & o, "xor": d ^ o, "random": rng.integers(0, 2, n)}[target]
+    return df
+
+
+def _paired(df, target="match", **kwargs):
+    return _paired_cut(df, target, **kwargs)[0]
+
+
+def _paired_cut(df, target="match", **kwargs):
+    columns = [profile_module._profile_column(c, df[c]) for c in df.columns]
+    return profile_module.paired_target(df, columns, target, **kwargs)
+
+
+@pytest.mark.parametrize("target", ["and", "xor"])
+def test_a_target_that_two_columns_fix_together_is_named(target):
+    found = _paired(_decisions(target=target))
+    assert found is not None and (found.first, found.second) == ("decision", "decision_other")
+    assert found.share == 1.0
+    assert profile_dataset(_decisions(target=target), "match").paired == found
+
+
+def test_a_target_that_one_column_fixes_or_none_do_is_not_paired():
+    df = _decisions()
+    assert _paired(df.assign(match=df.decision)) is None  # one column fixes it: named elsewhere
+    assert _paired(_decisions(target="random")) is None
+    assert _paired(df.assign(match=(df.decision & df.decision_other) | (df.rating > 4))) is None
+
+
+def test_a_pair_of_columns_needs_rows_in_each_combination_and_a_target_of_few_classes():
+    df = _decisions(n=3000)
+    # 3 values by 3 values by 2 classes on 90 rows: a combination holds about 10 rows
+    small = pd.DataFrame(
+        {
+            "a": np.arange(90) % 3,
+            "b": (np.arange(90) // 3) % 3,
+            "match": np.random.default_rng(0).integers(0, 2, 90),
+        }
+    )
+    assert _paired(small.assign(match=lambda d: (d.a + d.b) % 2)) is None
+    # the target of 21 values is not a decision
+    assert (
+        _paired(df.assign(match=(df.decision * 10 + df.decision_other * 5 + df.rating) % 21))
+        is None
+    )
+
+
+def test_a_training_run_and_a_slow_search_do_not_look_for_a_paired_target():
+    df = _decisions()
+    columns = [profile_module._profile_column(c, df[c]) for c in df.columns]
+    assert leak_check(df, columns, "match").paired is not None
+    assert leak_check(df, columns, "match", derived=False).paired is None
+    ticks = iter(range(10_000))
+    assert _paired_cut(df, clock=lambda: float(next(ticks)), time_budget=1.0) == (None, True)
+    assert leak_check(df, columns, "match").paired_cut is False
+
+
+def test_a_search_out_of_time_in_the_loop_of_pairs_is_cut_and_not_kept():
+    df = _decisions(target="random")  # no pair to find: the loop goes on to the next pair
+    calls = iter(range(10_000))
+
+    def slow_after_the_columns():
+        i = next(calls)
+        return 0.0 if i < 5 else 10.0  # the start, three columns and the first pair
+
+    assert _paired_cut(df, clock=slow_after_the_columns, time_budget=1.0) == (None, True)
+    assert _paired_cut(df) == (None, False)
+
+
+def _combinations(impure, n_a=10, n_b=10, rows=50, seed=0):
+    """Every combination of two columns of 10 values on 50 rows, the target their parity, but for
+    ``impure`` combinations (the first ones), cut to 30 rows where it alternates: each costs 0.6%
+    of the rows of a target value."""
+    a = np.repeat(np.arange(n_a), n_b * rows)
+    b = np.tile(np.repeat(np.arange(n_b), rows), n_a)
+    y = (a + b) % 2
+    df = pd.DataFrame({"a": a, "b": b, "match": y})
+    df["combo"] = df.a * n_b + df.b
+    odd = df.groupby("combo").cumcount() % 2
+    df["match"] = np.where(df.combo < impure, odd, df.match)
+    keep = (df.combo >= impure) | (df.groupby("combo").cumcount() < 30)
+    return df[keep].drop(columns="combo").sample(frac=1, random_state=seed)
+
+
+@pytest.mark.parametrize(("impure", "found"), [(0, True), (1, True), (2, False), (10, False)])
+def test_the_share_of_the_rows_in_combinations_with_one_target_value_is_pinned_at_99_percent(
+    impure, found
+):
+    # one impure combination of 100 leaves 99.4% of each target value's rows in pure ones
+    result = _paired(_combinations(impure))
+    assert (result is not None) is found
+    if found:
+        assert result.share >= 0.99
+
+
+def test_a_rare_target_value_must_be_fixed_too():
+    rng = np.random.default_rng(0)
+    n = 20_000
+    flag = (rng.random(n) < 0.015).astype(int)  # 1.5% of the rows
+    other = rng.integers(0, 5, n)
+    y = np.zeros(n, dtype=int)
+    positives = np.flatnonzero((flag == 1) & (other < 2))
+    y[rng.choice(positives, len(positives) // 2, replace=False)] = 1  # half of that group: 0.3%
+    df = pd.DataFrame({"flag": flag, "other": other, "y": y})
+    assert 0.002 < y.mean() < 0.004
+    assert _paired(df, "y") is None  # the pure groups hold 99.4% of the rows, but 0% of the 1s
+    assert _paired(df.assign(y=flag & (other < 2)), "y") is not None  # the 1s fixed too
+
+
+def test_a_table_of_more_than_the_rows_read_is_sampled():
+    rng = np.random.default_rng(0)
+    n = profile_module._PAIRED_ROWS + 30_000
+    df = pd.DataFrame({"a": rng.integers(0, 2, n), "b": rng.integers(0, 2, n)})
+    df["match"] = df.a & df.b
+    found = _paired(df)
+    assert found is not None and (found.first, found.second) == ("a", "b")
+    assert _paired(df.assign(match=rng.integers(0, 2, n))) is None
+
+
+def test_columns_are_ranked_on_a_sample_and_the_pair_is_judged_on_the_rows():
+    rng = np.random.default_rng(0)
+    n = profile_module._PAIRED_RANK_ROWS + 5_000  # more than the rows the columns are ranked on
+    df = pd.DataFrame({f"c{i}": rng.integers(0, 2, n) for i in range(60)})
+    df["a"], df["b"] = rng.integers(0, 3, n), rng.integers(0, 3, n)
+    df["match"] = ((df.a == 1) & (df.b == 2)).astype(int)
+    found = _paired(df)
+    assert found is not None and (found.first, found.second) == ("a", "b")
+    assert _paired(df.assign(match=rng.integers(0, 2, n))) is None
+    # an exception in the rows the ranking did not read: the pair must hold on all of them
+    broken = df.copy()
+    broken.loc[broken.index[-3000:], "match"] = rng.integers(0, 2, 3000)
+    assert _paired(broken) is None
+
+
+def test_a_column_that_fixes_the_target_on_almost_every_row_alone_does_not_hide_a_pair():
+    df = _decisions()
+    # `decision` alone fixes the target on 99.5% of the rows (but not on every row), so the leak
+    # check does not name it, and the pair with the other decision is not hidden by it
+    flipped = df.assign(match=df.decision & df.decision_other)
+    flipped.loc[flipped.index[:15], "match"] = 1 - flipped.loc[flipped.index[:15], "match"]
+    assert _paired(flipped) is None  # the pair is not exact either (a noisy target)
+    assert _paired(df.assign(match=df.decision)) is None  # one that does so on every row

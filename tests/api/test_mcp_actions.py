@@ -7,7 +7,7 @@ from contextlib import closing
 import pytest
 from test_mcp import bearer, call, iris_dataset, post, rpc
 
-from api_helpers import add_user, connect
+from api_helpers import ASSISTANT_OFF, add_user, connect
 from fione.auth.roles import ProjectAccess, Role
 from fione.jobs import store
 from fione.projects import service as projects
@@ -29,7 +29,7 @@ CONFIG = {"target": "species", "max_runtime_secs": 30}
 
 @pytest.fixture
 def writes(make_client):
-    client = make_client(mcp_enabled=True, mcp_write_enabled=True)
+    client = make_client(mcp_enabled=True, mcp_write_enabled=True, **ASSISTANT_OFF)
     user = add_user(client, "ed", Role.EDITOR)
     return client, user
 

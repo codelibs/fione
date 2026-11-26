@@ -40,7 +40,12 @@ _UNCUTTABLE = frozenset({"config", "truncated_lists"})
 
 
 class ToolError(Exception):
-    """The message is safe to show to the model and the user."""
+    """The message is safe to show to the model and the user; ``code``, when set, names the
+    refusal for a caller that says it in its own words (the browser, translated)."""
+
+    def __init__(self, message: str = "", code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -59,7 +64,7 @@ class ToolContext:
     user: User
     allow_samples: bool = True  # raw cell values reach the model; MCP passes False
     project_id: str | None = None  # when set, no tool reaches an object of any other project
-    via: Literal["chat", "mcp", "test"] = "test"  # the channel, for the log
+    via: Literal["chat", "mcp", "ui", "test"] = "test"  # the channel, for the log
     max_result_bytes: int = MAX_RESULT_BYTES  # a chat lowers it to what its context can hold
     # a chat lets find_table_links ask the model for links the names do not show: (question,
     # tool) -> the arguments of the tool call, or None when the model gave none
@@ -74,7 +79,8 @@ class ToolContext:
 
 
 _TOOLS: dict[str, Tool] = {}
-# Tools that start work, for MCP clients only (``FIONE_MCP_WRITE_ENABLED``): never in the chat.
+# Tools that start work, for MCP clients only (``fione.switches.McpSwitches.writes``): never in
+# the chat.
 _ACTIONS: dict[str, Tool] = {}
 
 

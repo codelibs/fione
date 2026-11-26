@@ -56,29 +56,31 @@ def test_fione_reaches_the_host():
     assert "host.docker.internal:host-gateway" in SERVICES["fione"]["extra_hosts"]
 
 
-def test_compose_defaults_to_the_host_ollama():
+def test_compose_leaves_the_assistant_off():
     env = SERVICES["fione"]["environment"]
-    # empty: the provider's default, which Settings holds (host Ollama, its model)
+    # none: the assistant is off, and the model settings stay empty (a provider's default
+    # applies once one is set)
     assert env["FIONE_LLM_BASE_URL"] == "${FIONE_LLM_BASE_URL:-}"
-    assert env["FIONE_LLM_PROVIDER"] == "${FIONE_LLM_PROVIDER:-ollama}"
+    assert env["FIONE_LLM_PROVIDER"] == "${FIONE_LLM_PROVIDER:-none}"
     assert env["FIONE_LLM_MODEL"] == "${FIONE_LLM_MODEL:-}"
     assert env["FIONE_LLM_AUTO_PULL"] == "${FIONE_LLM_AUTO_PULL:-false}"
-    assert env["FIONE_MCP_ENABLED"] == "${FIONE_MCP_ENABLED:-false}"
-    assert env["FIONE_MCP_WRITE_ENABLED"] == "${FIONE_MCP_WRITE_ENABLED:-false}"
+    assert env["FIONE_MCP_ENABLED"] == "${FIONE_MCP_ENABLED:-true}"
+    assert env["FIONE_MCP_WRITE_ENABLED"] == "${FIONE_MCP_WRITE_ENABLED:-true}"
 
 
 def test_env_example_offers_the_ollama_profile():
     block = [
+        "# FIONE_LLM_PROVIDER=ollama",
         "# COMPOSE_PROFILES=ollama",
         "# FIONE_LLM_BASE_URL=http://ollama:11434/v1",
         "# FIONE_LLM_MODEL=gemma4:12b",
         "# FIONE_LLM_AUTO_PULL=true",
     ]
     lines = ENV_EXAMPLE.splitlines()
-    for line in block:  # commented out: the default is the host's Ollama
+    for line in block:  # commented out: the assistant is off by default
         assert line in lines
-    assert "# FIONE_LLM_API_KEY=" in lines and "# FIONE_MCP_ENABLED=true" in lines
-    assert "# FIONE_MCP_WRITE_ENABLED=true" in lines
+    assert "# FIONE_LLM_API_KEY=" in lines and "# FIONE_MCP_ENABLED=false" in lines
+    assert "# FIONE_MCP_WRITE_ENABLED=false" in lines
     assert not [line for line in lines if re.match(r"(COMPOSE_PROFILES|FIONE_LLM|FIONE_MCP)", line)]
 
 
@@ -92,9 +94,7 @@ def test_e2e_uses_the_fake_llm():
     assert env["FIONE_LLM_BASE_URL"] == "http://fake-llm:11434/v1"
     assert env["FIONE_LLM_AUTO_PULL"] == "true" and env["FIONE_MCP_ENABLED"] == "true"
     assert E2E["services"]["fione"]["depends_on"]["fake-llm"]["condition"] == "service_healthy"
-    # for the tests only: the real defaults stay off
+    assert env["FIONE_LLM_PROVIDER"] == "ollama"  # the real default is none
     real = SERVICES["fione"]["environment"]
     assert real["FIONE_LLM_AUTO_PULL"].endswith(":-false}")
-    assert real["FIONE_MCP_ENABLED"].endswith(":-false}")
-    assert real["FIONE_MCP_WRITE_ENABLED"].endswith(":-false}")
     assert "COMPOSE_PROFILES" not in (ROOT / "docker" / "e2e.env").read_text()

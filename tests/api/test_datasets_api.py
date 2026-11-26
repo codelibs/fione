@@ -319,6 +319,40 @@ def test_a_derived_target_search_cut_by_its_time_is_not_cached_and_is_not_a_part
     assert len(calls) == 2  # cut: checked again
 
 
+def test_the_profile_names_the_pair_of_columns_that_fix_the_target_and_a_cut_search_is_not_kept(
+    client, owner, project, monkeypatch
+):
+    rng = np.random.default_rng(0)
+    n = 1000
+    frame = pd.DataFrame(
+        {
+            "decision": rng.integers(0, 2, n),
+            "decision_other": rng.integers(0, 2, n),
+            "x": rng.normal(size=n),
+        }
+    )
+    frame["match"] = frame.decision & frame.decision_other
+    dataset = upload(client, project, frame.to_csv(index=False).encode(), headers=owner).json()
+    url = f"{base(project)}/{dataset['id']}/profile"
+    found = client.get(f"{url}?target=match", headers=owner).json()
+    assert found["paired"]["first"] == "decision" and found["paired"]["second"] == "decision_other"
+    assert found["paired_cut"] is False
+    assert client.get(url, headers=owner).json()["paired"] is None  # no target, no check
+    calls = []
+    real = routes_datasets.leak_check
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(routes_datasets, "leak_check", spy)
+    monkeypatch.setattr(profile_module, "_PAIRED_SECS", -1.0)
+    for _ in range(2):
+        cut = client.get(f"{url}?target=decision", headers=owner).json()
+        assert cut["paired_cut"] is True and cut["paired"] is None
+    assert len(calls) == 2  # cut: checked again
+
+
 def test_the_profile_leak_check_runs_once_per_dataset_and_target(
     client, owner, project, monkeypatch
 ):

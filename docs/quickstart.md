@@ -72,12 +72,12 @@ This writes `iris.csv`: 150 rows, four measurements and the `species` column.
    which columns to learn from. Columns that are a copy of the answer, or whose value decides
    it, and columns that only identify rows are unchecked, with the reason. A column that only
    predicts the answer suspiciously well stays checked, with a warning: check that its value is
-   known when you make predictions. Above it, the Assistant comments on the data in plain
-   words and may propose a training you can start with one button.
+   known when you make predictions. With [the assistant](assistant.md) on, it also comments on
+   the data in plain words above and may propose a training you can start with one button.
 4. Under **Maximum run time** choose **1 min**, then press **Run**.
 5. The progress page shows what is being tried. When training ends, the
    **Prediction summary** opens: the best model, a rating from 1 to 5 stars, what the score
-   means in plain words, and a short comment from the Assistant.
+   means in plain words (and a short comment from the assistant when it is on).
 
 ## 6. Make predictions
 
@@ -127,9 +127,11 @@ the job list, the models with their leaderboard, variable importance and score h
 export and import, and project sharing. Administrators also manage users, Python modules and the
 system status from that menu.
 
-To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.md)). To ask
-questions about your data and models in plain language, use [the assistant](assistant.md)
-(it needs a language model: Ollama or Claude).
+To drive Fione from Python, use `fione-sdk` (see [sdk/README.md](../sdk/README.md)). To use it
+from AI tools such as Claude Code or Codex, create an API token on the **Account** page and give
+it to the tool with the `/mcp` address (see [MCP](mcp.md)). To ask questions about your
+data and models in plain language in the browser, set up [the assistant](assistant.md) (it needs
+a language model: Ollama or Claude).
 
 ## Choosing the score
 
@@ -176,10 +178,11 @@ class's mean log loss, averaged. It is measured on the probabilities shifted so 
 is as common as the others, and a model ranked by it delivers those probabilities (and the label
 that is the largest of them), so the score on its page is the score of what it predicts.
 
-When you name no metric, EasyML and the assistant's proposal rank by average precision (`aucpr`)
+When you name no metric, EasyML and the training proposal (`propose_training_config` over
+[MCP](mcp.md), and the assistant's card) rank by average precision (`aucpr`)
 for two classes with a rare one (under 10% of the rows), and the engine's *Automatic* is log loss
 or RMSE otherwise. Name the score your goal uses (a metric the task fixes, say) in the training
-settings, in the API, or to the assistant, which can set it in its proposal.
+settings, in the API, or to an MCP client or the assistant, which set it in the training proposal.
 
 Metrics that count right answers (accuracy, F1, kappa, ...) use the predicted class described
 below; with more than two classes precision, recall and F1 are the mean over the classes, and with
@@ -231,7 +234,7 @@ class its expected number falls in. The cut points are stored with the model and
 threshold above; without `tuned`, a `qwk` run says in a notice that it would score better with
 them.
 
-The analysis page and the assistant suggest `qwk` with `tuned` when the classes are three to ten
+The analysis page and the training proposal suggest `qwk` with `tuned` when the classes are three to ten
 whole numbers in a row starting at 0 or 1 (a rating of 1 to 5). A regression
 ranked by `rounded_qwk` is the alternative: it needs no decision, and its cut points are fitted on
 the blend. The suggestion is a hint, since codes and counts of the same shape (digits 0 to 9, a
@@ -240,7 +243,7 @@ number of children) are not ordered ratings.
 With the prediction type left to Fione, a target of text or of at most 20 whole numbers is a
 classification and any other number a regression. When the target is whole numbers that are every
 value from 0 or 1 up to a number between 50 and 1,000, each on 100 rows or more (class numbers, a
-category code), the assistant's proposal still reads it as a regression and warns that the values
+category code), the training proposal still reads it as a regression and warns that the values
 may be classes; setting the prediction type to classification trains on them as classes.
 
 ## Text columns
@@ -264,6 +267,27 @@ dropped. The three variants are not run for data without a text column. LinearBo
 trees boosted from a linear model, is a late candidate of every table: it runs after them and
 takes the time they leave. LinearSpline, a linear model with a piecewise linear curve for each
 number that has many values, follows it on the tables that have such numbers.
+
+## Joining datasets
+
+When a project holds two or more training datasets (upload another table as training data), the
+project's dashboard and its **Datasets** page show **Join datasets**. Choose the column to predict and press
+**Propose a join**: Fione looks for the columns that link the datasets, by their names and
+values, and proposes the first join. No language model is used. The base is the dataset that
+has the column to predict, and the dataset to add is the one its best link joins to; when the
+dataset to add has several rows per key, they are summarized to one row per key (the number of
+rows, and the mean, minimum, maximum and sum of each number). The proposal shows the key,
+whether the rows are summarized, the columns added and what to check (a key that repeats, few
+matching keys, a result over the limit). Anyone who can read the project sees it; a person who
+can edit the project presses **Create the joined dataset**, which starts a Join job and opens
+it. Fione checks the proposal again before the job starts. The result is a new dataset, and the
+base dataset stays as it is. Join only what is known when the model predicts.
+
+The search reads the 8 oldest datasets of the project, whose columns the list offers, and stops
+after 30 seconds; two searches run at once on the server, and another is asked to wait;
+[Several tables](assistant.md#several-tables) says how the links are found. To join two
+datasets of your choice, or to set the summary's statistics, run the **Join datasets by key
+columns** module.
 
 ## Data with one column per time
 
@@ -433,6 +457,13 @@ the event happened at the target's time and 0 where the row was last seen at tha
 (`event_column` in the API; the target is then a regression, and the column is not a feature). The
 models learn a score that grows with the time, and a prediction is that score: a higher one is a
 longer time, and it is not a time in the target's units.
+The assistant's proposal takes `event_column` too (a column other than the target, of 0 and 1 on
+every row with at least one 1, for a target of 0 or more; `sort_metric` may then be `auto` or
+`concordance`), sets no `target_transform` and gives no skew warning then. When it is not given,
+the proposal warns that the target looks like a time when its name is one (`time`, `futime`,
+`duration`, `tenure`, `survival_time`, `time_to_failure`, ...) and a column of 0 and 1 without a
+missing value is named by a word like an event (`event`, `death`, `churn`, `failed`, ...; `status`
+only next to `futime`, `survival` or `follow`).
 
 The score is the probability, by the Kaplan-Meier estimate of all the training rows, that the event
 has happened by the row's time (a row with an event) or by the time it is expected to last (a
@@ -497,7 +528,7 @@ value on one row, a name such as `date`, `day` or `week_no` is enough (a counter
 periods). With each value on many rows (the day or period of each row), the name must be a
 counter's: a time word and `id`, `idx`, `index`, `no` or `num` (`date_id`, `day_idx`), since a
 year, an age or a day of the month repeats over rows too. The notice is conditional on the rows
-being ordered in time. When each value is on one row, the assistant proposes the column as "Order of the rows in
+being ordered in time. When each value is on one row, the training proposal sets the column as "Order of the rows in
 time" instead of leaving it out as an ID, unless the classes could not all be validated in that
 order. When values repeat, it only warns and sets nothing. It also only warns about a column of
 dates (20 or more different dates over 30 days to 50 years, no missing value, in 300 rows or
@@ -521,7 +552,7 @@ value on one row, a name such as `date`, `day` or `week_no` is enough (a counter
 periods). With each value on many rows (the day or period of each row), the name must be a
 counter's: a time word and `id`, `idx`, `index`, `no` or `num` (`date_id`, `day_idx`), since a
 year, an age or a day of the month repeats over rows too. The notice is conditional on the rows
-being ordered in time. When each value is on one row, the assistant proposes the column as "Order of the rows in
+being ordered in time. When each value is on one row, the training proposal sets the column as "Order of the rows in
 time" instead of leaving it out as an ID, unless the classes could not all be validated in that
 order. When values repeat, it only warns and sets nothing. It also only warns about a column of
 dates (20 or more different dates over 30 days to 50 years, no missing value, in 300 rows or
@@ -539,14 +570,14 @@ it scored the same where a level moves with time. A whole-number time column tha
 the neural network leave out its number and its year; to keep a counter as an input, give
 the model a copy of it under another name. A counter that is the only input is kept.
 
-The time the assistant proposes (2 to 30 minutes) is what the data needs to try about 30 models,
+The time the training proposal sets (2 to 30 minutes) is what the data needs to try about 30 models,
 from its cells (rows times input columns, a table of fewer than 30 input columns counting as 30,
 since a trial of such a table costs more than its cells: the boosting rounds, the date and
 category encodings and the folds are work per row; a table of nothing but text counts its own
 columns), times the number of classes over ten (at most 30 times) for a classification target of
 more than ten classes, since a boosting round grows one tree per class, or, for text, from its
-characters if that is more. When the data needs more than 1.5 times the longest time the assistant
-proposes (30 minutes), which holds from about 15 million cells on (500,000 rows of 30 columns or
+characters if that is more. When the data needs more than 1.5 times the longest time the training
+proposal sets (30 minutes), which holds from about 15 million cells on (500,000 rows of 30 columns or
 fewer; 1.5 million with 100 classes), its proposal warns that many models may be cut by time and
 each kind tried with few settings. A longer `max_runtime_secs` is allowed, and so is training on a
 part of the rows (made with **Split into train, valid and test**).
@@ -585,8 +616,9 @@ of derived features alike. The column is still an input unless you leave it out
 value occurs, counted over all the training rows. A group the model has not seen gets the share of the
 rarest value, so its rows look like a very small group, and the validation, whose groups were
 counted too, cannot show that: leave the group column out when the rows to predict hold other groups.
-The assistant proposes the column itself when the project has a test dataset that holds it and at
+The training proposal sets the column itself when the project has a test dataset that holds it and at
 most 10% of the test rows have a value the training rows hold (it warns instead when 90% or more do).
+Of several repeated columns named like an identifier (`id`, `user_id`, or an id fused to the initial of what it numbers: `iid`, `pid`, `uid`), it takes the first whose values the test data does not repeat, as a person's `iid` against a subject number `id` that restarts in every block of the data; if none is, the first.
 It proposes a repeated column that the project's test datasets all lack as well (and leaves it out of the inputs): the test rows cannot be matched to the training rows by it.
 A training run says so when such a column holds codes (values of 8 characters or more with a digit
 and no space) on about 3 rows or more each, and holds at least 5% of what the model relies on. It also says so when the group
@@ -595,7 +627,7 @@ column, of any kind of values, is an input that holds at least 5% of what the mo
 counts as one group, and with fewer groups than folds the number of folds is lowered to the
 number of groups (at least two groups are needed). A class that occurs in so few groups that
 some fold's training rows lack it is refused, with the column named. The analysis page and the
-assistant suggest this when a column named like an ID (`user_id`, `顧客ID`) repeats its values over rows,
+training proposal suggest this when a column named like an ID (`user_id`, `顧客ID`) repeats its values over rows,
 unless a test dataset of the project has, on at least 90% of its rows, a value of that column
 that the training rows hold too: the rows to predict then belong to groups the model has seen, a random split
 matches how the model will be used, and keeping the groups together would make the score look worse than the
@@ -623,7 +655,7 @@ A group column and a time column can be used together (see "Data that follows ti
 More rows of the same kind often help more than any setting: older data, another store's
 history, a public data set of the same task. Joining them to the training data would make them
 part of the validation, and the score would be measured on rows that are not like the ones to
-predict. Give them as extra data instead (`extra_dataset_ids` in the API, the assistant's
+predict. Give them as extra data instead (`extra_dataset_ids` in the API, the MCP tool
 `start_training` and the SDK's `train`, other `train` datasets of the project): the models learn
 from them in every fold and in the final fit, and they are never validated, so every score, the
 out-of-fold predictions and the leaderboard count the rows of the main dataset alone.

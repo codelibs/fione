@@ -19,6 +19,10 @@ PW = "password-123"
 CSV = b"a,b,label\n1,x,yes\n2,y,no\n3,x,yes\n4,z,no\n"
 
 
+# The settings of a Fione without the assistant (the default outside the tests).
+ASSISTANT_OFF = {"llm_provider": "none", "llm_base_url": ""}
+
+
 def make_settings(data_dir, **overrides) -> Settings:
     values = {
         "data_dir": data_dir,
@@ -33,6 +37,9 @@ def make_settings(data_dir, **overrides) -> Settings:
         # server pass the fake's.
         "llm_base_url": "http://127.0.0.1:9/v1",
         "llm_provider": "ollama",
+        # MCP is on by default; tests that use it say so (test_mcp_switches covers the default)
+        "mcp_enabled": False,
+        "mcp_write_enabled": False,
         **overrides,
     }
     return Settings(**values)

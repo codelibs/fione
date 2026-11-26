@@ -134,6 +134,8 @@ AUTOML_ROUTES = {
     ("GET", P + "/jobs"): READ,
     ("POST", P + "/jobs/{predict_job}/delete"): WRITE_POST,
     ("POST", P + "/jobs/delete-finished"): WRITE_POST,
+    ("GET", P + "/join"): READ,  # no column to predict: a message
+    ("POST", P + "/join"): WRITE_POST,
 }
 AUTOML_PATHS = {
     "/projects/{pid}/datasets": P + "/datasets",
@@ -144,6 +146,7 @@ AUTOML_PATHS = {
     "/projects/{pid}/jobs": P + "/jobs",
     "/projects/{pid}/jobs/{jid}/delete": P + "/jobs/{predict_job}/delete",
     "/projects/{pid}/jobs/delete-finished": P + "/jobs/delete-finished",
+    "/projects/{pid}/join": P + "/join",
 }
 TRAIN_FORM = {
     "target": "species",
@@ -171,6 +174,16 @@ def automl_request(world, method, template, csrf, objects=None):
         data = token | {"kind": "train"}
         return client.post(path, data=data, files=files, follow_redirects=False)
     form = TRAIN_FORM if path.endswith("/train") else {}
+    if path.endswith("/join"):  # the test dataset joined onto the training one
+        ids = world.ids[objects or world.p]
+        form = {
+            "dataset_id": str(ids["train"]),
+            "other_dataset_id": str(ids["test"]),
+            "key": "sepal length (cm)",
+            "other_key": "",
+            "summarize": "true",
+            "columns": "",
+        }
     return client.post(path, data=token | form, follow_redirects=False)
 
 
@@ -234,6 +247,7 @@ ADMIN_ROUTES = {
     ("POST", "/admin/users/{uid}/delete"): (401, 403, 403, 303),
     ("GET", "/admin/system"): (303, 403, 403, 200),
     ("POST", "/admin/system/llm/pull"): (401, 403, 403, 303),
+    ("POST", "/admin/system/mcp"): (401, 403, 403, 303),
     ("GET", "/admin/setup/assistant"): (303, 403, 403, 303),  # a local host: to the System page
     ("POST", "/admin/setup/assistant"): (401, 403, 403, 303),
 }
@@ -244,6 +258,7 @@ GLOBAL_FORMS = {
     "/admin/users": {"username": "newbie", "password": PW, "role": "viewer"},
     "/role": {"role": "viewer"},
     "/password": {"password": "a-new-password-1"},
+    "/admin/system/mcp": {"name": "mcp", "enabled": "false"},
 }
 # Project sharing x the AutoML personas: the owner's (and admins') only, 403 for the
 # project's other readers.

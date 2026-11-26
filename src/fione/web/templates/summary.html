@@ -11,7 +11,7 @@
   <header class="page-header">
     <h1 class="page-header__title">{{ t('summary.title') }}</h1>
     <p class="page-header__lead text-muted">{{ t('summary.lead', name=record.name, target=record.target) }}</p>
-    <p><a class="btn btn-ghost btn-sm" href="/projects/{{ pid }}/assistant?ask=model:{{ record.id }}">{{ t('assistant.ask_link') }}</a></p>
+    {% if assistant_on %}<p><a class="btn btn-ghost btn-sm" href="/projects/{{ pid }}/assistant?ask=model:{{ record.id }}">{{ t('assistant.ask_link') }}</a></p>{% endif %}
   </header>
 
   <section class="card summary-hero" aria-labelledby="rating-title">
@@ -35,7 +35,7 @@
   <div class="alert alert-warning" role="note">{{ icon("alert") }}<span>{{ t('summary.degraded') }}</span></div>
   {% endif %}
 
-  <section class="card card-padded stack-tight assistant-note" id="assistant-note" hx-get="/projects/{{ pid }}/models/{{ record.id }}/comment" hx-trigger="load" hx-target="this" hx-swap="outerHTML"><p class="text-muted text-sm">{{ t('note.loading') }}</p></section>
+  {% if assistant_on %}<section class="card card-padded stack-tight assistant-note" id="assistant-note" hx-get="/projects/{{ pid }}/models/{{ record.id }}/comment" hx-trigger="load" hx-target="this" hx-swap="outerHTML"><p class="text-muted text-sm">{{ t('note.loading') }}</p></section>{% endif %}
 
   <div class="summary-grid">
     <section class="card card-padded stack" aria-labelledby="facts-title">
