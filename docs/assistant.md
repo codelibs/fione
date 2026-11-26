@@ -21,8 +21,8 @@ the default, leaves it off):
   blocks to the request that made them).
 
 While it is off, no page shows its chat, its comments or links to them, and the **System** page
-says it is off. A `FIONE_LLM_*` setting of a model (base URL, model, API key, extra body, automatic
-download) without a provider stops Fione at start.
+says it is off. A model setting without a provider (`FIONE_LLM_BASE_URL`, `FIONE_LLM_MODEL`,
+`FIONE_LLM_API_KEY`, `FIONE_LLM_EXTRA_BODY`, `FIONE_LLM_AUTO_PULL=true`) stops Fione at start.
 
 Nothing is installed with Fione and no model is bundled. Ways to set it up:
 

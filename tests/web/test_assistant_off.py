@@ -10,7 +10,9 @@ from markupsafe import escape
 
 from api_helpers import ASSISTANT_OFF, connect
 from fione import i18n
+from fione.assistant import store as assistant_store
 from fione.assistant.provider import LlmMonitor
+from fione.auth import service as users
 from fione.jobs import store
 from fione.jobs.store import JobStatus
 from fione.web import assistant_ui
@@ -92,17 +94,43 @@ def test_the_same_pages_offer_it_when_it_is_on(make_client, monkeypatch):
     assert "data-llm-banner" in MARKS.findall(on.client.get(on.path(P)).text)
 
 
-def test_the_assistants_routes_are_not_found(off):
-    csrf = off.login("ed")
-    ids = off.ids[off.p] | {"pid": off.p, "cid": 1, "prid": 1}
-    values = {"did": ids["train"], "mid": ids["model"], "jid": ids["failed"]} | ids
+def _sweep(world) -> dict:
+    """The status of each route of the assistant, as ``ed`` with a conversation that holds a
+    pending proposal; the conversation is deleted last."""
+    csrf = world.login("ed")
+    ids = world.ids[world.p]
+    with closing(connect(world.client)) as conn:
+        uid = conn.execute("SELECT id FROM users WHERE username = 'ed'").fetchone()[0]
+        ed = users.get_user(conn, uid)
+        cid = assistant_store.create_conversation(conn, ed, world.p).id
+        message = assistant_store.add_message(conn, cid, "assistant", "a proposal")
+        config = {"target": "species", "max_runtime_secs": 60}
+        prid = assistant_store.add_proposal(conn, message.id, cid, ids["train"], config, {}).id
+    values = {"pid": world.p, "cid": cid, "prid": prid, "did": ids["train"], "mid": ids["model"]}
     routes = [r for r in assistant_ui.router.routes if hasattr(r, "methods")]
-    assert len(routes) > 10
-    for route in routes:
-        path = re.sub(r"{(\w+)}", lambda m: str(values[m[1]]), route.path)
+    statuses = {}
+    for route in sorted(routes, key=lambda r: r.path.endswith("/delete")):
+        jid = ids["predict_job"] if "prediction-comment" in route.path else ids["failed"]
+        path = route.path.format(**values, jid=jid)
         for method in route.methods:
-            r = off.client.request(method, path, data={"csrf_token": csrf, "text": "hi"})
-            assert r.status_code == 404, (method, path)
+            r = world.client.request(method, path, data={"csrf_token": csrf, "text": "hi"})
+            statuses[(method, path)] = r.status_code
+    assert len(statuses) > 10
+    return statuses
+
+
+def test_the_assistants_routes_are_not_found(off):
+    found = {route: status for route, status in _sweep(off).items() if status != 404}
+    assert found == {}
+
+
+def test_the_assistants_routes_are_found_when_it_is_on(make_client, monkeypatch):
+    """The sweep above reaches each route: with the assistant on, none is not found."""
+    monkeypatch.setattr(LlmMonitor, "start", lambda self: None)
+    on = _world(make_client)
+    on.client.app.state.llm_monitor._update(state="ready")
+    missing = {route: status for route, status in _sweep(on).items() if status == 404}
+    assert missing == {}
 
 
 def test_the_system_page_says_it_is_off(off):
