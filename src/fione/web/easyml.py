@@ -60,7 +60,7 @@ from fione.tools.builtin import (
     propose,
     rare_class_share,
     recommended_metric,
-    repeated_id_column,
+    repeated_id_choice,
     repeated_values_in_test,
     runtime_need_secs,
     sample_profile,
@@ -396,7 +396,16 @@ def _tips(request: Request, conn, dataset: Dataset, found, task: str) -> list[tu
         tips.append(("analysis.tip.rare_class", {"share": _pct(share)}))
     if (ordered := ordered_classes(found.y, task)) is not None:
         tips.append(("analysis.tip.ordered_classes", {"low": ordered[0], "high": ordered[1]}))
-    if (repeated := repeated_id_column(found.profile, found.target.name)) is not None:
+    if (
+        repeated := repeated_id_choice(
+            _storage(request),
+            conn,
+            dataset,
+            found.profile,
+            found.target.name,
+            _profile_rows(dataset),
+        )
+    ) is not None:
         shared = repeated_values_in_test(
             _storage(request), conn, dataset, repeated.name, _profile_rows(dataset)
         )

@@ -747,7 +747,12 @@ TIME_DATE_DAYS = 30
 TIME_DATE_MAX_DAYS = 365 * 50  # a column of dates over more years is an attribute, not a series
 # A column of birth dates is an attribute of the rows, not the time they are in.
 _BIRTH_NAME = re.compile(r"(?i)birth|dob|born|生年|誕生")
-_IDENTIFIER = re.compile(r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(?![a-z])|番号")
+# An id fused to the initial of what it numbers (iid, pid, uid, cid, sid, oid, gid, tid), as the
+# whole name; other letters give words (kid, bid, mid, aid).
+_IDENTIFIER = re.compile(
+    r"(?<![A-Za-z])(?:id|ID|Id)(?![a-z])|[a-z0-9](?:Id|ID)(?![a-z])"
+    r"|(?<![A-Za-z])(?:[ipucsogt]id|[IPUCSOGT]ID|[IPUCSOGT]id)(?![a-z])|番号"
+)
 # Whom the rows are about, as the whole name (a plural, digits or punctuation may follow): a
 # column that names the one the rows concern, not a trait of it (user_age, session_count).
 _ENTITY = re.compile(
@@ -895,11 +900,23 @@ def test_seen_shares(
         if other.type != DatasetType.TEST or column not in {name for name, _ in other.schema}:
             continue
         if seen is None:
-            seen = set(ingest.read_dataset(storage, dataset, [column])[column].dropna().unique())
-        values = ingest.read_dataset_runs(storage, other, sample_rows, [column])[column].dropna()
+            seen = set(_value_keys(ingest.read_dataset(storage, dataset, [column])[column]))
+        values = _value_keys(
+            ingest.read_dataset_runs(storage, other, sample_rows, [column])[column]
+        )
         if len(values):
             shares.append(float(values.isin(seen).mean()))
     return shares
+
+
+def _value_keys(values: pd.Series) -> pd.Series:
+    """The values of a column as text, whole numbers without a fraction (a column of numbers in
+    the training rows and of text in the test rows holds the same values: 17 and "17"; 17.0 and
+    17), the missing ones left out."""
+    values = values.dropna()
+    if pd.api.types.is_float_dtype(values) and bool((values % 1 == 0).all()):
+        values = values.astype("int64")
+    return values.astype(str)
 
 
 def repeated_values_in_test(
@@ -924,11 +941,12 @@ def other_values_in_test(
     return bool(shares) and all(share <= TEST_UNSEEN_SHARE for share in shares)
 
 
-def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | None:
-    """The first column other than ``target`` that is named like an identifier (failing that, for
-    the entity the rows are about) and repeats its values over rows (``REPEATED_ID_GROUPS`` or
+def repeated_id_columns(profile: DatasetProfile, target: str) -> list[ColumnProfile]:
+    """The columns other than ``target`` that are named like an identifier (failing that, for
+    the entity the rows are about) and repeat their values over rows (``REPEATED_ID_GROUPS`` or
     more values, ``REPEATED_ID_MIN_ROWS`` rows each on average), where ``cv_group_column`` may
-    keep the validation honest; else None."""
+    keep the validation honest, the identifiers first; failing those, the one column whose values
+    each come back on a few rows and that gives the target away alone; else none."""
     found = [
         col
         for col in profile.columns
@@ -941,26 +959,61 @@ def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | 
     # A column named like an identifier comes before one named for the entity.
     found.sort(key=lambda col: _IDENTIFIER.search(col.name) is None)
     if found:
-        return found[0]
+        return found
     # Whatever it is named, a column of values that each come back on a few rows (under
     # ``REPEATED_ID_FEW_ROWS``, which the fit's own check of repeated values leaves to this one) and
     # that gives the target away on its own (its value fixes the target, or nearly) ties rows that
     # share the target together. Whole-number codes are left to the name rule: a number may be a
     # count or a code that fixes the target for another reason.
     alone = {s.column for s in profile.leak_suspects if s.reason in (PREDICTS_ALONE, DETERMINES)}
-    return next(
-        (
-            col
-            for col in profile.columns
-            if col.name in alone
-            and col.kind in ("categorical", "text")
-            and col.n_unique >= REPEATED_ID_GROUPS
-            and REPEATED_ID_MIN_ROWS * col.n_unique
-            <= profile.n_rows
-            < REPEATED_ID_FEW_ROWS * col.n_unique
-        ),
-        None,
-    )
+    return [
+        col
+        for col in profile.columns
+        if col.name in alone
+        and col.kind in ("categorical", "text")
+        and col.n_unique >= REPEATED_ID_GROUPS
+        and REPEATED_ID_MIN_ROWS * col.n_unique
+        <= profile.n_rows
+        < REPEATED_ID_FEW_ROWS * col.n_unique
+    ][:1]
+
+
+def repeated_id_column(profile: DatasetProfile, target: str) -> ColumnProfile | None:
+    """The first of ``repeated_id_columns``, else None."""
+    return next(iter(repeated_id_columns(profile, target)), None)
+
+
+REPEATED_ID_CANDIDATES = 5  # columns whose test values are compared with the training rows
+
+
+def repeated_id_choice(
+    storage,
+    conn,
+    dataset: Dataset,
+    profile: DatasetProfile,
+    target: str,
+    sample_rows: int = _SAMPLE_ROWS,
+) -> ColumnProfile | None:
+    """The repeated column to offer: the first of ``repeated_id_columns`` (``found[0]``), unless
+    the test data repeats it and a later one (at most ``REPEATED_ID_CANDIDATES`` in all) has test
+    rows of almost no value the training rows hold (``other_values_in_test``): the first of those.
+    A column that no test dataset holds stays the first choice, as a column of the test rows
+    cannot be compared. A subject number that runs through every block of the data (``id``)
+    repeats its values in the test rows, while the person it numbers (``iid``) does not, and the
+    person is the group. The proposal and the analysis page both use it, so they agree."""
+    found = repeated_id_columns(profile, target)
+    if not found:
+        return None
+    if found[0].name in absent_from_test(
+        conn, dataset, [col.name for col in found], (DatasetType.TEST,)
+    ):
+        return found[0]
+    for col in found[:REPEATED_ID_CANDIDATES]:
+        if _is_plain(col.name) and other_values_in_test(
+            storage, conn, dataset, col.name, sample_rows
+        ):
+            return col
+    return found[0]
 
 
 def time_index_column(profile: DatasetProfile, target: str, n_rows: int) -> ColumnProfile | None:
@@ -1539,7 +1592,9 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         if group == target or not _is_plain(group):
             raise ToolError("group_column must be a plain-text column other than the target")
         overrides["cv_group_column"] = group
-    elif (repeated := repeated_id_column(profile, target)) is not None:
+    elif (
+        repeated := repeated_id_choice(ctx.storage, ctx.conn, dataset, profile, target, rows)
+    ) is not None:
         column = clean_text(repeated.name)
         if repeated_values_in_test(ctx.storage, ctx.conn, dataset, repeated.name, rows):
             warnings.append(
