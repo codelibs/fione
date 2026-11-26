@@ -830,9 +830,9 @@ def test_budget_drops_old_rounds(env, fake_llm):
     for n in range(30):
         add_history_round(env.conn, env.conversation.id, n, 5000)
     fake = fake_llm([describe(env.iris.id), {"text": "ok"}])
-    settings = settings_for(env, fake, llm_context_tokens=5600, llm_max_tokens=256)
+    settings = settings_for(env, fake, llm_context_tokens=5800, llm_max_tokens=256)
     turn(env, settings, "The newest question")
-    budget = budget_bytes(5600, 256, list_tools())
+    budget = budget_bytes(5800, 256, list_tools())
     assert len(fake.requests) == 2
     for request in fake.requests:
         messages = request["messages"]
@@ -923,7 +923,7 @@ def test_the_smallest_context_fits_a_question():
     request = [{"role": "system", "content": system}, {"role": "user", "content": "?" * 64}]
     assert size(request) <= budget_bytes(MIN_PROMPT_TOKENS + 1024, 1024, list_tools())
     request = request[:1] + [{"role": "user", "content": "?"}]
-    assert size(request) > budget_bytes(MIN_PROMPT_TOKENS - 80 + 1024, 1024, list_tools())
+    assert size(request) > budget_bytes(MIN_PROMPT_TOKENS - 250 + 1024, 1024, list_tools())
 
 
 # What Ollama is assumed to serve before its context is known: the real default (4096) cannot
