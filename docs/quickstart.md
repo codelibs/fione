@@ -475,10 +475,11 @@ column as a number and also as its year, month, day, day of the week, day of the
 the year and, with an hour or a Unix time, hour of the day. A column of dates (or of text a date
 can be read from) is read the same way, and as the seconds since 1970 too, except when it is the
 time column (see below). The linear models and the neural network leave out the number itself of a
-whole-number date (a Unix time, 20240131, ...) whose training rows all fall in one year (and of
-one that is the time column when other inputs move with time, with its year): within a year the
-number is a straight line through month and day, and a later year would be read far outside what
-they learned.
+whole-number date (a Unix time, 20240131, ...) whose training rows fall in one year and span a
+day or more, first to last (and of one that is the time column when other inputs move with time, with its
+year): within a year the number is a straight line through month and day, and a later year would
+be read far outside what they learned. Rows that span less than a day keep the number, since
+nothing else orders them.
 A notice also points this out for a whole-number column named like a time that runs through 20 or
 more consecutive numbers (a few may be missing), in a sorted file or a shuffled one. With each
 value on one row, a name such as `date`, `day` or `week_no` is enough (a counter of days or

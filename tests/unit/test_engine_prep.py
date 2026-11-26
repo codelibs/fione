@@ -890,6 +890,50 @@ def test_unix_milliseconds_of_one_year_have_no_number_in_the_linear_view():
     assert not _raw_in_linear_view(prep, year)
 
 
+def _window(kind, start, span, n=3000, seed=0):
+    """A date column of ``span`` seconds from ``start`` (Unix seconds, datetimes or whole-number
+    days), sorted, a number, and a target that grows with the time."""
+    rng = np.random.default_rng(seed)
+    seconds = np.sort(int(pd.Timestamp(start).timestamp()) + rng.integers(0, span, n))
+    if kind == "datetime":
+        when = pd.to_datetime(seconds, unit="s")
+    elif kind == "days":
+        when = pd.to_datetime(seconds, unit="s").strftime("%Y%m%d").astype("int64")
+    else:
+        when = seconds
+    x = rng.normal(size=n)
+    y = (seconds - seconds[0]) / span * 3 + 0.5 * x + rng.normal(0, 0.3, n)
+    return pd.DataFrame({"when": when, "x": x}), y
+
+
+def _later_rows_r2(frame, y, dropped):
+    from sklearn.linear_model import Ridge
+    from sklearn.metrics import r2_score
+
+    first = np.arange(len(frame)) < 2400  # the later rows are held out
+    prep = Prep().fit(frame[first])
+    assert bool(prep._no_trend) == dropped
+    model = Ridge(alpha=1e-3).fit(prep.linear(frame[first]), y[first])
+    return r2_score(y[~first], model.predict(prep.linear(frame[~first])))
+
+
+@pytest.mark.parametrize("kind", ["unix", "datetime"])
+@pytest.mark.parametrize(
+    "start",
+    ["2017-07-14 02:40", "2017-07-14 23:30", "2017-07-31 23:30"],
+    ids=["an hour", "an hour across midnight", "an hour across a month end"],
+)
+def test_a_date_column_less_than_a_day_apart_keeps_its_number_in_the_linear_view(kind, start):
+    frame, y = _window(kind, start, 3600)
+    assert _later_rows_r2(frame, y, dropped=False) > 0.5  # below zero without the number
+
+
+@pytest.mark.parametrize("kind", ["unix", "datetime", "days"])
+def test_a_date_column_weeks_apart_in_one_month_has_no_number_in_the_linear_view(kind):
+    frame, y = _window(kind, "2017-07-02", 18 * 86_400)
+    assert _later_rows_r2(frame, y, dropped=True) > 0.5
+
+
 def test_epoch_seconds_are_found_by_position_not_by_a_column_name():
     year = _days("2016-01-01", 360)
     year.insert(0, "when__year", np.where(np.arange(360) < 180, 2000, 2001))  # a user column

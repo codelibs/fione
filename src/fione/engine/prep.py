@@ -503,6 +503,13 @@ class Prep:
             parts = tuple(p for p in parts if p not in ("year", "ordinal"))
         return parts + (("hour",) if column in self.timed else ())
 
+    @staticmethod
+    def _spans_a_day(seconds: pd.Series) -> bool:
+        """Whether the dates (as seconds since 1970) of the training rows span a day or more,
+        first to last. Within less than a day the month and the day are (nearly) constant, the
+        seconds are no line through them, and only the number carries the order of the rows."""
+        return bool(seconds.max() - seconds.min() >= 86_400)
+
     def _fit_no_trend(self, base: pd.DataFrame) -> None:
         """The seconds-since-epoch part of a date column whose year is the same on every training
         row (for a whole-number date, a Unix time or 20240131, the number itself). Within one
@@ -510,7 +517,8 @@ class Prep:
         effect between them in opposite weights. That holds on the training rows; on a date of
         the next year, where the month starts again, the weights add up to a prediction far
         outside the target's range. A time order of validation cannot show it, because the folds
-        stay within the year. The time column, when other inputs move with time, loses its seconds
+        stay within the year. A column whose rows span less than a day keeps it (nothing else
+        orders them). The time column, when other inputs move with time, loses its seconds
         (or number) and its year whatever the years."""
         off = []
         at = 0  # position of the column's first feature
@@ -523,12 +531,18 @@ class Prep:
                     if column == self.trend_column:  # the parts that only grow
                         off += [f"f{at}", year]
                     elif base[year].nunique() <= 1:
-                        off.append(f"f{at}")
+                        when = _integer_dates(base[f"f{at}"], fmt)
+                        if self._spans_a_day(_date_part(when, "ordinal")):
+                            off.append(f"f{at}")
                     at += len(parts)
                 at += 1
                 continue
             parts = self._date_parts(column)
-            if column != self.trend_column and base[f"f{at + parts.index('year')}"].nunique() <= 1:
+            if (
+                column != self.trend_column
+                and base[f"f{at + parts.index('year')}"].nunique() <= 1
+                and self._spans_a_day(base[f"f{at + parts.index('ordinal')}"])
+            ):
                 off.append(f"f{at + parts.index('ordinal')}")
             at += len(parts)
         self._no_trend = tuple(off)
