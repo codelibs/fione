@@ -1083,6 +1083,8 @@ def propose(
             leak_partial=check.partial,
             derived=check.derived,
             derived_cut=check.derived_cut,
+            paired=check.paired,
+            paired_cut=check.paired_cut,
         )
     # the whole target column (one column) decides the task, not a sample
     y = ingest.read_dataset(storage, dataset, [target])[target]
@@ -1419,6 +1421,18 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 f"depends on {names}. If the rows to predict will not have them, add them to "
                 "ignored_columns",
                 **params,
+            )
+        )
+    if profile.paired is not None:
+        first, second = clean_text(profile.paired.first), clean_text(profile.paired.second)
+        warnings.append(
+            _warning(
+                "leak_pair",
+                f"the target looks fixed by the columns '{first}' and '{second}' together (each "
+                "combination of their values has one target value). If the rows to predict will "
+                "not have them, add them to ignored_columns",
+                first=first,
+                second=second,
             )
         )
     if profile.leak_partial:

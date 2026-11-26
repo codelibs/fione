@@ -3059,6 +3059,41 @@ def test_a_target_that_may_be_computed_from_columns_is_warned_about_and_nothing_
     assert result["ignored_suggestions"] == []
 
 
+def _decisions_table(n=3000, seed=0):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame(
+        {
+            "decision": rng.integers(0, 2, n),
+            "decision_other": rng.integers(0, 2, n),
+            "rating": rng.integers(1, 6, n),
+            "noise": rng.normal(size=n),
+        }
+    )
+    df["match"] = df.decision & df.decision_other
+    return df
+
+
+def test_a_target_that_two_columns_fix_together_is_warned_about_and_nothing_is_ignored(env):
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "decisions", DatasetType.TRAIN, [_decisions_table()]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "match"})
+    warning = next(w for w in result["warnings"] if w["code"] == "leak_pair")
+    assert warning["params"] == {"first": "decision", "second": "decision_other"}
+    assert "'decision'" in warning["message"] and "ignored_columns" in warning["message"]
+    assert "leak_pair" in codes(result)  # translated in both languages
+    assert result["config"]["ignored_columns"] == [] and result["ignored_suggestions"] == []
+
+
+def test_no_pair_warning_for_a_target_that_the_columns_do_not_give(env):
+    frame = _decisions_table().assign(match=np.random.default_rng(1).integers(0, 2, 3000))
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "decisions_noise", DatasetType.TRAIN, [frame]
+    )
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "match"})
+    assert "leak_pair" not in codes(result)
+
+
 def test_no_derived_target_warning_for_a_target_that_the_columns_do_not_give(env):
     frame = _revenue_table().assign(
         revenue=lambda d: np.exp(np.random.default_rng(1).normal(3, 1, len(d)))

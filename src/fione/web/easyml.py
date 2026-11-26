@@ -284,11 +284,15 @@ def _leak_check(request: Request, dataset: Dataset, target: str):
             found.profile.leak_partial,
             found.profile.derived,
             found.profile.derived_cut,
+            found.profile.paired,
+            found.profile.paired_cut,
         )
         return check, found.task
 
     entry = request.app.state.ui_leaks.get(
-        (dataset.id, target), compute, keep=lambda e: not e[0].partial and not e[0].derived_cut
+        (dataset.id, target),
+        compute,
+        keep=lambda e: not (e[0].partial or e[0].derived_cut or e[0].paired_cut),
     )
     return (made[0] if made else None), entry
 
@@ -379,6 +383,11 @@ def _warnings(dataset: Dataset, found, task: str, inputs: set[str]) -> list[tupl
             params["second"] = derived.keys[1]
         code = "leak_derived" if len(derived.keys) == 1 else "leak_derived_pair"
         out.append(("warning", f"analysis.warn.{code}", params))
+    paired = found.profile.paired
+    if paired is not None and {paired.first, paired.second} & inputs:
+        out.append(
+            ("warning", "analysis.warn.leak_pair", {"first": paired.first, "second": paired.second})
+        )
     if found.profile.leak_partial:
         out.append(("info", "analysis.warn.leak_partial", {}))
     classes = class_count(found.y, task)

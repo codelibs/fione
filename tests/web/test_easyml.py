@@ -20,7 +20,7 @@ from api_helpers import ASSISTANT_OFF, add_user, connect, iris_csv, iris_frame, 
 from fione import i18n
 from fione.auth import service as auth
 from fione.auth.roles import Role
-from fione.data.profile import DerivedTarget
+from fione.data.profile import DerivedTarget, PairedTarget
 from fione.engine.artifact import save_model
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
@@ -728,6 +728,7 @@ def test_the_derived_target_note_goes_when_its_columns_are_unchecked():
             leak_suspects=[],
             leak_partial=False,
             derived=DerivedTarget("quantity", ("category", "tier"), 0.999),
+            paired=None,
         ),
     )
     dataset = types.SimpleNamespace(type=DatasetType.TRAIN, n_cols=5, n_rows=199)
@@ -740,6 +741,9 @@ def test_the_derived_target_note_goes_when_its_columns_are_unchecked():
     assert "analysis.warn.leak_derived_pair" not in codes({"noise"})
     found.profile.derived = DerivedTarget("quantity", ("category",), 0.999)
     assert "analysis.warn.leak_derived" in codes({"category"})
+    found.profile.paired = PairedTarget("decision", "decision_other", 1.0)
+    assert "analysis.warn.leak_pair" in codes({"decision", "noise"})  # one of them is checked
+    assert "analysis.warn.leak_pair" not in codes({"noise"})
 
 
 def test_the_pro_form_run_time_follows_the_size_of_the_data(owner, monkeypatch):
@@ -801,13 +805,16 @@ def test_an_id_in_the_order_of_the_target_stays_unchecked_with_both_notes(owner)
     assert not any("They stay checked" in text for text in alerts(page))  # it is not
 
 
-def spy_leak_check(monkeypatch, partial=False) -> list[str]:
-    """The targets ``leak_check`` runs for; with ``partial``, every check ran out of time."""
+def spy_leak_check(monkeypatch, partial=False, paired_cut=False) -> list[str]:
+    """The targets ``leak_check`` runs for; with ``partial``, every check ran out of time, with
+    ``paired_cut`` only the search for a pair of columns."""
     calls, original = [], builtin.leak_check
 
     def spy(df, columns, target, **kwargs):
         calls.append(target)
         check = original(df, columns, target, **kwargs)
+        if paired_cut:
+            return dataclasses.replace(check, paired_cut=True)
         return dataclasses.replace(check, partial=True) if partial else check
 
     monkeypatch.setattr(builtin, "leak_check", spy)
@@ -831,6 +838,39 @@ def test_the_leak_check_runs_once_per_dataset_and_target(owner, monkeypatch):
     r = client.post(base + "/train", data={"csrf_token": csrf, "target": "label"})
     assert r.status_code == 422
     assert calls == ["label", "x"]
+
+
+def _decisions_csv(n=600):
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(
+        {
+            "decision": rng.integers(0, 2, n),
+            "decision_other": rng.integers(0, 2, n),
+            "x": rng.normal(size=n),
+        }
+    )
+    frame["match"] = frame.decision & frame.decision_other
+    return frame.to_csv(index=False).encode()
+
+
+PAIR_NOTE = "The answer looks fixed by the columns “decision” and “decision_other” together"
+
+
+def test_the_pair_note_stays_on_the_cached_second_view(owner):
+    client, pid, csrf = owner
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, _decisions_csv()))
+    for _ in range(2):  # the second view reads the cached leak check
+        page = client.get(url, params={"target": "match"}).text
+        assert any(text.startswith(PAIR_NOTE) for text in alerts(page))
+
+
+def test_a_cut_search_for_a_pair_is_checked_again(owner, monkeypatch):
+    client, pid, csrf = owner
+    calls = spy_leak_check(monkeypatch, paired_cut=True)
+    url = location(upload(client, f"/projects/{pid}/upload", csrf, _decisions_csv()))
+    for _ in range(2):
+        assert client.get(url, params={"target": "match"}).status_code == 200
+    assert calls == ["match", "match"]  # not kept
 
 
 def test_a_partial_leak_check_is_noted_and_checked_again(owner, monkeypatch):
