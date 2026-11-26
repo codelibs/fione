@@ -534,6 +534,12 @@ order. When values repeat, it only warns and sets nothing. It also only warns ab
 dates (20 or more different dates over 30 days to 50 years, no missing value, in 300 rows or
 more, not a birth date) when it proposes no time column, since the date may order the rows in time. A time column turns the search for
 derived features off, so a run with the proposed column does not try them.
+When that column of dates sits next to a key of one or two columns (of 2 to 5,000 values, not a part of the
+calendar) such that each combination has one row per date on all but 1% of the rows, with 20 rows or
+more for each series on average, at least 5 series and series that cover at least half of the dates
+between them (a store by week, a shop by day; not random times of events), in a dataset of at most
+500,000 rows, the proposal also says the rows look like a panel of series and points at the lag and
+rolling modules (with lags at least as long as the time predicted ahead) and at the time order.
 When other inputs move with time too (a day counter, a year, a second date: a rank correlation of
 0.8 or more with the time column), the model does not read what only grows with the time column
 itself. A time column that is a plain number is then left out of the inputs, and a date time column

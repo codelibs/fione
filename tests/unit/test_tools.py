@@ -13,7 +13,7 @@ from fione import db, i18n
 from fione.auth import service as auth
 from fione.auth.roles import ProjectAccess, Role
 from fione.data import profile
-from fione.data.profile import profile_dataset
+from fione.data.profile import ColumnProfile, profile_dataset
 from fione.engine import explain
 from fione.engine.automl import AutoML
 from fione.engine.config import TrainConfig
@@ -2037,6 +2037,179 @@ def test_propose_checks_the_time_column_it_is_given(env):
     ):
         with pytest.raises(ToolError, match=text):
             _propose_dated_with_test(env, None, **bad)
+
+
+def _panel(stores=30, days=60, depts=None, seed=0, name="sales"):
+    """One row per date for each store (and each department of it): sales of a panel of series."""
+    rng = np.random.default_rng(seed)
+    dates = pd.Timestamp("2021-01-01") + pd.to_timedelta(np.arange(days), unit="D")
+    frame = pd.DataFrame(
+        {"store": np.repeat(np.arange(stores), days), "when": np.tile(dates, stores)}
+    )
+    if depts:
+        frame = pd.concat([frame.assign(dept=d) for d in range(depts)], ignore_index=True)
+    frame[name] = rng.gamma(2.0, 100.0, len(frame))
+    return frame.sample(frac=1, random_state=seed).reset_index(drop=True)
+
+
+def _panel_key(frame, target="sales", date="when"):
+    profile = profile_dataset(frame, target)
+    names = builtin.panel_key_columns(profile, target, date)
+    dates = pd.to_datetime(frame[date])
+    return builtin.panel_key(frame[names], dates) if names else None
+
+
+def test_a_key_of_one_or_two_columns_with_the_date_is_a_panel_of_series():
+    assert _panel_key(_panel()) == ("store",)
+    assert set(_panel_key(_panel(stores=12, depts=4))) == {
+        "store",
+        "dept",
+    }  # neither alone is unique
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: _panel(stores=4),  # four series: too few
+        lambda: _panel(days=15, stores=30).sample(frac=0.2, random_state=0),  # sparse: under half
+        lambda: _panel(stores=2, days=300),  # two series
+        lambda: _panel().assign(hour=lambda d: d.index % 24, store=1).drop(columns="store"),
+        lambda: _panel().assign(store=lambda d: d.index % 7),  # a date repeats within a key
+    ],
+)
+def test_other_tables_are_no_panel_of_series(make):
+    assert _panel_key(make()) is None
+
+
+def _daily_panel(stores, days):
+    dates = pd.Timestamp("2020-01-01") + pd.to_timedelta(np.arange(days), unit="D")
+    frame = pd.DataFrame(
+        {"store": np.repeat(np.arange(stores), days), "when": np.tile(dates, stores)}
+    )
+    frame["sales"] = np.random.default_rng(0).gamma(2.0, 100.0, len(frame))
+    return frame
+
+
+def test_a_single_daily_series_with_a_few_values_is_no_panel():
+    # a date on every row and 6 values: the series cover a sixth of the dates
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(
+        {"when": pd.Timestamp("2020-01-01") + pd.to_timedelta(np.arange(1000), unit="D")}
+    )
+    frame["k"] = rng.integers(0, 6, len(frame))
+    frame["sales"] = rng.gamma(2.0, 100.0, len(frame))
+    assert _panel_key(frame) is None
+
+
+@pytest.mark.parametrize(("duplicates", "found"), [(0.005, True), (0.05, False)])
+def test_a_panel_may_repeat_a_pair_of_key_and_date_on_under_one_percent_of_its_rows(
+    duplicates, found
+):
+    frame = _daily_panel(30, 60)
+    repeated = frame.sample(frac=duplicates, random_state=0)
+    assert (_panel_key(pd.concat([frame, repeated], ignore_index=True)) is not None) is found
+
+
+def test_a_series_needs_twenty_rows_on_average():
+    assert _panel_key(_daily_panel(40, 15)) is None  # full coverage, 15 rows each
+    assert _panel_key(_daily_panel(40, 20)) == ("store",)
+
+
+def test_a_column_that_is_the_year_of_the_dates_gives_no_series_whatever_its_name():
+    frame = _daily_panel(3, 730).rename(columns={"store": "group"})
+    frame["period"] = frame.when.dt.year  # 3 groups by 2 years: 6 "series" if the year counted
+    profile = profile_dataset(frame, "sales")
+    names = builtin.panel_key_columns(profile, "sales", "when")
+    assert "period" in names  # a candidate by name and size
+    assert builtin.panel_key(frame[names], frame.when) is None
+    # without the filter the year and the group make 6 series that cover half of the dates
+
+
+@pytest.mark.parametrize(
+    ("name", "calendar"),
+    [
+        ("hour", True),
+        ("hr", True),
+        ("pickupHour", True),
+        ("storeMonth", True),
+        ("order_month", True),
+        ("hour_of_day", True),
+        ("day_of_week", True),
+        ("week_no", True),
+        ("weekday", True),
+        ("monitor_id", False),
+        ("money_band", False),
+        ("download_site", False),
+        ("dowel", False),
+        ("hr_dept", False),
+        ("monday_sales", False),
+        ("store", False),
+    ],
+)
+def test_the_calendar_names_are_read_by_whole_words(name, calendar):
+    column = ColumnProfile(name, "numeric", 0.0, 24, None, None, None, None)
+    assert builtin._calendar_like(column) is calendar
+
+
+def test_a_part_of_the_calendar_is_no_series_key():
+    frame = _panel().assign(month=lambda d: d.when.dt.month, hr=lambda d: d.index % 24)
+    profile = profile_dataset(frame, "sales")
+    names = builtin.panel_key_columns(profile, "sales", "when")
+    assert "store" in names and "month" not in names and "hr" not in names
+
+
+def test_propose_names_the_series_of_a_panel_and_changes_nothing(env):
+    frame = _panel(stores=12, depts=4)
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "panel", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "sales"})
+        grouped = call(
+            env,
+            "propose_training_config",
+            {"dataset_id": ds.id, "target": "sales", "group_column": "store"},
+        )
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "series_key" in codes(result)  # translated in both languages
+    warning = next(w for w in result["warnings"] if w["code"] == "series_key")
+    assert warning["params"] == {"keys": "dept, store", "column": "when"}
+    assert result["config"]["time_column"] is None and "time_hint" in codes(result)
+    assert "series_key" not in codes(grouped)  # a group column was chosen: groups, not series
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "panel2", DatasetType.TRAIN, [frame]
+    )
+    try:
+        timed = call(
+            env,
+            "propose_training_config",
+            {"dataset_id": ds.id, "target": "sales", "time_column": "when"},
+        )
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "series_key" not in codes(timed)  # the user has set the time order already
+
+
+def test_propose_names_no_series_for_a_table_of_events(env):
+    rng = np.random.default_rng(0)
+    n = 2000
+    frame = pd.DataFrame(
+        {
+            "when": pd.Timestamp("2021-01-01")
+            + pd.to_timedelta(np.sort(rng.integers(0, 10**6, n)), unit="s"),
+            "source": rng.integers(0, 2, n),
+            "sales": rng.gamma(2.0, 100.0, n),
+        }
+    )
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "events", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "sales"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "series_key" not in codes(result)
 
 
 def test_propose_reads_day_first_dates_as_the_engine_does(env):
