@@ -3,7 +3,7 @@
    i18n key with its ``params``). It shows the facts of a Join proposal; its form carries what
    is shown, which the server checks again before the Join job starts. Only a person who can
    edit the project creates the dataset. #}
-<section class="card card-padded stack-tight" aria-label="{{ t('assistant.proposal.join_title') }}" data-join="{{ 'proposal' if join.config else 'message' }}">
+<section class="card card-padded stack-tight chat-proposal" aria-label="{{ t('assistant.proposal.join_title') }}" data-join="{{ 'proposal' if join.config else 'message' }}">
   {% if join.config %}
   <h3>{{ t('assistant.proposal.join_title') }}</h3>
   {% with c = join.config, base_name = join.base_name, other_name = join.other_name %}{% include "_join_facts.html" %}{% endwith %}
