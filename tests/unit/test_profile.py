@@ -149,6 +149,14 @@ def test_long_high_cardinality_strings_are_text():
     assert _kind(pd.Series(values)) == "text"
 
 
+def test_a_different_text_in_every_row_with_its_short_values_first_is_text_not_an_id():
+    rng = np.random.default_rng(7)
+    words = ["film", "story", "actor", "scene", "funny", "dull", "moving", "plot", "cast"]
+    short = [" ".join(rng.choice(words, 1 + i % 2)) + f" {i}" for i in range(1200)]
+    long = [" ".join(rng.choice(words, 9)) + f" {i}" for i in range(1800)]
+    assert _kind(pd.Series(short + long)) == "text"
+
+
 def test_a_prose_column_reports_its_mean_length_and_other_columns_do_not():
     text = [f"this is a fairly long free text comment number {i % 400}" for i in range(500)]
     unique = [f"every comment here is different, and this is number {i}" for i in range(500)]
