@@ -152,3 +152,73 @@ def test_its_contributions_add_up_to_the_prediction_per_text_column():
     assert explain.pd_rows(model, 100, 5) >= 1 and explain.contribution_rows(model, 100) >= 1
     curve = explain.partial_dependence(model, X, "n", grid_size=3, max_rows=6)
     assert curve is not None
+
+
+def _binary_texts(n=200, seed=1):
+    frame = _texts(n, seed)
+    frame["y"] = (frame["y"] == "a").astype(int)
+    return frame
+
+
+def test_a_binary_task_fits_predicts_and_explains():
+    from fione.engine import explain
+
+    frame = _binary_texts()
+    model = AutoML(_config(), families=["TextEmbedding"]).fit(frame)
+    X = frame.drop(columns="y")
+    assert model.predict(X.iloc[:0]).shape[0] == 0 and len(model.predict(X)) == len(X)
+    out = explain.contributions(model, X.iloc[:10])
+    assert np.allclose(
+        out.prediction[:, 0], np.asarray(model.predict_proba(X.iloc[:10]))[:, 1], atol=1e-6
+    )
+
+
+def test_a_regression_task_fits_predicts_and_explains():
+    from fione.engine import explain
+
+    frame = _texts(200, 2)
+    frame["y"] = frame["text"].str.len().astype(float) + (frame["y"] == "a") * 5.0
+    model = AutoML(_config(), families=["TextEmbedding"]).fit(frame)
+    X = frame.drop(columns="y")
+    assert model.predict(X.iloc[:0]).shape[0] == 0 and len(model.predict(X)) == len(X)
+    out = explain.contributions(model, X.iloc[:10])
+    assert np.allclose(out.prediction[:, 0], model.predict(X.iloc[:10]), atol=1e-4)
+
+
+def test_extra_rows_are_embedded_before_the_search_and_a_broken_backend_stops_there(monkeypatch):
+    own, more = _texts(120, 0), _texts(100, 9)
+    events = []
+    AutoML(_config(), events.append, families=["TextEmbedding"]).fit(own, extra=more)
+    first = next(i for i, e in enumerate(events) if e.type == "embedding")
+    assert (
+        first < next(i for i, e in enumerate(events) if e.type == "trial")
+        if any(e.type == "trial" for e in events)
+        else True
+    )
+    assert sum(StyleBackend.calls) <= 220  # every text once, extra rows included
+    monkeypatch.setitem(embedding.BACKENDS, "style", "no_such_module:Nothing")
+    embedding.forget()
+    with pytest.raises(ConfigError, match="cannot run here"):
+        AutoML(_config(), families=["TextEmbedding"]).fit(_texts(80, 4), extra=_texts(60, 8))
+
+
+def test_vectors_that_are_not_finite_never_reach_the_cache(monkeypatch):
+    class Overflow(StyleBackend):
+        def embed(self, texts):
+            return np.full((len(texts), DIM), 1e9, dtype=np.float32)  # float16 holds 65504
+
+    monkeypatch.setitem(embedding.BACKENDS, "style", Overflow)
+    embedding.forget()
+    with pytest.raises(embedding.EmbeddingUnavailable, match="not finite"):
+        embedding.embed_texts(_config().embedding, ["alpha beta"])
+    assert embedding.missing(_config().embedding, ["alpha beta"]) == 1
+
+
+def test_a_stop_is_heard_while_the_vectors_are_made(monkeypatch):
+    from fione.engine.config import NoModelError
+
+    monkeypatch.setattr(embedding, "CHUNK", 50)
+    stop = lambda: len(StyleBackend.calls) >= 1  # noqa: E731
+    with pytest.raises(NoModelError, match="cancelled"):
+        AutoML(_config(), should_stop=stop, families=["TextEmbedding"]).fit(_texts())
+    assert sum(StyleBackend.calls) <= 100  # not all 240 texts

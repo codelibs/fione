@@ -226,6 +226,10 @@ def embed_texts(
             part = np.asarray(backend.embed(todo[start : start + CHUNK]), dtype=np.float32)
             if part.ndim != 2 or len(part) != len(todo[start : start + CHUNK]):
                 raise EmbeddingUnavailable("the backend returned the wrong number of vectors")
+            with np.errstate(over="ignore"):
+                narrow = part.astype(np.float16)
+            if not np.isfinite(narrow).all():  # the cache is permanent
+                raise EmbeddingUnavailable("the backend returned vectors that are not finite")
             cache.add(todo_keys[start : start + CHUNK], part)
             if progress is not None:
                 progress(min(start + CHUNK, len(todo)), len(todo))

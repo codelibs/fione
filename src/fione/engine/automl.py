@@ -1886,11 +1886,13 @@ class AutoML:
             kind="embedding_rows",
             rows=todo,
         )
-        embedding.embed_texts(
-            spec,
-            texts.tolist(),
-            lambda done, total: self._event("embedding", done=done, total=total),
-        )
+        texts = texts.tolist()
+        for start in range(0, len(texts), embedding.CHUNK):  # a stop is heard between chunks
+            if self.should_stop():
+                return
+            embedding.embed_texts(spec, texts[start : start + embedding.CHUNK])
+            done = min(start + embedding.CHUNK, len(texts))
+            self._event("embedding", done=done, total=len(texts))
 
     def _late_families(self, prep: Prep, X, y, task: Task) -> list[str]:
         """The late families this data suits, whose models would not be too big, and whose view
