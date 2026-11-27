@@ -17,6 +17,7 @@ from fione.engine.features import (
     DateParts,
     GroupMeans,
     IdParts,
+    NotationShares,
     NumberPairs,
     RowCounts,
     RowStatistics,
@@ -149,6 +150,44 @@ def test_text_topics_survive_pickling_and_the_views():
 
     X, _ = sentences()
     prep = Prep().fit(X, [TextTopics("text")])
+    clone = pickle.loads(pickle.dumps(prep))  # noqa: S301 - a frame this test built
+    for view in ("tree", "dense", "catboost", "linear"):
+        pd.testing.assert_frame_equal(getattr(prep, view)(X), getattr(clone, view)(X))
+
+
+def sequences(n=300, seed=0):
+    """DNA-like strings of varying length, all different: a notation, no words."""
+    rng = np.random.default_rng(seed)
+    return pd.Series(["".join(rng.choice(list("AACGTTN"), rng.integers(20, 90))) for _ in range(n)])
+
+
+def test_notation_shares_sum_to_one_and_an_unseen_character_is_other(monkeypatch):
+    monkeypatch.setattr(features, "NOTATION_CHARS", 3)  # A, T and one of C, G: the rest is other
+    X = pd.DataFrame({"seq": sequences()})
+    group = NotationShares("seq").fit(X)
+    out = group.transform(X)
+    shares = out.drop(columns="seq__length")
+    assert len(shares.columns) == 4 and "seq__share_other" in shares
+    assert np.allclose(shares.sum(axis=1), 1.0)
+    assert (out["seq__length"] == X["seq"].str.len()).all()
+    new = group.transform(pd.DataFrame({"seq": ["AAZZ", "", None]}))
+    assert new.loc[0, "seq__share_A"] == 0.5 and new.loc[0, "seq__share_other"] == 0.5
+    assert new.iloc[1:].drop(columns="seq__length").isna().all().all()
+
+
+def test_character_shares_are_offered_for_a_notation_only():
+    X, _ = sentences()
+    X["seq"] = sequences()
+    labels = [g.label for g in features.candidates(Prep().fit(X), X, [])]
+    assert "character shares of seq" in labels and "character shares of text" not in labels
+    numbers = pd.DataFrame({"x": np.arange(300.0), "c": ["a", "b", "c"] * 100})
+    labels = [g.label for g in features.candidates(Prep().fit(numbers), numbers, [])]
+    assert not any(label.startswith("character shares") for label in labels)
+
+
+def test_notation_shares_survive_pickling_and_the_views():
+    X = pd.DataFrame({"seq": sequences(), "x": np.arange(300.0)})
+    prep = Prep().fit(X, [NotationShares("seq")])
     clone = pickle.loads(pickle.dumps(prep))  # noqa: S301 - a frame this test built
     for view in ("tree", "dense", "catboost", "linear"):
         pd.testing.assert_frame_equal(getattr(prep, view)(X), getattr(clone, view)(X))
