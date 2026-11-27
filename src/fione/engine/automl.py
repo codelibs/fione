@@ -149,8 +149,10 @@ QUANTILE_FAMILIES = tuple(f for f in FAMILY_ORDER if FAMILIES[f].quantile_object
 # when the data suits it (``FamilySpec.applies``) and a model of it would not be too big.
 # Searched only when the settings ask for them (as a base family, in the time its weight gives it),
 # so that a fit that does not ask is what it was before.
-OPT_IN_ORDER = ("TextEmbedding",)
-OPT_IN_WEIGHTS = {"TextEmbedding": 0.2}  # like TextLinear: it matters most where there is prose
+OPT_IN_ORDER = ("TextEmbedding", "TextEmbedding2", "TextEmbedding3")
+# like TextLinear, the first matters most where there is prose; the others read the same texts
+# with other models, and a trial of each is what the blend needs
+OPT_IN_WEIGHTS = {"TextEmbedding": 0.2, "TextEmbedding2": 0.1, "TextEmbedding3": 0.1}
 # The L1 variants of the boosting families are late candidates for a regression ranked by MAE,
 # MEDAE or SMAPE (``MEDIAN_METRICS``) with no quantile: the squared error the others learn is not
 # the loss they are ranked by, and on a heavy-tailed target the median predicts better.
@@ -401,10 +403,15 @@ class AutoML:
                     f"{', '.join(other)} cannot learn a quantile; choose from {QUANTILE_FAMILIES}"
                 )
             families = list(families or QUANTILE_FAMILIES)
-        opt_in = OPT_IN_ORDER if config.embedding_backend is not None else ()
+        opt_in = [f for f in OPT_IN_ORDER if config.embedding_for(f) is not None]
         self.families = [f for f in (*FAMILY_ORDER, *opt_in) if families is None or f in families]
-        if "TextEmbedding" in (families or ()) and config.embedding_backend is None:
-            raise ConfigError("TextEmbedding needs an embedding_backend")
+        for name in OPT_IN_ORDER:
+            if name in (families or ()) and config.embedding_for(name) is None:
+                raise ConfigError(
+                    "TextEmbedding needs an embedding_backend"
+                    if name == "TextEmbedding"
+                    else f"{name} needs a model in embedding_extra"
+                )
         self.late = [
             f for f in LATE_ORDER if f not in MEDIAN_ORDER and (families is None or f in families)
         ]
@@ -1486,8 +1493,9 @@ class AutoML:
         families = [
             f for f in families if f not in ("TextLinear", *OPT_IN_ORDER) or prep.prose
         ] or (families)
-        if "TextEmbedding" in families and not prep.prose:
-            raise ConfigError("TextEmbedding needs a column of text, and the data has none")
+        reading = [f for f in families if f in OPT_IN_ORDER]
+        if reading and not prep.prose:
+            raise ConfigError(f"{reading[0]} needs a column of text, and the data has none")
         # An explicit list of late families only is run as it is, like TextLinear above.
         late = self._late_families(prep, X, y, task) if families else self.late
         # The L1 variants run when asked for, or for a regression ranked by an absolute error.
@@ -1500,8 +1508,8 @@ class AutoML:
         if median and (self.explicit or sort_metric in MEDIAN_METRICS):
             late = [*late, *self.median]
         families = [*families, *late]
-        if "TextEmbedding" in families:
-            self._embed_rows(prep, X)
+        if reading:
+            self._embed_rows(prep, X, reading)
         if prep.reads_only_prose and not self.explicit:
             families = self._text_families_only(families)
 
@@ -1871,28 +1879,29 @@ class AutoML:
             families=left_out,
         )
 
-    def _embed_rows(self, prep: Prep, X: pd.DataFrame) -> None:
-        """Fill the cache with the vectors of every prose text, once, before the search: the
-        trials then only read it. A backend that cannot run stops the training here."""
-        spec = self.config.embedding
+    def _embed_rows(self, prep: Prep, X: pd.DataFrame, families: list[str]) -> None:
+        """Fill the cache with the vectors of every prose text, for each model the families read,
+        once, before the search: the trials then only read it. A backend that cannot run stops
+        the training here."""
         view = prep.text_prose(X)
-        texts = pd.concat([view[c] for c in view.columns])
-        todo = embedding.missing(spec, texts.tolist())
-        if not todo:
-            return
-        self._notice(
-            f"embedding {todo:,} texts with {spec.model} (layer {spec.layer:g}): the vectors are "
-            "computed once and kept in the cache",
-            kind="embedding_rows",
-            rows=todo,
-        )
-        texts = texts.tolist()
-        for start in range(0, len(texts), embedding.CHUNK):  # a stop is heard between chunks
-            if self.should_stop():
-                return
-            embedding.embed_texts(spec, texts[start : start + embedding.CHUNK])
-            done = min(start + embedding.CHUNK, len(texts))
-            self._event("embedding", done=done, total=len(texts))
+        texts = pd.concat([view[c] for c in view.columns]).tolist()
+        for name in families:
+            spec = self.config.embedding_for(name)
+            todo = embedding.missing(spec, texts)
+            if not todo:
+                continue
+            self._notice(
+                f"embedding {todo:,} texts with {spec.model} (layer {spec.layer:g}): the vectors "
+                "are computed once and kept in the cache",
+                kind="embedding_rows",
+                rows=todo,
+            )
+            for start in range(0, len(texts), embedding.CHUNK):  # a stop is heard between chunks
+                if self.should_stop():
+                    return
+                embedding.embed_texts(spec, texts[start : start + embedding.CHUNK])
+                done = min(start + embedding.CHUNK, len(texts))
+                self._event("embedding", done=done, total=len(texts), model=spec.model)
 
     def _late_families(self, prep: Prep, X, y, task: Task) -> list[str]:
         """The late families this data suits, whose models would not be too big, and whose view
@@ -1994,7 +2003,7 @@ class AutoML:
                     repeats=repeats,
                     first_deadline=None if late else own.child(allowed),
                     quantile=c.quantile,
-                    embedding=c.embedding,
+                    embedding=c.embedding_for(name),
                 )
             except NoModelError as e:
                 if late:

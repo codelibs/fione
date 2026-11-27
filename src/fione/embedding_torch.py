@@ -5,6 +5,7 @@ is built, so Fione runs without them everywhere the vectors are only read from t
 The model is read from the directory in ``FIONE_EMBEDDING_MODEL_DIR`` (a Hugging Face model
 directory); ``EmbeddingSpec.model`` is only its label. The layer is ``round(layer * depth)``."""
 
+import copy
 import os
 from collections.abc import Sequence
 
@@ -15,14 +16,22 @@ from fione.engine.embedding import MODEL_ENV, EmbeddingSpec, EmbeddingUnavailabl
 BATCH = 16
 
 
+def model_directory(spec: EmbeddingSpec) -> str:
+    """``FIONE_EMBEDDING_MODEL_DIR`` itself, or its subdirectory named like the model's label when
+    that holds a model (so that several models can sit side by side)."""
+    base = os.environ.get(MODEL_ENV)
+    if not base:
+        raise EmbeddingUnavailable(f"set {MODEL_ENV} to the directory of the model")
+    sub = os.path.join(base, spec.model)
+    return sub if os.path.isfile(os.path.join(sub, "config.json")) else base
+
+
 class TorchLMBackend:
     def __init__(self, spec: EmbeddingSpec):
         import torch
         from transformers import AutoModel, AutoTokenizer
 
-        directory = os.environ.get(MODEL_ENV)
-        if not directory:
-            raise EmbeddingUnavailable(f"set {MODEL_ENV} to the directory of the model")
+        directory = model_directory(spec)
         self.spec, self._torch = spec, torch
         self.device = (
             "cuda"
@@ -37,8 +46,18 @@ class TorchLMBackend:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = self._load(AutoModel, directory, dtype)
+        self._set_layer(spec)
+
+    def _set_layer(self, spec: EmbeddingSpec) -> None:
         depth = self.model.config.num_hidden_layers
+        self.spec = spec
         self.layer = max(1, min(depth, round(spec.layer * depth)))
+
+    def view(self, spec: EmbeddingSpec) -> "TorchLMBackend":
+        """The same model read at another layer of ``spec`` (nothing is loaded again)."""
+        other = copy.copy(self)
+        other._set_layer(spec)
+        return other
 
     def _load(self, auto_model, directory: str, dtype):
         """The model on the GPU, or spread over several (a model larger than one of them); on
@@ -51,6 +70,15 @@ class TorchLMBackend:
             except (ImportError, ValueError):
                 pass
         return auto_model.from_pretrained(directory, dtype=dtype).to(self.device).eval()
+
+    def close(self) -> None:
+        """Free the model's memory (on the GPU too)."""
+        import gc
+
+        self.model = None
+        gc.collect()
+        if self.device != "cpu" and hasattr(self._torch, "cuda"):
+            self._torch.cuda.empty_cache()
 
     def embed(self, texts: Sequence[str]) -> np.ndarray:
         torch = self._torch

@@ -132,3 +132,45 @@ def test_the_settings_are_checked():
     ):
         with pytest.raises(ConfigError):
             TrainConfig(target="y", **bad).validate()
+
+
+def test_only_one_backend_stays_in_memory_and_the_one_let_go_is_closed():
+    closed = []
+
+    class Closing(FakeBackend):
+        def close(self):
+            closed.append(self.spec.model)
+
+    embedding.BACKENDS["fake"] = Closing
+    first, second = EmbeddingSpec("fake", "one", 0.5, 64), EmbeddingSpec("fake", "two", 0.5, 64)
+    embed_texts(first, ["alpha beta"])
+    embed_texts(first, ["gamma delta"])  # the same backend again: nothing is closed
+    assert closed == []
+    embed_texts(second, ["alpha beta"])
+    assert closed == ["one"]
+
+
+def test_one_loaded_model_serves_every_layer_asked_of_it():
+    built, closed = [], []
+
+    class Shared(FakeBackend):
+        def __init__(self, spec):
+            super().__init__(spec)
+            built.append(spec.model)
+
+        def view(self, spec):
+            other = FakeBackend(spec)
+            other.view = self.view
+            other.close = lambda: closed.append(spec.layer)
+            return other
+
+        def close(self):
+            closed.append(self.spec.layer)
+
+    embedding.BACKENDS["fake"] = Shared
+    low, high = EmbeddingSpec("fake", "big", 0.5, 64), EmbeddingSpec("fake", "big", 0.9, 64)
+    embed_texts(low, ["alpha beta"])
+    embed_texts(high, ["alpha beta"])
+    assert built == ["big"]  # the second layer reuses the loaded model
+    embed_texts(EmbeddingSpec("fake", "small", 0.5, 64), ["alpha beta"])
+    assert built == ["big", "small"] and sorted(closed) == [0.5, 0.9]

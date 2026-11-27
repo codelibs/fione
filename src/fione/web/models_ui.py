@@ -348,6 +348,8 @@ def _config(record: ModelRecord) -> list[tuple[str, tuple[str, str | None]]]:
             continue
         if name.startswith("embedding_") and not config.get("embedding_backend"):
             continue  # the settings of a backend that is not used
+        if name == "embedding_extra" and not config.get(name):
+            continue
         value, key = config[name], None
         if isinstance(value, bool):
             key = "common.yes" if value else "common.no"
@@ -360,6 +362,8 @@ def _config(record: ModelRecord) -> list[tuple[str, tuple[str, str | None]]]:
         elif name in ("stopping_metric", "sort_metric") and isinstance(value, str):
             known = value.lower() == "auto" or value.lower() in engine_metrics.REGISTRY
             key = f"train.metric.{value.lower()}" if known else None
+        if name == "embedding_extra":
+            value = ", ".join(f"{v['model']} ({v.get('layer', 'default')})" for v in value)
         if isinstance(value, list):
             value = ", ".join(str(v) for v in value) or "—"
         out.append((name, ("—" if value is None else str(value), key)))

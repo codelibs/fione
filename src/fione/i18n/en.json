@@ -597,6 +597,7 @@
   "train.f.embedding_model": "Language model of text vectors",
   "train.f.embedding_layer": "Layer of the language model (share of its depth)",
   "train.f.embedding_max_length": "Longest text read for text vectors (tokens)",
+  "train.f.embedding_extra": "Other language models of text vectors",
   "train.f.target_transform": "Learning the target",
   "train.f.cv_group_column": "Keep related rows together by",
   "train.f.feature_engineering": "Add derived features",

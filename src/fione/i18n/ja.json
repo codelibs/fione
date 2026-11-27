@@ -597,6 +597,7 @@
   "train.f.embedding_model": "文章のベクトルを作る言語モデル",
   "train.f.embedding_layer": "使う層(モデルの深さに対する割合)",
   "train.f.embedding_max_length": "ベクトルにする文章の最大長(トークン)",
+  "train.f.embedding_extra": "ベクトルを作るほかの言語モデル",
   "train.f.target_transform": "予測する値の学習のしかた",
   "train.f.cv_group_column": "同じ値の行をまとめる列",
   "train.f.feature_engineering": "派生特徴量を追加",

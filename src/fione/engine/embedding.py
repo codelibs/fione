@@ -12,7 +12,8 @@ fingerprint of what it read, never a path:
 
 * ``FIONE_EMBEDDING_CACHE_DIR``: the cache. Unset, vectors are kept in memory for the process.
   ``extract`` fills the cache where a GPU is, and a fit or a prediction elsewhere reads it.
-* ``FIONE_EMBEDDING_MODEL_DIR``: the model's directory, read by the torch backend.
+* ``FIONE_EMBEDDING_MODEL_DIR``: the model's directory, read by the torch backend; with several
+  models, a directory that holds one subdirectory per model, named by the model's label.
 """
 
 from __future__ import annotations
@@ -80,12 +81,23 @@ BACKENDS: dict[str, Callable[[EmbeddingSpec], EmbeddingBackend] | str] = {
     "torch_lm": "fione.embedding_torch:TorchLMBackend",
 }
 _live: dict[str, EmbeddingBackend] = {}  # a backend is built once per process and spec
+_live_specs: dict[str, tuple[EmbeddingSpec, EmbeddingBackend]] = {}
 
 
 def make_backend(spec: EmbeddingSpec) -> EmbeddingBackend:
     key = spec.fingerprint
     if key in _live:
         return _live[key]
+    for live_spec, backend in _live_specs.values():
+        if (live_spec.backend, live_spec.model, live_spec.max_length) == (
+            spec.backend,
+            spec.model,
+            spec.max_length,
+        ) and hasattr(backend, "view"):  # the same model, read at another layer
+            _live[key] = backend.view(spec)
+            _live_specs[key] = (spec, _live[key])
+            return _live[key]
+    release()  # one model in memory at a time: two large models rarely fit together
     factory = BACKENDS.get(spec.backend)
     if factory is None:
         raise EmbeddingUnavailable(f"unknown embedding backend {spec.backend!r}")
@@ -94,6 +106,7 @@ def make_backend(spec: EmbeddingSpec) -> EmbeddingBackend:
             module, _, attribute = factory.partition(":")
             factory = getattr(importlib.import_module(module), attribute)
         _live[key] = factory(spec)
+        _live_specs[key] = (spec, _live[key])
     except EmbeddingUnavailable:
         raise
     except Exception as e:  # a missing library or model: say what it was, not a traceback
@@ -197,9 +210,17 @@ def open_cache(spec: EmbeddingSpec) -> EmbeddingCache:
     return _caches[key]
 
 
+def release() -> None:
+    """Let go of the backends in memory (each frees what it holds, if it can)."""
+    for backend in _live.values():
+        getattr(backend, "close", lambda: None)()
+    _live.clear()
+    _live_specs.clear()
+
+
 def forget() -> None:
     """Drop the backends and the caches held in memory (tests; a long process that is done)."""
-    _live.clear()
+    release()
     _caches.clear()
 
 

@@ -1314,6 +1314,19 @@ class TextEmbedding(FamilySpec):
         return by_feature(weight, [c for c in model.columns for _ in range(width)])
 
 
+class TextEmbedding2(TextEmbedding):
+    """``TextEmbedding`` on the vectors of the second model of ``embedding_extra``: a different
+    model reads the texts differently, and the ensemble blends what each reads."""
+
+    name = "TextEmbedding2"
+
+
+class TextEmbedding3(TextEmbedding):
+    """``TextEmbedding`` on the vectors of the third model (see ``TextEmbedding2``)."""
+
+    name = "TextEmbedding3"
+
+
 class _MedianVariant:
     """A boosting family that learns the median (an L1 objective) instead of the mean. It is a
     late candidate for a regression ranked by MAE or MEDAE, and it runs after the family it
@@ -1356,6 +1369,8 @@ FAMILIES: dict[str, type[FamilySpec]] = {
         TextLinearChar,
         TextLinearPlain,
         TextEmbedding,
+        TextEmbedding2,
+        TextEmbedding3,
         LinearWide,
         LightGBML1,
         XGBoostL1,

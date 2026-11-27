@@ -460,6 +460,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "embedding_model": "",  # not on the form
         "embedding_layer": 0.75,  # not on the form
         "embedding_max_length": 384,  # not on the form
+        "embedding_extra": [],  # not on the form
         "cost_miss": None,  # not on the form
         "cost_false_alarm": None,  # not on the form
     }

@@ -222,3 +222,59 @@ def test_a_stop_is_heard_while_the_vectors_are_made(monkeypatch):
     with pytest.raises(NoModelError, match="cancelled"):
         AutoML(_config(), should_stop=stop, families=["TextEmbedding"]).fit(_texts())
     assert sum(StyleBackend.calls) <= 100  # not all 240 texts
+
+
+def _two_models(**more):
+    return _config(embedding_extra=[{"model": "toy2", "layer": 0.5}], **more)
+
+
+def test_each_model_of_embedding_extra_reads_the_texts_in_a_family_of_its_own():
+    config = _two_models()
+    first, second = config.embedding_for("TextEmbedding"), config.embedding_for("TextEmbedding2")
+    assert (first.model, second.model, second.layer) == ("toy", "toy2", 0.5)
+    assert (
+        config.embedding_for("TextEmbedding3") is None and config.embedding_for("LightGBM") is None
+    )
+    events = []
+    model = AutoML(config, events.append, families=["TextEmbedding", "TextEmbedding2"]).fit(
+        _texts()
+    )
+    assert {"TextEmbedding", "TextEmbedding2"} <= set(model.trials["family"])
+    assert sum(StyleBackend.calls) <= 480  # each text once per model, never per trial
+    assert len(model.predict(_texts(25, seed=3).drop(columns="y"))) == 25
+    from fione.engine import explain
+
+    X = _texts(8, seed=4).drop(columns="y")
+    out = explain.contributions(model, X)
+    assert np.allclose(out.prediction, model.predict_proba(X), atol=1e-6)
+
+
+def test_the_settings_of_several_models_are_checked():
+    ok = _two_models()
+    assert ok.validate() is ok
+    for bad in (
+        {"embedding_extra": "toy2"},
+        {"embedding_extra": [{"model": "a"}, {"model": "b"}, {"model": "c"}]},
+        {"embedding_extra": [{"name": "toy2"}]},
+        {"embedding_extra": [{"model": " "}]},
+        {"embedding_extra": [{"model": "toy2", "layer": 2}]},
+    ):
+        with pytest.raises(ConfigError):
+            _config(**bad).validate()
+    with pytest.raises(ConfigError, match="needs an embedding_backend"):
+        TrainConfig(target="y", embedding_extra=[{"model": "toy2"}]).validate()
+    with pytest.raises(ConfigError, match="embedding_extra"):
+        AutoML(_config(), families=["TextEmbedding2"])
+
+
+def test_the_torch_backend_finds_each_model_in_a_directory_of_models(monkeypatch, tmp_path):
+    from fione import embedding_torch
+    from fione.engine.embedding import MODEL_ENV, EmbeddingSpec
+
+    (tmp_path / "small").mkdir()
+    (tmp_path / "small" / "config.json").write_text("{}")
+    monkeypatch.setenv(MODEL_ENV, str(tmp_path))
+    assert embedding_torch.model_directory(EmbeddingSpec("torch_lm", "small")) == str(
+        tmp_path / "small"
+    )
+    assert embedding_torch.model_directory(EmbeddingSpec("torch_lm", "big")) == str(tmp_path)

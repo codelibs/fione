@@ -103,6 +103,9 @@ def _check_int(name: str, value, minimum: int, optional: bool = False) -> None:
         )
 
 
+MAX_EXTRA_EMBEDDINGS = 2  # (TextEmbedding2 and TextEmbedding3)
+
+
 @dataclass
 class TrainConfig:
     target: str
@@ -159,6 +162,33 @@ class TrainConfig:
     embedding_model: str = ""
     embedding_layer: float = 0.75
     embedding_max_length: int = 384
+    # More models whose vectors are read the same way (up to ``MAX_EXTRA_EMBEDDINGS``), each
+    # ``{"model": label, "layer": fraction}`` (the layer defaults to ``embedding_layer``). Each
+    # model's vectors get a family of their own (TextEmbedding2, TextEmbedding3) whose
+    # predictions the ensemble blends with the others.
+    embedding_extra: list = field(default_factory=list)
+
+    def embedding_for(self, family: str):
+        """The ``EmbeddingSpec`` the family ``TextEmbedding`` (or ``TextEmbedding2``, ...) reads,
+        or None when the settings do not name one."""
+        first = self.embedding
+        number = family.removeprefix("TextEmbedding")
+        if first is None or not family.startswith("TextEmbedding") or number not in ("", "2", "3"):
+            return None
+        at = int(number or 1) - 1
+        if at == 0:
+            return first
+        if at - 1 >= len(self.embedding_extra):
+            return None
+        from fione.engine.embedding import EmbeddingSpec
+
+        extra = self.embedding_extra[at - 1]
+        return EmbeddingSpec(
+            self.embedding_backend,
+            extra["model"],
+            extra.get("layer", self.embedding_layer),
+            self.embedding_max_length,
+        )
 
     @property
     def embedding(self):
@@ -267,6 +297,17 @@ class TrainConfig:
             raise ConfigError(f"extra_weight must be a number above 0, got {weight!r}")
         if self.embedding_backend is not None:
             self.embedding.validate()
+        extra = self.embedding_extra
+        if not isinstance(extra, list) or len(extra) > MAX_EXTRA_EMBEDDINGS:
+            raise ConfigError(
+                f"embedding_extra must be a list of at most {MAX_EXTRA_EMBEDDINGS} models"
+            )
+        if extra and self.embedding_backend is None:
+            raise ConfigError("embedding_extra needs an embedding_backend")
+        for at, item in enumerate(extra):
+            if not isinstance(item, dict) or set(item) - {"model", "layer"}:
+                raise ConfigError('each embedding_extra entry is {"model": label, "layer": f}')
+            self.embedding_for(f"TextEmbedding{at + 2}").validate()
         event = self.event_column
         if event is None:
             if "concordance" in (self.stopping_metric.lower(), self.sort_metric.lower()):
