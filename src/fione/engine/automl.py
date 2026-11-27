@@ -1486,6 +1486,8 @@ class AutoML:
         families = [
             f for f in families if f not in ("TextLinear", *OPT_IN_ORDER) or prep.prose
         ] or (families)
+        if "TextEmbedding" in families and not prep.prose:
+            raise ConfigError("TextEmbedding needs a column of text, and the data has none")
         # An explicit list of late families only is run as it is, like TextLinear above.
         late = self._late_families(prep, X, y, task) if families else self.late
         # The L1 variants run when asked for, or for a regression ranked by an absolute error.

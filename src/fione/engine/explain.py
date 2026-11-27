@@ -36,6 +36,7 @@ from fione.engine.families import (
     Linear,
     LinearBoost,
     OffsetBoost,
+    TextEmbedding,
     TextLinear,
     TextModel,
     XGBoost,
@@ -333,6 +334,22 @@ def _text_linear_contributions(model, view: pd.DataFrame) -> tuple[np.ndarray, n
     return out, bias
 
 
+def _text_embedding_contributions(model, view: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Contributions of the vectors, summed per text column: the standardised vector's mean is
+    the baseline, so a dimension adds ``coef * standardised value``, and the dimensions of a
+    column add up to one value for it."""
+    coef = np.atleast_2d(model.model.coef_)  # (k, columns * width)
+    standardised = model.matrix(view)
+    owner = owners(model.columns)
+    width = coef.shape[1] // len(model.columns)
+    out = np.zeros((len(view), coef.shape[0], owner.max() + 1))
+    for i in range(len(model.columns)):
+        block = slice(i * width, (i + 1) * width)
+        out[:, :, owner[i]] += standardised[:, block] @ coef[:, block].T
+    bias = np.tile(np.atleast_1d(model.model.intercept_), (len(view), 1))
+    return out, bias
+
+
 def native_contributions(
     spec: FamilySpec, model, view: pd.DataFrame
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -365,6 +382,8 @@ def native_contributions(
         return _linear_view_contributions(spec, model, view)
     elif isinstance(spec, TextLinear):
         return _text_linear_contributions(model, view)
+    elif isinstance(spec, TextEmbedding):
+        return _text_embedding_contributions(model, view)
     elif isinstance(spec, CatBoost):
         categorical = [i for i, dtype in enumerate(view.dtypes) if dtype is np.dtype(object)]
         raw = model.get_feature_importance(

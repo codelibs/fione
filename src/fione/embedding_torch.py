@@ -47,7 +47,7 @@ class TorchLMBackend:
         for start in range(0, len(texts), BATCH):
             at = order[start : start + BATCH]
             batch = self.tokenizer(
-                [texts[i] for i in at],
+                [texts[i] or " " for i in at],  # a text of no tokens would be a batch of none
                 return_tensors="pt",
                 padding=True,
                 truncation=True,
@@ -56,7 +56,7 @@ class TorchLMBackend:
             with torch.no_grad():
                 states = self.model(**batch, output_hidden_states=True).hidden_states[self.layer]
             mask = batch["attention_mask"].unsqueeze(-1).to(states.dtype)
-            mean = (states * mask).sum(1) / mask.sum(1)
+            mean = (states * mask).sum(1) / mask.sum(1).clamp(min=1)
             if out is None:
                 out = np.zeros((len(texts), mean.shape[1]), dtype=np.float32)
             out[at] = mean.float().cpu().numpy()

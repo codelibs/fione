@@ -111,3 +111,44 @@ def test_the_prose_view_holds_only_the_texts():
     view = prep.text_prose(X)
     assert view.shape[1] == 1 and view.columns[0].endswith("_t")
     assert text_keys(view.iloc[:, 0].tolist()).shape == (len(X),)
+
+
+def test_predicting_no_rows_gives_nothing_even_in_a_fresh_process():
+    model = AutoML(_config(), families=["TextEmbedding"]).fit(_texts())
+    embedding.forget()
+    empty = _texts().drop(columns="y").iloc[:0]
+    assert len(model.predict(empty)) == 0
+    assert model.predict_proba(empty).shape[0] == 0
+
+
+def test_an_empty_text_has_a_vector_like_any_other():
+    model = AutoML(_config(), families=["TextEmbedding"]).fit(_texts())
+    odd = pd.DataFrame({"text": ["", " ", None]})
+    assert len(model.predict(odd)) == 3
+
+
+def test_asking_for_it_on_data_without_prose_is_refused():
+    frame = pd.DataFrame(
+        {"x": np.arange(120.0), "z": np.arange(120.0) % 7, "y": np.arange(120) % 2}
+    )
+    with pytest.raises(ConfigError, match="needs a column of text"):
+        AutoML(_config(), families=["TextEmbedding"]).fit(frame)
+    model = AutoML(_config(), families=["LightGBM", "TextEmbedding"]).fit(frame)  # not searched
+    assert "TextEmbedding" not in set(model.trials["family"])
+
+
+def test_its_contributions_add_up_to_the_prediction_per_text_column():
+    from fione.engine import explain
+
+    frame = _texts()
+    frame["n"] = np.arange(len(frame), dtype=float) % 5
+    model = AutoML(_config(), families=["TextEmbedding"]).fit(frame)
+    assert [m.key for m in model.members] == ["TextEmbedding"]
+    X = frame.drop(columns="y").iloc[:12]
+    out = explain.contributions(model, X)
+    assert out.columns == ["text", "n"] and out.values.shape == (12, 3, 2)
+    assert np.allclose(out.values[:, :, 1], 0)  # the number is not in this view
+    assert np.allclose(out.prediction, model.predict_proba(X), atol=1e-6)
+    assert explain.pd_rows(model, 100, 5) >= 1 and explain.contribution_rows(model, 100) >= 1
+    curve = explain.partial_dependence(model, X, "n", grid_size=3, max_rows=6)
+    assert curve is not None

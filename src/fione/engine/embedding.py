@@ -21,6 +21,7 @@ import hashlib
 import importlib
 import json
 import os
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -177,8 +178,7 @@ class EmbeddingCache:
                 meta = self.dir / "meta.json"
                 if not meta.exists():
                     meta.write_text(json.dumps({"fingerprint": self.fingerprint}))
-                n = len(list(self.dir.glob("shard-*.keys.npy")))
-                stem = self.dir / f"shard-{n:06d}"
+                stem = self.dir / f"shard-{uuid.uuid4().hex}"  # unique: writers never collide
                 np.save(f"{stem}.vec.npy", vectors)
                 np.save(f"{stem}.keys.npy", keys)  # the keys last: a shard without them is unseen
             except OSError:
