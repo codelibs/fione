@@ -63,7 +63,7 @@ from sklearn.metrics import log_loss
 from fione.data.frames import is_day_first
 from fione.engine.config import Deadline
 from fione.engine.families import n_threads
-from fione.engine.prep import Prep, Task, _as_str, _datetimes, is_prose
+from fione.engine.prep import Prep, Task, _as_str, _datetimes, is_notation, is_prose
 from fione.engine.search import make_folds
 
 GATE_ROWS = 20_000  # rows the gate samples
@@ -110,6 +110,7 @@ MAX_CLUSTER_COLUMNS = 10
 TEXT_MIN_DISTINCT = 12  # string columns with fewer values are plain categories
 TEXT_MIN_STRUCTURED = 0.2  # share of values with several words or letters mixed with digits
 MAX_TEXT_COLUMNS = 6  # text columns that get groups (the most useful by rank)
+NOTATION_CHARS = 40  # characters of a notation with a share of their own (the most frequent)
 MAX_PAIR_TEXTS = 3  # text columns compared pairwise (running texts first, then by rank)
 PAIR_ROWS = 100_000  # rows whose words are held at a time while texts are compared
 MAX_REPEATED_VALUES = 10_000  # repeated values stored per column
@@ -251,6 +252,45 @@ class TextShape(Group):
             "number": pd.to_numeric(s.str.extract(r"(\d{1,15})")[0], errors="coerce"),
         }
         return pd.DataFrame({f"{column}__{k}": v.astype(float) for k, v in out.items()})
+
+
+class NotationShares(Group):
+    """The length of a notation (a protein or DNA sequence, a molecule: characters, no words) and
+    the share of each of its ``NOTATION_CHARS`` most frequent characters in training, the rest
+    (and a character not seen in training) in one share, ``other``. Its words are one per row and
+    its character n-grams too many to read whole; what it is made of says much of what it does."""
+
+    def __init__(self, column: str):
+        self.label, self.columns = f"character shares of {column}", (column,)
+
+    def _fit(self, X):
+        column = self.columns[0]
+        counts = Counter()
+        for value in _as_str(X[column]).dropna():
+            counts.update(value)
+        common = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:NOTATION_CHARS]
+        self._chars = [c for c, _ in common]
+        parts = [f"{column}__length", *map(self._name, self._chars), f"{column}__share_other"]
+        self._sources = {name: self.columns for name in parts}
+
+    def _name(self, char: str) -> str:
+        # a character that is no ASCII letter or digit ("=", "(") is named by its code point
+        plain = char.isalnum() and char.isascii()
+        return f"{self.columns[0]}__share_{char if plain else f'u{ord(char):x}'}"
+
+    def _compute(self, df):
+        column = self.columns[0]
+        s = _as_str(df[column])
+        length = s.str.len().astype(float)
+        safe = length.where(length > 0)
+        counts = {self._name(c): s.str.count(re.escape(c)) for c in self._chars}
+        rest = length - sum(counts.values(), pd.Series(0.0, index=df.index))  # exact, in counts
+        out = {
+            f"{column}__length": length,
+            **{name: count / safe for name, count in counts.items()},
+            f"{column}__share_other": rest / safe,
+        }
+        return pd.DataFrame(out, index=df.index).astype(float)
 
 
 class TextTokens(Group):
@@ -1336,6 +1376,9 @@ def candidates(
     dates = by_rank(c for c in columns if kinds[c] == "datetime")
     # The topics of prose come first: they are worth the most, and the gate may run out of time.
     found: list[Group] = [TextTopics(c) for c in by_rank(text)[:MAX_TEXT_COLUMNS] if is_prose(X[c])]
+    # A notation has no words to read: what it is made of comes next, being cheap and worth much.
+    notations = [c for c in by_rank(strings) if is_notation(X[c])][:MAX_TEXT_COLUMNS]
+    found += [NotationShares(c) for c in notations]
     # Running texts are compared first: their rank is low (nearly every value is unique), but
     # two of them are the pair worth comparing.
     running = [c for c in by_rank(text) if is_prose(X[c])]
