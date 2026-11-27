@@ -29,6 +29,7 @@ from fione.projects.service import DatasetType
 from fione.storage import LocalStorage
 from fione.tools import ToolContext, ToolError, builtin, call_tool, clean_text, list_tools, registry
 from fione.tools.registry import DATA_NOTICE, MAX_RESULT_BYTES, NOT_ALLOWED, Tool, register
+from fione.web.views import warning_texts
 
 SECRET = "SECRET-CELL-VALUE"
 SECRET_NUMBER = 31337.2  # a regression target value (6 digits survive the rounding)
@@ -2440,6 +2441,106 @@ def test_propose_warns_about_unusable_datasets(env):
     result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
     assert any("predict dataset" in w["message"] for w in result["warnings"])
     assert "not_train" in codes(result)
+
+
+def _wide(env, name, rows, columns, constants=0):
+    rng = np.random.default_rng(3)
+    values = rng.normal(size=(rows, columns + 1)).round(3)
+    values[:, :constants] = 1.0
+    values[:, -1] = rng.integers(0, 2, rows)
+    frame = pd.DataFrame(values, columns=[*(f"c{i}" for i in range(columns)), "y"])
+    return ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, name, DatasetType.TRAIN, [frame]
+    )
+
+
+@pytest.mark.parametrize(
+    ("rows", "columns", "constants", "warned"),
+    [
+        (40, 600, 0, True),  # 15 times as many columns as rows
+        (60, 600, 0, True),  # 10 times
+        (61, 600, 0, False),  # just under
+        (40, 499, 0, False),  # fewer columns than the floor, however few rows
+        (40, 600, 101, False),  # 499 inputs: the constant columns do not count
+        (40, 600, 100, True),
+        (400, 600, 0, False),
+    ],
+)
+def test_propose_notes_far_more_columns_than_rows(env, rows, columns, constants, warned):
+    ds = _wide(env, f"wide_{rows}_{columns}_{constants}", rows, columns, constants)
+    result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "y"})
+    assert ("many_more_columns_than_rows" in codes(result)) is warned
+    for lang in i18n.LANGUAGES:  # the card has the figures its text needs
+        for found in (w for w in result["warnings"] if w["code"] == "many_more_columns_than_rows"):
+            text = warning_texts([found], lang)[0]
+            assert found["params"]["rows"] in text and found["message"] not in text
+            assert "{" not in text
+            # more models on the same validation rows would make the score look better still
+            assert "time limit" not in text and "制限時間" not in text
+            assert (
+                "time limit" not in found["message"] and "max_runtime_secs" not in found["message"]
+            )
+
+
+def test_propose_leaves_a_table_that_is_not_wide_as_it_was(env):
+    result = call(env, "propose_training_config", {"dataset_id": env.dataset.id, "target": "label"})
+    assert not {"wide_prep", "many_more_columns_than_rows"} & set(codes(result))
+
+
+def test_propose_warns_when_the_time_limit_is_short_for_preparing_the_columns(env, monkeypatch):
+    ds = _wide(env, "prep", 200, 60)
+    base = {"dataset_id": ds.id, "target": "y"}
+    assert "wide_prep" not in codes(call(env, "propose_training_config", base))
+    monkeypatch.setattr(builtin, "PREP_BASE_SECS", 2.0)  # 60 columns take 2 minutes
+    monkeypatch.setattr(builtin, "PREP_SLOPE_SECS", 0.0)
+    for given, warned in ((None, True), (239, True), (240, False), (3600, False)):  # 120 s proposed
+        arguments = base if given is None else {**base, "max_runtime_secs": given}
+        result = call(env, "propose_training_config", arguments)
+        assert ("wide_prep" in codes(result)) is warned, given
+    found = next(
+        w
+        for w in call(env, "propose_training_config", {**base, "max_runtime_secs": 90})["warnings"]
+        if w["code"] == "wide_prep"
+    )
+    assert found["params"] == {"columns": "60", "prep": "120", "limit": "90"}
+    for lang in i18n.LANGUAGES:
+        text = warning_texts([found], lang)[0]
+        assert "60" in text and found["message"] not in text and "{" not in text
+    # the columns the proposal leaves out (30 constants) are not prepared: 30 columns, 60 s
+    left_out = _wide(env, "prep_constants", 200, 60, constants=30)
+    for given, warned in ((119, True), (120, False)):
+        result = call(
+            env,
+            "propose_training_config",
+            {"dataset_id": left_out.id, "target": "y", "max_runtime_secs": given},
+        )
+        assert len(result["config"]["ignored_columns"]) == 30
+        assert ("wide_prep" in codes(result)) is warned, given
+
+
+def test_a_short_time_limit_is_shown_in_seconds_for_a_wide_table(env):
+    ds = _wide(env, "sixteen_thousand", 60, 16_000)
+    result = call(
+        env, "propose_training_config", {"dataset_id": ds.id, "target": "y", "max_runtime_secs": 45}
+    )
+    found = next(w for w in result["warnings"] if w["code"] == "wide_prep")
+    assert found["params"]["limit"] == "45" and "minutes" not in found["message"]
+    for lang in i18n.LANGUAGES:
+        text = warning_texts([found], lang)[0]
+        assert "45" in text and "16,000" in text and "{" not in text
+        assert "0 minutes" not in text and "0 分" not in text
+
+
+def test_the_time_to_try_models_counts_cells_whatever_the_width(env):
+    # rows x columns x 6e-6 s x 30 trials: no term for the columns alone, so the proposal of a
+    # wide table keeps the run time it had (the width only adds the warnings above)
+    for rows, columns in ((200, 60), (40, 600), (20, 3000)):
+        ds = _wide(env, f"need_{rows}_{columns}", rows, columns)
+        assert builtin.runtime_need_secs(ds, None) == pytest.approx(rows * columns * 6e-6 * 30)
+    # as measured: about 5 ms per column at 20,000 columns and 10 ms at 100,000
+    assert builtin.prep_floor_secs(20_000) == pytest.approx(20_000 * 0.0047)
+    assert builtin.prep_floor_secs(100_000) == pytest.approx(100_000 * 0.0103)
+    assert builtin.prep_floor_secs(-1) == 0
 
 
 # --- limits ----------------------------------------------------------------

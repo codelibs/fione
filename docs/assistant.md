@@ -160,7 +160,11 @@ and shows a **Training proposal** card: the dataset, the column to predict, the 
 limit (each with a plain reason), the columns it suggests leaving out, and what to check. The
 reasons and the things to check are written in plain words in the language of the page, not as
 technical terms. The card examines up to 5,000 columns (a wider table is read with fewer rows)
-and says when there are more. It lists at most 200 columns to leave out, ids first; it counts the
+and says when there are more. When the time limit is shorter than twice the time the columns
+take to prepare (about 5 ms per column at 20,000 columns and 10 ms at 100,000, on a busy machine
+more), it says that the run may end without a model. When the table has at least 500 input columns
+and 10 times as many columns as rows, it says that the validation score may look better than the
+model does on new rows. It lists at most 200 columns to leave out, ids first; it counts the
 others: columns that hold one value in the rows examined, which training leaves out by itself,
 and ids beyond the 200, which stay in the training unless you ignore them. When the project already has a test or prediction dataset, the card also
 warns about columns the model would learn from that those datasets lack, because predicting
