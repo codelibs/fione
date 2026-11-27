@@ -331,6 +331,7 @@ def run_family(
     repeats: int = 1,
     first_deadline: Deadline | None = None,
     quantile: float | None = None,
+    embedding=None,
 ) -> FamilyResult:
     """Search family ``name`` within ``deadline``; ``y`` is float targets or class codes 0..k-1.
     ``folds`` holds ``repeats`` runs of folds (see ``repeat_folds``).
@@ -340,7 +341,9 @@ def run_family(
     its search ends at ``deadline`` as soon as that trial is done."""
     start = time.monotonic()
     n_classes = int(y.max()) + 1 if task == "classification" else 0
-    spec = FAMILIES[name](task, n_classes, seed=seed, n_jobs=n_threads(len(X)), quantile=quantile)
+    spec = FAMILIES[name](
+        task, n_classes, seed=seed, n_jobs=n_threads(len(X)), quantile=quantile, embedding=embedding
+    )
 
     def cap() -> float | None:
         if max_trial_secs is None or not spec.unit_secs:

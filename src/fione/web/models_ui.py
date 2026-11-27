@@ -346,6 +346,8 @@ def _config(record: ModelRecord) -> list[tuple[str, tuple[str, str | None]]]:
             name in ("cost_miss", "cost_false_alarm") and config[name] is None
         ):
             continue
+        if name.startswith("embedding_") and not config.get("embedding_backend"):
+            continue  # the settings of a backend that is not used
         value, key = config[name], None
         if isinstance(value, bool):
             key = "common.yes" if value else "common.no"

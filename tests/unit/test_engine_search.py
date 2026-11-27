@@ -32,7 +32,10 @@ from fione.engine.search import (
 )
 
 # The L1 variants learn the median of a regression, and are tested with it (test_engine_late).
-FAMILY_NAMES = [name for name in FAMILIES if not FAMILIES[name].median]
+# TextEmbedding needs an embedding backend and is tested with it (test_engine_text_embedding).
+FAMILY_NAMES = [
+    name for name in FAMILIES if not FAMILIES[name].median and not FAMILIES[name].opt_in
+]
 
 TRIAL_KEYS = {"family", "trial", "score", "params", "elapsed", "best_so_far"}
 

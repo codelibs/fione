@@ -154,8 +154,11 @@ def test_every_family_is_listed_once():
     # FAMILIES, FAMILY_ORDER and FAMILY_WEIGHTS must agree.
     core = {"LightGBM", "XGBoost", "RandomForest", "ExtraTrees", "Linear", "DeepLearning"}
     assert core <= set(FAMILY_ORDER)
-    assert set(FAMILY_ORDER) | set(LATE_ORDER) == set(FAMILIES)
-    assert not set(FAMILY_ORDER) & set(LATE_ORDER)
+    opt_in = set(automl_module.OPT_IN_ORDER)
+    assert set(FAMILY_ORDER) | set(LATE_ORDER) | opt_in == set(FAMILIES)
+    assert {name for name in FAMILIES if FAMILIES[name].opt_in} == opt_in
+    assert not set(FAMILY_ORDER) & set(LATE_ORDER) and not opt_in & set(FAMILY_ORDER)
+    assert opt_in == set(automl_module.OPT_IN_WEIGHTS)
     assert set(FAMILY_ORDER) == set(automl_module.FAMILY_WEIGHTS)
     assert set(LATE_ORDER) == set(automl_module.LATE_WEIGHTS)
     assert sum(automl_module.FAMILY_WEIGHTS.values()) == pytest.approx(1.0)
@@ -1139,7 +1142,9 @@ def test_keyboard_interrupt_is_not_swallowed(monkeypatch):
 # --- empty frames -------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", [name for name in FAMILIES if not FAMILIES[name].median])
+@pytest.mark.parametrize(
+    "name", [name for name in FAMILIES if not FAMILIES[name].median and not FAMILIES[name].opt_in]
+)
 @pytest.mark.parametrize("task", ["classification", "regression"])
 def test_predicting_no_rows_returns_empty_results_quietly(name, task, capfd):
     df = _binary(200)

@@ -39,7 +39,9 @@ TARGETS = {"binary": "good", "multiclass": "判定", "regression": "value"}
 
 # Every family, heaviest first, summing to 1.
 # (the L1 variants of the boosting families explain like the families they vary)
-FAMILY_NAMES = [name for name in FAMILIES if not FAMILIES[name].median]
+FAMILY_NAMES = [
+    name for name in FAMILIES if not FAMILIES[name].median and not FAMILIES[name].opt_in
+]
 MIXED_WEIGHTS = {
     name: (len(FAMILY_NAMES) - i) / (len(FAMILY_NAMES) * (len(FAMILY_NAMES) + 1) / 2)
     for i, name in enumerate(FAMILY_NAMES)
