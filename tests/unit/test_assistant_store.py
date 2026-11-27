@@ -252,6 +252,8 @@ def test_proposals_are_stored_and_found_through_their_conversation(
     assert (proposal.state, proposal.job_id, proposal.config) == ("pending", None, {"target": "y"})
     assert proposal.details == {"warnings": []}
     assert store.proposals_for(conn, conversation.id) == {proposal.message_id: proposal}
+    # The message moved the conversation's updated_at: compare with it as it is now.
+    conversation = store.get_conversation(conn, owner, project.id, conversation.id)
     assert store.get_proposal(conn, owner, project.id, proposal.id) == (proposal, conversation)
     with pytest.raises(ProposalNotFound):
         store.get_proposal(conn, member, project.id, proposal.id)
@@ -262,6 +264,7 @@ def test_proposals_are_stored_and_found_through_their_conversation(
     shared = store.add_proposal(
         conn, store.add_message(conn, theirs.id, "assistant").id, theirs.id, None, {}, {}
     )
+    theirs = store.get_conversation(conn, member, project.id, theirs.id)
     assert store.get_proposal(conn, member, project.id, shared.id) == (shared, theirs)
     projects.unshare_project(conn, owner, project.id, "member")
     with pytest.raises(ProposalNotFound):  # hidden with the conversation
