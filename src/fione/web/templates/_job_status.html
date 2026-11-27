@@ -65,4 +65,4 @@
   </details>
   {% endif %}
 </section>
-{% if terminal and fragment %}<div id="job-cancel" hx-swap-oob="true"></div>{% endif %}
+{% if terminal and fragment %}<div id="job-cancel" hx-swap-oob="true"></div>{% with oob = true %}{% include "_job_header.html" %}{% endwith %}{% endif %}
