@@ -84,6 +84,12 @@ SMALL_DATA_ROWS = 20_000
 SMALL_DATA_THREADS = 4
 PROBE_ROWS = 20_000
 UNIT_SAFETY = 1.2
+# A text model's fold is refused on the probe's estimate only when that is more than this many
+# times what the fold may take. The probe fits PROBE_ROWS rows and scales by n log n, but TF-IDF
+# and a logistic regression grow slower than that: on 100,000 short texts it said 31 to 41 s a
+# fold where a fold took 15 s (2.1 to 2.7 times), and the text model was refused a first trial
+# that fitted with time to spare. Once a fold has run, its measured time decides, as for any family.
+TEXT_PROBE_SLACK = 3.0
 MEDIAN = 0.5  # the level of the L1 variants
 # The strength of the penalty that suits a linear model falls with the number of columns (on a
 # table of 5,000 columns the best ``C`` is near 1e-3, and the default 1 overfits badly): ``C`` is
@@ -124,6 +130,7 @@ class FamilySpec:
     median: ClassVar[bool] = False  # True: learns the median (level 0.5) unless a level is given
     shrinkable: ClassVar[bool] = False  # True: the first trees of a fitted model are a model too
     opt_in: ClassVar[bool] = False  # True: searched only when the settings ask for it
+    probe_slack: ClassVar[float] = 1.0  # the probe's estimate may exceed a fold's time this much
 
     def __init__(
         self,
@@ -170,7 +177,8 @@ class FamilySpec:
         if deadline.expired():
             raise DeadlineExceeded
         self.estimate_unit(params, X_tr, y_tr)
-        if self.unit_secs is not None and deadline.remaining() < UNIT_SAFETY * self.unit_secs:
+        need = self.fold_need()
+        if need is not None and deadline.remaining() < need:
             raise DeadlineExceeded
         timer = _UnitTimer(deadline)
         model = self._fit(params, X_tr, y_tr, X_va, y_va, timer, sample_weight)
@@ -178,6 +186,13 @@ class FamilySpec:
         self.fits += 1
         self.cut_fits += timer.cut
         return model
+
+    def fold_need(self) -> float | None:
+        """The seconds a fold must have to start: the unit time with its margin, a text model's
+        probed (not yet measured) one taken ``probe_slack`` times less."""
+        if self.unit_secs is None:
+            return None
+        return UNIT_SAFETY * self.unit_secs / (1.0 if self._measured else self.probe_slack)
 
     def fit_full(
         self,
@@ -1054,6 +1069,7 @@ class TextLinear(FamilySpec):
     cost = 1.0
     reference = "TextLinear"  # the family ``cost`` is relative to
     keeps_share = True  # the reference family has its time as without the late families
+    probe_slack = TEXT_PROBE_SLACK
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1141,6 +1157,7 @@ class LinearWide(TextLinear):
 
     name = "LinearWide"
     view = "levels"
+    probe_slack = 1.0  # reads no text: the probe's estimate holds as for the other families
     defaults = {"C": 0.1}
     cost = 3.0
     reference = "Linear"

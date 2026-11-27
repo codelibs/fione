@@ -15,6 +15,7 @@ from fione.engine.families import (
     FOREST_COLUMNS,
     LINEAR_COLUMNS,
     MAX_ROUNDS,
+    TEXT_PROBE_SLACK,
     UNIT_SAFETY,
     FamilySpec,
     Forest,
@@ -188,6 +189,49 @@ def test_fit_refuses_to_start_a_unit_that_cannot_finish(slow):
     with pytest.raises(DeadlineExceeded):
         spec.fit({}, X, y, X, y, Deadline(UNIT_SAFETY * slow.unit * 0.9))
     assert len(slow.begun) == 1
+
+
+class _SlowText(_SlowFamily):
+    """A text model: its probed unit may be this many times too long."""
+
+    probe_slack = TEXT_PROBE_SLACK
+
+
+def _probed(family, estimate):
+    """A family whose probe (not yet a fit) said ``estimate`` seconds a unit."""
+    spec = family("classification", 2)
+    spec.unit_secs, spec._unit_rows = estimate, 100_000
+    return spec
+
+
+@pytest.mark.parametrize("over", [1.5, 2.9])
+def test_a_text_model_starts_a_fold_its_probe_says_is_up_to_slack_times_too_short(slow, over):
+    X, y = pd.DataFrame({"a": range(20)}), np.array([0, 1] * 10)
+    share = UNIT_SAFETY * 1.0 / over  # the probe says 1 s a unit: ``over`` times the share
+    text = _probed(_SlowText, 1.0)
+    text.fit({}, X, y, X, y, Deadline(share))
+    assert text.unit_secs == pytest.approx(_SlowText.unit, abs=0.05)  # measured now
+    with pytest.raises(DeadlineExceeded):  # the measured unit decides from here, with no slack
+        text.fit({}, X, y, X, y, Deadline(UNIT_SAFETY * _SlowText.unit * 0.9))
+    other = _probed(slow, 1.0)
+    with pytest.raises(DeadlineExceeded):  # any other family is refused on the probe, as before
+        other.fit({}, X, y, X, y, Deadline(share))
+    assert len(slow.begun) == 1  # only the text model's first fold ran
+
+
+def test_a_text_model_is_refused_a_fold_its_probe_says_is_far_too_short(slow):
+    X, y = pd.DataFrame({"a": range(20)}), np.array([0, 1] * 10)
+    text = _probed(_SlowText, 1.0)
+    with pytest.raises(DeadlineExceeded):
+        text.fit({}, X, y, X, y, Deadline(UNIT_SAFETY * 1.0 / (TEXT_PROBE_SLACK * 1.2)))
+    assert not slow.begun
+
+
+def test_only_the_text_models_have_the_probe_slack():
+    slack = {name: spec.probe_slack for name, spec in FAMILIES.items()}
+    text = {name for name, spec in FAMILIES.items() if spec.view in ("text", "text_plain")}
+    assert text and all(slack[name] == TEXT_PROBE_SLACK for name in text)
+    assert all(slack[name] == 1.0 for name in set(FAMILIES) - text)
 
 
 @pytest.mark.parametrize("name", FAMILY_NAMES)
