@@ -769,6 +769,29 @@ def class_count(y: pd.Series, task: str) -> int:
     return int(y.nunique()) if task == "classification" else 2
 
 
+# Preparing the columns is Python work per column, whatever the rows, and per column it grows with
+# their number: on 823 rows it took about 5 ms per column at 20,000 columns and 10 ms at 100,000
+# (1,060 s before the first model could start, a run of 600 s ended with none after 1,100 s), on
+# a machine under some load. That is
+# PREP_BASE_SECS + PREP_SLOPE_SECS x columns per column. A run shorter than twice the time the
+# preparation takes has little left to search.
+PREP_BASE_SECS = 0.0033
+PREP_SLOPE_SECS = 7e-8
+WIDE_PREP_FACTOR = 2
+# A table with this many times more input columns than rows (and at least WIDE_MIN_COLUMNS of
+# them) gives the models more chance patterns than rows to check them on. Tables of thousands of
+# columns on thousands of rows have up to 1.1 times as many columns as rows; tables of gene
+# measurements, on tens or hundreds of rows, have 99 to 362 times as many.
+WIDE_RATIO = 10
+WIDE_MIN_COLUMNS = 500
+
+
+def prep_floor_secs(columns: int) -> float:
+    """Seconds that preparing ``columns`` input columns takes at least (``PREP_BASE_SECS``)."""
+    columns = max(0, columns)
+    return columns * (PREP_BASE_SECS + PREP_SLOPE_SECS * columns)
+
+
 def runtime_need_secs(
     dataset: Dataset, profile: DatasetProfile | None = None, classes: int = 2
 ) -> float:
@@ -2121,6 +2144,34 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 "allowed; so is training on a part of the rows",
                 need=f"{need_minutes:,}",
                 limit=limit_minutes,
+            )
+        )
+    # the columns training prepares: all but the target and the ones the proposal leaves out
+    wide = max(0, dataset.n_cols - 1 - len(config.ignored_columns))
+    floor = prep_floor_secs(wide)
+    if config.max_runtime_secs < WIDE_PREP_FACTOR * floor:
+        warnings.append(
+            _warning(
+                "wide_prep",
+                f"the table has {dataset.n_cols - 1:,} columns and preparing them takes about "
+                f"{math.ceil(floor):,} seconds (it varies with the load of the machine), so a "
+                f"max_runtime_secs of {config.max_runtime_secs:,} may end with no model. A larger "
+                "max_runtime_secs, or ignored_columns for the columns not needed, avoids that",
+                columns=f"{dataset.n_cols - 1:,}",
+                prep=f"{math.ceil(floor):,}",
+                limit=f"{config.max_runtime_secs:,}",
+            )
+        )
+    if wide >= WIDE_MIN_COLUMNS and wide >= WIDE_RATIO * dataset.n_rows:
+        warnings.append(
+            _warning(
+                "many_more_columns_than_rows",
+                f"the table has {wide:,} input columns and only {dataset.n_rows:,} rows; with so "
+                "many more columns than rows the models may fit chance patterns, so the "
+                "validation score may look better than the model does on new rows. Fewer "
+                "columns (ignored_columns), or more rows, may help",
+                columns=f"{wide:,}",
+                rows=f"{dataset.n_rows:,}",
             )
         )
     notes = args.get("notes")
