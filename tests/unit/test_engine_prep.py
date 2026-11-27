@@ -16,6 +16,7 @@ from fione.engine.prep import (
     infer_task,
     integer_date_format,
     is_notation,
+    is_prose,
     validate_target,
 )
 
@@ -653,6 +654,24 @@ def test_a_search_query_that_repeats_is_prose_and_still_read_as_levels():
     # a label that repeats with a few hundred levels stays a label
     few = pd.DataFrame({"label": rng.choice(pool[:300], n), "num": rng.normal(size=n)})
     assert Prep().fit(few).prose == ()
+
+
+def _parts_after_sentences(n=3000, parts=1200):
+    """Every value different: ``parts`` parts of one or two words first, then sentences, as a
+    file of phrases is sorted when each sentence is followed by its short parts."""
+    rng = np.random.default_rng(7)
+    words = ["film", "story", "actor", "scene", "funny", "dull", "moving", "plot", "cast"]
+    short = [" ".join(rng.choice(words, 1 + i % 2)) + f" {i}" for i in range(parts)]
+    long = [" ".join(rng.choice(words, 9)) + f" {i}" for i in range(n - parts)]
+    return pd.Series(short + long)
+
+
+def test_a_text_is_judged_on_values_spread_over_the_column_not_on_its_first_rows():
+    phrases = _parts_after_sentences()
+    assert not is_prose(phrases.head(1000))  # its first rows alone look like short labels
+    assert is_prose(phrases)
+    frame = pd.DataFrame({"phrase": phrases, "num": RNG.normal(size=len(phrases))})
+    assert Prep().fit(frame).prose == ("phrase",)
 
 
 def test_a_name_of_three_words_that_is_different_in_every_row_is_prose():

@@ -2299,6 +2299,24 @@ def test_propose_does_not_take_a_duration_for_a_day_counter(env, rows):
     assert "time_index" not in codes(result)
 
 
+def test_propose_keeps_a_text_whose_first_rows_are_its_short_parts(env):
+    rng = np.random.default_rng(7)
+    words = ["film", "story", "actor", "scene", "funny", "dull", "moving", "plot", "cast"]
+    short = [" ".join(rng.choice(words, 1 + i % 2)) + f" {i}" for i in range(1200)]
+    long = [" ".join(rng.choice(words, 9)) + f" {i}" for i in range(1800)]
+    frame = pd.DataFrame({"phrase": short + long, "label": rng.integers(0, 2, 3000)})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "phrases", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+        found = call(env, "describe_dataset", {"dataset_id": ds.id})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "phrase" not in result["config"]["ignored_columns"]
+    assert {c["name"]: c["kind"] for c in found["columns"]}["phrase"] == "text"
+
+
 @pytest.mark.parametrize("name", ["id", "Id", "index", "row_id", "user_id", "idle"])
 def test_propose_still_leaves_a_row_id_out(env, name):
     ds = _daily(env, name)

@@ -235,10 +235,10 @@ def is_notation(s: pd.Series) -> bool:
     values mostly different, without spaces and of varying length (an id has one length). Its
     character n-grams carry the signal, but the values are no words."""
     values = _as_str(s).dropna()
-    first = values.head(1000)
-    if len(first) < MIN_ROWS or first.str.contains(r"\s").mean() > 0.05:
+    judged = frames._spread(values)  # a file sorted by length is judged on its whole range
+    if len(judged) < MIN_ROWS or judged.str.contains(r"\s").mean() > 0.05:
         return False
-    length = first.str.len()
+    length = judged.str.len()
     if length.mean() < NOTATION_LENGTH or length.std() < NOTATION_LENGTH_VARIATION * length.mean():
         return False
     return bool(values.nunique() >= NOTATION_UNIQUE * len(values))
@@ -251,16 +251,16 @@ def is_prose(s: pd.Series) -> bool:
     that are mostly different (``SHORT_PROSE_UNIQUE``, of the whole column) or take
     ``REPEATED_PROSE_VALUES`` different values, and have longer words than a code."""
     values = _as_str(s).dropna()
-    first = values.head(1000)
-    if not len(first):
+    judged = frames._spread(values)  # a file sorted by length is judged on its whole range
+    if not len(judged):
         return False
     if is_notation(s):
         return True
-    words = first.str.findall(_LETTERS.pattern)
+    words = judged.str.findall(_LETTERS.pattern)
     counts = words.str.len()
     # a hex id has as many runs of letters as a sentence has words, but runs of a letter or two
     # and no spaces between them
-    spaced = first.str.contains(r"\s").mean() >= SPACED_PROSE
+    spaced = judged.str.contains(r"\s").mean() >= SPACED_PROSE
     if counts.median() >= PROSE_WORDS and (
         spaced or words.explode().str.len().mean() >= SHORT_PROSE_WORD_CHARS
     ):
