@@ -283,6 +283,12 @@ trees boosted from a linear model, is a late candidate of every table: it runs a
 takes the time they leave. LinearSpline, a linear model with a piecewise linear curve for each
 number that has many values, follows it on the tables that have such numbers.
 
+### Language-model vectors of text
+
+Where words say what a text is about, the hidden states of a pretrained language model also carry how it is written (who wrote it, in which style). With `embedding_backend` set (a training setting of the engine, with `embedding_model`, a label for the model, `embedding_layer`, the fraction of the model's depth, 0.75 by default, and `embedding_max_length`, the longest text read, in tokens), a family called TextEmbedding joins the search, with the share of the search time TextLinear has: a logistic (or ridge) regression on the standardised vectors of the prose columns, each vector the mean over a text's tokens of one hidden layer. It stays in the model only when its cross-validation scores improve the ensemble; otherwise it gets weight 0.
+
+Fione's core does not load a model. A *backend* turns texts into vectors, and every vector is kept in a cache keyed by the backend, the model, the layer, the length and the text, so a text is embedded once, however many trials and folds read it. Two environment variables say where things are: `FIONE_EMBEDDING_CACHE_DIR` is the cache (unset, the vectors stay in memory for the process), and `FIONE_EMBEDDING_MODEL_DIR` is the model's directory for the `torch_lm` backend, which reads a Hugging Face model with torch and transformers (where there is a GPU, in a notebook or on a server). `fione.engine.embedding.extract` fills the cache there; a fit elsewhere reads it. Texts the cache lacks are embedded by the backend, at the start of the fit and at prediction; where the backend cannot run (no torch, no model), training stops at the start and a prediction for texts that are not in the cache fails, saying so. A trained model holds the fingerprint of what it read and no path.
+
 ## Joining datasets
 
 When a project holds two or more training datasets (upload another table as training data), the

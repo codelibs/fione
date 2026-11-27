@@ -151,6 +151,28 @@ class TrainConfig:
     # Weight of the extra rows given to ``AutoML.fit`` among the rows the models learn from (1: as
     # the rows of the data). Scores are never weighted.
     extra_weight: float = 1.0
+    # Vectors of the prose columns from a pretrained language model (``fione.engine.embedding``):
+    # the backend, a label for the model, the layer (a fraction of its depth) and the longest text
+    # read, in tokens. With a backend, the TextEmbedding family joins the search (late, so that
+    # the cross-validation decides whether it helps); without one it is not tried.
+    embedding_backend: str | None = None
+    embedding_model: str = ""
+    embedding_layer: float = 0.75
+    embedding_max_length: int = 384
+
+    @property
+    def embedding(self):
+        """The ``EmbeddingSpec`` the settings name, or None without a backend."""
+        if self.embedding_backend is None:
+            return None
+        from fione.engine.embedding import EmbeddingSpec
+
+        return EmbeddingSpec(
+            self.embedding_backend,
+            self.embedding_model,
+            self.embedding_layer,
+            self.embedding_max_length,
+        )
 
     def validate(self) -> "TrainConfig":
         """Raise ConfigError for the first invalid value; return self when everything is valid."""
@@ -243,6 +265,8 @@ class TrainConfig:
         weight = self.extra_weight
         if not isinstance(weight, int | float) or isinstance(weight, bool) or not 0 < weight <= 1e6:
             raise ConfigError(f"extra_weight must be a number above 0, got {weight!r}")
+        if self.embedding_backend is not None:
+            self.embedding.validate()
         event = self.event_column
         if event is None:
             if "concordance" in (self.stopping_metric.lower(), self.sort_metric.lower()):

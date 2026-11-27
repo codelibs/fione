@@ -101,7 +101,7 @@ import pandas as pd
 
 from fione.data.frames import is_time_counter, parse_datetimes
 from fione.data.profile import training_leak_suspects
-from fione.engine import metrics
+from fione.engine import embedding, metrics
 from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, NoModelError, TrainConfig
 from fione.engine.diagnostics import diagnostics
 from fione.engine.ensemble import caruana
@@ -147,6 +147,10 @@ FAMILY_WEIGHTS = {
 QUANTILE_FAMILIES = tuple(f for f in FAMILY_ORDER if FAMILIES[f].quantile_objective)
 # Run after the others, in the search time they leave (see the module docstring); each only
 # when the data suits it (``FamilySpec.applies``) and a model of it would not be too big.
+# Searched only when the settings ask for them (as a base family, in the time its weight gives it),
+# so that a fit that does not ask is what it was before.
+OPT_IN_ORDER = ("TextEmbedding",)
+OPT_IN_WEIGHTS = {"TextEmbedding": 0.2}  # like TextLinear: it matters most where there is prose
 # The L1 variants of the boosting families are late candidates for a regression ranked by MAE,
 # MEDAE or SMAPE (``MEDIAN_METRICS``) with no quantile: the squared error the others learn is not
 # the loss they are ranked by, and on a heavy-tailed target the median predicts better.
@@ -385,7 +389,7 @@ class AutoML:
         self.config = config.validate()
         self.emit = emit
         self.should_stop = should_stop
-        known = [*FAMILY_ORDER, *LATE_ORDER]
+        known = [*FAMILY_ORDER, *LATE_ORDER, *OPT_IN_ORDER]
         unknown = sorted(set(families or ()) - set(known))
         if unknown or families == []:
             raise ConfigError(f"unknown families: {unknown}; choose from {known}")
@@ -397,7 +401,10 @@ class AutoML:
                     f"{', '.join(other)} cannot learn a quantile; choose from {QUANTILE_FAMILIES}"
                 )
             families = list(families or QUANTILE_FAMILIES)
-        self.families = [f for f in FAMILY_ORDER if families is None or f in families]
+        opt_in = OPT_IN_ORDER if config.embedding_backend is not None else ()
+        self.families = [f for f in (*FAMILY_ORDER, *opt_in) if families is None or f in families]
+        if "TextEmbedding" in (families or ()) and config.embedding_backend is None:
+            raise ConfigError("TextEmbedding needs an embedding_backend")
         self.late = [
             f for f in LATE_ORDER if f not in MEDIAN_ORDER and (families is None or f in families)
         ]
@@ -1476,7 +1483,11 @@ class AutoML:
         rows = covered(folds, len(y))  # the rows some fold predicts (all but the first part)
         families = self._without_wide_linear_view(prep, len(X))
         # The words are read only from prose columns.
-        families = [f for f in families if f != "TextLinear" or prep.prose] or families
+        families = [
+            f for f in families if f not in ("TextLinear", *OPT_IN_ORDER) or prep.prose
+        ] or (families)
+        if "TextEmbedding" in families and not prep.prose:
+            raise ConfigError("TextEmbedding needs a column of text, and the data has none")
         # An explicit list of late families only is run as it is, like TextLinear above.
         late = self._late_families(prep, X, y, task) if families else self.late
         # The L1 variants run when asked for, or for a regression ranked by an absolute error.
@@ -1489,6 +1500,8 @@ class AutoML:
         if median and (self.explicit or sort_metric in MEDIAN_METRICS):
             late = [*late, *self.median]
         families = [*families, *late]
+        if "TextEmbedding" in families:
+            self._embed_rows(prep, X)
         if prep.reads_only_prose and not self.explicit:
             families = self._text_families_only(families)
 
@@ -1858,6 +1871,29 @@ class AutoML:
             families=left_out,
         )
 
+    def _embed_rows(self, prep: Prep, X: pd.DataFrame) -> None:
+        """Fill the cache with the vectors of every prose text, once, before the search: the
+        trials then only read it. A backend that cannot run stops the training here."""
+        spec = self.config.embedding
+        view = prep.text_prose(X)
+        texts = pd.concat([view[c] for c in view.columns])
+        todo = embedding.missing(spec, texts.tolist())
+        if not todo:
+            return
+        self._notice(
+            f"embedding {todo:,} texts with {spec.model} (layer {spec.layer:g}): the vectors are "
+            "computed once and kept in the cache",
+            kind="embedding_rows",
+            rows=todo,
+        )
+        texts = texts.tolist()
+        for start in range(0, len(texts), embedding.CHUNK):  # a stop is heard between chunks
+            if self.should_stop():
+                return
+            embedding.embed_texts(spec, texts[start : start + embedding.CHUNK])
+            done = min(start + embedding.CHUNK, len(texts))
+            self._event("embedding", done=done, total=len(texts))
+
     def _late_families(self, prep: Prep, X, y, task: Task) -> list[str]:
         """The late families this data suits, whose models would not be too big, and whose view
         is not too wide (see ``_without_wide_linear_view``)."""
@@ -1923,7 +1959,7 @@ class AutoML:
                     break
                 # Leave one trial for each family after this one.
                 max_trials = max(1, c.max_models - finished - (len(rest) - 1))
-            weights = LATE_WEIGHTS if late else FAMILY_WEIGHTS
+            weights = LATE_WEIGHTS if late else {**FAMILY_WEIGHTS, **OPT_IN_WEIGHTS}
             own = search if late or name in references else base
             left = own.remaining()
             share = left * weights[name] / sum(weights[f] for f in rest)
@@ -1958,6 +1994,7 @@ class AutoML:
                     repeats=repeats,
                     first_deadline=None if late else own.child(allowed),
                     quantile=c.quantile,
+                    embedding=c.embedding,
                 )
             except NoModelError as e:
                 if late:

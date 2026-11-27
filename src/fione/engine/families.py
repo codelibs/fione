@@ -70,9 +70,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.preprocessing import StandardScaler
 from threadpoolctl import threadpool_limits
 
 from fione.engine.config import ConfigError, DeadlineExceeded
+from fione.engine.embedding import EmbeddingSpec, embed_texts
 from fione.engine.prep import LINEAR_LEVELS, MAX_LEVELS, Task, is_notation
 
 MAX_ROUNDS = 2000
@@ -121,6 +123,7 @@ class FamilySpec:
     seeded: ClassVar[bool] = True  # False: the same fit gives the same model, whatever the seed
     median: ClassVar[bool] = False  # True: learns the median (level 0.5) unless a level is given
     shrinkable: ClassVar[bool] = False  # True: the first trees of a fitted model are a model too
+    opt_in: ClassVar[bool] = False  # True: searched only when the settings ask for it
 
     def __init__(
         self,
@@ -129,8 +132,10 @@ class FamilySpec:
         seed: int = 0,
         n_jobs: int = 1,
         quantile: float | None = None,
+        embedding: EmbeddingSpec | None = None,
     ):
         quantile = MEDIAN if quantile is None and self.median else quantile
+        self.embedding = embedding  # what TextEmbedding reads (the other families ignore it)
         if quantile is not None and not self.quantile_objective:
             raise ConfigError(f"{self.name} cannot learn a quantile")
         self.quantile = quantile  # the level of the regression's pinball loss; None: the mean
@@ -1223,6 +1228,92 @@ class TextLinearPlain(TextLinear):
         return super().applies(prep, X) and bool(prep.groups)
 
 
+class EmbeddingModel:
+    """The language-model vectors of the prose columns, standardised, and a linear model on them.
+    It holds the fingerprint's spec, never the vectors: a prediction asks the cache or the
+    backend (``fione.engine.embedding``) for the vectors of the rows it is given."""
+
+    def __init__(self, spec: EmbeddingSpec, columns: list[str], scaler, model):
+        self.spec, self.columns, self.scaler, self.model = spec, columns, scaler, model
+
+    @property
+    def classes_(self):
+        return self.model.classes_
+
+    def matrix(self, X: pd.DataFrame) -> np.ndarray:
+        return self.scaler.transform(_vectors(self.spec, X, self.columns))
+
+    def predict_proba(self, X, **options):
+        return self.model.predict_proba(self.matrix(X))
+
+    def predict(self, X, **options):
+        return self.model.predict(self.matrix(X))
+
+
+def _vectors(spec: EmbeddingSpec, X: pd.DataFrame, columns: list[str]) -> np.ndarray:
+    """The vectors of each of ``columns``' texts, side by side, as float32."""
+    return np.hstack([embed_texts(spec, X[c].tolist()) for c in columns])
+
+
+class TextEmbedding(FamilySpec):
+    """Logistic (classification) or ridge (regression) regression on the vectors a language model
+    gives the prose columns (``EmbeddingSpec``: the mean of one hidden layer over a text's
+    tokens), standardised. Where words say what a text is about, the vectors also carry how it is
+    written. ``C`` is the inverse regularisation strength; ridge uses ``alpha = 1/C``. The
+    vectors come from the cache once per fit (``AutoML`` fills it before the search), whatever
+    the number of trials. Searched only with an ``embedding_backend``."""
+
+    name = "TextEmbedding"
+    view = "text_prose"
+    opt_in = True
+    seeded = False
+    defaults = {"C": 0.003}
+    max_iter = 200
+    cost = 5.0
+    reference = "TextLinear"  # the family ``cost`` is relative to
+    keeps_share = True
+    WIDTH = 4096  # what ``coef_bytes`` assumes of a vector, before any model has been read
+
+    @classmethod
+    def applies(cls, prep, X: pd.DataFrame) -> bool:
+        return bool(prep.prose)
+
+    @classmethod
+    def coef_bytes(cls, prep, outputs: int) -> int:
+        return len(prep.prose) * cls.WIDTH * max(1, outputs) * 8 + 1024
+
+    def space(self, trial):
+        return {"C": trial.suggest_float("C", 1e-4, 1e-1, log=True)}
+
+    def _fit(self, params, X_tr, y_tr, X_va, y_va, deadline, sample_weight=None, rounds=None):
+        if self.embedding is None:
+            raise ConfigError("TextEmbedding needs an embedding_backend")
+        columns = list(X_tr.columns)
+        scaler = StandardScaler(copy=False)
+        Z = scaler.fit_transform(_vectors(self.embedding, X_tr, columns))
+        if self.classification:
+            model = LogisticRegression(C=params["C"], max_iter=self.max_iter)
+        else:
+            model = Ridge(alpha=1.0 / params["C"])
+        model.fit(Z, y_tr, sample_weight=sample_weight)
+        deadline.remaining()  # consulted once, so that the unit time is measured (see ``fit``)
+        return EmbeddingModel(self.embedding, columns, scaler, model)
+
+    def _full_rounds(self, rounds: int) -> int:
+        return 1
+
+    def rounds(self, model) -> int:
+        return 1
+
+    def size_bytes(self, model) -> int:
+        return model.model.coef_.size * 8 + model.scaler.scale_.size * 16 + 1024
+
+    def importance(self, model) -> np.ndarray:
+        weight = np.abs(np.atleast_2d(model.model.coef_)).sum(axis=0)
+        width = len(weight) // len(model.columns)
+        return by_feature(weight, [c for c in model.columns for _ in range(width)])
+
+
 class _MedianVariant:
     """A boosting family that learns the median (an L1 objective) instead of the mean. It is a
     late candidate for a regression ranked by MAE or MEDAE, and it runs after the family it
@@ -1264,6 +1355,7 @@ FAMILIES: dict[str, type[FamilySpec]] = {
         TextLinearWide,
         TextLinearChar,
         TextLinearPlain,
+        TextEmbedding,
         LinearWide,
         LightGBML1,
         XGBoostL1,

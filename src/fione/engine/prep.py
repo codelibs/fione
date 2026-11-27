@@ -769,6 +769,13 @@ class Prep:
         texts = [_as_str(df[column]).fillna("").rename(f"f{at}_t") for at, column in spots.items()]
         return pd.concat([out, *texts], axis=1) if texts else out
 
+    def text_prose(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Only the prose columns as their texts (``f3_t``; missing is empty), what a language
+        model reads."""
+        spots = {self.feature_names.index(column): column for column in self.prose}
+        texts = [_as_str(df[column]).fillna("").rename(f"f{at}_t") for at, column in spots.items()]
+        return pd.concat(texts, axis=1) if texts else pd.DataFrame(index=df.index)
+
     def text_plain(self, df: pd.DataFrame) -> pd.DataFrame:
         """The text view without the columns of the derived features (``groups``); the frequencies
         of the codes (``Prep.codes``) stay, being input columns' own."""
