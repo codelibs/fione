@@ -612,6 +612,36 @@ def test_a_notation_of_varying_length_is_text_but_an_id_of_one_length_is_not():
     assert Prep().fit(frame).prose == ()
 
 
+def _aligned_dna(n=300, length=297, seed=8):
+    """One region of DNA in every row: one length, a few point differences and ambiguity codes."""
+    rng = np.random.default_rng(seed)
+    base = rng.choice(list("ACGT"), length)
+    rows = []
+    for _ in range(n):
+        seq = base.copy()
+        at = rng.choice(length, 12, replace=False)
+        seq[at] = rng.choice(list("ACGTRYKMN"), 12)
+        rows.append("".join(seq))
+    return pd.Series(rows)
+
+
+def test_an_aligned_sequence_of_one_length_is_a_notation_but_a_long_hash_is_not():
+    import base64
+    import hashlib
+
+    dna = _aligned_dna()
+    assert dna.str.len().std() == 0 and dna.nunique() == len(dna)
+    assert is_notation(dna) and is_prose(dna)
+    rng = np.random.default_rng(9)
+    hashes = {
+        "hex128": [hashlib.sha512(rng.bytes(8)).hexdigest() for _ in range(300)],
+        "base64_172": [base64.b64encode(rng.bytes(128)).decode() for _ in range(300)],
+        "sha256": [hashlib.sha256(rng.bytes(8)).hexdigest() for _ in range(300)],
+    }
+    assert {len(v[0]) for v in hashes.values()} == {128, 172, 64}
+    assert not any(is_notation(pd.Series(v)) for v in hashes.values())
+
+
 def test_codes_of_one_shape_and_unspaced_sentences_are_told_apart():
     import hashlib
     import uuid
@@ -630,12 +660,15 @@ def test_codes_of_one_shape_and_unspaced_sentences_are_told_apart():
             f"A_{rng.integers(1, 99)}_x_2016-0{rng.integers(1, 9)}-{rng.integers(10, 28)}"
             for _ in range(n)
         ],
-        "fixed_sequence": ["".join(rng.choice(list("ACGT"), 100)) for _ in range(n)],
+        # one length and shorter than an aligned sequence (ALIGNED_LENGTH): a code
+        "fixed_code": ["".join(rng.choice(list("ACGT"), 60)) for _ in range(n)],
     }
     sentences = list("今日は天気がとても良いので公園へ散歩に行きました私猫犬学校先生")
     text = {
         "sentence": ["".join(rng.choice(sentences, rng.integers(20, 80))) for _ in range(n)],
         "sequence": ["".join(rng.choice(list("ACGT"), rng.integers(30, 200))) for _ in range(n)],
+        # one length, but long and in a few letters: a sequence (aligned, or of a fixed region)
+        "fixed_sequence": ["".join(rng.choice(list("ACGT"), 100)) for _ in range(n)],
     }
     assert not any(is_notation(pd.Series(v)) for v in not_text.values())
     assert all(is_notation(pd.Series(v)) for v in text.values())

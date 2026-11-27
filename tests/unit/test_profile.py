@@ -157,6 +157,21 @@ def test_a_different_text_in_every_row_with_its_short_values_first_is_text_not_a
     assert _kind(pd.Series(short + long)) == "text"
 
 
+def test_an_aligned_sequence_of_one_length_is_text_and_a_long_hex_hash_an_id():
+    import hashlib
+
+    rng = np.random.default_rng(8)
+    base = rng.choice(list("ACGT"), 297)
+    rows = []
+    for _ in range(300):
+        seq = base.copy()
+        seq[rng.choice(297, 12, replace=False)] = rng.choice(list("ACGTRYKMN"), 12)
+        rows.append("".join(seq))
+    assert _kind(pd.Series(rows)) == "text"
+    hashes = [hashlib.sha512(rng.bytes(8)).hexdigest() for _ in range(300)]
+    assert _kind(pd.Series(hashes)) == "id"
+
+
 def test_a_prose_column_reports_its_mean_length_and_other_columns_do_not():
     text = [f"this is a fairly long free text comment number {i % 400}" for i in range(500)]
     unique = [f"every comment here is different, and this is number {i}" for i in range(500)]

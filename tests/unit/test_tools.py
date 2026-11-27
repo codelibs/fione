@@ -2317,6 +2317,25 @@ def test_propose_keeps_a_text_whose_first_rows_are_its_short_parts(env):
     assert {c["name"]: c["kind"] for c in found["columns"]}["phrase"] == "text"
 
 
+def test_propose_keeps_an_aligned_sequence_of_one_length(env):
+    rng = np.random.default_rng(8)
+    base = rng.choice(list("ACGT"), 297)
+    rows = []
+    for _ in range(300):
+        seq = base.copy()
+        seq[rng.choice(297, 12, replace=False)] = rng.choice(list("ACGTRYKMN"), 12)
+        rows.append("".join(seq))
+    frame = pd.DataFrame({"seq": rows, "label": rng.integers(0, 2, 300)})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "dna", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "seq" not in result["config"]["ignored_columns"]
+
+
 @pytest.mark.parametrize("name", ["id", "Id", "index", "row_id", "user_id", "idle"])
 def test_propose_still_leaves_a_row_id_out(env, name):
     ds = _daily(env, name)
