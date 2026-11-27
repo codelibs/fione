@@ -1,0 +1,8 @@
+{# The job page's heading: what the job is doing while it runs, what it was once it has ended
+   (then without the lead, which says that the page updates by itself). The status fragment
+   that sees the end sends it again, out of band (``oob``). #}
+{% set named = job.kind in ("automl", "batch_predict", "export_models", "module", "explain") %}
+<header class="page-header" id="job-header"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <h1 class="page-header__title">{{ t(('job.title_ended.' if terminal else 'job.title.') ~ job.kind) if named else job.kind }}</h1>
+  {% if not terminal %}<p class="page-header__lead text-muted">{{ t('job.lead.' ~ job.kind) if named else "" }}</p>{% endif %}
+</header>

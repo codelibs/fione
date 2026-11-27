@@ -445,6 +445,27 @@ def test_cancelling_a_queued_training(make_client):
     assert location(r) == job_url
 
 
+def test_an_ended_run_is_not_named_as_running(make_client):
+    """Once a job has ended, its page names it in the past and no longer says that it updates
+    by itself; the fragment that sees the end replaces the heading too."""
+    world = make_world(make_client())
+    csrf = world.login("ed")
+    job_url = world.path("/projects/{p}/jobs/{job}")
+    page = world.client.get(job_url).text
+    assert '<h1 class="page-header__title">Training your model</h1>' in page
+    assert "This page updates by itself." in page
+    world.client.post(job_url + "/cancel", data={"csrf_token": csrf}, follow_redirects=False)
+    page = world.client.get(job_url).text
+    assert '<h1 class="page-header__title">Model training</h1>' in page
+    assert "<title>Model training · " in page
+    assert "Training your model" not in page and "updates by itself" not in page
+    fragment = world.client.get(job_url + "/status", headers={"HX-Request": "true"}).text
+    assert 'id="job-header" hx-swap-oob="true"' in fragment and "Model training" in fragment
+    world.client.cookies.set("fione_lang", "ja")
+    page = world.client.get(job_url).text
+    assert "モデルの学習" in page and "モデルを学習中" not in page
+
+
 def test_a_viewer_watches_but_cannot_cancel(make_client):
     world = make_world(make_client())
     csrf = world.login("vi")
