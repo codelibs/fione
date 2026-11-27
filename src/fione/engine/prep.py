@@ -2,6 +2,7 @@
 
 import copy
 import re
+from collections import Counter
 from typing import Literal
 
 import numpy as np
@@ -38,6 +39,14 @@ REPEATED_PROSE_VALUES = 1000
 NOTATION_LENGTH = 15  # mean characters of a notation (a shorter value is a label or code)
 NOTATION_LENGTH_VARIATION = 0.3  # std / mean of the lengths: an id or a hash has one length
 NOTATION_UNIQUE = 0.9  # share of different values
+# An aligned sequence (one region of DNA or protein in every row) is a notation of one length: the
+# protease region of a virus is 297 letters in nearly every row (std / mean 0.017). It is told from
+# an id or a hash by being long and written in few characters, nearly all letters: a uuid is 36
+# characters, a sha256 64, and a hex hash (16 characters, most of them digits) or base64 (64
+# characters) fails the alphabet or the letters; DNA takes 4 to 15 letters, a protein about 25.
+ALIGNED_LENGTH = 100  # mean characters, at least
+ALIGNED_ALPHABET = 30  # different characters, at most
+ALIGNED_LETTERS = 0.9  # share of the characters that are letters, at least
 MAX_PROSE = 3  # prose columns the text view reads (the first ones)
 CONSOLIDATE_COLUMNS = 2_000  # a view of more columns is joined into few blocks (see _base)
 FEW_LEVELS = (
@@ -232,16 +241,29 @@ def _as_str(s: pd.Series) -> pd.Series:
 
 def is_notation(s: pd.Series) -> bool:
     """Whether a string column holds a notation (a SMILES molecule, a DNA or protein sequence):
-    values mostly different, without spaces and of varying length (an id has one length). Its
-    character n-grams carry the signal, but the values are no words."""
+    values mostly different, without spaces and of varying length (an id has one length), or of
+    one length when they are an aligned sequence (``_aligned``). Its character n-grams carry the
+    signal, but the values are no words."""
     values = _as_str(s).dropna()
     judged = frames._spread(values)  # a file sorted by length is judged on its whole range
     if len(judged) < MIN_ROWS or judged.str.contains(r"\s").mean() > 0.05:
         return False
     length = judged.str.len()
-    if length.mean() < NOTATION_LENGTH or length.std() < NOTATION_LENGTH_VARIATION * length.mean():
+    if length.mean() < NOTATION_LENGTH:
+        return False
+    if length.std() < NOTATION_LENGTH_VARIATION * length.mean() and not _aligned(judged):
         return False
     return bool(values.nunique() >= NOTATION_UNIQUE * len(values))
+
+
+def _aligned(values: pd.Series) -> bool:
+    """Whether values of (nearly) one length are an aligned sequence rather than an id or hash:
+    long (``ALIGNED_LENGTH``), in few characters (``ALIGNED_ALPHABET``), nearly all letters."""
+    if values.str.len().mean() < ALIGNED_LENGTH:
+        return False
+    chars = Counter("".join(values))
+    letters = sum(n for c, n in chars.items() if c.isalpha())
+    return len(chars) <= ALIGNED_ALPHABET and letters >= ALIGNED_LETTERS * sum(chars.values())
 
 
 def is_prose(s: pd.Series) -> bool:

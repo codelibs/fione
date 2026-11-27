@@ -263,7 +263,7 @@ may be classes; setting the prediction type to classification trains on them as 
 
 ## Text columns
 
-A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product, or that take a thousand different values or more, such as a search query; so is a column of notations without spaces, such as molecules written as SMILES or DNA sequences, whose values are mostly different, 15 characters or longer and of varying length) is read in two ways. Its
+A column of running text (the median value has five words or more, or three or more in values that are mostly different, such as the title of a product, or that take a thousand different values or more, such as a search query; so is a column of notations without spaces, such as molecules written as SMILES or DNA sequences, whose values are mostly different, 15 characters or longer and of varying length, or of one length when they are an aligned sequence: 100 characters or longer, written in at most 30 different characters, nearly all letters, which an id or a hash of one length is not) is read in two ways. Its
 topics are derived features (see below). A model family called TextLinear also reads its words:
 a logistic (or ridge) regression on the TF-IDF weights of words and word pairs, with the other
 columns beside them, learned again on each training fold. Each punctuation mark or symbol counts as a word of its own, and so does a one-letter word, since how a text is punctuated can tell its author or its mood. It joins the search and the ensemble
