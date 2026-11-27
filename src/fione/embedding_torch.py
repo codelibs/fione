@@ -36,9 +36,21 @@ class TorchLMBackend:
         self.tokenizer.padding_side = "right"
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.model = AutoModel.from_pretrained(directory, dtype=dtype).to(self.device).eval()
+        self.model = self._load(AutoModel, directory, dtype)
         depth = self.model.config.num_hidden_layers
         self.layer = max(1, min(depth, round(spec.layer * depth)))
+
+    def _load(self, auto_model, directory: str, dtype):
+        """The model on the GPU, or spread over several (a model larger than one of them); on
+        another device, or where ``accelerate`` is missing, all on the one device."""
+        if self.device == "cuda":
+            try:
+                model = auto_model.from_pretrained(directory, dtype=dtype, device_map="auto")
+                self.device = model.device
+                return model.eval()
+            except (ImportError, ValueError):
+                pass
+        return auto_model.from_pretrained(directory, dtype=dtype).to(self.device).eval()
 
     def embed(self, texts: Sequence[str]) -> np.ndarray:
         torch = self._torch
@@ -55,8 +67,8 @@ class TorchLMBackend:
             ).to(self.device)
             with torch.no_grad():
                 states = self.model(**batch, output_hidden_states=True).hidden_states[self.layer]
-            mask = batch["attention_mask"].unsqueeze(-1).to(states.dtype)
-            mean = (states * mask).sum(1) / mask.sum(1).clamp(min=1)
+            mask = batch["attention_mask"].unsqueeze(-1).to(states.device, torch.float32)
+            mean = (states.float() * mask).sum(1) / mask.sum(1).clamp(min=1)
             if out is None:
                 out = np.zeros((len(texts), mean.shape[1]), dtype=np.float32)
             out[at] = mean.float().cpu().numpy()
