@@ -148,6 +148,7 @@
   "kind.datetime": "日付",
   "kind.id": "ID らしい",
   "kind.constant": "値が 1 種類",
+  "kind.list": "数値のリスト",
   "dataset.type.train": "学習データ",
   "dataset.type.test": "予測するデータ",
   "dataset.type.predict": "予測結果",

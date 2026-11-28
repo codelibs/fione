@@ -17,6 +17,7 @@ from fione.engine.prep import (
     integer_date_format,
     is_notation,
     is_prose,
+    number_list_shape,
     validate_target,
 )
 
@@ -640,6 +641,22 @@ def test_an_aligned_sequence_of_one_length_is_a_notation_but_a_long_hash_is_not(
     }
     assert {len(v[0]) for v in hashes.values()} == {128, 172, 64}
     assert not any(is_notation(pd.Series(v)) for v in hashes.values())
+
+
+def test_columns_of_number_lists_are_told_from_text_and_strings():
+    rng = np.random.default_rng(10)
+    flat = pd.Series([str(rng.integers(0, 9, rng.integers(2, 9)).tolist()) for _ in range(200)])
+    frames = pd.Series(
+        [str(rng.integers(0, 256, (rng.integers(3, 6), 4)).tolist()) for _ in range(200)]
+    )
+    assert number_list_shape(flat) == (1, 0) and number_list_shape(frames) == (2, 4)
+    tags = pd.Series([f'["pool", "garden", "room {i}"]' for i in range(200)])
+    ragged = pd.Series(["[[1, 2], [3]]"] * 200)
+    words = pd.Series([f"a list of {i} words" for i in range(200)])
+    assert not any(number_list_shape(s) for s in (tags, ragged, words))
+    frame = pd.DataFrame({"emb": frames, "x": rng.normal(size=200)})
+    prep = Prep().fit(frame)
+    assert prep.lists == ("emb",) and prep.prose == ()
 
 
 def test_codes_of_one_shape_and_unspaced_sentences_are_told_apart():

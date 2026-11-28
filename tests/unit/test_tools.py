@@ -2336,6 +2336,22 @@ def test_propose_keeps_an_aligned_sequence_of_one_length(env):
     assert "seq" not in result["config"]["ignored_columns"]
 
 
+def test_propose_keeps_a_column_of_number_lists(env):
+    rng = np.random.default_rng(3)
+    values = [str(rng.integers(0, 256, (5, 4)).tolist()) for _ in range(300)]
+    frame = pd.DataFrame({"frames": values, "label": rng.integers(0, 2, 300)})
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "lists", DatasetType.TRAIN, [frame]
+    )
+    try:
+        result = call(env, "propose_training_config", {"dataset_id": ds.id, "target": "label"})
+        found = call(env, "describe_dataset", {"dataset_id": ds.id})
+    finally:
+        projects.delete_dataset(env.conn, env.storage, ds.id)
+    assert "frames" not in result["config"]["ignored_columns"]
+    assert {c["name"]: c["kind"] for c in found["columns"]}["frames"] == "list"
+
+
 @pytest.mark.parametrize("name", ["id", "Id", "index", "row_id", "user_id", "idle"])
 def test_propose_still_leaves_a_row_id_out(env, name):
     ds = _daily(env, name)

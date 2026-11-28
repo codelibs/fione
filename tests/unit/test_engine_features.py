@@ -17,6 +17,7 @@ from fione.engine.features import (
     DateParts,
     GroupMeans,
     IdParts,
+    ListValues,
     NotationShares,
     NumberPairs,
     RowCounts,
@@ -190,6 +191,58 @@ def test_notation_shares_survive_pickling_and_the_views():
     prep = Prep().fit(X, [NotationShares("seq")])
     clone = pickle.loads(pickle.dumps(prep))  # noqa: S301 - a frame this test built
     for view in ("tree", "dense", "catboost", "linear"):
+        pd.testing.assert_frame_equal(getattr(prep, view)(X), getattr(clone, view)(X))
+
+
+def test_list_values_of_short_lists_of_one_length_are_the_positions():
+    X = pd.DataFrame({"c": [str([i, i + 1, i * 2]) for i in range(50)]})
+    group = ListValues("c").fit(X)
+    assert group.names == ["c__p0", "c__p1", "c__p2"]
+    out = group.transform(
+        pd.DataFrame({"c": ["[7, 8]", "no list", None, "[[1, 2]]", "[1, 2, 3, 4]"]})
+    )
+    assert out.iloc[0].tolist()[:2] == [7.0, 8.0] and np.isnan(out.iloc[0, 2])
+    assert out.iloc[1:4].isna().all().all()
+    assert out.iloc[4].tolist() == [1.0, 2.0, 3.0]  # the extra number is not read
+
+
+def test_list_values_of_ragged_lists_are_their_statistics():
+    rng = np.random.default_rng(1)
+    X = pd.DataFrame(
+        {"c": [str(rng.integers(0, 9, rng.integers(2, 60)).tolist()) for _ in range(80)]}
+    )
+    out = ListValues("c").fit(X).transform(pd.DataFrame({"c": ["[1, 5, 3]"]}))
+    assert out.iloc[0].tolist() == pytest.approx([3, 3, np.std([1, 5, 3]), 1, 5, 1, 3])
+
+
+def test_list_values_of_lists_of_lists_are_means_and_spreads_per_position():
+    rng = np.random.default_rng(2)
+    X = pd.DataFrame(
+        {"c": [str(rng.integers(0, 9, (rng.integers(2, 5), 3)).tolist()) for _ in range(80)]}
+    )
+    group = ListValues("c").fit(X)
+    assert group.names[:5] == ["c__lists", "c__mean_0", "c__std_0", "c__min_0", "c__max_0"]
+    out = group.transform(pd.DataFrame({"c": ["[[1, 2, 3], [3, 4, 5]]"]}))
+    assert (
+        out.loc[0, "c__lists"] == 2 and out.loc[0, "c__mean_2"] == 4 and out.loc[0, "c__max_0"] == 3
+    )
+    fixed = pd.DataFrame({"c": [str(rng.integers(0, 9, (2, 3)).tolist()) for _ in range(80)]})
+    assert "c__cell_1_2" in ListValues("c").fit(fixed).names  # 6 numbers in all: each one too
+    wide = pd.DataFrame({"c": [str(rng.integers(0, 9, (3, 40)).tolist()) for _ in range(30)]})
+    names = ListValues("c").fit(wide).names
+    assert "c__mean_39" in names and not any("__min_" in n or "__cell_" in n for n in names)
+
+
+def test_list_values_are_offered_for_a_list_column_only_and_survive_pickling():
+    rng = np.random.default_rng(3)
+    X, _ = sentences()
+    X["emb"] = [str(rng.integers(0, 9, (3, 4)).tolist()) for _ in range(len(X))]
+    labels = [g.label for g in features.candidates(Prep().fit(X), X, [])]
+    assert "list values of emb" in labels and "list values of text" not in labels
+    assert not any(label.endswith("of emb") and "list" not in label for label in labels)
+    prep = Prep().fit(X, [ListValues("emb")])
+    clone = pickle.loads(pickle.dumps(prep))  # noqa: S301 - a frame this test built
+    for view in ("tree", "dense", "linear"):
         pd.testing.assert_frame_equal(getattr(prep, view)(X), getattr(clone, view)(X))
 
 
