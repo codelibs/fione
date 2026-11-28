@@ -36,8 +36,11 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import StratifiedKFold
 
 from fione.auth.roles import ProjectAccess, Role, can_access_project, project_access
 from fione.data.frames import is_counter_name, is_day_first, is_time_counter, parse_datetimes
@@ -1637,6 +1640,94 @@ def _sibling_warning(target: str, siblings: list[str]) -> dict | None:
     )
 
 
+# Whether the rows to predict look like the training rows: a quick classifier tells the rows of the
+# project's test and predict datasets from the training rows. Over the local train and test pairs
+# the AUC was 0.45 to 0.53 where the test rows were drawn like the training rows, 0.60 and more
+# where they differ (other times, other subjects, rows chosen by a column).
+SHIFT_ROWS = 5_000  # rows read of each side, spread over the file
+SHIFT_CELLS = 600_000  # ... fewer on a wide table, so the check takes a second or two
+SHIFT_MIN_ROWS = 50  # rows of each side the check needs
+SHIFT_MAX_COLUMNS = 1_000  # more columns are not checked: the time grows with them
+SHIFT_MAX_LEVELS = 200  # a text column of more values is not read by the check
+SHIFT_TREES = 50
+SHIFT_AUC = 0.58  # from this AUC the warning is given
+_SHIFT_SHOWN = 3  # columns named
+
+
+def shift_from_training(
+    storage, conn, dataset: Dataset, profile, features: list[str]
+) -> tuple[float, list[str]] | None:
+    """``(AUC, the columns it relies on most)`` of a classifier telling the rows of the project's
+    test and predict datasets from the training rows, over the ``features`` that are numbers or
+    categories (dates are left to the time checks, prose and ids out); None when not judged."""
+    kinds = {c.name: c.kind for c in profile.columns}
+    columns = [n for n in features if kinds.get(n) in ("numeric", "categorical")]
+    later = [
+        other
+        for other in projects.list_datasets(conn, dataset.project_id)
+        if other.type in (DatasetType.TEST, DatasetType.PREDICT)
+        and set(columns) <= {n for n, _ in other.schema}
+    ]
+    if dataset.type != DatasetType.TRAIN or not later or not columns:
+        return None
+    if len(columns) > SHIFT_MAX_COLUMNS:
+        return None
+    side = max(min(SHIFT_ROWS, SHIFT_CELLS // len(columns)), SHIFT_MIN_ROWS)
+    train = ingest.read_dataset_spread(storage, dataset, side, columns)
+    rows = max(side // len(later), 1)
+    test = pd.concat(
+        [ingest.read_dataset_spread(storage, other, rows, columns) for other in later],
+        ignore_index=True,
+    )
+    if min(len(train), len(test)) < SHIFT_MIN_ROWS:
+        return None
+    both = pd.concat([train, test], ignore_index=True)
+    used, X = [], {}
+    for name in columns:
+        values = both[name]
+        if kinds[name] == "numeric" and pd.api.types.is_numeric_dtype(values):
+            X[f"c{len(used)}"] = pd.to_numeric(values, errors="coerce").astype(float)
+        else:
+            text = values.astype(str).where(values.notna())
+            if text.nunique() > SHIFT_MAX_LEVELS:
+                continue
+            X[f"c{len(used)}"] = pd.Categorical(text)
+        used.append(name)
+    if not used:
+        return None
+    X = pd.DataFrame(X)
+    y = np.r_[np.zeros(len(train)), np.ones(len(test))]
+
+    def model():
+        return lgb.LGBMClassifier(
+            n_estimators=SHIFT_TREES, learning_rate=0.1, n_jobs=2, random_state=0, verbose=-1
+        )
+
+    scores = np.zeros(len(y))
+    for fit_rows, held in StratifiedKFold(3, shuffle=True, random_state=0).split(X, y):
+        scores[held] = model().fit(X.iloc[fit_rows], y[fit_rows]).predict_proba(X.iloc[held])[:, 1]
+    auc = float(roc_auc_score(y, scores))
+    gain = model().set_params(importance_type="gain").fit(X, y).feature_importances_
+    order = np.argsort(-np.asarray(gain), kind="stable")
+    return auc, [used[i] for i in order[:_SHIFT_SHOWN] if gain[i] > 0]
+
+
+def _shift_warning(found: tuple[float, list[str]] | None) -> dict | None:
+    if found is None or found[0] < SHIFT_AUC or not found[1]:
+        return None
+    auc, columns = found
+    shown = ", ".join(f"'{clean_text(n)}'" for n in columns)
+    return _warning(
+        "test_shift",
+        f"the rows of the test or predict data can be told from the training rows (AUC "
+        f"{auc:.2f}), most by {shown}: the validation score may not hold on them. Check how "
+        "those columns differ, and leave out one that differs for a reason that will not hold "
+        "when predicting",
+        auc=f"{auc:.2f}",
+        columns=shown,
+    )
+
+
 def _columns_not_in_test(absent: list[str]) -> dict | None:
     """The warning for the columns the model would learn from that no test or predict dataset of
     the project has, or None."""
@@ -1917,6 +2008,12 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         )
         ignored.append(name)
     if warning := _columns_empty_in_test([n for n in empty if n not in set(left_empty)]):
+        warnings.append(warning)
+    times = {time_arg, time_index.name if time_index else None}  # left to the time checks
+    kept = [n for n in features if n not in set(ignored) and n not in times]
+    if warning := _shift_warning(
+        shift_from_training(ctx.storage, ctx.conn, dataset, profile, kept)
+    ):
         warnings.append(warning)
     if event is None and is_skewed_target(found.y, task):
         warnings.append(
