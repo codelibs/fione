@@ -948,6 +948,60 @@ def test_propose_names_up_to_five_columns_and_counts_the_rest(env, n_absent, cod
     assert (warning["code"], warning["params"]) == (code, params)
 
 
+def _joined_training_data(env, n_answers=3):
+    """Ratings, persons keyed by another name, the ratings joined to the persons by a done Join
+    job, and test rows that were not joined."""
+    rng = np.random.default_rng(0)
+    persons = pd.DataFrame({"PersonNo": range(40), "age": rng.integers(18, 80, 40)})
+    persons = persons.assign(**{f"q{i}": rng.integers(0, 100, 40) for i in range(n_answers)})
+    ratings = pd.DataFrame({"User": rng.integers(0, 40, 200), "x": rng.normal(size=200)})
+    ratings["label"] = ratings.x + rng.normal(size=200)
+    joined = ratings.merge(persons, left_on="User", right_on="PersonNo").drop(columns="PersonNo")
+    made = {
+        name: ingest.ingest_batches(env.storage, env.conn, env.project.id, name, kind, [frame])
+        for name, kind, frame in [
+            ("ratings", DatasetType.TRAIN, ratings),
+            ("persons", DatasetType.TRAIN, persons),
+            ("joined", DatasetType.TRAIN, joined),
+            ("test", DatasetType.TEST, ratings.drop(columns="label")),
+        ]
+    }
+    params = {"other_dataset_id": made["persons"].id, "key": "User", "other_key": "PersonNo"}
+    payload = {"module_id": "join", "dataset_id": made["ratings"].id, "params": params}
+    job = store.enqueue(env.conn, "module", env.project.id, env.users.owner.id, payload)
+    assert store.claim_job(env.conn, job.id, "token")
+    store.finish_job(
+        env.conn, job.id, store.JobStatus.DONE, result={"dataset_id": made["joined"].id}
+    )
+    return made
+
+
+@pytest.mark.parametrize(
+    ("n_answers", "code", "columns", "more"),
+    [
+        (3, "joined_columns_not_in_test", "age, q0, q1, q2", None),
+        (6, "joined_columns_not_in_test_more", "age, q0, q1, q2, q3", 2),
+    ],
+)
+def test_propose_says_to_join_the_test_data_as_the_training_data_was(
+    env, n_answers, code, columns, more
+):
+    made = _joined_training_data(env, n_answers)
+    try:
+        result = call(
+            env, "propose_training_config", {"dataset_id": made["joined"].id, "target": "label"}
+        )
+    finally:
+        for dataset in made.values():
+            projects.delete_dataset(env.conn, env.storage, dataset.id)
+    (warning,) = [w for w in result["warnings"] if w["code"].startswith("joined_columns")]
+    expected = {"columns": columns, "dataset": "persons", "key": "User = PersonNo"}
+    assert warning["code"] == code
+    assert warning["params"] == expected | ({"more": more} if more else {})
+    assert _absent_columns(result) is None  # the join says it, not the general warning
+    codes(result)  # both languages translate the code
+
+
 def test_propose_is_silent_for_a_test_dataset_with_the_columns_of_the_train_dataset(env):
     # what the Split module makes: the same columns, the target included
     result = _propose_with_later_data(env, [(DatasetType.TEST, ["x", "z", "Age", "label"])])
