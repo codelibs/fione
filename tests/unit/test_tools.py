@@ -1087,6 +1087,87 @@ def test_the_sibling_warnings_show_their_figures_in_both_languages(code, placeho
         assert {f for _, f, _, _ in string.Formatter().parse(template) if f} == placeholders
 
 
+def _propose_train_and_test(env, train, test):
+    made = [
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "train", DatasetType.TRAIN, [train]
+        ),
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "test", DatasetType.TEST, [test]
+        ),
+    ]
+    try:
+        return call(env, "propose_training_config", {"dataset_id": made[0].id, "target": "y"})
+    finally:
+        for ds in made:
+            projects.delete_dataset(env.conn, env.storage, ds.id)
+
+
+def _shifted(result):
+    return next((w for w in result["warnings"] if w["code"] == "test_shift"), None)
+
+
+def _table(rows=600, seed=0):
+    rng = np.random.default_rng(seed)
+    frame = pd.DataFrame(
+        {"x": rng.normal(size=rows), "z": rng.normal(size=rows), "c": rng.choice(list("abc"), rows)}
+    )
+    frame["y"] = frame["x"] + rng.normal(size=rows)
+    return frame
+
+
+def test_propose_warns_when_the_test_rows_differ_from_the_training_rows(env):
+    frame = _table()
+    high = frame["x"] > frame["x"].quantile(0.8)  # the rows to predict were chosen by x
+    result = _propose_train_and_test(env, frame[~high], frame[high].drop(columns="y"))
+    warning = _shifted(result)
+    assert warning is not None and warning["code"] in codes(result)
+    assert warning["params"]["columns"].startswith("'x'") and float(warning["params"]["auc"]) > 0.9
+
+
+def test_propose_does_not_warn_when_the_test_rows_are_drawn_like_the_training_rows(env):
+    frame = _table()
+    picked = np.random.default_rng(1).random(len(frame)) < 0.25
+    assert (
+        _shifted(_propose_train_and_test(env, frame[~picked], frame[picked].drop(columns="y")))
+        is None
+    )
+
+
+def test_the_shift_check_leaves_dates_to_the_time_checks_and_needs_enough_rows(env):
+    frame = _table()
+    frame["when"] = pd.date_range("2020-01-01", periods=len(frame), freq="D")
+    picked = np.random.default_rng(2).random(len(frame)) < 0.25
+    train, test = frame[~picked].copy(), frame[picked].drop(columns="y")
+    test["when"] = test["when"] + pd.Timedelta(days=5000)  # later dates, otherwise alike
+    assert _shifted(_propose_train_and_test(env, train, test)) is None
+    high = frame["x"] > frame["x"].quantile(0.95)
+    few = frame[high].drop(columns=["y", "when"]).head(20)  # too few rows to judge
+    assert _shifted(_propose_train_and_test(env, frame[~high].drop(columns="when"), few)) is None
+
+
+def test_the_shift_check_gives_the_same_verdict_every_time(env):
+    frame = _table()
+    high = frame["x"] > frame["x"].quantile(0.8)
+    runs = [_propose_train_and_test(env, frame[~high], frame[high].drop(columns="y")) for _ in "ab"]
+    assert _shifted(runs[0])["params"] == _shifted(runs[1])["params"]
+
+
+def test_the_shift_check_leaves_a_group_column_of_other_values_to_its_own_warning(env):
+    frame = _table()
+    frame["user"] = np.arange(len(frame)) // 10  # 60 users, 10 rows each
+    later = frame["user"] >= 50  # the test is about other users
+    result = _propose_train_and_test(env, frame[~later], frame[later].drop(columns="y"))
+    assert "group_column_for_test" in codes(result)
+    assert _shifted(result) is None
+
+
+def test_the_shift_warning_shows_its_figures_in_both_languages():
+    for lang in i18n.LANGUAGES:
+        template = i18n.catalog(lang)["assistant.warn.test_shift"]
+        assert {f for _, f, _, _ in string.Formatter().parse(template) if f} == {"auc", "columns"}
+
+
 def _propose_with_test_values(env, test_values, train_missing=0.0, rows=60, test_rows=30, **args):
     """The proposal for a train dataset (columns x, z, Age; ``z`` missing in ``train_missing`` of
     its rows) next to test datasets whose column ``z`` holds ``test_values`` (a list of lists,
