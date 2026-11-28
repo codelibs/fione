@@ -74,9 +74,9 @@ from fione.web.access import model_in as _model
 from fione.web.access import page as _page
 from fione.web.uploads import UploadProblem as _UploadProblem
 from fione.web.uploads import receive_csv as _receive_csv
-from fione.web.uploads import size_text as _size
 from fione.web.uploads import upload_context as _upload_context
 from fione.web.views import UiError, language, render
+from fione.web.views import size_text as _size
 
 log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)

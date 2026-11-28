@@ -144,10 +144,3 @@ async def receive_csv(request: Request, conn, ctx: Ctx, type_: DatasetType | Non
             raise _ingest_problem(e) from e
     finally:
         await form.close()
-
-
-def size_text(n: int) -> str:
-    for unit, scale in (("GB", 2**30), ("MB", 2**20), ("KB", 2**10)):
-        if n >= scale:
-            return f"{n / scale:.1f}".removesuffix(".0") + f" {unit}"
-    return f"{n} B"

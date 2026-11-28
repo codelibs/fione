@@ -64,8 +64,8 @@ from fione.web.easyml import (
     join_targets,
     recommended_runtime,
 )
-from fione.web.uploads import UploadProblem, receive_csv, size_text, upload_context
-from fione.web.views import UiError, language, render, warning_texts
+from fione.web.uploads import UploadProblem, receive_csv, upload_context
+from fione.web.views import UiError, language, render, size_text, warning_texts
 
 log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)

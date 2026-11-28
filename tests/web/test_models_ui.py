@@ -411,6 +411,44 @@ def test_an_import_over_the_archive_limit_is_413(world, monkeypatch):
     assert r.status_code == 413 and "larger than a model export may be" in r.text
 
 
+def test_an_import_over_the_upload_limit_says_the_limit(make_client):
+    world = make_world(make_client(max_upload_bytes=1000))
+    csrf = world.login("admin")
+    r = world.client.post(
+        f"/projects/{world.p}/models/import",
+        data={"csrf_token": csrf},
+        files={"file": ("model.zip", b"x" * (2 << 20), "application/zip")},
+        headers=HTML,
+    )
+    assert r.status_code == 413 and "The file is too large to upload." in r.text
+    assert "Files up to 1000 B" in r.text and "rows or columns" not in r.text
+    assert f'href="/projects/{world.p}/models/import"' in r.text
+
+
+def test_a_module_over_the_upload_limit_says_the_module_cap(make_client):
+    world = make_world(make_client(max_upload_bytes=512 * 1024))
+    csrf = world.login("admin")
+    r = world.client.post(
+        "/modules/upload",
+        data={"csrf_token": csrf, "id": "big"},
+        files={"file": ("big.py", b"#" * (2 << 20), "text/x-python")},
+        headers=HTML,
+    )
+    assert r.status_code == 413 and "Files up to 256 KB can be uploaded." in r.text
+    assert 'href="/modules/upload"' in r.text
+
+
+def test_the_way_back_from_an_oversized_upload_is_quoted(make_client):
+    client = make_client(max_upload_bytes=1000)
+    r = client.post(
+        '/projects/x"><b>y/upload',
+        content=b"x" * (2 << 20),  # over the limit plus the multipart slack
+        headers=HTML | {"Content-Type": "application/octet-stream"},
+    )
+    assert r.status_code == 413
+    assert 'href="/projects/x%22%3E%3Cb%3Ey/upload"' in r.text and "<b>y" not in r.text
+
+
 # --- modules ------------------------------------------------------------------------------
 
 

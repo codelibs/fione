@@ -7,13 +7,14 @@ which HTMX sends from ``hx-headers`` on ``<body>``, or a ``csrf_token`` form fie
 """
 
 import logging
+import re
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from string import Formatter
 from typing import Annotated
-from urllib.parse import unquote, urlencode, urlsplit
+from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from fastapi import APIRouter, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
@@ -29,6 +30,8 @@ from fione.assistant.provider import LlmStatus
 from fione.auth import service as auth_service
 from fione.auth.passwords import MIN_PASSWORD_LENGTH
 from fione.auth.roles import Role
+from fione.models.transfer import MAX_ARCHIVE_BYTES
+from fione.modules.service import MAX_SOURCE_BYTES
 from fione.projects import service as projects
 from fione.version import __version__
 from fione.web.cache import LruCache
@@ -401,6 +404,37 @@ def error_page(request: Request, status: int, key: str) -> HTMLResponse:
     )
 
 
+def size_text(n: int) -> str:
+    for unit, scale in (("GB", 2**30), ("MB", 2**20), ("KB", 2**10)):
+        if n >= scale:
+            return f"{n / scale:.1f}".removesuffix(".0") + f" {unit}"
+    return f"{n} B"
+
+
+def too_large_page(request: Request) -> HTMLResponse:
+    """The page for a request body over the limit, refused before it is read. An upload form's
+    page says the upload limit and leads back to the form; others get the plain error page."""
+    path = request.url.path
+    form = next((f for f in UI_UPLOAD_FORMS if f[0].match(path)), None)
+    if form is None:
+        return error_page(request, 413, "error.too_large")
+    _, key, own_cap = form
+    limit = request.app.state.settings.max_upload_bytes
+    if own_cap is not None:
+        limit = min(limit, own_cap)
+    lang = language(request)
+    return render(
+        request,
+        "error.html",
+        _signed_in(request),
+        status=413,
+        message=i18n.t(key, lang),
+        detail=i18n.t("error.upload_limit", lang, limit=size_text(limit)),
+        back=quote(path),
+        here="/",
+    )
+
+
 async def _ui_error(request: Request, exc: UiError) -> Response:
     if request.headers.get("hx-request"):
         message = i18n.t(exc.key, language(request))
@@ -417,6 +451,18 @@ async def _ui_error(request: Request, exc: UiError) -> Response:
 
 # Status -> message of the error page for errors raised outside the UI's own checks.
 HTTP_ERROR_KEYS = {404: "error.not_found", 405: "error.method", 413: "error.too_large"}
+# The UI's upload forms (fione.web.easyml, automl, models_ui, modules_ui): their bodies may be as
+# large as the upload limit, and one over it gets a page that says how large a file the form takes
+# (the upload limit, or the form's own smaller cap) and leads back to it (the same path, opened
+# with GET). The data uploads also say how to make the file smaller.
+UI_UPLOAD_FORMS = [  # (path, message, the form's own cap or None)
+    (re.compile(r"^/projects/[^/]+/upload$"), "upload.error.too_large", None),
+    (re.compile(r"^/projects/[^/]+/datasets$"), "upload.error.too_large", None),
+    (re.compile(r"^/projects/[^/]+/models/[^/]+/predict$"), "upload.error.too_large", None),
+    (re.compile(r"^/projects/[^/]+/models/import$"), "error.too_large", MAX_ARCHIVE_BYTES),
+    (re.compile(r"^/modules/upload$"), "error.too_large", MAX_SOURCE_BYTES),
+]
+UI_UPLOAD_PATHS = [path for path, _, _ in UI_UPLOAD_FORMS]
 ERROR_HINTS = {404: "error.not_found_hint", 403: "error.forbidden_hint"}
 KEY_HINTS = {"error.admin_only": "error.admin_only_hint"}
 
@@ -457,6 +503,8 @@ def install(app: FastAPI) -> None:
 
     async def http_error(request: Request, exc: StarletteHTTPException) -> Response:
         if wants_html(request):
+            if exc.status_code == 413:  # a body counted over the limit as it arrived
+                return too_large_page(request)
             return error_page(
                 request, exc.status_code, HTTP_ERROR_KEYS.get(exc.status_code, "error.generic")
             )

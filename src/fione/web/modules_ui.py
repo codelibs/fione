@@ -16,8 +16,8 @@ from fione.modules import service as modules
 from fione.modules.registry import MODULE_ID, redact
 from fione.modules.service import MAX_SOURCE_BYTES, ModuleNotFound
 from fione.web.automl import Posted, _text
-from fione.web.uploads import UploadFormError, read_form, size_text
-from fione.web.views import UiError, action_auth, render
+from fione.web.uploads import UploadFormError, read_form
+from fione.web.views import UiError, action_auth, render, size_text
 
 router = APIRouter(include_in_schema=False)
 

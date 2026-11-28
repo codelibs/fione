@@ -138,7 +138,8 @@ def test_dataset_uploads_are_under_the_upload_limit_not_the_form_limit(make_clie
         files={"file": ("big.csv", big, "text/csv")},
         headers=HTML,
     )
-    assert r.status_code == 413 and "too large to upload" in r.text
+    assert r.status_code == 413 and "larger than the upload limit" in r.text
+    assert "Files up to 1000 B" in r.text and world.path('href="/projects/{p}/datasets"') in r.text
 
 
 def test_deleting_a_dataset(world):
