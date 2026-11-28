@@ -752,11 +752,19 @@ def _typed(series: pd.Series, column: str, text: str):
             return float(text)
     except ValueError:
         raise ModuleError(f"'{text}' does not fit column '{column}'") from None
-    if pd.api.types.is_datetime64_any_dtype(dtype):
+    if pd.api.types.is_datetime64_any_dtype(dtype) or _holds_dates(series):
         return _date_literal(text, column, getattr(dtype, "tz", None))
     if pd.api.types.is_string_dtype(dtype) or pd.api.types.is_object_dtype(dtype):
         return text
     raise ModuleError(f"column '{column}' of type {dtype} is not supported here")
+
+
+def _holds_dates(series: pd.Series) -> bool:
+    """A column of dates without a time (a CSV's year-month-day column, stored as date32), which
+    a module reads as ``datetime.date`` objects rather than as datetime64."""
+    return pd.api.types.is_object_dtype(series.dtype) and (
+        pd.api.types.infer_dtype(series, skipna=True) == "date"
+    )
 
 
 def _date_literal(text: str, column: str, zone) -> pd.Timestamp:
@@ -794,8 +802,11 @@ def _comparison(df: pd.DataFrame, text: str) -> np.ndarray:
             "column is empty or column is not empty"
         )
     column = require_column(df, found["column"].strip())
-    value = _typed(df[column], column, found["value"].strip())
-    return np.asarray(_COMPARE[found["op"]](df[column], value).fillna(False), dtype=bool)
+    series = df[column]
+    value = _typed(series, column, found["value"].strip())
+    if _holds_dates(series):
+        series = pd.to_datetime(series)  # each date at midnight, to compare with the timestamp
+    return np.asarray(_COMPARE[found["op"]](series, value).fillna(False), dtype=bool)
 
 
 def row_mask(df: pd.DataFrame, conditions: str) -> np.ndarray:
@@ -816,6 +827,12 @@ def row_mask(df: pd.DataFrame, conditions: str) -> np.ndarray:
 def replace(df, params, ctx):
     column = require_column(df, params["column"])
     value = _typed(df[column], column, params["value"])
+    if _holds_dates(df[column]):
+        if value != value.normalize():
+            raise ModuleError(
+                f"column '{column}' holds dates without a time of day; write a date as 2015-07-01"
+            )
+        value = value.date()
     df = df.copy()
     try:
         df.loc[row_mask(df, params["row_conditions"]), column] = value
