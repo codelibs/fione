@@ -54,7 +54,8 @@ log can do it.
 ## 4. Get a CSV to try
 
 Any CSV with a header row works, in UTF-8, Shift_JIS, EUC-JP or Windows-1252 (a file that none of
-the first three reads, such as one saved by Excel in a Western language), and so does JSON: an array of objects (`[{"a": 1}, ...]`, up
+the first three reads, such as one saved by Excel in a Western language), and a quoted cell may hold
+line breaks, as a text of several paragraphs does. JSON works too: an array of objects (`[{"a": 1}, ...]`, up
 to 200 MB) or JSON Lines (one object per line, of any size up to the upload limit). Each
 top-level key becomes a column, in the order first seen; a list or an object in a value is kept
 as its JSON text; a column of numbers and text is text. To try with the classic iris flowers, export the copy that
