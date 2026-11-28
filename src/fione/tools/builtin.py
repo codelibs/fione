@@ -1888,23 +1888,6 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                         column=column,
                     )
                 )
-    for suspect in profile.leak_suspects:
-        name, reason = clean_text(suspect.column), clean_text(suspect.reason)
-        code = leak_code(suspect.reason)
-        if suspect.reason in SCORE_REASONS:  # a strong legitimate column can score as high
-            warnings.append(
-                _warning(
-                    code,
-                    f"column '{name}': {reason} (score {_r(suspect.score)}); it may be a target "
-                    "leak, so check that it is known at prediction time",
-                    column=name,
-                    score=_r(suspect.score),
-                )
-            )
-            continue
-        reason = f"possible target leak: {reason}"
-        suggestions.append({"column": name, "reason": reason, "code": code})
-        warnings.append(_warning(code, f"column '{name}': {reason}", column=name))
     if unlisted_ids:
         warnings.append(
             _warning(
@@ -2017,6 +2000,27 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         ignored.append(name)
     if warning := _columns_empty_in_test([n for n in empty if n not in set(left_empty)]):
         warnings.append(warning)
+    # A column the proposal leaves out (an id, not in the test data, ...) cannot leak, so it is
+    # not warned of.
+    for suspect in profile.leak_suspects:
+        if suspect.column in set(ignored):
+            continue
+        name, reason = clean_text(suspect.column), clean_text(suspect.reason)
+        code = leak_code(suspect.reason)
+        if suspect.reason in SCORE_REASONS:  # a strong legitimate column can score as high
+            warnings.append(
+                _warning(
+                    code,
+                    f"column '{name}': {reason} (score {_r(suspect.score)}); it may be a target "
+                    "leak, so check that it is known at prediction time",
+                    column=name,
+                    score=_r(suspect.score),
+                )
+            )
+            continue
+        reason = f"possible target leak: {reason}"
+        suggestions.append({"column": name, "reason": reason, "code": code})
+        warnings.append(_warning(code, f"column '{name}': {reason}", column=name))
     if event is None and is_skewed_target(found.y, task):
         warnings.append(
             _warning(

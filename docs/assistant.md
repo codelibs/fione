@@ -171,7 +171,8 @@ warns about columns the model would learn from that those datasets lack, because
 needs every column the model learned from. A column that the test datasets have but hold no value in (each of them of at least 20 rows),
 while at most 90% of the training rows examined lack it, is left out of the proposal in the same
 way, since a prediction could not use it; the files' own counts of missing values decide, so every
-row is taken into account. It also checks whether the rows of those datasets look like the
+row is taken into account. A column the proposal leaves out (an id, or one the test data lacks or
+holds no value in) is not warned of as a possible leak. It also checks whether the rows of those datasets look like the
 training rows: a quick model tries to tell them apart on up to 5,000 rows of each (fewer on a wide
 table, none past 600 columns), over the number and category columns the proposal keeps (dates are
 left to the checks on time, and a column proposed as group_column because the test data holds

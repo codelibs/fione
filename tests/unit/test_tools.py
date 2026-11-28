@@ -3937,6 +3937,19 @@ def _propose_with_test_target(env, name, train, test, target="match"):
         projects.delete_dataset(env.conn, env.storage, train_ds.id)
 
 
+def test_a_leak_the_test_data_lacks_is_left_out_without_a_leak_warning(env):
+    rng = np.random.default_rng(0)
+    train = pd.DataFrame({"x": rng.normal(size=400), "y": rng.normal(size=400)})
+    train["after"] = train["y"] * 2 + rng.normal(scale=0.01, size=400)  # known after the fact
+    held = _propose_with_test(env, "leak_held", train, train.drop(columns=["y"]))
+    assert "leak_correlated" in codes(held)  # the test data holds it: it is warned of
+    result = _propose_with_test(env, "leak_lacking", train, train[["x"]])
+    assert not [c for c in codes(result) if c.startswith("leak_")]
+    assert result["ignored_suggestions"] == [
+        {"column": "after", "reason": "not in the test data", "code": "not_in_test"}
+    ]
+
+
 def test_text_ids_in_the_test_data_are_compared_with_the_numbers_of_the_training_rows(env):
     train = _persons_by_waves(8)
     test = _persons_by_waves(2, first_wave=1).drop(columns="match")  # the same persons
