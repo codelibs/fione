@@ -2366,6 +2366,15 @@ _MIN_VALUE_KEYS = 100  # a key found by its values alone needs this many values:
 _MIN_SEQUENCE_COVERAGE = 0.3  # of a key that is a run of whole numbers, found by values alone
 _MIN_COVERAGE = 0.05  # of the longer key column, for names that are not the same
 _MIN_REPEATED_KEYS = 20  # keys that repeat on both sides need this many values to be reported
+# A whole-number column not named like an id (a count, a rank, an age) overlaps with a long id
+# column by chance, so it is a key by its values alone only when they say so plainly: a key of
+# many values that is not a run of whole numbers, holding nearly all values of the other column,
+# the two sharing at least half the values of the longer one. Over the local tables, such links
+# shared 90% and more of the longer column; a count inside a long id column 5%, a row index of a
+# few hundred values inside counters up to 95%.
+_MIN_NUMBER_KEYS = 1_000
+_MIN_NUMBER_SHARED = 0.9
+_MIN_NUMBER_COVERAGE = 0.5
 _MAX_LINKS = 20
 _LINK_VALUE_COLUMNS = 8  # columns of a dataset compared by their values, whatever their names
 # the names that relate two columns say more than their values alone; the sort puts the most
@@ -2480,7 +2489,7 @@ def _link(
         return None  # a few small ids inside a long id column: they overlap by chance
     if basis == link_names.VALUES:
         # one side is the key and most values of the other are in it
-        if unique_a == unique_b or not all(key_ok):
+        if unique_a == unique_b:
             return None
         key, other = (values_a, values_b) if unique_a else (values_b, values_a)
         inter = len(key & other)
@@ -2488,6 +2497,13 @@ def _link(
             return None
         if inter / len(key) < _MIN_SEQUENCE_COVERAGE and _is_sequence(key):
             return None  # a row number or a short list of ids that the other column only touches
+        if not all(key_ok) and not (
+            len(key) >= _MIN_NUMBER_KEYS
+            and not _is_sequence(key)
+            and inter / len(other) >= _MIN_NUMBER_SHARED
+            and inter / max(len(key), len(other)) >= _MIN_NUMBER_COVERAGE
+        ):
+            return None  # a whole-number column not named like an id: see _MIN_NUMBER_KEYS
         shared = inter / len(other)
     elif basis == link_names.MEANING:
         # the model named the columns: one side still has to be the key, and most values of the
@@ -2624,8 +2640,8 @@ def _project_links(
     id_like = {
         d.id: [n for n in usable[d.id].values() if link_names.is_id_like(n)] for d in datasets
     }
-    # a whole-number column is a key by its values only when its name says id (on both sides);
-    # a small integer such as a count or a rank overlaps with any other
+    # a whole-number column whose name does not say id is held to the stricter rule of
+    # _MIN_NUMBER_KEYS: a small integer such as a count or a rank overlaps with any other
     key_columns = {
         d.id: {
             n

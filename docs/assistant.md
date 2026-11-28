@@ -201,7 +201,12 @@ least 5% of the longer column, so a few small ids inside a long id column are no
 whose names are unrelated is compared by its values alone only when one side has one row per
 value (at least 100 of them; a run of consecutive whole numbers, such as a row number, counts
 only when the other column has at least 30% of it), most values of the other side are among them, and both columns are named like an id or are not
-whole numbers (a small integer such as a count overlaps with any other). Up to 8 columns of each
+whole numbers. A whole-number column not named like an id (a small integer such as a count
+overlaps with any other) links only when the values say so plainly: the side with one row per
+value has at least 1,000 values and is not a run of consecutive whole numbers, at least 90% of
+the other side's values are among them, and the two share at least half the values of the
+longer one, as a person number in a ratings table and the same number in a table of persons
+under another name. Up to 8 columns of each
 dataset are compared this way, those named like an id first. A link whose names are not the same
 says `basis` (`table_id`, `similar_name`, `values` or `meaning`); links by name come before
 links by values. In a chat, a dataset that no link reaches (or only links where both sides
