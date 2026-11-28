@@ -98,6 +98,45 @@ def test_extra_rows_that_do_not_fit_the_data_are_refused():
         _fit(own.assign(t=np.arange(len(own))), extra.assign(t=0), time_column="t")
 
 
+def test_extra_rows_read_true_and_false_as_the_csv_reader_does():
+    """A column of the data that holds booleans takes, from the extra rows, what the CSV reader
+    reads as true or false; any other text is refused rather than read as true."""
+    own = _table(150, 0).assign(y=lambda d: d["y"] == "yes", f=lambda d: d["a"] > 0)
+    extra = _table(100, 1)
+    text = extra.assign(
+        y=np.where(extra["y"] == "yes", "True", "False"), f=np.where(extra["a"] > 0, "1", "0")
+    )
+    typed = automl_module._typed_like(own["y"], text["y"], "y")
+    assert typed.dtype == bool and typed.tolist() == (extra["y"] == "yes").tolist()
+    assert automl_module._typed_like(own["f"], text["f"], "f").tolist() == (extra["a"] > 0).tolist()
+    ones = pd.Series([1.0, 0.0, np.nan])  # 1 and 0 with a gap, as a CSV gives them
+    assert automl_module._typed_like(own["f"], ones, "f").tolist() == [True, False, None]
+    for bad in ("Maybe", "yes"):
+        odd = text.assign(y=np.where(np.arange(len(text)) % 7 == 0, bad, text["y"]))
+        with pytest.raises(ConfigError, match="column 'y'.*cannot be read as bool"):
+            _fit(own, odd)
+    with pytest.raises(ConfigError, match="column 'f'.*cannot be read as bool"):
+        _fit(own, text.assign(f="word"))
+    with pytest.raises(ConfigError, match="missing values"):
+        _fit(own, text.assign(y=np.where(np.arange(len(text)) < 3, None, text["y"])))
+    gaps = text.assign(f=np.where(np.arange(len(text)) % 4 == 0, None, text["f"]))  # an input
+    events = []
+    _fit(own, gaps, events, max_runtime_secs=45)
+    assert _notices(events)["extra_rows"]["rows"] == len(text)
+
+
+def test_a_gap_in_the_extra_rows_does_not_hide_their_copies_of_rows_of_the_data():
+    """A gap makes the extra column floats (whole numbers) or objects (booleans) where the data's
+    is int64 or bool: the extra rows that copy rows of the data are still found and left out."""
+    own = _table(150, 0).assign(k=lambda d: np.arange(len(d)) % 5, f=lambda d: d["a"] > 0)
+    copies = own.head(30).assign(f=lambda d: np.where(d["f"], "True", "False"))
+    gap = _table(1, 7).assign(k=np.nan, f=None)
+    extra = pd.concat([copies, _table(60, 1).assign(k=2.5, f="False"), gap], ignore_index=True)
+    events = []
+    _fit(own, extra, events, max_runtime_secs=45)
+    assert _notices(events)["extra_duplicates"]["dropped"] == len(copies)
+
+
 def test_extra_rows_may_have_gaps_and_fractions_in_a_column_of_whole_numbers():
     own = _table(150, 0).assign(k=lambda d: np.arange(len(d)) % 5)  # int64, no gaps
     extra = _table(200, 1).assign(k=lambda d: np.where(np.arange(len(d)) % 4 == 0, np.nan, 2.5))
