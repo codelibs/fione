@@ -340,7 +340,8 @@ gives, for example, the mean of an item over all its shops one month earlier. A 
 a step of one apart). No row reads its
 own time or a later one, but the module does not know which rows are to be predicted: to give
 the rows to predict their lags, put them in the same dataset (with the target empty) before
-adding the lags. Training refuses a target with missing values, so take the rows to learn from
+adding the lags. Training refuses a target with missing values (its message, like the proposal's
+warning, names the condition for each part below), so take the rows to learn from
 with **Slice rows** (such as `month < 34`, or `sales is not empty` for the rows where `sales`
 has a value; `is empty` selects the others) before training, and the rows to predict with
 another slice for the prediction. A date column is compared with a date written year-month-day
