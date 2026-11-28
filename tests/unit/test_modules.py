@@ -2683,6 +2683,12 @@ def test_rslice_and_replace_take_a_date_column_of_a_csv_as_dates():
     assert pa.Table.from_pandas(out).schema.field("d").type == pa.date32()
     with pytest.raises(ModuleError, match="holds dates without a time of day"):
         run_op("replace", df, {"column": "d", "value": "2021-05-06 08:30"})
+    far = pa.table(
+        {"d": pa.array([datetime.date(1, 1, 1), datetime.date(9999, 12, 31)], pa.date32())}
+    )
+    far = far.to_pandas(types_mapper=ingest._NULLABLE.get)
+    out, _ = run_op("rslice", far, {"row_conditions": "d > 2020-01-01"})
+    assert out["d"].tolist() == [datetime.date(9999, 12, 31)]
 
 
 def test_rslice_and_replace_on_other_columns_are_as_they_were():
