@@ -199,11 +199,12 @@ def test_list_values_of_short_lists_of_one_length_are_the_positions():
     group = ListValues("c").fit(X)
     assert group.names == ["c__p0", "c__p1", "c__p2"]
     out = group.transform(
-        pd.DataFrame({"c": ["[7, 8]", "no list", None, "[[1, 2]]", "[1, 2, 3, 4]"]})
+        pd.DataFrame({"c": ["[7, 8]", "no list", None, "[[1, 2]]", "[1, 2, 3, 4]", "[" * 100_000]})
     )
     assert out.iloc[0].tolist()[:2] == [7.0, 8.0] and np.isnan(out.iloc[0, 2])
     assert out.iloc[1:4].isna().all().all()
     assert out.iloc[4].tolist() == [1.0, 2.0, 3.0]  # the extra number is not read
+    assert out.iloc[5].isna().all()  # nested too deep to parse: missing, no error
 
 
 def test_list_values_of_ragged_lists_are_their_statistics():
