@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -953,6 +954,27 @@ def test_the_inspect_process_gets_a_scrubbed_environment(
     assert not [k for k in env if k.startswith("FIONE")] and "SOME_TOKEN" not in env
     assert set(env) <= {"PATH", "HOME", "LANG", "__PYVENV_LAUNCHER__", "__CF_USER_TEXT_ENCODING"}
     assert env["HOME"] != os.environ["HOME"] and "hunter2" not in out.read_text()
+
+
+def test_the_inspect_script_runs_where_fione_cannot_be_imported(tmp_path):
+    # The image runs Fione from its source tree through PYTHONPATH, which -I ignores; -S also
+    # drops the site-packages that make fione importable here. The module may still import fione,
+    # as a job does, and its own `import inspect` must reach the standard library, not the script.
+    module = tmp_path / "add.py"
+    source = "import fione\n" + GOOD + "\nimport inspect\nassert inspect.isfunction(run)\n"
+    module.write_text(source)
+    command = service._inspect_command(module)
+    assert command[:2] == [sys.executable, "-I"]
+    proc = subprocess.run(
+        [*command[:2], "-S", *command[2:]],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["has_run"] is True and out["module"]["name"] == "Add"
 
 
 def test_only_an_admin_can_upload_and_nothing_is_read_first(

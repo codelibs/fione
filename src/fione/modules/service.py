@@ -95,14 +95,25 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+# Run by its file, not as ``-m fione.modules.inspect``: the image finds Fione's source through
+# PYTHONPATH, which the scrubbed environment leaves out (and -I would ignore), and the script
+# needs nothing but the standard library.
+INSPECT_SCRIPT = Path(__file__).with_name("inspect.py")
+
+
+def _inspect_command(path: Path) -> list[str]:
+    """The inspect process's command line for the module file ``path``."""
+    return [sys.executable, "-I", str(INSPECT_SCRIPT), str(path)]
+
+
 def _inspect(path: Path, timeout: float) -> dict:
-    """Run ``fione.modules.inspect`` on ``path`` and return what it printed, parsed."""
+    """Run the inspect script on ``path`` and return what it printed, parsed."""
     with tempfile.TemporaryDirectory(prefix="fione-inspect-") as work:
         home = Path(work)
         env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home), "LANG": "C.UTF-8"}
         with (home / "out").open("wb") as out, (home / "err").open("wb") as err:
             proc = subprocess.Popen(
-                [sys.executable, "-I", "-m", "fione.modules.inspect", str(path)],
+                _inspect_command(path),
                 stdin=subprocess.DEVNULL,
                 stdout=out,
                 stderr=err,
