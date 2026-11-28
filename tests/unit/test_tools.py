@@ -1146,6 +1146,22 @@ def test_the_shift_check_leaves_dates_to_the_time_checks_and_needs_enough_rows(e
     assert _shifted(_propose_train_and_test(env, frame[~high].drop(columns="when"), few)) is None
 
 
+def test_the_shift_check_gives_the_same_verdict_every_time(env):
+    frame = _table()
+    high = frame["x"] > frame["x"].quantile(0.8)
+    runs = [_propose_train_and_test(env, frame[~high], frame[high].drop(columns="y")) for _ in "ab"]
+    assert _shifted(runs[0])["params"] == _shifted(runs[1])["params"]
+
+
+def test_the_shift_check_leaves_a_group_column_of_other_values_to_its_own_warning(env):
+    frame = _table()
+    frame["user"] = np.arange(len(frame)) // 10  # 60 users, 10 rows each
+    later = frame["user"] >= 50  # the test is about other users
+    result = _propose_train_and_test(env, frame[~later], frame[later].drop(columns="y"))
+    assert "group_column_for_test" in codes(result)
+    assert _shifted(result) is None
+
+
 def test_the_shift_warning_shows_its_figures_in_both_languages():
     for lang in i18n.LANGUAGES:
         template = i18n.catalog(lang)["assistant.warn.test_shift"]

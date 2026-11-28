@@ -173,8 +173,9 @@ while at most 90% of the training rows examined lack it, is left out of the prop
 way, since a prediction could not use it; the files' own counts of missing values decide, so every
 row is taken into account. It also checks whether the rows of those datasets look like the
 training rows: a quick model tries to tell them apart on up to 5,000 rows of each (fewer on a wide
-table), over the number and category columns the proposal keeps (dates are left to the checks on
-time). When it can (an AUC of 0.58 or more; rows drawn like the training rows give about 0.5), the
+table, none past 600 columns), over the number and category columns the proposal keeps (dates are
+left to the checks on time, and a column proposed as group_column because the test data holds
+other values of it to that warning). When it can (an AUC of 0.60 or more; rows drawn like the training rows give about 0.5), the
 card names the three columns it relied on most and says the validation score may not hold on those
 rows. A dataset that shares no column with the training data is taken for another table and not
 compared. People who can edit the project

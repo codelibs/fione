@@ -1642,24 +1642,25 @@ def _sibling_warning(target: str, siblings: list[str]) -> dict | None:
 
 # Whether the rows to predict look like the training rows: a quick classifier tells the rows of the
 # project's test and predict datasets from the training rows. Over the local train and test pairs
-# the AUC was 0.45 to 0.53 where the test rows were drawn like the training rows, 0.60 and more
+# the AUC was 0.45 to 0.56 where the test rows were drawn like the training rows, about 0.6 to 1
 # where they differ (other times, other subjects, rows chosen by a column).
 SHIFT_ROWS = 5_000  # rows read of each side, spread over the file
-SHIFT_CELLS = 600_000  # ... fewer on a wide table, so the check takes a second or two
+SHIFT_CELLS = 300_000  # ... fewer on a wide table, so the check takes a few seconds at most
 SHIFT_MIN_ROWS = 50  # rows of each side the check needs
-SHIFT_MAX_COLUMNS = 1_000  # more columns are not checked: the time grows with them
+SHIFT_MAX_COLUMNS = 600  # more columns are not checked: too few rows would be read of each side
 SHIFT_MAX_LEVELS = 200  # a text column of more values is not read by the check
 SHIFT_TREES = 50
-SHIFT_AUC = 0.58  # from this AUC the warning is given
+SHIFT_AUC = 0.60  # from this AUC the warning is given
 _SHIFT_SHOWN = 3  # columns named
 
 
 def shift_from_training(
     storage, conn, dataset: Dataset, profile, features: list[str]
 ) -> tuple[float, list[str]] | None:
-    """``(AUC, the columns it relies on most)`` of a classifier telling the rows of the project's
-    test and predict datasets from the training rows, over the ``features`` that are numbers or
-    categories (dates are left to the time checks, prose and ids out); None when not judged."""
+    """``(AUC, the columns it relies on most)`` of a classifier telling the rows of the
+    project's test and predict datasets from the training rows, over the ``features`` that are
+    numbers or categories (dates are left to the time checks, prose and ids out); None when not
+    judged."""
     kinds = {c.name: c.kind for c in profile.columns}
     columns = [n for n in features if kinds.get(n) in ("numeric", "categorical")]
     later = [
@@ -1698,17 +1699,22 @@ def shift_from_training(
     X = pd.DataFrame(X)
     y = np.r_[np.zeros(len(train)), np.ones(len(test))]
 
-    def model():
-        return lgb.LGBMClassifier(
-            n_estimators=SHIFT_TREES, learning_rate=0.1, n_jobs=2, random_state=0, verbose=-1
-        )
-
-    scores = np.zeros(len(y))
+    scores, gain = np.zeros(len(y)), np.zeros(len(used))
     for fit_rows, held in StratifiedKFold(3, shuffle=True, random_state=0).split(X, y):
-        scores[held] = model().fit(X.iloc[fit_rows], y[fit_rows]).predict_proba(X.iloc[held])[:, 1]
+        model = lgb.LGBMClassifier(  # seeded and deterministic: the same data, the same verdict
+            n_estimators=SHIFT_TREES,
+            learning_rate=0.1,
+            importance_type="gain",
+            n_jobs=2,
+            random_state=0,
+            deterministic=True,
+            force_row_wise=True,
+            verbose=-1,
+        ).fit(X.iloc[fit_rows], y[fit_rows])
+        scores[held] = model.predict_proba(X.iloc[held])[:, 1]
+        gain += model.feature_importances_
     auc = float(roc_auc_score(y, scores))
-    gain = model().set_params(importance_type="gain").fit(X, y).feature_importances_
-    order = np.argsort(-np.asarray(gain), kind="stable")
+    order = np.argsort(-gain, kind="stable")
     return auc, [used[i] for i in order[:_SHIFT_SHOWN] if gain[i] > 0]
 
 
@@ -2009,12 +2015,6 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         ignored.append(name)
     if warning := _columns_empty_in_test([n for n in empty if n not in set(left_empty)]):
         warnings.append(warning)
-    times = {time_arg, time_index.name if time_index else None}  # left to the time checks
-    kept = [n for n in features if n not in set(ignored) and n not in times]
-    if warning := _shift_warning(
-        shift_from_training(ctx.storage, ctx.conn, dataset, profile, kept)
-    ):
-        warnings.append(warning)
     if event is None and is_skewed_target(found.y, task):
         warnings.append(
             _warning(
@@ -2241,6 +2241,15 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                 column=column,
             )
         )
+    # dates are left to the time checks, and a group column of other values in the test data to
+    # its own warning
+    elsewhere = {time_arg, time_index.name if time_index else None}
+    if any(w["code"] == "group_column_for_test" for w in warnings):
+        elsewhere.add(overrides["cv_group_column"])
+    kept = [n for n in features if n not in set(ignored) and n not in elsewhere]
+    shift = shift_from_training(ctx.storage, ctx.conn, dataset, profile, kept)
+    if warning := _shift_warning(shift):
+        warnings.append(warning)
     if "sort_metric" in overrides:
         overrides["sort_metric"] = _metric_for(
             overrides["sort_metric"], found.y, task, survival=event is not None
