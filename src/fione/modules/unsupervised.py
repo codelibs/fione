@@ -2,8 +2,10 @@
 
 Missing values are not modelled: a gap is filled with the column mean found in training (the
 mean is part of the state). Only integer and float columns are used; name the ones to use in
-``columns``. The state is plain JSON and ``*_predict`` applies it with numpy alone, through the
-same function the train module uses for its own output, so both give identical results.
+``columns``. Without names, every number column is used but those that are an id (a different
+whole number on every row, as the data profile calls an id) or hold one value; a note names
+them. The state is plain JSON and ``*_predict`` applies it with numpy alone, through the same
+function the train module uses for its own output, so both give identical results.
 """
 
 import warnings
@@ -16,6 +18,7 @@ from sklearn.exceptions import ConvergenceWarning
 from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
 from sklearn.preprocessing import PowerTransformer
 
+from fione.data.profile import _infer_kind
 from fione.modules.registry import (
     Module,
     ModuleError,
@@ -40,6 +43,35 @@ MIXTURE_MAX_COVARIANCE = 250_000
 
 def _schema(properties: dict, required: tuple[str, ...] = ()) -> dict:
     return {"type": "object", "properties": properties, "required": list(required)}
+
+
+def _chosen(df: pd.DataFrame, names: list[str]) -> tuple[list[str], np.ndarray, tuple[dict, ...]]:
+    """The columns to use as a float matrix, and a note naming the number columns left out: with
+    no ``names``, an id or a column of one value says nothing of which rows are alike (and an id
+    would group the rows by their order). Named columns are used as they are."""
+    if names:
+        return (*numeric_matrix(df, names), ())
+    numbers = [
+        c
+        for c in df.columns
+        if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])
+    ]
+    left_out = []
+    for c in numbers:
+        values = df[c].dropna()
+        if len(values) and _infer_kind(values, int(values.nunique()), int(df[c].isna().sum())) in (
+            "id",
+            "constant",
+        ):
+            left_out.append(c)
+    if not left_out or len(left_out) == len(numbers):  # none left to use: the data is as it is
+        return (*numeric_matrix(df, []), ())
+    columns, matrix = numeric_matrix(df.drop(columns=left_out), [])
+    message = (
+        f"left out {', '.join(left_out)}: an id or a column of one value says nothing of which "
+        "rows are alike; name the columns in 'columns' to use them"
+    )
+    return columns, matrix, ({"message": message, "kind": "columns_left_out", "columns": left_out},)
 
 
 def _fill_gaps(columns: list[str], matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -102,7 +134,7 @@ def _cluster(df: pd.DataFrame, state: dict, output_columns: list[str]) -> pd.Dat
 
 
 def kmeans_train(df, params, ctx):
-    columns, matrix = numeric_matrix(df, params["columns"])
+    columns, matrix, notes = _chosen(df, params["columns"])
     filled, means = _fill_gaps(columns, matrix)
     k = params["k"]
     if k > len(df):
@@ -126,7 +158,7 @@ def kmeans_train(df, params, ctx):
         "scales": scales.tolist(),
         "centers": fit.cluster_centers_.tolist(),
     }
-    return ModuleOutput(_cluster(df, state, params["output_columns"]), state)
+    return ModuleOutput(_cluster(df, state, params["output_columns"]), state, notes)
 
 
 def kmeans_predict(df, params, ctx):
@@ -197,7 +229,7 @@ def _mixture_clusters(df: pd.DataFrame, state: dict, params: dict) -> pd.DataFra
 
 
 def gmm_train(df, params, ctx):
-    columns, matrix = numeric_matrix(df, params["columns"])
+    columns, matrix, notes = _chosen(df, params["columns"])
     filled, means = _fill_gaps(columns, matrix)
     k, covariance = params["n_components"], params["covariance"]
     if k > len(df):
@@ -243,7 +275,8 @@ def gmm_train(df, params, ctx):
         "precisions_cholesky": model.precisions_cholesky_.tolist(),
     }
     out = _mixture_clusters(df, state, params)
-    return ModuleOutput(out, state, _mixture_notes(out["cluster"], x, state, len(fit_rows)))
+    fit = _mixture_notes(out["cluster"], x, state, len(fit_rows))
+    return ModuleOutput(out, state, notes + fit)
 
 
 def _mixture_notes(labels: pd.Series, x: np.ndarray, state: dict, fitted: int) -> tuple[dict, ...]:
@@ -307,7 +340,7 @@ def _projection(df: pd.DataFrame, state: dict, output_columns: list[str]) -> pd.
 
 
 def lowrank_train(df, params, ctx):
-    columns, matrix = numeric_matrix(df, params["columns"])
+    columns, matrix, notes = _chosen(df, params["columns"])
     filled, means = _fill_gaps(columns, matrix)
     n_components, method = params["n_components"], params["method"]
     limit = min(len(df), len(columns))
@@ -333,7 +366,7 @@ def lowrank_train(df, params, ctx):
         "means": means.tolist(),
         "components": model.components_.tolist(),
     }
-    return ModuleOutput(_projection(df, state, params["output_columns"]), state)
+    return ModuleOutput(_projection(df, state, params["output_columns"]), state, notes)
 
 
 def lowrank_predict(df, params, ctx):

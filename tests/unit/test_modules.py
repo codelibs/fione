@@ -671,11 +671,25 @@ def test_kmeans_state_is_stable_for_a_seed_and_standardizes():
 
 def test_kmeans_fills_gaps_with_the_column_mean_and_handles_constant_columns():
     df = expect(a=[1.0, 2.0, np.nan, 10.0, 11.0, 12.0], k=[7.0] * 6)
-    out, state = run_op("kmeans_train", df, {"k": 2, "seed": 0})
+    out, state = run_op("kmeans_train", df, {"columns": ["a", "k"], "k": 2, "seed": 0})
     assert state["means"][0] == pytest.approx(np.nanmean(df["a"]))
     assert state["scales"][1] == 1.0  # constant column: no division by zero
     assert out["cluster"][2] == out["cluster"][3]  # the mean (7.2) is nearer 11 than 1.5
     json.dumps(state, allow_nan=False)
+
+
+@pytest.mark.parametrize("op", ["kmeans_train", "gmm_train", "lowrank_train"])
+def test_without_columns_an_id_and_a_column_of_one_value_are_left_out_and_named(op):
+    df = blobs().drop(columns="label").assign(id=range(60), one=5.0, step=lambda d: d["id"] % 3)
+    module = get_builtin(op)
+    params = validate_args(module.params, {"k": 3} if op == "kmeans_train" else {})
+    out = module.run(df, params, ModuleContext())
+    assert out.state["columns"] == ["a", "b", "step"]  # a whole number that repeats stays
+    note = out.notes[0]  # (the mixture tells its fit after it)
+    assert note["kind"] == "columns_left_out" and note["columns"] == ["id", "one"]
+    assert "id, one" in note["message"]
+    named = validate_args(module.params, {**params, "columns": ["a", "b", "id"]})
+    assert module.run(df, named, ModuleContext()).state["columns"] == ["a", "b", "id"]
 
 
 def test_kmeans_needs_numbers_and_says_which_columns_are_not():
