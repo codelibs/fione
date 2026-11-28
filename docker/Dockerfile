@@ -20,7 +20,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src/ src/
-RUN python -m compileall -q src
+# COPY keeps the modes of the checkout: one made under a strict umask (077) would leave the
+# code unreadable to the user the image runs as (every start fails to import fione); the modes
+# are set either way, so a loose one (000) leaves no code that user can write.
+RUN chmod -R u=rwX,go=rX pyproject.toml uv.lock src && python -m compileall -q src
 
 
 FROM python:3.12.15-slim-trixie
