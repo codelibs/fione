@@ -2,7 +2,9 @@
 
 A schema is ``{"type": "object", "properties": {...}, "required": [...]}`` whose properties are
 scalars (``string``, ``integer``, ``number``, ``boolean``), an ``array`` of strings or, for tools
-only, an ``object`` or an ``array`` of objects (``"items": {"type": "object"}``). Nothing is
+only, an ``object``, an ``array`` of objects (``"items": {"type": "object"}``) or an ``array`` of
+integers or numbers (``"items": {"type": "integer"}``, which may set ``minimum`` and ``maximum``).
+Nothing is
 evaluated and no ``$ref`` is followed: a property is checked against its own keywords only.
 """
 
@@ -42,6 +44,20 @@ def _is_object_list(value) -> bool:
     return isinstance(value, list) and all(isinstance(x, dict) for x in value)
 
 
+def _number_items(spec: dict) -> dict | None:
+    """The ``items`` of an array of integers or numbers, else None (strings, or objects)."""
+    items = spec.get("items")
+    if spec["type"] == "array" and isinstance(items, dict):
+        if items.get("type") in ("integer", "number"):
+            return items
+    return None
+
+
+def _is_number_list(value, items: dict) -> bool:
+    each = _TYPES[items["type"]]
+    return isinstance(value, list) and all(each(x) for x in value)
+
+
 def clean_text(s, max_len: int = 80) -> str:
     """``s`` made safe to show to a model: control characters become spaces, whitespace runs
     collapse, the result is stripped and cut to ``max_len`` characters (ending in ``…``)."""
@@ -69,11 +85,27 @@ def validate_args(schema: dict, args) -> dict:
                 out[name] = copy.deepcopy(spec["default"])
             continue
         value = args[name]
-        is_type = _TYPES[spec["type"]]
+        items = _number_items(spec)
         if spec["type"] == "array" and spec.get("items") == _OBJECT_ITEMS:
-            is_type = _is_object_list
-        if not is_type(value):
-            raise ValueError(f"argument '{name}' must be of type {spec['type']}")
+            fits = _is_object_list(value)
+        elif items is not None:
+            fits = _is_number_list(value, items)
+        else:
+            fits = _TYPES[spec["type"]](value)
+        if not fits:
+            kind = (
+                f"an array of {items['type']}s" if items is not None else f"of type {spec['type']}"
+            )
+            raise ValueError(f"argument '{name}' must be {kind}")
+        if items is not None:
+            if "minimum" in items and any(x < items["minimum"] for x in value):
+                raise ValueError(
+                    f"the items of argument '{name}' must be at least {items['minimum']}"
+                )
+            if "maximum" in items and any(x > items["maximum"] for x in value):
+                raise ValueError(
+                    f"the items of argument '{name}' must be at most {items['maximum']}"
+                )
         if "enum" in spec and value not in spec["enum"]:
             raise ValueError(f"argument '{name}' must be one of {spec['enum']}")
         if "minimum" in spec and value < spec["minimum"]:
@@ -102,7 +134,12 @@ def check_schema(schema) -> dict:
             raise ValueError("every parameter must be an object")
         if spec.get("type") not in _TYPES or spec["type"] == "object":
             raise ValueError(f"parameter '{clean_text(name, 40)}' has an unsupported type")
-        if not _KEYWORDS.issuperset(spec) or spec.get("items") == _OBJECT_ITEMS:
+        items = spec.get(
+            "items"
+        )  # a module's array holds strings (objects and numbers are tools' own)
+        if not _KEYWORDS.issuperset(spec) or (
+            items is not None and not (isinstance(items, dict) and items.get("type") == "string")
+        ):
             raise ValueError(f"parameter '{clean_text(name, 40)}' uses an unsupported keyword")
         if "enum" in spec and not isinstance(spec["enum"], list):
             raise ValueError(f"parameter '{clean_text(name, 40)}' has an invalid enum")
