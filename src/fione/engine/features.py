@@ -347,7 +347,7 @@ class ListValues(Group):
     def _parse(self, value: str) -> np.ndarray | None:
         try:
             parsed = np.asarray(json.loads(value), dtype=float)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):  # not numbers, ragged, or nested too deep
             return None
         shape_ok = parsed.ndim == 1 if self._dims == 1 else parsed.ndim == 2
         if not shape_ok or not len(parsed) or (self._dims == 2 and parsed.shape[1] != self._width):

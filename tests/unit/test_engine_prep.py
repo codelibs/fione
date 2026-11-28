@@ -1366,3 +1366,8 @@ def test_a_linear_family_fitted_in_one_year_predicts_a_later_year_like_the_mean(
         np.sqrt(np.mean((np.asarray(model.predict(ahead.drop(columns="y"))) - ahead["y"]) ** 2))
     )
     assert rmse < 0.6  # a mean of 3.0 and noise of 0.3: the seconds would put it far outside
+
+
+def test_a_list_nested_too_deep_is_no_list_value_and_no_error():
+    values = [str([i, i + 1]) for i in range(40)] + ["[" * 100_000]
+    assert number_list_shape(pd.Series(values)) == (1, 0)  # 1 of 41 is not a list

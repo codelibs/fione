@@ -289,7 +289,7 @@ def number_list_shape(s: pd.Series) -> tuple[int, int] | None:
 def _list_shape(value: str) -> tuple[int, int] | None:
     try:
         items = json.loads(value)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     if not isinstance(items, list) or not items:
         return None
