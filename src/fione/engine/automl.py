@@ -2337,8 +2337,10 @@ def _typed_like(own: pd.Series, values: pd.Series, name: str) -> pd.Series:
     so that joining them leaves a column of one type."""
     if values.dtype == own.dtype:
         return values
+    if pd.api.types.is_bool_dtype(own):
+        return _booleans(values, name)
     try:
-        if pd.api.types.is_numeric_dtype(own) and not pd.api.types.is_bool_dtype(own):
+        if pd.api.types.is_numeric_dtype(own):
             return pd.to_numeric(values)  # (a gap or a fraction makes it a float, as the join does)
         return values.astype(own.dtype)
     except (TypeError, ValueError, OverflowError) as e:
@@ -2346,6 +2348,37 @@ def _typed_like(own: pd.Series, values: pd.Series, name: str) -> pd.Series:
             f"the column '{name}' of the extra rows cannot be read as {own.dtype}, the type of "
             "the data's"
         ) from e
+
+
+# The texts the CSV reader takes for true and false (pyarrow's defaults): ``astype(bool)`` would
+# read any other text, "False" and "no" included, as true.
+_TRUE_TEXTS = frozenset({"1", "True", "TRUE", "true"})
+_FALSE_TEXTS = frozenset({"0", "False", "FALSE", "false"})
+
+
+def _booleans(values: pd.Series, name: str) -> pd.Series:
+    """``values`` (a column of the extra rows) as booleans, for a column of the data that holds
+    them: booleans, and the texts and the numbers 1 and 0 that the CSV reader reads as true or
+    false. A gap stays a gap (the column then holds objects, as it would in the data)."""
+
+    def read(value):
+        if value is None or value is pd.NA or (isinstance(value, float) and np.isnan(value)):
+            return None
+        if isinstance(value, bool | np.bool_):
+            return bool(value)
+        if isinstance(value, int | float | np.integer | np.floating) and value in (0, 1):
+            return bool(value)  # a column of 1 and 0 with gaps reads as floats
+        text = str(value)
+        if text in _TRUE_TEXTS:
+            return True
+        if text in _FALSE_TEXTS:
+            return False
+        raise ConfigError(
+            f"the column '{name}' of the extra rows cannot be read as bool, the type of the data's"
+        )
+
+    read_values = values.map(read)
+    return read_values.astype(bool) if read_values.notna().all() else read_values.astype(object)
 
 
 def _learned_mix(y: np.ndarray, weight: np.ndarray | None, classes: int) -> np.ndarray:
