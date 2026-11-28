@@ -1,5 +1,6 @@
 import io
 import itertools
+import json
 import sqlite3
 
 import pandas as pd
@@ -722,3 +723,86 @@ def test_a_rewritten_wide_table_keeps_its_row_groups_small(conn, storage, projec
 def test_levels_with_blanks_around_numbers_are_the_ones_an_upload_reads_as_numbers(levels, shown):
     found = ingest.blank_padded_numbers(pd.Series(levels, dtype=object))
     assert found.tolist() == shown
+
+
+def test_json_lines_become_a_column_per_key(conn, storage, project):
+    lines = [
+        '{"id": 1, "emb": [[1, 2], [3, 4]], "tag": "a", "ok": true, "x": 1}',
+        "",
+        '{"id": 2, "emb": [[5, 6]], "ok": false, "x": 2.5, "late": {"k": "v"}}',
+        '{"id": 3, "tag": 7, "ok": null, "x": null}',
+    ]
+    ds, df = load(conn, storage, project, "\n".join(lines).encode())
+    assert ds.schema == [
+        ("id", "int64"),
+        ("emb", "string"),
+        ("tag", "string"),
+        ("ok", "bool"),
+        ("x", "double"),
+        ("late", "string"),
+    ]
+    assert df["emb"].tolist()[:2] == ["[[1,2],[3,4]]", "[[5,6]]"]  # compact JSON: a list reads it
+    assert df["tag"].tolist()[0] == "a" and df["tag"].tolist()[2] == "7"  # numbers among text
+    assert df["late"].isna().tolist() == [True, False, True] and df.loc[1, "late"] == '{"k":"v"}'
+    assert df["emb"].isna().tolist() == [False, False, True]
+
+
+def test_a_json_array_of_objects_is_read_like_json_lines(conn, storage, project):
+    records = [{"a": i, "b": f"t{i}", "c": [i, i + 1]} for i in range(5)]
+    array = json.dumps(records, indent=2).encode()
+    lines = "\n".join(json.dumps(r) for r in records).encode()
+    a, from_array = load(conn, storage, project, b"\xef\xbb\xbf  " + array)  # a BOM and blanks
+    b, from_lines = load(conn, storage, project, lines)
+    assert a.schema == b.schema == [("a", "int64"), ("b", "string"), ("c", "string")]
+    pd.testing.assert_frame_equal(from_array, from_lines)
+
+
+def test_a_json_array_over_the_cap_points_to_json_lines(conn, storage, project, monkeypatch):
+    monkeypatch.setattr(ingest, "JSON_ARRAY_MAX_BYTES", 10)
+    with pytest.raises(IngestError, match="JSON Lines"):
+        load(conn, storage, project, b'[{"a": 1}, {"a": 2}]')
+    assert storage.list("projects/") == []
+
+
+@pytest.mark.parametrize(
+    "data",
+    [b"[a],b\n1,2\n", b"{a},b\n1,2\n", b"[1 2],x\n3,4\n"],
+)
+def test_a_csv_whose_first_cell_starts_with_a_bracket_stays_a_csv(conn, storage, project, data):
+    ds, df = load(conn, storage, project, data)
+    assert ds.n_cols == 2 and len(df) == 1
+
+
+@pytest.mark.parametrize(
+    ("data", "fragment"),
+    [
+        (b'{"a": 1}\n{"a": 2,\n', "could not parse the JSON: line 2"),
+        (b'{"a": 1}\n[1, 2]\n', "line 2 is no object"),
+        (b'[{"a": 1}, 3]', "no object"),
+        (b'[{"a": 1}, {"a": 2]', "could not parse the JSON"),
+        (b'{"a": 1}\n{"a": ' + b"[" * 100_000 + b"\n", "line 2: nested too deeply"),
+        (b'[{"a": ' + b"[" * 100_000 + b"]", "nested too deeply"),
+    ],
+)
+def test_broken_json_is_refused_without_quoting_it(conn, storage, project, data, fragment):
+    with pytest.raises(IngestError, match=fragment) as caught:
+        load(conn, storage, project, data)
+    assert '"a"' not in str(caught.value)
+    assert storage.list("projects/") == []
+
+
+def test_an_empty_json_string_is_missing_as_an_empty_csv_cell(conn, storage, project):
+    lines = ['{"n": 1, "t": "a"}', '{"n": "", "t": ""}', '{"n": 2.5, "t": "b"}']
+    ds, df = load(conn, storage, project, "\n".join(lines).encode())
+    assert dict(ds.schema) == {"n": "double", "t": "string"}
+    assert df["n"].isna().tolist() == [False, True, False]
+    assert df["t"].isna().tolist() == [False, True, False]
+
+
+def test_an_empty_cell_is_missing_alike_in_csv_and_json(conn, storage, project):
+    _, csv_df = load(conn, storage, project, b"n,t\n1,a\n,\n2.5,b\n")
+    _, json_df = load(
+        conn, storage, project, b'{"n":1,"t":"a"}\n{"n":"","t":""}\n{"n":2.5,"t":"b"}'
+    )
+    assert csv_df.isna().equals(json_df.isna())
+    assert csv_df.dtypes.tolist() == json_df.dtypes.tolist()

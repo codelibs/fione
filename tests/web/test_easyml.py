@@ -225,6 +225,7 @@ def test_a_regression_flow(runner_owner):
         (b"a,b\n", "no data rows"),
         (bytes(range(128, 256)) * 50, "could not read the text of this file"),
         (b"a,b\n1,2\n3,4,5\n", "could not read the file as CSV"),
+        (b'{"a": 1}\n{"a": 2,\n', "could not read the file as JSON"),
     ],
 )
 def test_a_bad_csv_is_refused_in_plain_words(owner, content, message):
@@ -241,7 +242,7 @@ def test_an_upload_without_a_file_is_refused(owner):
     r = client.post(
         f"/projects/{pid}/upload", data={"csrf_token": csrf}, files={"other": ("x", b"")}
     )
-    assert r.status_code == 422 and "Choose a CSV file" in r.text
+    assert r.status_code == 422 and "Choose a CSV or JSON file" in r.text
 
 
 @pytest.fixture

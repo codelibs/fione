@@ -434,3 +434,14 @@ def test_viewer_reads_but_cannot_write(client, owner, project):
     assert client.get(f"{base(project)}/{dataset['id']}/preview", headers=headers).is_success
     assert upload(client, project, headers=headers).status_code == 403
     assert client.delete(f"{base(project)}/{dataset['id']}", headers=headers).status_code == 403
+
+
+def test_upload_reads_a_json_file(client, owner, project):
+    data = b'[{"a": 1, "label": "x"}, {"a": 2, "label": "y", "emb": [1, 2]}]'
+    r = upload(client, project, data, filename="table.json", headers=owner)
+    assert r.status_code == 201, r.text
+    assert r.json()["schema"] == [
+        {"name": "a", "type": "int64"},
+        {"name": "label", "type": "string"},
+        {"name": "emb", "type": "string"},
+    ]

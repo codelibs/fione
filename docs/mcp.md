@@ -64,8 +64,8 @@ access:
 | Tool | What it does |
 |---|---|
 | `create_project` | Creates a project the user owns and returns its `project_id`. |
-| `upload_dataset` | Adds a dataset (type `train`, `test` or `predict`) from CSV text sent inline, at most 512 KiB of UTF-8. |
-| `create_upload_url` | Returns a one-time URL for a CSV file of any size up to `FIONE_MAX_UPLOAD_BYTES`. |
+| `upload_dataset` | Adds a dataset (type `train`, `test` or `predict`) from CSV text (or JSON Lines) sent inline, at most 512 KiB of UTF-8. |
+| `create_upload_url` | Returns a one-time URL for a CSV or JSON file of any size up to `FIONE_MAX_UPLOAD_BYTES`. |
 | `start_training`, `start_batch_predict`, `run_module` | Queue a job and return its `job_id`. `list_modules` gives each module's parameters. |
 | `get_job`, `wait_for_job`, `list_jobs` | Show a job's status and, once finished, its result (`model_id` of a training, `dataset_id` of a batch prediction); the newest 50 jobs. |
 | `cancel_job` | Cancels a queued or running job. |

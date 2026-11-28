@@ -2,6 +2,7 @@ import codecs
 import csv
 import io
 import itertools
+import json
 import logging
 import re
 import sqlite3
@@ -37,10 +38,14 @@ _PAGE_BATCH_ROWS = 8192  # read_dataset_rows
 _DELIMITERS = ",;\t|"
 _SNIFF_ROWS = 20
 _MAX_EXACT_FLOAT_INT = 2**53  # integers up to this magnitude survive a float64 round trip
+# A JSON array is read whole: json.load held about 5.6 times the file (1 GB for a 179 MB array),
+# so a larger one is refused with a pointer to JSON Lines, which is read a line at a time.
+JSON_ARRAY_MAX_BYTES = 200 * 2**20
+_JSON_ROWS = 50_000  # rows of a JSON upload written at a time
 
 
 class IngestError(Exception):
-    """The upload is not a CSV Fione can read; the message is meant for the user."""
+    """The upload is not a CSV or JSON Fione can read; the message is meant for the user."""
 
 
 _PARSE_ERROR = re.compile(r"Expected (\d+) columns?, got (\d+)")
@@ -409,6 +414,137 @@ def _convert(
             forced |= widened
 
 
+def _json_form(path: Path) -> str | None:
+    """``"array"`` for a JSON array of objects or lists (``[`` then ``{`` or ``[``), ``"lines"``
+    for JSON Lines (``{`` and a first line that parses), else None (a CSV). Judged on a leading
+    sample, so a CSV whose first cell starts with a bracket stays a CSV."""
+    with path.open("rb") as f:
+        sample = f.read(_SAMPLE_SIZE)
+    text = _decode(sample, "utf-8-sig", len(sample) < _SAMPLE_SIZE)
+    if text is None:
+        return None
+    text = text.lstrip()
+    if text.startswith("["):
+        return "array" if text[1:].lstrip()[:1] in ("{", "[") else None
+    if text.startswith("{"):
+        first = text.split("\n", 1)[0]
+        try:
+            return "lines" if isinstance(json.loads(first), dict) else None
+        except ValueError:
+            return None
+    return None
+
+
+def _json_records(path: Path, form: str) -> Iterator[dict]:
+    """The objects of a JSON array or of JSON Lines (blank lines skipped)."""
+    if form == "array":
+        if path.stat().st_size > JSON_ARRAY_MAX_BYTES:
+            raise IngestError(
+                f"the JSON array is over {JSON_ARRAY_MAX_BYTES // 2**20} MB; save it as JSON Lines "
+                "(one object per line) or as CSV"
+            )
+        try:
+            with path.open(encoding="utf-8-sig") as f:
+                records = json.load(f)
+        except (ValueError, RecursionError) as e:
+            raise IngestError(f"could not parse the JSON: {_json_error(e)}") from None
+        for record in records:
+            if not isinstance(record, dict):
+                raise IngestError(
+                    "could not parse the JSON: the array holds a value that is no object"
+                )
+            yield record
+        return
+    with path.open(encoding="utf-8-sig") as f:
+        for number, line in enumerate(f, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except (ValueError, RecursionError) as e:
+                raise IngestError(
+                    f"could not parse the JSON: line {number}: {_json_error(e)}"
+                ) from None
+            if not isinstance(record, dict):
+                raise IngestError(f"could not parse the JSON: line {number} is no object")
+            yield record
+
+
+def _json_error(error: Exception) -> str:
+    # the decoder's message names a position, never the text (which is data)
+    if isinstance(error, RecursionError):
+        return "nested too deeply"
+    return getattr(error, "msg", "not JSON")
+
+
+def _json_kind(value) -> str | None:
+    if value is None or value == "":  # an empty string is missing, as an empty CSV cell
+        return None
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int" if -(2**63) <= value < 2**63 else "text"
+    if isinstance(value, float):
+        return "float"
+    return "text"  # a string, a list or an object
+
+
+def _json_types(kinds: set[str]) -> pa.DataType:
+    """The column type for the kinds of value it holds: numbers stay numbers, true/false a
+    bool, anything else (strings, lists, objects, a mix) text."""
+    if kinds <= {"int"} and kinds:
+        return pa.int64()
+    if kinds <= {"int", "float"} and kinds:
+        return pa.float64()
+    if kinds == {"bool"}:
+        return pa.bool_()
+    return pa.string()
+
+
+def _json_cell(value, dtype: pa.DataType):
+    if value is None or value == "":
+        return None
+    if not pa.types.is_string(dtype):
+        return value
+    if isinstance(value, str):
+        return value
+    # a list or an object as its compact JSON text (a list of numbers reads as one); a number or
+    # true/false among text as its JSON text
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
+def _convert_json(path: Path, out: Path, form: str) -> tuple[int, pa.Schema]:
+    """JSON (an array of objects, or JSON Lines) to Parquet: a column for each top-level key, in
+    the order first seen. Read twice, once for the keys and their types and once to write, so
+    JSON Lines is never held whole."""
+    kinds: dict[str, set[str]] = {}
+    for record in _json_records(path, form):
+        for key, value in record.items():
+            found = kinds.setdefault(key, set())
+            if (kind := _json_kind(value)) is not None:
+                found.add(kind)
+    keys = list(kinds)
+    names = unique_names(keys)
+    schema = pa.schema(
+        [(name, _json_types(kinds[key])) for name, key in zip(names, keys, strict=True)]
+    )
+    rows = 0
+    with pq.ParquetWriter(out, schema) as writer:
+        chunk: list[dict] = []
+        for record in itertools.chain(_json_records(path, form), [None]):
+            if record is not None:
+                chunk.append(record)
+            if chunk and (record is None or len(chunk) >= _JSON_ROWS):
+                columns = [
+                    pa.array([_json_cell(r.get(key), f.type) for r in chunk], type=f.type)
+                    for key, f in zip(keys, schema, strict=True)
+                ]
+                writer.write_table(pa.Table.from_arrays(columns, schema=schema))
+                rows += len(chunk)
+                chunk = []
+    return rows, schema
+
+
 def ingest_csv(
     storage: Storage,
     conn: sqlite3.Connection,
@@ -421,7 +557,8 @@ def ingest_csv(
     tmp_dir: Path | None = None,
     block_size: int = _BLOCK_SIZE,
 ) -> Dataset:
-    """Convert an uploaded CSV to Parquet in storage and record it as a dataset.
+    """Convert an uploaded CSV, JSON array of objects or JSON Lines file to Parquet in storage
+    and record it as a dataset (see ``_json_form`` for how JSON is told from CSV).
 
     The upload is streamed to a scratch file (under ``tmp_dir``, default the system temp
     dir), then converted block by block, so memory stays bounded by ``block_size``. Raises
@@ -432,6 +569,11 @@ def ingest_csv(
     with tempfile.TemporaryDirectory(dir=tmp_dir) as work:
         raw, parquet = Path(work) / "upload.csv", Path(work) / "data.parquet"
         _spool(stream, raw, max_bytes)
+        if (form := _json_form(raw)) is not None:
+            n_rows, schema = _convert_json(raw, parquet, form)
+            if n_rows == 0 or not len(schema):
+                raise IngestError("no data rows")
+            return _register(storage, conn, project_id, name, type, parquet, n_rows, schema)
         encoding, delimiter = _inspect(raw)
         try:
             n_rows, schema = _convert(raw, parquet, encoding, delimiter, block_size)

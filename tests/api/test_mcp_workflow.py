@@ -263,6 +263,18 @@ def test_upload_dataset_ingests_csv(writes):  # noqa: F811
     assert entry["id"] == dataset["id"] and entry["n_rows"] == 150
 
 
+def test_upload_dataset_reads_json_lines(writes):  # noqa: F811
+    client, user = writes
+    headers = bearer(client, user)
+    project_id = new_project(client, user)
+    out = upload(client, headers, project_id, '{"a": 1, "b": "x"}\n{"a": 2, "b": "y"}\n')
+    assert out["isError"] is False, out
+    assert out["structuredContent"]["schema"] == [
+        {"name": "a", "type": "int64"},
+        {"name": "b", "type": "string"},
+    ]
+
+
 def test_upload_over_512_kib_names_create_upload_url(writes):  # noqa: F811
     client, user = writes
     project_id = new_project(client, user)

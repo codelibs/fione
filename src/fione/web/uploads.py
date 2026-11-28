@@ -1,4 +1,4 @@
-"""CSV uploads of the web UI: checks, multipart parsing and ingest.
+"""CSV and JSON uploads of the web UI: checks, multipart parsing and ingest.
 
 Starlette's parser keeps each file in a ``SpooledTemporaryFile`` (in memory up to
 ``spool_max_size``, then a temp file). Here that spool rolls over into ``<data_dir>/tmp``, so a
@@ -32,6 +32,8 @@ INGEST_ERRORS = (
     ("empty file", "upload.error.empty"),
     ("no data rows", "upload.error.no_rows"),
     ("could not parse the CSV", "upload.error.parse"),
+    ("could not parse the JSON", "upload.error.json_parse"),
+    ("the JSON array is over", "upload.error.json_large"),
 )
 
 
@@ -90,10 +92,13 @@ async def upload_context(request: Request, conn, pid: str) -> Ctx:
 
 
 def dataset_name(filename: str) -> str:
-    """The dataset name for an uploaded file: its base name without ``.csv``."""
+    """The dataset name for an uploaded file: its base name without ``.csv``, ``.json``,
+    ``.jsonl`` or ``.ndjson``."""
     base = PureWindowsPath(PurePosixPath(filename).name).name.strip()
-    if base.lower().endswith(".csv"):
-        base = base[:-4].strip()
+    for suffix in (".csv", ".json", ".jsonl", ".ndjson"):
+        if base.lower().endswith(suffix):
+            base = base[: -len(suffix)].strip()
+            break
     return base[:MAX_NAME_LEN] or "data"
 
 
@@ -101,7 +106,8 @@ def _ingest_problem(error: IngestError) -> UploadProblem:
     text = redact(str(error))
     for start, key in INGEST_ERRORS:
         if text.startswith(start):
-            return UploadProblem(422, key, text if key == "upload.error.parse" else None)
+            shown = key in ("upload.error.parse", "upload.error.json_parse")  # a position, no data
+            return UploadProblem(422, key, text if shown else None)
     if "not valid UTF-8" in text:
         return UploadProblem(422, "upload.error.encoding")
     return UploadProblem(422, "upload.error.invalid", text)

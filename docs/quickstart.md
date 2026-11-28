@@ -53,7 +53,10 @@ log can do it.
 
 ## 4. Get a CSV to try
 
-Any CSV with a header row works. To try with the classic iris flowers, export the copy that
+Any CSV with a header row works, and so does JSON: an array of objects (`[{"a": 1}, ...]`, up
+to 200 MB) or JSON Lines (one object per line, of any size up to the upload limit). Each
+top-level key becomes a column, in the order first seen; a list or an object in a value is kept
+as its JSON text; a column of numbers and text is text. To try with the classic iris flowers, export the copy that
 ships with scikit-learn from the running container:
 
 ```sh

@@ -181,7 +181,7 @@
 
 {% macro upload_field(t, limit, describedby="") %}
 <div class="dropzone" data-dropzone>
-  <input class="dropzone__input" type="file" id="upload-file" name="file" accept=".csv,text/csv" required aria-describedby="upload-help{% if describedby %} {{ describedby }}{% endif %}">
+  <input class="dropzone__input" type="file" id="upload-file" name="file" accept=".csv,text/csv,.json,.jsonl,.ndjson,application/json" required aria-describedby="upload-help{% if describedby %} {{ describedby }}{% endif %}">
   <label class="dropzone__label" for="upload-file">
     <span class="dropzone__icon" aria-hidden="true">{{ icon("upload") }}</span>
     <span class="dropzone__title">{{ t('upload.drop') }}</span>
