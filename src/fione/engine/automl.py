@@ -1787,7 +1787,7 @@ class AutoML:
                 )
             )
         twin = pd.util.hash_pandas_object(extra[inputs], index=False).isin(
-            pd.util.hash_pandas_object(own[inputs], index=False)
+            pd.util.hash_pandas_object(_in_types_of(own[inputs], extra), index=False)
         )
         if twin.any():
             notices.append(
@@ -2348,6 +2348,20 @@ def _typed_like(own: pd.Series, values: pd.Series, name: str) -> pd.Series:
             f"the column '{name}' of the extra rows cannot be read as {own.dtype}, the type of "
             "the data's"
         ) from e
+
+
+def _in_types_of(own: pd.DataFrame, extra: pd.DataFrame) -> pd.DataFrame:
+    """``own`` with each column in the type of the same column of ``extra``, so that equal rows
+    hash alike: a gap makes the extra column floats where the data's holds whole numbers, or
+    objects where it holds booleans (``_typed_like``)."""
+    out = own.copy()
+    for name in out.columns:
+        if out[name].dtype != extra[name].dtype:
+            try:
+                out[name] = out[name].astype(extra[name].dtype)
+            except (TypeError, ValueError):
+                pass  # rows that cannot be compared are not twins
+    return out
 
 
 # The texts the CSV reader takes for true and false (pyarrow's defaults): ``astype(bool)`` would

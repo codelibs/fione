@@ -125,6 +125,18 @@ def test_extra_rows_read_true_and_false_as_the_csv_reader_does():
     assert _notices(events)["extra_rows"]["rows"] == len(text)
 
 
+def test_a_gap_in_the_extra_rows_does_not_hide_their_copies_of_rows_of_the_data():
+    """A gap makes the extra column floats (whole numbers) or objects (booleans) where the data's
+    is int64 or bool: the extra rows that copy rows of the data are still found and left out."""
+    own = _table(150, 0).assign(k=lambda d: np.arange(len(d)) % 5, f=lambda d: d["a"] > 0)
+    copies = own.head(30).assign(f=lambda d: np.where(d["f"], "True", "False"))
+    gap = _table(1, 7).assign(k=np.nan, f=None)
+    extra = pd.concat([copies, _table(60, 1).assign(k=2.5, f="False"), gap], ignore_index=True)
+    events = []
+    _fit(own, extra, events, max_runtime_secs=45)
+    assert _notices(events)["extra_duplicates"]["dropped"] == len(copies)
+
+
 def test_extra_rows_may_have_gaps_and_fractions_in_a_column_of_whole_numbers():
     own = _table(150, 0).assign(k=lambda d: np.arange(len(d)) % 5)  # int64, no gaps
     extra = _table(200, 1).assign(k=lambda d: np.where(np.arange(len(d)) % 4 == 0, np.nan, 2.5))
