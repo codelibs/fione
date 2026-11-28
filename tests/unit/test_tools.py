@@ -1434,6 +1434,39 @@ def test_propose_sets_the_event_column_when_asked_and_checks_it(env):
             call(env, "propose_training_config", {**args, **bad})
 
 
+def test_the_event_column_is_not_asked_of_the_test_data(env):
+    # The event says how a row's time ended, like the target it is no input: rows to predict
+    # do not have it, so the proposal must not leave it out as "not in the test data".
+    table = _survival_table()
+    ds = ingest.ingest_batches(
+        env.storage, env.conn, env.project.id, "follow_up_t", DatasetType.TRAIN, [table]
+    )
+    ingest.ingest_batches(
+        env.storage,
+        env.conn,
+        env.project.id,
+        "follow_up_new",
+        DatasetType.TEST,
+        [table.drop(columns=["futime", "death"]).head(50)],
+    )
+    args = {"dataset_id": ds.id, "target": "futime", "event_column": "death"}
+    result = call(env, "propose_training_config", args)
+    assert result["config"]["event_column"] == "death"
+    assert "death" not in (result["config"]["ignored_columns"] or [])
+    assert not any(s["column"] == "death" for s in result["ignored_suggestions"])
+    assert not any(w["code"].startswith("columns_not_in_test") for w in result["warnings"])
+    every = ingest.ingest_batches(
+        env.storage,
+        env.conn,
+        env.project.id,
+        "all_died",
+        DatasetType.TRAIN,
+        [table.assign(death=1)],
+    )
+    result = call(env, "propose_training_config", {**args, "dataset_id": every.id})
+    assert not (result["config"]["ignored_columns"] or [])  # not listed as a constant input
+
+
 def test_the_recommended_metric_follows_the_problem():
     rare = pd.Series([0] * 95 + [1] * 5)
     assert builtin.recommended_metric(rare, "classification") == "aucpr"
