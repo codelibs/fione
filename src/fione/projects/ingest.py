@@ -431,6 +431,8 @@ def _json_form(path: Path) -> str | None:
         first = text.split("\n", 1)[0]
         try:
             return "lines" if isinstance(json.loads(first), dict) else None
+        except RecursionError:  # an object nested too deeply: JSON Lines, refused when read
+            return "lines"
         except ValueError:
             return None
     return None

@@ -786,6 +786,7 @@ def test_a_csv_whose_first_cell_starts_with_a_bracket_stays_a_csv(conn, storage,
         (b'{"a": 1}\n{"a": "\xff"}\n', "the JSON is not valid UTF-8"),
         (b'[{"a": 1}, {"a": "\xff"}]', "the JSON is not valid UTF-8"),
         (b'{"a": 1}\n{"a": ' + b"[" * 100_000 + b"\n", "line 2: nested too deeply"),
+        (b'{"a": ' + b"[" * 100_000 + b"\n", "line 1: nested too deeply"),  # the sniffed line
         (b'[{"a": ' + b"[" * 100_000 + b"]", "nested too deeply"),
     ],
 )
