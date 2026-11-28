@@ -1742,6 +1742,7 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
     ignore = {col.name for col in found.ignore} - {
         time_index.name if time_index else None,
         time_arg,
+        event,  # no input: an event on every row (no follow-up cut short) is no constant column
     }
     id_names = [c.name for c in profile.columns if c.name in ignore and c.kind == "id"]
     listed_ids = set(id_names[:_MAX_IGNORED_LISTED])
@@ -1858,7 +1859,8 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         warnings.append(
             _warning("leak_partial", "the leak check ran out of time; some columns were not scored")
         )
-    left_out_names = {target, *ignored, *left_out}
+    # the event, like the target, is no input: the rows to predict do not have it
+    left_out_names = {target, *ignored, *left_out, *([event] if event else [])}
     features = [n for n in columns if n not in left_out_names]
     absent = absent_from_test(ctx.conn, dataset, features)
     # A column that a test dataset lacks cannot be predicted from, so the proposal leaves it out.
