@@ -101,8 +101,9 @@ when you create a `Client` without arguments:
 ## Engine variables
 
 Read by the AutoML engine where it trains or predicts (the job worker, or your own Python), for the
-TextEmbedding family that a training setting, `embedding_backend`, turns on. The standard image has
-no embedding backend; see [the quick start](quickstart.md#language-model-vectors-of-text).
+TextEmbedding family that a training setting, `embedding_backend`, turns on. The standard image
+includes neither torch and transformers nor a model, so there the family reads a cache filled
+elsewhere; see [the quick start](quickstart.md#language-model-vectors-of-text).
 
 | Variable | Default | What it does |
 |---|---|---|
