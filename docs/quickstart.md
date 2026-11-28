@@ -469,8 +469,10 @@ like are refused with a message, as are an unknown column or one that is not num
 For a table with no column to predict, the built-in modules **K-means (train)** (`kmeans_train`)
 and **Gaussian mixture (train)** (`gmm_train`) add a `cluster` column to every row and keep the
 model, which **K-means (assign clusters)** and **Gaussian mixture (assign clusters)** apply to other
-rows. Name the number columns to group by in `columns` (by default every column). Both fill a gap
-with the column's mean and standardize the columns first (`standardize`).
+rows. Name the number columns to group by in `columns` (by default every number column but one
+that is an id or holds one value: such a column says nothing of which rows are alike, and the job
+names it). Both fill a gap with the column's mean and standardize the columns first
+(`standardize`).
 
 K-means makes round groups of a similar size. A Gaussian mixture also learns each group's shape:
 `covariance` `full` lets a group be long and tilted, `diag` only stretched along the columns.
