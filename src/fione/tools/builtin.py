@@ -2918,18 +2918,38 @@ def _base_columns(link: dict, base: int) -> tuple[str, str]:
     return column_other, column_base
 
 
-def _first_join(links: list[dict], holders: set[int], target: str) -> tuple[dict, int] | None:
+def _joined_into(ctx: ToolContext, dataset_id: int) -> set[int]:
+    """The datasets that Join jobs joined into the dataset: the base each started from and the
+    dataset it added, and theirs in turn."""
+    joined: set[int] = set()
+    waiting = [dataset_id]
+    while waiting:
+        job = store.join_of(ctx.conn, waiting.pop())
+        if job is None:
+            continue
+        for found in (job.payload["dataset_id"], job.payload["params"]["other_dataset_id"]):
+            if found not in joined and found != dataset_id:
+                joined.add(found)
+                waiting.append(found)
+    return joined
+
+
+def _first_join(
+    links: list[dict], holders: set[int], target: str, joined: dict[int, set[int]]
+) -> tuple[dict, int] | None:
     """The best link of a dataset in ``holders`` (those with the column to predict) that a join
     can follow, and the base: the dataset of ``holders`` it links. A link where both sides
     repeat is left out, since one side would have to be summarized first, and so is a link on
     the column to predict itself, since the rows of the other dataset would follow from the
-    answer (a table that describes each class)."""
+    answer (a table that describes each class), and a link to a dataset already joined into
+    the base (``joined``)."""
     for link in links:
         base = next((d for d in link["datasets"] if d in holders), None)
         if (
             base is not None
             and link["relation"] != "many_to_many"
             and _base_columns(link, base)[0].lower() != target
+            and not set(link["datasets"]) & joined[base]
         ):
             return link, base
     return None
@@ -2938,7 +2958,7 @@ def _first_join(links: list[dict], holders: set[int], target: str) -> tuple[dict
 def _propose_first_join(ctx: ToolContext, args: dict) -> dict:
     project_id = args["project_id"]
     _authorize(ctx, project_id)
-    links, datasets, *_ = _project_links(ctx, project_id)
+    links, datasets, every, *_ = _project_links(ctx, project_id)
     if not args.get("target"):
         raise ToolError(
             "the first join depends on the column to predict: ask the user which column it is, "
@@ -2952,7 +2972,20 @@ def _propose_first_join(ctx: ToolContext, args: dict) -> dict:
             f"no dataset of the project has a column named {args['target']!r}",
             code="no_target_column",
         )
-    chosen = _first_join(links, holders, wanted)
+    # A dataset a join made takes the place of the datasets it was made from: the next join
+    # starts from it and does not add them again. Every dataset with the column counts, so a
+    # joined dataset past those the search reads still keeps its base from being joined again.
+    made = {d.id for d in every if any(n.lower() == wanted for n, _ in d.schema)}
+    joined = {d: _joined_into(ctx, d) for d in made}
+    holders -= {d for each in made for d in joined[each]}
+    chosen = _first_join(links, holders, wanted, joined)
+    if chosen is None and any(joined.values()):
+        raise ToolError(
+            "the links that a join can follow from the datasets with that column are joined "
+            "already; train on the joined dataset, or add another table with propose_join, "
+            "naming its key",
+            code="joined",
+        )
     if chosen is None:
         raise ToolError(
             "no dataset with that column has a link that a join can follow; call "

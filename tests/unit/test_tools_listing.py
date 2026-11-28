@@ -12,6 +12,7 @@ from fione.auth import service as auth
 from fione.auth.roles import ProjectAccess, Role
 from fione.data.profile import ColumnProfile
 from fione.jobs import store
+from fione.jobs.store import JobStatus
 from fione.models import service as models
 from fione.projects import ingest
 from fione.projects import service as projects
@@ -814,6 +815,54 @@ def test_propose_first_join_does_not_join_on_the_column_to_predict(env):
     assert found["dataset_id"] == by_name["users"]
     assert found["config"]["other_dataset_id"] == by_name["visits"]
     assert found["config"]["key"] == "id" and found["config"]["other_key"] == "user_id"
+
+
+def _joined(env, base_id, other_id, frame, name):
+    """The dataset a done Join job of ``other_id`` into ``base_id`` made, holding ``frame``."""
+    made = ingest.ingest_batches(env.storage, env.conn, env.b.id, name, DatasetType.TRAIN, [frame])
+    payload = {"module_id": "join", "dataset_id": base_id, "params": {"other_dataset_id": other_id}}
+    job = store.enqueue(env.conn, "module", env.b.id, env.users.owner.id, payload)
+    assert store.claim_job(env.conn, job.id, "token")
+    store.finish_job(env.conn, job.id, JobStatus.DONE, result={"dataset_id": made.id})
+    return made.id
+
+
+def test_propose_first_join_goes_on_from_the_joined_dataset(env):
+    by_name = _shop(env)
+    found = call(env, "propose_first_join", {"project_id": env.b.id, "target": "qty"})
+    assert (found["dataset_id"], found["config"]["other_dataset_id"]) == (
+        by_name["items"],
+        by_name["orders"],
+    )
+    items = pd.DataFrame({"order_id": [100 + i % 120 for i in range(300)], "qty": range(300)})
+    joined = items.assign(customer_id=lambda d: (d.order_id - 100) % 60 + 1)
+    made = _joined(env, by_name["items"], by_name["orders"], joined, "items_orders")
+    found = call(env, "propose_first_join", {"project_id": env.b.id, "target": "qty"})
+    # the joined dataset is the base, and the customers come next, not the orders again
+    assert found["dataset_id"] == made
+    assert found["config"]["other_dataset_id"] == by_name["customers"]
+    assert found["config"]["key"] == "customer_id" and found["config"]["other_key"] == "id"
+
+
+def test_a_joined_dataset_the_search_does_not_read_still_keeps_its_base_from_a_rejoin(
+    env, monkeypatch
+):
+    monkeypatch.setattr(builtin, "_LINK_DATASETS", 3)  # the joined dataset is the fourth
+    by_name = _shop(env)
+    items = pd.DataFrame({"order_id": [100 + i % 120 for i in range(300)], "qty": range(300)})
+    _joined(env, by_name["items"], by_name["orders"], items.assign(n=1), "items_orders")
+    with pytest.raises(ToolError, match="joined already"):
+        call(env, "propose_first_join", {"project_id": env.b.id, "target": "qty"})
+
+
+def test_propose_first_join_says_when_every_link_is_joined_already(env):
+    left = pd.DataFrame({"k": range(1, 61), "a": range(60)})
+    right = pd.DataFrame({"k": range(1, 61), "b": range(60)})
+    by_name = _ingest(env, env.b, left=left, right=right)
+    _joined(env, by_name["right"], by_name["left"], right.assign(a=range(60)), "right_left")
+    with pytest.raises(ToolError, match="joined already") as refused:
+        call(env, "propose_first_join", {"project_id": env.b.id, "target": "b"})
+    assert refused.value.code == "joined"
 
 
 def test_propose_first_join_says_what_it_cannot_do(env):
