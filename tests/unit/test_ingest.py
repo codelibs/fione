@@ -88,6 +88,29 @@ def test_euc_jp_japanese(conn, storage, project):
     assert df["なまえ"].tolist() == ["たなか", "さとう", "すずき"]
 
 
+def test_a_western_file_that_no_other_encoding_reads_is_read_as_windows_1252(
+    conn, storage, project
+):
+    text = "city,note\nZürich,café crème\nSão Paulo,“quoted” – 5 €\nKraków,naïve\n"
+    _, df = load(conn, storage, project, text.encode("cp1252"))
+    assert df["city"].tolist() == ["Zürich", "São Paulo", "Kraków"]
+    assert df["note"].tolist() == ["café crème", "“quoted” – 5 €", "naïve"]
+
+
+def test_a_binary_file_is_not_taken_for_windows_1252(conn, storage, project):
+    # the bytes no other encoding reads (0x80), but with the control characters of a binary file
+    metadata = b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X        \x00\x02\x80\xe9\x00"
+    with pytest.raises(IngestError, match="encoding"):
+        load(conn, storage, project, metadata * 10)
+
+
+def test_a_japanese_file_is_still_read_as_japanese(conn, storage, project):
+    # cp1252 reads these bytes too: it is the last choice, after Shift_JIS and EUC-JP
+    for encoding in ("cp932", "euc_jp"):
+        _, df = load(conn, storage, project, "名前,値\n山田,1\n".encode(encoding))
+        assert df["名前"].tolist() == ["山田"]
+
+
 def test_multibyte_char_cut_at_sample_boundary(conn, storage, project, monkeypatch):
     monkeypatch.setattr(ingest, "_SAMPLE_SIZE", 8)
     # Every sample size 8 cuts "名前" (3-byte chars) and cp932 pairs mid-character.

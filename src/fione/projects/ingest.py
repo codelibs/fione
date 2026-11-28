@@ -75,6 +75,9 @@ def _spool(stream: BinaryIO, path: Path, max_bytes: int) -> int:
     return total
 
 
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
 def _decode(sample: bytes, encoding: str, final: bool) -> str | None:
     # Incremental, so a multibyte character cut at the end of a partial sample is not an error.
     try:
@@ -84,7 +87,8 @@ def _decode(sample: bytes, encoding: str, final: bool) -> str | None:
 
 
 def _detect_encoding(sample: bytes, final: bool) -> tuple[str, str]:
-    """Return ``(encoding, decoded sample)``: UTF-8, else Shift_JIS family, else EUC-JP."""
+    """Return ``(encoding, decoded sample)``: UTF-8, else Shift_JIS family, else EUC-JP, else
+    Windows-1252 (a file saved by Excel in a Western language)."""
     text = _decode(sample, "utf-8-sig", final)
     if text is not None:
         return ("utf-8-sig" if sample.startswith(codecs.BOM_UTF8) else "utf-8"), text
@@ -94,8 +98,14 @@ def _detect_encoding(sample: bytes, final: bool) -> tuple[str, str]:
         if (text := _decode(sample, encoding, final)) is not None
     ]
     if not candidates:
+        # Last, as it reads nearly any bytes: only a file that none of the others reads is
+        # taken for it, and only as text (no control character but tabs and line ends, which
+        # a binary file such as an archive's metadata has).
+        text = _decode(sample, "cp1252", final)
+        if text is not None and not _CONTROL.search(text):
+            return "cp1252", text
         raise IngestError(
-            "could not detect the text encoding (expected UTF-8, Shift_JIS or EUC-JP)"
+            "could not detect the text encoding (expected UTF-8, Shift_JIS, EUC-JP or Windows-1252)"
         )
     # EUC-JP kana often decode as valid cp932, but as half-width katakana noise; prefer the
     # reading with fewer of those (ties go to cp932).

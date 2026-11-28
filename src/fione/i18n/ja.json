@@ -214,7 +214,7 @@
   "upload.choose": "ファイルを選択",
   "upload.rule_format": "CSV、または JSON（オブジェクトの配列か、1 行にオブジェクト 1 つ）。CSV の列の区切りはカンマ・セミコロン・タブ・| が使えます。",
   "upload.rule_size": "{size} まで。",
-  "upload.rule_encoding": "文字コード: UTF-8、Shift_JIS、EUC-JP。",
+  "upload.rule_encoding": "文字コード: UTF-8、Shift_JIS、EUC-JP、Windows-1252。",
   "upload.rule_header": "1 行目には列名を入れてください。",
   "upload.error.form": "アップロードが正しく届きませんでした。ファイルを選び直して、もう一度お試しください。",
   "upload.error.missing": "アップロードする CSV か JSON のファイルを選んでください。",
