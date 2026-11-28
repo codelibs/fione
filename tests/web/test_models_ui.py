@@ -438,6 +438,38 @@ def test_a_module_over_the_upload_limit_says_the_module_cap(make_client):
     assert 'href="/modules/upload"' in r.text
 
 
+def test_data_to_predict_over_the_upload_limit_says_the_limit(make_client):
+    world = make_world(make_client(max_upload_bytes=1000))
+    csrf = world.login("ed")
+    path = world.path("/projects/{p}/models/{model}/predict")
+    r = world.client.post(
+        path,
+        data={"csrf_token": csrf},
+        files={"file": ("new.csv", b"a,b\n" + b"1,2\n" * 300_000, "text/csv")},
+        headers=HTML,
+    )
+    assert r.status_code == 413 and "larger than the upload limit" in r.text
+    assert "Files up to 1000 B" in r.text and f'href="{path}"' in r.text
+
+
+def test_a_module_counted_over_the_limit_says_the_module_cap(make_client):
+    world = make_world(make_client(max_upload_bytes=512 * 1024))
+    world.login("admin")
+
+    def chunks():  # no Content-Length: the bytes are counted as they arrive
+        yield b'--b\r\nContent-Disposition: form-data; name="file"; filename="m.py"\r\n\r\n'
+        for _ in range(3):
+            yield b"#" * (1 << 20)
+
+    r = world.client.post(
+        "/modules/upload",
+        content=chunks(),
+        headers=HTML | {"Content-Type": "multipart/form-data; boundary=b"},
+    )
+    assert r.status_code == 413 and "Files up to 256 KB can be uploaded." in r.text
+    assert 'href="/modules/upload"' in r.text
+
+
 def test_the_way_back_from_an_oversized_upload_is_quoted(make_client):
     client = make_client(max_upload_bytes=1000)
     r = client.post(
