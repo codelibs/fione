@@ -3894,3 +3894,158 @@ def test_no_repeated_texts_notice_beside_the_notice_for_number_columns_that_repe
         feature_engineering=False,
     )
     assert "repeated_texts" not in _kinds(events)
+
+
+def _stores(closed=True, seed=0):
+    """30 stores over 120 days; store 3 sells nothing from day 40 to day 79 when ``closed``."""
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame([(s, d) for s in range(30) for d in range(120)], columns=["store", "day"])
+    df["date"] = pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")
+    df["x"] = rng.normal(size=len(df))
+    df["y"] = rng.poisson(5 + df["store"] % 4, len(df)).astype(float)
+    if closed:
+        df.loc[(df["store"] == 3) & df["day"].between(40, 79), "y"] = 0.0
+    return df.drop(columns="day")
+
+
+def test_a_stretch_of_zero_targets_of_a_value_is_pointed_out_with_its_dates():
+    events = []
+    df = _stores()
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        task="regression",
+        max_models=1,
+        time_column="date",
+        ignored_columns=["date"],
+    )
+    found = [
+        e.data for e in events if e.type == "notice" and e.data.get("kind") == "zero_stretches"
+    ]
+    assert len(found) == 1 and found[0]["columns"] == ["store"] and found[0]["rows"] == [40]
+    assert "such as 3 from 2021-02-10 to 2021-03-21" in found[0]["message"]
+
+
+def test_zeros_at_the_start_or_end_of_a_value_or_usual_for_it_are_not_pointed_out():
+    df = _stores(closed=False)
+    df.loc[(df["store"] == 4) & (df["date"] < "2021-02-10"), "y"] = 0.0  # opened later
+    df.loc[(df["store"] == 5) & (df["date"] > "2021-03-21"), "y"] = 0.0  # closed for good
+    # store 6 sells only one week in four: zero is usual for it, a long stretch included
+    weeks = (df["date"] - df["date"].min()).dt.days // 7
+    df.loc[(df["store"] == 6) & ((weeks % 4 != 0) | weeks.between(4, 7)), "y"] = 0.0
+    events = []
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        task="regression",
+        max_models=1,
+        time_column="date",
+        ignored_columns=["date"],
+    )
+    assert not [e for e in events if e.type == "notice" and e.data.get("kind") == "zero_stretches"]
+
+
+def test_a_target_that_is_mostly_zero_is_not_pointed_out():
+    df = _stores(closed=True)
+    df.loc[df.sample(frac=0.9, random_state=0).index, "y"] = 0.0
+    events = []
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        task="regression",
+        max_models=1,
+        time_column="date",
+        ignored_columns=["date"],
+    )
+    assert not [e for e in events if e.type == "notice" and e.data.get("kind") == "zero_stretches"]
+
+
+def test_scattered_zero_targets_and_a_value_that_never_sells_are_not_pointed_out():
+    df = _stores(closed=False)
+    df.loc[df.sample(frac=0.3, random_state=0).index, "y"] = 0.0  # zeros here and there
+    df.loc[df["store"] == 7, "y"] = 0.0  # one store that never sells: nothing to compare with
+    events = []
+    _fit(
+        df,
+        events,
+        families=["LightGBM"],
+        target="y",
+        task="regression",
+        max_models=1,
+        time_column="date",
+        ignored_columns=["date"],
+    )
+    assert not [e for e in events if e.type == "notice" and e.data.get("kind") == "zero_stretches"]
+
+
+def test_a_closed_day_of_an_hourly_table_is_not_a_stretch_and_a_store_is_told_once():
+    rng = np.random.default_rng(0)
+    hours = pd.date_range("2021-01-01", periods=24 * 60, freq="h")
+    df = pd.DataFrame([(s, h) for s in range(6) for h in hours], columns=["store", "when"])
+    df["city"] = df["store"].map({0: "a", 1: "a", 2: "b", 3: "b", 4: "c", 5: "d"})
+    df["y"] = rng.poisson(20, len(df)).astype(float)
+    day = (df["when"] >= "2021-01-20") & (df["when"] < "2021-01-21")
+    df.loc[(df["store"] == 1) & day, "y"] = 0.0  # 24 hours: one closed day
+    events = []
+    model = automl_module.AutoML(TrainConfig(target="y", task="regression"), events.append)
+    model._notice_zero_stretches(df, df.drop(columns="y"), df["y"].to_numpy(), "when")
+    assert not events
+    weeks = (df["when"] >= "2021-02-01") & (df["when"] < "2021-02-20")
+    df.loc[(df["store"] == 5) & weeks, "y"] = 0.0  # 19 days; store 5 is the only one of city d
+    model._notice_zero_stretches(df, df.drop(columns="y"), df["y"].to_numpy(), "when")
+    assert len(events) == 1 and events[0].data["columns"] == ["store"]
+    assert events[0].data["stretches"] == [1]
+
+
+def _zero_notice(df, column="when"):
+    events = []
+    model = automl_module.AutoML(TrainConfig(target="y", task="regression"), events.append)
+    model._notice_zero_stretches(df, df.drop(columns="y"), df["y"].to_numpy(), column)
+    return [e.data for e in events if e.data.get("kind") == "zero_stretches"]
+
+
+def _store_days(stores=4, items=4, days=365, seed=0):
+    rng = np.random.default_rng(seed)
+    when = pd.date_range("2021-01-01", periods=days)
+    df = pd.DataFrame(
+        [(s, i, d) for s in range(stores) for i in range(items) for d in when],
+        columns=["store", "item", "when"],
+    )
+    df["y"] = rng.poisson(20, len(df)).astype(float)
+    return df
+
+
+def test_unrelated_stretches_on_the_same_dates_are_each_told():
+    df = _store_days()
+    stretch = df["when"].between("2021-04-11", "2021-06-09")
+    df.loc[(df["store"] == 0) & stretch, "y"] = 0.0
+    df.loc[(df["item"] == 2) & stretch, "y"] = 0.0
+    found = _zero_notice(df)
+    assert len(found) == 1 and sorted(found[0]["columns"]) == ["item", "store"]
+
+
+def test_stores_closed_together_are_not_told_again_under_their_cities():
+    df = _store_days(stores=30, items=1, days=200)
+    df["city"] = df["store"] // 2
+    df.loc[df["when"].between("2021-04-11", "2021-05-10"), "y"] = 0.0
+    found = _zero_notice(df)
+    assert len(found) == 1 and found[0]["columns"] == ["store"] and found[0]["stretches"] == [30]
+
+
+def test_a_closure_is_told_beside_a_weekly_closing_day_and_two_closures_are_both_told():
+    df = _store_days(stores=4, items=1)
+    df.loc[df["when"].dt.day_of_week == 6, "y"] = 0.0  # every store closes on Sundays
+    df.loc[(df["store"] == 3) & df["when"].between("2021-04-11", "2021-06-09"), "y"] = 0.0
+    found = _zero_notice(df)
+    assert len(found) == 1 and found[0]["stretches"] == [1]
+    df = _store_days(stores=4, items=1)
+    for first, last in (("2021-02-20", "2021-03-31"), ("2021-07-20", "2021-08-28")):
+        df.loc[(df["store"] == 3) & df["when"].between(first, last), "y"] = 0.0
+    found = _zero_notice(df)
+    assert len(found) == 1 and found[0]["stretches"] == [2]

@@ -262,6 +262,14 @@ HISTORY_PERSISTENCE = 0.7
 HISTORY_COVERED = 0.8
 HISTORY_SAMPLE_ROWS = 50_000
 HISTORY_COLUMNS = 200  # a wider table is not looked at
+# A value of a column (a store, a product) whose target is 0 on every row of at least this many
+# of its times in a row, with other targets before and after: a stretch when it was closed.
+ZERO_RUN_TIMES = 14
+ZERO_RUN_RARE = 0.2  # ... at most this share of its other times all 0 (zero is unusual)
+ZERO_RUN_MOST = 0.5  # ... and long zero stretches on at most this share of its times
+ZERO_RUN_VALUES = 1_000  # columns with more different values are not looked at
+ZERO_RUN_SHOWN = 3  # stretches named in the notice
+ZERO_RUN_SECONDS = 10.0  # the columns left when the look has taken this long are not looked at
 # A time-ordered validation whose first part spans less than SEASON_DAYS, of dates that span more
 # than TWO_SEASONS_DAYS: the first folds learn from less than one yearly cycle, see
 # ``AutoML._notice_time_parts``.
@@ -565,6 +573,96 @@ class AutoML:
             columns=[column],
             correlation=round(found[column], 2),
         )
+
+    def _notice_zero_stretches(
+        self, df: pd.DataFrame, X: pd.DataFrame, y: np.ndarray, time_column: str | None
+    ) -> None:
+        """Say when some values of a column (a store, a product) have a target of 0 on every row
+        of at least ``ZERO_RUN_TIMES`` of their times in a row (and ``ZERO_RUN_TIMES`` days for
+        dates), with other targets before and after the stretch, while zero is otherwise unusual
+        for them (``ZERO_RUN_RARE``, ``ZERO_RUN_MOST``): periods when they were closed or not
+        recorded. A model
+        learns those zeros as part of the values and the dates (a day of the year, a lag of a
+        year) and can predict them again. A stretch whose rows were all told under a column with
+        more values is not told again (a store, not its city); the two columns with the most rows
+        in stretches are told. The look ends after ``ZERO_RUN_SECONDS``. Advisory: a check that
+        fails changes nothing."""
+        if time_column is None or X.shape[1] > HISTORY_COLUMNS:
+            return
+        try:
+            zero = np.asarray(y) == 0
+            if not zero.any():
+                return
+            started = time.monotonic()
+            codes, moments = pd.factorize(_time_values(df, time_column), sort=True)
+            order = codes.astype(np.int64)
+            dated = pd.api.types.is_datetime64_any_dtype(moments)
+            candidates = []
+            for column in X.columns:
+                values = X[column]
+                if column == time_column or pd.api.types.is_float_dtype(values):
+                    continue
+                if time.monotonic() - started > ZERO_RUN_SECONDS:
+                    return
+                distinct = values.nunique()
+                if 2 <= distinct <= ZERO_RUN_VALUES:
+                    candidates.append((distinct, column))
+            found = {}
+            told = np.zeros(len(order), dtype=bool)  # rows in a stretch told already
+            for _, column in sorted(candidates, key=lambda c: -c[0]):  # the finest column first
+                if time.monotonic() - started > ZERO_RUN_SECONDS:
+                    break
+                value_codes, labels = pd.factorize(X[column])
+                stretches = _zero_stretches(value_codes, labels, order, zero)
+                if stretches is None:
+                    continue
+                if dated:
+                    last = moments[stretches["last"].to_numpy()]
+                    days = (last - moments[stretches["first"].to_numpy()]).days + 1
+                    stretches = stretches[np.asarray(days) >= ZERO_RUN_TIMES]
+                kept = []
+                for r in stretches.itertuples():
+                    rows = (value_codes == r.code) & (order >= r.first) & (order <= r.last)
+                    kept.append(bool((rows & ~told).any()))  # not all told under a finer column
+                    told |= rows
+                stretches = stretches[np.asarray(kept, dtype=bool)]
+                if len(stretches):
+                    found[column] = stretches
+            if not found:
+                return
+            columns = sorted(found, key=lambda c: -int(found[c]["rows"].sum()))[:2]
+            parts = []
+            for column in columns:
+                stretches = found[column]
+                shown = stretches.sort_values("times", ascending=False).head(ZERO_RUN_SHOWN)
+                named = "; ".join(
+                    f"{_value_text(r.value)} from {_moment_text(moments[r.first])} to "
+                    f"{_moment_text(moments[r.last])}"
+                    for r in shown.itertuples()
+                )
+                count = len(stretches)
+                parts.append(
+                    f"{count} stretch{'es' if count != 1 else ''} of values of {column!r} "
+                    f"({int(stretches['rows'].sum()):,} rows), such as {named}"
+                )
+            message = (
+                f"the target is 0 on every row of stretches of at least {ZERO_RUN_TIMES} times "
+                f"of {time_column!r} in a row inside the history of a value, where zero is "
+                f"otherwise unusual for it: {', and '.join(parts)}. These are likely periods "
+                "when those values were closed or not recorded. A model learns those zeros as "
+                "part of the values and dates and can predict them again, at the same time of a "
+                "later year too. If they will not come back, leave those rows out of the "
+                "training data with the Slice rows module, one per stretch (column != value | "
+                "time < first | time > last)"
+            )
+            data = {
+                "columns": columns,
+                "stretches": [len(found[c]) for c in columns],
+                "rows": [int(found[c]["rows"].sum()) for c in columns],
+            }
+        except Exception:
+            return
+        self._notice(message, kind="zero_stretches", **data)
 
     def _notice_frequency_encoded_values(
         self, prep: Prep, X: pd.DataFrame, importance: pd.Series
@@ -1513,6 +1611,9 @@ class AutoML:
             self._notice_missing_history(
                 own_df, X_own, y_seen[:own], c.time_column or next(iter(dates), None)
             )
+            self._notice_zero_stretches(
+                own_df, X_own, y_seen[:own], c.time_column or next(iter(dates), None)
+            )
         rows = covered(folds, len(y))  # the rows some fold predicts (all but the first part)
         families = self._without_wide_linear_view(prep, len(X))
         # The words are read only from prose columns.
@@ -2373,6 +2474,73 @@ def _time_values(df: pd.DataFrame, column: str) -> pd.Series:
         if values.isna().any():
             raise ConfigError(f"time column '{column}' must hold numbers or dates it can order by")
     return values
+
+
+def _zero_stretches(codes: np.ndarray, labels, order: np.ndarray, zero: np.ndarray):
+    """The stretches of at least ``ZERO_RUN_TIMES`` times in a row (in the order codes
+    ``order``) when every row of a value (``codes`` into ``labels``) has a zero target
+    (``zero``), with a non-zero time of the value before and after, for values whose zero is
+    otherwise unusual: at most ``ZERO_RUN_RARE`` of their times outside their long zero
+    stretches are all zero, and those stretches hold at most ``ZERO_RUN_MOST`` of their times.
+    A frame of value, code, times, rows, first and last order code, or None when there is
+    none."""
+    keep = codes >= 0
+    cells = (
+        pd.DataFrame({"v": codes[keep], "t": order[keep], "z": zero[keep]})
+        .groupby(["v", "t"], sort=True)
+        .z.agg(["all", "size"])
+        .reset_index()
+    )
+    v = cells.v.to_numpy()
+    flag = cells["all"].to_numpy()
+    starts = np.r_[True, (v[1:] != v[:-1]) | (flag[1:] != flag[:-1])]
+    cells["run"] = np.cumsum(starts)
+    runs = cells.groupby("run").agg(
+        v=("v", "first"),
+        zero=("all", "first"),
+        times=("t", "size"),
+        rows=("size", "sum"),
+        first=("t", "first"),
+        last=("t", "last"),
+    )
+    # inside the history: a run of the same value before and after it
+    same_before = runs.v.shift(1).eq(runs.v).to_numpy()
+    same_after = runs.v.shift(-1).eq(runs.v).to_numpy()
+    long = runs.zero.to_numpy() & (runs.times.to_numpy() >= ZERO_RUN_TIMES)
+    stretches = runs[long & same_before & same_after]
+    if stretches.empty:
+        return None
+    total = cells.groupby("v").size()
+    zeros = cells.groupby("v")["all"].sum()
+    in_long = runs[long].groupby("v").times.sum().reindex(total.index, fill_value=0)
+    other_zero = (zeros - in_long) / (total - in_long).clip(lower=1)
+    unusual = (other_zero <= ZERO_RUN_RARE) & (in_long <= ZERO_RUN_MOST * total)
+    stretches = stretches[stretches.v.map(unusual).to_numpy(dtype=bool)]
+    if stretches.empty:
+        return None
+    return pd.DataFrame(
+        {
+            "value": [labels[int(x)] for x in stretches.v],
+            "code": stretches.v.to_numpy(),
+            "times": stretches.times.to_numpy(),
+            "rows": stretches.rows.to_numpy(),
+            "first": stretches["first"].to_numpy(),
+            "last": stretches["last"].to_numpy(),
+        }
+    )
+
+
+def _value_text(value) -> str:
+    """A value of a column for a message, as a Slice rows condition takes it (no quotes)."""
+    return str(value)
+
+
+def _moment_text(moment) -> str:
+    """A time of the time column in words: a date without a midnight time, else as it is."""
+    stamp = pd.Timestamp(moment) if isinstance(moment, np.datetime64 | pd.Timestamp) else None
+    if stamp is not None and stamp == stamp.normalize():
+        return stamp.strftime("%Y-%m-%d")
+    return str(moment)
 
 
 def _order_codes(df: pd.DataFrame, column: str) -> np.ndarray:

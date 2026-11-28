@@ -360,6 +360,23 @@ named by several columns together (a shop and an item), a time that is not a dat
 `time_column`, a table of over 200 columns, a classification, a quantile and a survival fit get
 none.
 
+A regression over a date column or the `time_column` also gets a notice when some values of a
+column (a store, a product; a column of at most 1,000 values) have a target of 0 on every row of
+at least 14 of their times in a row (14 days or more for dates), with other targets before and
+after the stretch, while zero
+is otherwise unusual for them (at most a fifth of their times outside such stretches, and the
+stretches on at most half of their times, so a weekly closing day does not hide a closure):
+periods when they were
+closed or not recorded. Zeros at the start or the end of a value's history (opened later, closed
+for good) are not told, and a stretch whose rows were all told under a column with more values
+is not told again (a store, not its city). The notice names the two columns with the most rows in such
+stretches, and the longest stretches with their dates; a table of over 200 columns, a
+classification, a quantile and a survival fit get none. A model learns those zeros as part of the values and
+the dates (a day of the year, a lag of a year) and can predict them again, at the same time of a
+later year too; if they will not come back, leave those rows out of the training data with
+**Slice rows**, one per stretch (`shop != 7 | date < 2021-03-01 | date > 2021-04-15` keeps every
+row but those of shop 7 in that stretch).
+
 ## Statistics of nearby values
 
 For a signal or a sensor, the rows next to a row often say more than the row: a level that
