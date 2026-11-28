@@ -1,16 +1,19 @@
 """The MCP action tools: off unless FIONE_MCP_WRITE_ENABLED, never in the chat, and each runs
 as the token's user with the write access the REST routes ask for."""
 
+import io
 import re
 from contextlib import closing
 
 import pytest
-from test_mcp import bearer, call, iris_dataset, post, rpc
+from test_mcp import bearer, call, iris_dataset, iris_frame, post, rpc
 
 from api_helpers import ASSISTANT_OFF, add_user, connect
 from fione.auth.roles import ProjectAccess, Role
 from fione.jobs import store
 from fione.projects import service as projects
+from fione.projects.ingest import ingest_csv
+from fione.projects.service import DatasetType
 from fione.tools import list_actions, list_tools, registry
 
 READS = {"list_modules", "get_job", "wait_for_job", "list_jobs", "get_predictions"}
@@ -104,6 +107,26 @@ def test_start_training_queues_a_job(writes):
     assert out["job_id"] == job.id and out["kind"] == "automl" and out["status"] == "queued"
     assert job.owner_id == user.id and job.payload["name"] == "t"
     assert job.payload["config"]["target"] == "species"
+
+
+def test_start_training_takes_extra_datasets(writes):
+    client, user = writes
+    project, dataset = iris_dataset(client, user)
+    with closing(connect(client)) as conn:
+        stream = io.BytesIO(iris_frame().to_csv(index=False).encode())
+        more = ingest_csv(
+            client.app.state.storage, conn, project.id, "more", DatasetType.TRAIN, stream
+        )
+    headers = bearer(client, user)
+    args = {"project_id": project.id, "dataset_id": dataset.id, "config": CONFIG}
+    for bad in (["1"], [0], [1.5], [True]):
+        result = call(client, headers, "start_training", {**args, "extra_dataset_ids": bad})
+        assert result["isError"] is True, bad
+    assert jobs(client) == []
+    result = call(client, headers, "start_training", {**args, "extra_dataset_ids": [more.id]})
+    assert result["isError"] is False, result
+    (job,) = jobs(client)
+    assert job.payload["extra_dataset_ids"] == [more.id]
 
 
 def test_bad_config_is_a_message_and_queues_nothing(writes):
