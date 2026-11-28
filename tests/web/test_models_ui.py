@@ -438,6 +438,18 @@ def test_a_module_over_the_upload_limit_says_the_module_cap(make_client):
     assert 'href="/modules/upload"' in r.text
 
 
+def test_the_import_page_says_the_smaller_of_the_export_cap_and_the_upload_limit(make_client):
+    world = make_world(make_client(max_upload_bytes=3 * 2**20))
+    world.login("admin")
+    page = world.client.get(world.path("/projects/{p}/models/import")).text
+    assert "up to 3 MB." in page
+
+
+def test_the_import_page_says_the_export_cap_under_the_default_limit(world):
+    world.login("admin")
+    assert "up to 512 MB." in world.client.get(world.path("/projects/{p}/models/import")).text
+
+
 def test_data_to_predict_over_the_upload_limit_says_the_limit(make_client):
     world = make_world(make_client(max_upload_bytes=1000))
     csrf = world.login("ed")

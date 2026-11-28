@@ -904,7 +904,7 @@
   "import.warning_title": "Only import files you trust",
   "import.warning": "A model file can run code on the server when it is loaded. Fione only loads models whose signature was made by this installation, unless you choose to trust a foreign one below.",
   "import.file": "Model export (zip)",
-  "import.file_hint": "A zip made by Export on a model page, up to {mb} MB.",
+  "import.file_hint": "A zip made by Export on a model page, up to {size}.",
   "import.trust": "Trust a model from another Fione installation",
   "import.trust_hint": "Only if you know where the file comes from: Fione cannot check that its code is safe, and loading it may run that code on this server. The model is marked as imported and unverified.",
   "import.back": "Back to the models",

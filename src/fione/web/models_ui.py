@@ -65,7 +65,7 @@ from fione.web.easyml import (
     refusals,
 )
 from fione.web.uploads import UploadFormError, UploadProblem, read_form
-from fione.web.views import UiError, language, render
+from fione.web.views import UiError, language, render, size_text
 
 log = logging.getLogger(__name__)
 router = APIRouter(include_in_schema=False)
@@ -195,7 +195,10 @@ def _import_view(request: Request, ctx: Ctx, *, status=200, problem=None) -> Res
         ctx,
         status=status,
         problem=problem,
-        limit_mb=routes_models.MAX_ARCHIVE_BYTES // 2**20,
+        # the export cap, or the upload limit when that is smaller: the body limit refuses first
+        limit=size_text(
+            min(routes_models.MAX_ARCHIVE_BYTES, request.app.state.settings.max_upload_bytes)
+        ),
     )
 
 
