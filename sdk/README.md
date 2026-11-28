@@ -58,6 +58,9 @@ predictions = fione.predict(project["id"], model_id, new_rows)  # a "predict" co
   the other training options as keyword arguments. The dataset must be a `train` dataset;
   `extra_dataset_ids` are other `train` datasets whose rows are only learned from, never
   validated.
+- Training does not leave out id columns by itself: pass the columns that only identify rows,
+  or that are not known when you predict, as `ignored_columns=[...]`. `profile()` marks the
+  columns that look like ids (`"kind": "id"`); the web form leaves those out for you.
 - `wait(timeout=None, poll=1.0, max_poll=10.0)` polls, doubling the interval up to
   `max_poll`. It raises `fione_sdk.JobFailed` (a `FioneError`) when the job failed or was
   cancelled: `code` is `"failed"` or `"cancelled"`, `message` the job's message, `job` the

@@ -98,6 +98,18 @@ when you create a `Client` without arguments:
 | `FIONE_URL` | The address of the Fione server, for example `http://localhost:8080`. |
 | `FIONE_TOKEN` | An API token (see the Account page). Sent as `Authorization: Bearer`. |
 
+## Engine variables
+
+Read by the AutoML engine where it trains or predicts (the job worker, or your own Python), for the
+TextEmbedding family that a training setting, `embedding_backend`, turns on. The standard image
+includes neither torch and transformers nor a model, so there the family reads a cache filled
+elsewhere; see [the quick start](quickstart.md#language-model-vectors-of-text).
+
+| Variable | Default | What it does |
+|---|---|---|
+| `FIONE_EMBEDDING_CACHE_DIR` | unset | Where the vectors of texts are kept, so that a text is embedded once. Unset, they stay in memory for the process. |
+| `FIONE_EMBEDDING_MODEL_DIR` | unset | The language model's directory for the `torch_lm` backend, which needs torch and transformers. |
+
 ## Internal variables
 
 `FIONE_JOB_DB` and `FIONE_JOB_HANDLER_MODULES` are set by Fione for its own job worker
