@@ -3911,7 +3911,7 @@ def _zero_notice(df, column="when"):
     return [e.data for e in events if e.data.get("kind") == "zero_stretches"]
 
 
-def _daily(stores=4, items=4, days=365, seed=0):
+def _store_days(stores=4, items=4, days=365, seed=0):
     rng = np.random.default_rng(seed)
     when = pd.date_range("2021-01-01", periods=days)
     df = pd.DataFrame(
@@ -3923,7 +3923,7 @@ def _daily(stores=4, items=4, days=365, seed=0):
 
 
 def test_unrelated_stretches_on_the_same_dates_are_each_told():
-    df = _daily()
+    df = _store_days()
     stretch = df["when"].between("2021-04-11", "2021-06-09")
     df.loc[(df["store"] == 0) & stretch, "y"] = 0.0
     df.loc[(df["item"] == 2) & stretch, "y"] = 0.0
@@ -3932,7 +3932,7 @@ def test_unrelated_stretches_on_the_same_dates_are_each_told():
 
 
 def test_stores_closed_together_are_not_told_again_under_their_cities():
-    df = _daily(stores=30, items=1, days=200)
+    df = _store_days(stores=30, items=1, days=200)
     df["city"] = df["store"] // 2
     df.loc[df["when"].between("2021-04-11", "2021-05-10"), "y"] = 0.0
     found = _zero_notice(df)
@@ -3940,12 +3940,12 @@ def test_stores_closed_together_are_not_told_again_under_their_cities():
 
 
 def test_a_closure_is_told_beside_a_weekly_closing_day_and_two_closures_are_both_told():
-    df = _daily(stores=4, items=1)
+    df = _store_days(stores=4, items=1)
     df.loc[df["when"].dt.day_of_week == 6, "y"] = 0.0  # every store closes on Sundays
     df.loc[(df["store"] == 3) & df["when"].between("2021-04-11", "2021-06-09"), "y"] = 0.0
     found = _zero_notice(df)
     assert len(found) == 1 and found[0]["stretches"] == [1]
-    df = _daily(stores=4, items=1)
+    df = _store_days(stores=4, items=1)
     for first, last in (("2021-02-20", "2021-03-31"), ("2021-07-20", "2021-08-28")):
         df.loc[(df["store"] == 3) & df["when"].between(first, last), "y"] = 0.0
     found = _zero_notice(df)
