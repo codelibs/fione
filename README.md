@@ -36,8 +36,8 @@ Documentation: [fione.codelibs.org](https://fione.codelibs.org/) (English) and
   model, as one shared Docker image and the model files.
 - **Users and sharing**: administrators, editors and viewers; projects are shared per user.
   API tokens and a REST API (`/api/v1`) for scripts.
-- **Python modules** for data operations (built-in frame operations, k-means, low-rank
-  factorization; administrators can upload their own).
+- **Python modules** for data operations (built-in frame operations, k-means, Gaussian
+  mixture clustering, low-rank factorization; administrators can upload their own).
 - **Python client** `fione-sdk` for scripts and notebooks of your own.
 - **Storage** on SeaweedFS or any S3-compatible service; metadata in SQLite.
 - English and Japanese, light and dark themes, usable on phones.

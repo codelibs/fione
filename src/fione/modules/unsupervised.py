@@ -1,4 +1,4 @@
-"""K-means and low-rank projection.
+"""K-means, Gaussian mixture and low-rank projection.
 
 Missing values are not modelled: a gap is filled with the column mean found in training (the
 mean is part of the state). Only integer and float columns are used; name the ones to use in
@@ -13,6 +13,8 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.decomposition import NMF, TruncatedSVD
 from sklearn.exceptions import ConvergenceWarning
+from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
+from sklearn.preprocessing import PowerTransformer
 
 from fione.modules.registry import (
     Module,
@@ -28,6 +30,12 @@ _SEED = {"type": "integer", "minimum": 0, "maximum": 2**31 - 1, "default": 0}
 _MODEL = {"type": "integer", "minimum": 1}
 _NMF_SWEEPS = 200
 _NMF_TOLERANCE = 1e-10
+# A mixture is fitted on at most this many rows (a seeded sample; every row is then assigned): on
+# 98,000 rows of 14 columns the fit took 15 s with n_init 3, and the time grows with the rows.
+MIXTURE_FIT_ROWS = 200_000
+# Numbers in the covariances of a full mixture (k x columns x columns), at most: the saved state
+# stays well under its 8 MB, and a diagonal mixture has many fewer.
+MIXTURE_MAX_COVARIANCE = 250_000
 
 
 def _schema(properties: dict, required: tuple[str, ...] = ()) -> dict:
@@ -123,6 +131,141 @@ def kmeans_train(df, params, ctx):
 
 def kmeans_predict(df, params, ctx):
     return ModuleOutput(_cluster(df, ctx.state, params["output_columns"]))
+
+
+# --- Gaussian mixture -----------------------------------------------------------------------
+
+
+def _yeo_johnson(x: np.ndarray, lambdas: np.ndarray) -> np.ndarray:
+    """The Yeo-Johnson transform of each column of ``x`` with its ``lambdas`` (as sklearn's)."""
+    out = np.empty_like(x)
+    for j, lam in enumerate(lambdas):
+        col, pos = x[:, j], x[:, j] >= 0
+        if abs(lam) < 1e-19:
+            out[pos, j] = np.log1p(col[pos])
+        else:
+            out[pos, j] = (np.power(col[pos] + 1, lam) - 1) / lam
+        if abs(lam - 2) < 1e-19:
+            out[~pos, j] = -np.log1p(-col[~pos])
+        else:
+            out[~pos, j] = -(np.power(-col[~pos] + 1, 2 - lam) - 1) / (2 - lam)
+    return out
+
+
+def _mixture_space(df: pd.DataFrame, state: dict) -> tuple[list[str], np.ndarray]:
+    """The columns and the rows as the mixture sees them: gaps filled, transformed, scaled."""
+    columns, means, lambdas, centers, scales = _state_arrays(
+        state, "gmm", "Gaussian mixture", "means", "lambdas", "centers", "scales"
+    )
+    matrix = _model_matrix(df, columns, means)
+    if state.get("power_transform"):
+        matrix = _yeo_johnson(matrix, lambdas)
+    return columns, (matrix - centers) / scales
+
+
+def _mixture_log_probs(x: np.ndarray, state: dict) -> np.ndarray:
+    """Log weight plus log density of each row under each component."""
+    try:
+        weights = np.asarray(state["weights"], dtype=float)
+        mu = np.asarray(state["component_means"], dtype=float)
+        chol = np.asarray(state["precisions_cholesky"], dtype=float)
+        full = state["covariance"] == "full"
+    except (KeyError, TypeError, ValueError):
+        raise ModuleError("the model state is damaged") from None
+    d = x.shape[1]
+    out = np.empty((len(x), len(weights)))
+    for k in range(len(weights)):
+        if full:
+            y = x @ chol[k] - mu[k] @ chol[k]
+            log_det = np.log(np.diag(chol[k])).sum()
+        else:
+            y = (x - mu[k]) * chol[k]
+            log_det = np.log(chol[k]).sum()
+        out[:, k] = -0.5 * (d * np.log(2 * np.pi) + (y**2).sum(axis=1)) + log_det
+    return out + np.log(np.maximum(weights, 1e-300))
+
+
+def _mixture_clusters(df: pd.DataFrame, state: dict, params: dict) -> pd.DataFrame:
+    _, x = _mixture_space(df, state)
+    logp = _mixture_log_probs(x, state)
+    labels = logp.argmax(axis=1)
+    result = {"cluster": labels}
+    if params.get("probability"):
+        shifted = np.exp(logp - logp.max(axis=1, keepdims=True))
+        result["cluster_probability"] = shifted.max(axis=1) / shifted.sum(axis=1)
+    return _with_columns(df, pd.DataFrame(result), params["output_columns"])
+
+
+def gmm_train(df, params, ctx):
+    columns, matrix = numeric_matrix(df, params["columns"])
+    filled, means = _fill_gaps(columns, matrix)
+    k, covariance = params["n_components"], params["covariance"]
+    if k > len(df):
+        raise ModuleError(f"n_components={k} is more than the {len(df)} rows")
+    if covariance == "full" and k * len(columns) ** 2 > MIXTURE_MAX_COVARIANCE:
+        raise ModuleError(
+            f"a full mixture of {k} components over {len(columns)} columns is too large to keep; "
+            "use covariance 'diag', fewer columns or fewer components"
+        )
+    lambdas = np.zeros(len(columns))
+    space = filled
+    if params["power_transform"]:
+        transform = PowerTransformer(method="yeo-johnson", standardize=False).fit(filled)
+        lambdas = transform.lambdas_
+        space = _yeo_johnson(filled, lambdas)
+    centers = space.mean(axis=0) if params["standardize"] else np.zeros(len(columns))
+    spread = space.std(axis=0) if params["standardize"] else np.ones(len(columns))
+    scales = np.where(spread > 0, spread, 1.0)
+    x = (space - centers) / scales
+    rng = np.random.default_rng(params["seed"])
+    fit_rows = x if len(x) <= MIXTURE_FIT_ROWS else x[rng.choice(len(x), MIXTURE_FIT_ROWS, False)]
+    kind = BayesianGaussianMixture if params["bayesian"] else GaussianMixture
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)  # the fit is as good as it gets
+        model = kind(
+            n_components=k,
+            covariance_type=covariance,
+            n_init=params["n_init"],
+            max_iter=params["max_iterations"],
+            random_state=params["seed"],
+        ).fit(fit_rows)
+    state = {
+        "type": "gmm",
+        "columns": columns,
+        "means": means.tolist(),
+        "power_transform": bool(params["power_transform"]),
+        "lambdas": np.asarray(lambdas, dtype=float).tolist(),
+        "centers": centers.tolist(),
+        "scales": scales.tolist(),
+        "covariance": covariance,
+        "weights": model.weights_.tolist(),
+        "component_means": model.means_.tolist(),
+        "precisions_cholesky": model.precisions_cholesky_.tolist(),
+    }
+    out = _mixture_clusters(df, state, params)
+    return ModuleOutput(out, state, _mixture_notes(out["cluster"], x, state, len(fit_rows)))
+
+
+def _mixture_notes(labels: pd.Series, x: np.ndarray, state: dict, fitted: int) -> tuple[dict, ...]:
+    """The rows in each cluster, and the BIC of the fit (lower is better, comparing runs with
+    other n_components on the same columns): what to choose the number of clusters by."""
+    k, d = len(state["weights"]), x.shape[1]
+    sizes = np.bincount(labels, minlength=k).tolist()
+    per_component = d * (d + 1) / 2 if state["covariance"] == "full" else d
+    parameters = k * (per_component + d) + k - 1
+    loglik = float(np.logaddexp.reduce(_mixture_log_probs(x, state), axis=1).sum())
+    bic = -2 * loglik + parameters * np.log(len(x))
+    message = (
+        f"clusters of {', '.join(f'{n:,}' for n in sizes)} rows; BIC {bic:,.0f} (lower is better "
+        "when comparing runs with another n_components on the same columns)"
+    )
+    if fitted < len(x):
+        message += f"; fitted on {fitted:,} of the {len(x):,} rows, all of them assigned"
+    return ({"message": message, "kind": "mixture_fit", "sizes": sizes, "bic": float(bic)},)
+
+
+def gmm_predict(df, params, ctx):
+    return ModuleOutput(_mixture_clusters(df, ctx.state, params))
 
 
 # --- low-rank projection --------------------------------------------------------------------
@@ -222,6 +365,38 @@ for module in (
         "predict",
         _schema({"module_model_id": _MODEL, "output_columns": _NAMES}, ("module_model_id",)),
         kmeans_predict,
+    ),
+    Module(
+        "gmm_train",
+        "Gaussian mixture (train)",
+        "train",
+        _schema(
+            _train_params(
+                n_components={"type": "integer", "minimum": 1, "maximum": 100, "default": 3},
+                covariance={"type": "string", "enum": ["full", "diag"], "default": "full"},
+                bayesian={"type": "boolean", "default": False},
+                n_init={"type": "integer", "minimum": 1, "maximum": 20, "default": 1},
+                max_iterations={"type": "integer", "minimum": 1, "maximum": 10000, "default": 300},
+                power_transform={"type": "boolean", "default": False},
+                standardize={"type": "boolean", "default": True},
+                probability={"type": "boolean", "default": False},
+            )
+        ),
+        gmm_train,
+    ),
+    Module(
+        "gmm_predict",
+        "Gaussian mixture (assign clusters)",
+        "predict",
+        _schema(
+            {
+                "module_model_id": _MODEL,
+                "output_columns": _NAMES,
+                "probability": {"type": "boolean", "default": False},
+            },
+            ("module_model_id",),
+        ),
+        gmm_predict,
     ),
     Module(
         "lowrank_train",

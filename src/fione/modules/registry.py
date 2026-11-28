@@ -22,7 +22,11 @@ KINDS = ("frame", "train", "predict")
 # float64), checked before a result is built where its size can be estimated.
 MAX_OUTPUT_CELLS = 150_000_000
 # A predict module only accepts a state made by its train module.
-TRAIN_FOR = {"kmeans_predict": "kmeans_train", "lowrank_predict": "lowrank_train"}
+TRAIN_FOR = {
+    "kmeans_predict": "kmeans_train",
+    "gmm_predict": "gmm_train",
+    "lowrank_predict": "lowrank_train",
+}
 _PATH = re.compile(r"/(?:[^\s/:'\"]+/)+[^\s:'\"]*")
 
 

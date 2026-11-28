@@ -66,12 +66,16 @@ def test_the_built_in_ids_and_kinds():
         " sort split tokenize unpivot"
     )
     assert ids == sorted(frame_ops.split()) + [
+        "gmm_predict",
+        "gmm_train",
         "kmeans_predict",
         "kmeans_train",
         "lowrank_predict",
         "lowrank_train",
     ]
     assert {m.id: m.kind for m in modules if m.id.endswith(("_train", "_predict"))} == {
+        "gmm_train": "train",
+        "gmm_predict": "predict",
         "kmeans_train": "train",
         "kmeans_predict": "predict",
         "lowrank_train": "train",
@@ -707,6 +711,93 @@ def test_kmeans_predict_checks_the_model_and_the_columns():
         run_op("kmeans_predict", blobs(), {"module_model_id": 1}, state={"type": "lowrank"})
     with pytest.raises(ModuleError, match="not numeric"):
         run_op("kmeans_predict", blobs().assign(a="s"), {"module_model_id": 1}, state=state)
+
+
+def stretched(n=90, seed=0):
+    """Three groups, one of them long and thin: k-means splits it, a full mixture does not."""
+    rng = np.random.default_rng(seed)
+    a = rng.normal([0.0, 0.0], [6.0, 0.3], (n // 3, 2))
+    b = rng.normal([0.0, 4.0], [0.5, 0.5], (n // 3, 2))
+    c = rng.normal([7.0, 8.0], [0.5, 0.5], (n // 3, 2))
+    points = np.vstack([a, b, c])
+    return pd.DataFrame({"a": points[:, 0], "b": points[:, 1], "label": ["x"] * n})
+
+
+def test_gmm_assign_reproduces_the_training_assignments_from_a_json_state():
+    df = blobs()
+    params = {"columns": ["a", "b"], "n_components": 3, "seed": 1, "probability": True}
+    trained, state = run_op("gmm_train", df, params)
+    assert list(trained.columns) == ["cluster", "cluster_probability"]
+    assert sorted(np.bincount(trained["cluster"])) == [20, 20, 20]
+    assert len(set(trained["cluster"][:20])) == 1
+    assert trained["cluster_probability"].between(0, 1).all()
+    again = json.loads(json.dumps(state, allow_nan=False))
+    predicted, none = run_op(
+        "gmm_predict", df, {"module_model_id": 1, "output_columns": ["label"]}, state=again
+    )
+    assert none is None and list(predicted.columns) == ["cluster", "label"]
+    assert list(predicted["cluster"]) == list(trained["cluster"])
+
+
+def test_gmm_assignments_are_sklearns_and_stable_for_a_seed():
+    from sklearn.mixture import GaussianMixture
+
+    df = stretched()
+    params = {"columns": ["a", "b"], "n_components": 3, "seed": 3, "standardize": False}
+    out, s1 = run_op("gmm_train", df, params)
+    _, s2 = run_op("gmm_train", df, params)
+    assert s1 == s2
+    sk = GaussianMixture(3, covariance_type="full", random_state=3).fit(df[["a", "b"]])
+    assert list(out["cluster"]) == list(sk.predict(df[["a", "b"]]))  # the state alone reproduces it
+    long_group = out["cluster"][:30]
+    assert long_group.nunique() == 1  # the long, thin group stays one cluster
+    diag, state = run_op("gmm_train", df, {**params, "covariance": "diag", "bayesian": True})
+    assert state["covariance"] == "diag" and len(diag) == len(df)
+
+
+def test_gmm_power_transform_is_kept_in_the_state_and_applied_when_assigning():
+    rng = np.random.default_rng(4)
+    df = pd.DataFrame({"a": np.exp(rng.normal(size=200)), "b": rng.normal(size=200)})
+    _, plain = run_op("gmm_train", df, {"n_components": 2, "seed": 0})
+    out, state = run_op("gmm_train", df, {"n_components": 2, "seed": 0, "power_transform": True})
+    assert plain["power_transform"] is False and plain["lambdas"] == [0.0, 0.0]
+    assert state["power_transform"] is True and state["lambdas"][0] != 0.0
+    again = run_op("gmm_predict", df, {"module_model_id": 1}, state=state)[0]
+    assert list(again["cluster"]) == list(out["cluster"])
+
+
+def test_gmm_tells_the_cluster_sizes_and_the_bic():
+    module = get_builtin("gmm_train")
+    params = validate_args(module.params, {"columns": ["a", "b"], "n_components": 3})
+    notes = module.run(blobs(), params, ModuleContext()).notes
+    assert notes[0]["kind"] == "mixture_fit" and sorted(notes[0]["sizes"]) == [20, 20, 20]
+    assert "BIC" in notes[0]["message"] and np.isfinite(notes[0]["bic"])
+
+
+@pytest.mark.parametrize(
+    ("df", "params", "message"),
+    [
+        (blobs(), {"n_components": 100, "columns": ["a"]}, "n_components=100"),
+        (blobs().assign(flag=True), {"n_components": 2}, "not numeric: ['label', 'flag']"),
+        (expect(a=[np.nan, np.nan]), {"n_components": 1}, "no values"),
+        (
+            pd.DataFrame(np.zeros((60, 200))).add_prefix("c"),
+            {"n_components": 10},
+            "use covariance 'diag'",
+        ),
+    ],
+)
+def test_gmm_rejects_unusable_data(df, params, message):
+    with pytest.raises(ModuleError, match=re.escape(message)):
+        run_op("gmm_train", df, params)
+
+
+def test_gmm_assign_checks_the_model_and_the_columns():
+    _, state = run_op("gmm_train", blobs(), {"columns": ["a", "b"], "n_components": 2})
+    with pytest.raises(ModuleError, match="missing columns: \\['b'\\]"):
+        run_op("gmm_predict", blobs().drop(columns="b"), {"module_model_id": 1}, state=state)
+    with pytest.raises(ModuleError, match="not a Gaussian mixture model"):
+        run_op("gmm_predict", blobs(), {"module_model_id": 1}, state={"type": "kmeans"})
 
 
 def low_rank(n=40, seed=0):
