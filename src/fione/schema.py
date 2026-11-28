@@ -1,9 +1,10 @@
 """The flat JSON-schema argument validator shared by the assistant tools and the modules.
 
 A schema is ``{"type": "object", "properties": {...}, "required": [...]}`` whose properties are
-scalars (``string``, ``integer``, ``number``, ``boolean``), an ``array`` of strings (of integers or
-numbers with ``"items": {"type": "integer"}``, which may set ``minimum`` and ``maximum``) or, for
-tools only, an ``object`` or an ``array`` of objects (``"items": {"type": "object"}``). Nothing is
+scalars (``string``, ``integer``, ``number``, ``boolean``), an ``array`` of strings or, for tools
+only, an ``object``, an ``array`` of objects (``"items": {"type": "object"}``) or an ``array`` of
+integers or numbers (``"items": {"type": "integer"}``, which may set ``minimum`` and ``maximum``).
+Nothing is
 evaluated and no ``$ref`` is followed: a property is checked against its own keywords only.
 """
 
@@ -92,7 +93,10 @@ def validate_args(schema: dict, args) -> dict:
         else:
             fits = _TYPES[spec["type"]](value)
         if not fits:
-            raise ValueError(f"argument '{name}' must be of type {spec['type']}")
+            kind = (
+                f"an array of {items['type']}s" if items is not None else f"of type {spec['type']}"
+            )
+            raise ValueError(f"argument '{name}' must be {kind}")
         if items is not None:
             if "minimum" in items and any(x < items["minimum"] for x in value):
                 raise ValueError(
@@ -130,7 +134,12 @@ def check_schema(schema) -> dict:
             raise ValueError("every parameter must be an object")
         if spec.get("type") not in _TYPES or spec["type"] == "object":
             raise ValueError(f"parameter '{clean_text(name, 40)}' has an unsupported type")
-        if not _KEYWORDS.issuperset(spec) or spec.get("items") == _OBJECT_ITEMS:
+        items = spec.get(
+            "items"
+        )  # a module's array holds strings (objects and numbers are tools' own)
+        if not _KEYWORDS.issuperset(spec) or (
+            items is not None and not (isinstance(items, dict) and items.get("type") == "string")
+        ):
             raise ValueError(f"parameter '{clean_text(name, 40)}' uses an unsupported keyword")
         if "enum" in spec and not isinstance(spec["enum"], list):
             raise ValueError(f"parameter '{clean_text(name, 40)}' has an invalid enum")

@@ -832,10 +832,16 @@ def test_check_schema_rejects_malformed_schemas(schema):
         check_schema(schema)
 
 
-def test_a_module_cannot_declare_an_array_of_objects():
+def test_a_module_cannot_declare_an_array_of_objects_or_numbers():
     check_schema({"properties": {"a": {"type": "array", "items": {"type": "string"}}}})
-    with pytest.raises(ValueError, match="unsupported keyword"):
-        check_schema({"properties": {"a": {"type": "array", "items": {"type": "object"}}}})
+    for items in (
+        {"type": "object"},
+        {"type": "integer"},
+        {"type": "integer", "minimum": "x"},
+        "s",
+    ):
+        with pytest.raises(ValueError, match="unsupported keyword"):
+            check_schema({"properties": {"a": {"type": "array", "items": items}}})
 
 
 def test_an_array_of_objects_takes_only_lists_of_objects():

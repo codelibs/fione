@@ -119,7 +119,29 @@ def test_start_training_takes_extra_datasets(writes):
         )
     headers = bearer(client, user)
     args = {"project_id": project.id, "dataset_id": dataset.id, "config": CONFIG}
-    for bad in (["1"], [0], [1.5], [True]):
+    with closing(connect(client)) as conn:
+        other_project = projects.create_project(conn, user, "Q")
+        stream = io.BytesIO(iris_frame().to_csv(index=False).encode())
+        theirs = ingest_csv(
+            client.app.state.storage, conn, other_project.id, "x", DatasetType.TRAIN, stream
+        )
+        stream = io.BytesIO(iris_frame().drop(columns="species").to_csv(index=False).encode())
+        test_set = ingest_csv(
+            client.app.state.storage, conn, project.id, "t", DatasetType.TEST, stream
+        )
+    message = call(client, headers, "start_training", {**args, "extra_dataset_ids": ["1"]})
+    assert "must be an array of integers" in message["content"][0]["text"]
+    for bad in (
+        ["1"],
+        [0],
+        [1.5],
+        [True],
+        [theirs.id],  # another project's
+        [dataset.id],  # the main dataset itself
+        [test_set.id],  # not a train dataset
+        [more.id + 1000],  # none
+        list(range(more.id, more.id + 11)),  # more than 10
+    ):
         result = call(client, headers, "start_training", {**args, "extra_dataset_ids": bad})
         assert result["isError"] is True, bad
     assert jobs(client) == []
