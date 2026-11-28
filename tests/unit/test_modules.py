@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from fione import db
@@ -2651,6 +2652,43 @@ def test_rslice_reads_a_date_in_the_zone_of_the_column():
     naive = pd.DataFrame({"d": pd.to_datetime(["2020-01-01"])})
     with pytest.raises(ModuleError, match="does not fit column 'd'"):
         run_op("rslice", naive, {"row_conditions": "d < 2020-01-01T00:00:00+00:00"})
+
+
+def test_rslice_and_replace_take_a_date_column_of_a_csv_as_dates():
+    """A CSV column of dates without a time is stored as dates (date32), and a module reads it
+    as datetime.date objects, not datetime64: its conditions compare dates, and replace writes
+    a date."""
+    days = [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2), None, datetime.date(2020, 1, 3)]
+    table = pa.table({"id": [1, 2, 3, 4], "d": pa.array(days, pa.date32())})
+    df = table.to_pandas(types_mapper=ingest._NULLABLE.get)  # as the module handler reads it
+    assert df["d"].dtype == object
+
+    def ids(conditions):
+        out, _ = run_op("rslice", df, {"row_conditions": conditions})
+        return out["id"].tolist()
+
+    assert ids("d < 2020-01-02") == [1]
+    assert ids("d <= 2020-01-02") == [1, 2]
+    assert ids("d >= 2020-01-02") == [2, 4]  # an empty date matches nothing
+    assert ids("d == 2020-01-02") == [2]
+    assert ids("d != 2020-01-02") == [1, 3, 4]
+    assert ids("d < 2020-01-02 08:30") == [1, 2]  # a date is midnight
+    assert ids("d is empty") == [3]
+    with pytest.raises(ModuleError, match="does not fit column 'd'; write a date as"):
+        ids("d < yesterday")
+    out, _ = run_op(
+        "replace", df, {"column": "d", "value": "2021-05-06", "row_conditions": "d is empty"}
+    )
+    assert out["d"].tolist() == [*days[:2], datetime.date(2021, 5, 6), days[3]]
+    assert pa.Table.from_pandas(out).schema.field("d").type == pa.date32()
+    with pytest.raises(ModuleError, match="holds dates without a time of day"):
+        run_op("replace", df, {"column": "d", "value": "2021-05-06 08:30"})
+    far = pa.table(
+        {"d": pa.array([datetime.date(1, 1, 1), datetime.date(9999, 12, 31)], pa.date32())}
+    )
+    far = far.to_pandas(types_mapper=ingest._NULLABLE.get)
+    out, _ = run_op("rslice", far, {"row_conditions": "d > 2020-01-01"})
+    assert out["d"].tolist() == [datetime.date(9999, 12, 31)]
 
 
 def test_rslice_and_replace_on_other_columns_are_as_they_were():
