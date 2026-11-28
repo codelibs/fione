@@ -226,6 +226,7 @@ def test_a_regression_flow(runner_owner):
         (bytes(range(128, 256)) * 50, "could not read the text of this file"),
         (b"a,b\n1,2\n3,4,5\n", "could not read the file as CSV"),
         (b'{"a": 1}\n{"a": 2,\n', "could not read the file as JSON"),
+        (b'{"a": 1}\n{"a": "\xff"}\n', "the JSON is not valid UTF-8"),  # JSON, not a CSV
     ],
 )
 def test_a_bad_csv_is_refused_in_plain_words(owner, content, message):

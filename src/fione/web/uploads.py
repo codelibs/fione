@@ -33,6 +33,7 @@ INGEST_ERRORS = (
     ("no data rows", "upload.error.no_rows"),
     ("could not parse the CSV", "upload.error.parse"),
     ("could not parse the JSON", "upload.error.json_parse"),
+    ("the JSON is not valid UTF-8", "upload.error.json_parse"),
     ("the JSON array is over", "upload.error.json_large"),
 )
 

@@ -41,6 +41,7 @@ _MAX_EXACT_FLOAT_INT = 2**53  # integers up to this magnitude survive a float64 
 # A JSON array is read whole: json.load held about 5.6 times the file (1 GB for a 179 MB array),
 # so a larger one is refused with a pointer to JSON Lines, which is read a line at a time.
 JSON_ARRAY_MAX_BYTES = 200 * 2**20
+_JSON_NOT_UTF8 = "the JSON is not valid UTF-8 (JSON text is always UTF-8); save it as UTF-8"
 _JSON_ROWS = 50_000  # rows of a JSON upload written at a time
 
 
@@ -417,19 +418,21 @@ def _convert(
 def _json_form(path: Path) -> str | None:
     """``"array"`` for a JSON array of objects or lists (``[`` then ``{`` or ``[``), ``"lines"``
     for JSON Lines (``{`` and a first line that parses), else None (a CSV). Judged on a leading
-    sample, so a CSV whose first cell starts with a bracket stays a CSV."""
+    sample, so a CSV whose first cell starts with a bracket stays a CSV. The sample is read with
+    any byte that is not UTF-8 replaced: such a file is still JSON, refused as not UTF-8 (JSON
+    text is UTF-8), not read as a CSV of its brackets."""
     with path.open("rb") as f:
         sample = f.read(_SAMPLE_SIZE)
-    text = _decode(sample, "utf-8-sig", len(sample) < _SAMPLE_SIZE)
-    if text is None:
-        return None
-    text = text.lstrip()
+    decoder = codecs.getincrementaldecoder("utf-8-sig")(errors="replace")
+    text = decoder.decode(sample, len(sample) < _SAMPLE_SIZE).lstrip()
     if text.startswith("["):
         return "array" if text[1:].lstrip()[:1] in ("{", "[") else None
     if text.startswith("{"):
         first = text.split("\n", 1)[0]
         try:
             return "lines" if isinstance(json.loads(first), dict) else None
+        except RecursionError:  # an object nested too deeply: JSON Lines, refused when read
+            return "lines"
         except ValueError:
             return None
     return None
@@ -446,6 +449,8 @@ def _json_records(path: Path, form: str) -> Iterator[dict]:
         try:
             with path.open(encoding="utf-8-sig") as f:
                 records = json.load(f)
+        except UnicodeDecodeError:
+            raise IngestError(_JSON_NOT_UTF8) from None
         except (ValueError, RecursionError) as e:
             raise IngestError(f"could not parse the JSON: {_json_error(e)}") from None
         for record in records:
@@ -455,26 +460,39 @@ def _json_records(path: Path, form: str) -> Iterator[dict]:
                 )
             yield record
         return
+    for number, line in _utf8_lines(path):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line.rstrip("\r\n"))  # the column on its own line
+        except (ValueError, RecursionError) as e:
+            raise IngestError(f"could not parse the JSON: {_json_error(e, number)}") from None
+        if not isinstance(record, dict):
+            raise IngestError(f"could not parse the JSON: line {number} is no object")
+        yield record
+
+
+def _utf8_lines(path: Path) -> Iterator[tuple[int, str]]:
+    """The numbered lines of a JSON Lines file; a byte that is not UTF-8 refuses it (the file is
+    decoded a block ahead, so no line is named)."""
     with path.open(encoding="utf-8-sig") as f:
-        for number, line in enumerate(f, start=1):
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-            except (ValueError, RecursionError) as e:
-                raise IngestError(
-                    f"could not parse the JSON: line {number}: {_json_error(e)}"
-                ) from None
-            if not isinstance(record, dict):
-                raise IngestError(f"could not parse the JSON: line {number} is no object")
-            yield record
+        try:
+            yield from enumerate(f, start=1)
+        except UnicodeDecodeError:
+            raise IngestError(_JSON_NOT_UTF8) from None
 
 
-def _json_error(error: Exception) -> str:
-    # the decoder's message names a position, never the text (which is data)
+def _json_error(error: Exception, line: int | None = None) -> str:
+    """The decoder's complaint and where it is: a line and a column, never the text (which is
+    data). ``line`` is the line of JSON Lines; in an array the decoder gives the line."""
     if isinstance(error, RecursionError):
-        return "nested too deeply"
-    return getattr(error, "msg", "not JSON")
+        what, column = "nested too deeply", None
+    else:
+        what, column = getattr(error, "msg", "not JSON"), getattr(error, "colno", None)
+        if line is None:
+            line = getattr(error, "lineno", None)
+    where = "" if line is None else f"line {line}" + ("" if column is None else f" column {column}")
+    return f"{where}: {what}" if where else what
 
 
 def _json_kind(value) -> str | None:

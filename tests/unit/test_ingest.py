@@ -776,11 +776,17 @@ def test_a_csv_whose_first_cell_starts_with_a_bracket_stays_a_csv(conn, storage,
 @pytest.mark.parametrize(
     ("data", "fragment"),
     [
-        (b'{"a": 1}\n{"a": 2,\n', "could not parse the JSON: line 2"),
+        (b'{"a": 1}\n{"a": 2,\n', "could not parse the JSON: line 2 column 9: Expecting"),
         (b'{"a": 1}\n[1, 2]\n', "line 2 is no object"),
         (b'[{"a": 1}, 3]', "no object"),
-        (b'[{"a": 1}, {"a": 2]', "could not parse the JSON"),
+        (b'[{"a": 1}, {"a": 2]', "could not parse the JSON: line 1 column 19: Expecting"),
+        (b'[{"a": 1},\n {"a": 2}]oops', "could not parse the JSON: line 2 column 11: Extra data"),
+        (b'{"a": 1}\r\n{"a": 2,\r\n', "could not parse the JSON: line 2 column 9"),  # CRLF
+        (b'{"a": 1}\n\n{"a": x}\n', "could not parse the JSON: line 3 column 7"),  # blank line
+        (b'{"a": 1}\n{"a": "\xff"}\n', "the JSON is not valid UTF-8"),
+        (b'[{"a": 1}, {"a": "\xff"}]', "the JSON is not valid UTF-8"),
         (b'{"a": 1}\n{"a": ' + b"[" * 100_000 + b"\n", "line 2: nested too deeply"),
+        (b'{"a": ' + b"[" * 100_000 + b"\n", "line 1: nested too deeply"),  # the sniffed line
         (b'[{"a": ' + b"[" * 100_000 + b"]", "nested too deeply"),
     ],
 )
@@ -788,6 +794,16 @@ def test_broken_json_is_refused_without_quoting_it(conn, storage, project, data,
     with pytest.raises(IngestError, match=fragment) as caught:
         load(conn, storage, project, data)
     assert '"a"' not in str(caught.value)
+    assert storage.list("projects/") == []
+
+
+@pytest.mark.parametrize("form", ["lines", "array"])
+def test_json_that_stops_being_utf8_past_the_sample_is_refused(conn, storage, project, form):
+    rows = [b'{"a": %d}' % i for i in range(120_000)]  # over the 1 MiB sample
+    rows.append(b'{"a": "\xff"}')
+    data = b"\n".join(rows) + b"\n" if form == "lines" else b"[" + b",".join(rows) + b"]"
+    with pytest.raises(IngestError, match="the JSON is not valid UTF-8"):
+        load(conn, storage, project, data)
     assert storage.list("projects/") == []
 
 
