@@ -140,6 +140,10 @@ class TrainConfig:
     # before the one it predicts. With cv_group_column too, a group is ordered by its last row and
     # kept in one part. None: shuffled folds.
     time_column: str | None = None
+    # With time_column: validate on the last nfolds windows of this length of the time column
+    # (days for dates; e.g. as long as the stretch that is forecast at once), each fold learning
+    # from every row before its window. None: the rows are cut into parts of about the same size.
+    time_window: float | None = None
     # Learn this quantile of the target (a regression, 0 < quantile < 1) instead of its mean:
     # the models fit the pinball loss, and only the families that can do so are searched.
     quantile: float | None = None
@@ -254,6 +258,12 @@ class TrainConfig:
             raise ConfigError("time_column must name a column or be empty")
         if self.time_column == self.target:
             raise ConfigError("the time column cannot be the target")
+        w = self.time_window
+        if w is not None:
+            if not isinstance(w, int | float) or isinstance(w, bool) or not 0 < w < float("inf"):
+                raise ConfigError(f"time_window must be a number above 0 (or empty), got {w!r}")
+            if self.time_column is None:
+                raise ConfigError("time_window needs a time_column")
         q = self.quantile
         if q is not None:
             if not isinstance(q, int | float) or isinstance(q, bool) or not 0 < q < 1:

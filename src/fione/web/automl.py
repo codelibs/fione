@@ -95,6 +95,7 @@ SINGLE_FIELDS = (
     "nfolds",
     "cv_repeats",
     "time_column",
+    "time_window",
     "seed",
     "balance_classes",
     "decision",
@@ -582,6 +583,7 @@ def _form_values(defaults: dict) -> dict:
         "max_models": "",
         "cv_repeats": "",
         "time_column": "",
+        "time_window": "",
     }
     for name in (
         "nfolds",
@@ -724,6 +726,14 @@ def _parse_train(form: FormData, names: list[str], inferred_task: str):
     if time_column and (time_column not in names or time_column == target):
         errors["time_column"] = "train.error.time_column"
     config["time_column"] = time_column or None
+    window = values["time_window"].strip()
+    config["time_window"] = None
+    if window:
+        if not _DECIMAL.fullmatch(window) or float(window) <= 0 or not time_column:
+            errors["time_window"] = "train.error.time_window"
+        else:
+            number = float(window)
+            config["time_window"] = int(number) if number.is_integer() else number
     minutes = values["max_runtime_minutes"].strip()
     if len(minutes) > MAX_RUNTIME_DIGITS or _whole(minutes, 1) is None:
         errors["max_runtime_minutes"] = "analysis.error.runtime"

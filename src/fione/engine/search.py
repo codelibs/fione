@@ -144,6 +144,51 @@ def make_time_folds(
     if len(present) < 2:
         raise ConfigError(few_message)
     folds = [(np.flatnonzero(part < p), np.flatnonzero(part == p)) for p in present[1:]]
+    _check_time_classes(folds, y, task)
+    return folds
+
+
+def make_window_folds(
+    times: np.ndarray,
+    y: np.ndarray,
+    task: Task,
+    nfolds: int,
+    window: float,
+    groups: np.ndarray | None = None,
+) -> Folds:
+    """Folds that look forward in time over the last ``nfolds`` windows of length ``window`` of
+    ``times`` (numbers: days for dates), the last one ending at the latest time: fold ``j``
+    validates on window ``j`` and trains on every row before it, as a model that forecasts the
+    next ``window`` from all the history does. A window with no row gives no fold; the first
+    fold must learn from at least as many rows as it validates. With ``groups`` a group is
+    placed by its last row, as in ``make_time_folds``."""
+    if groups is not None:
+        last = np.full(int(groups.max()) + 1, -np.inf)
+        np.maximum.at(last, groups, times)
+        times = last[groups]
+    end = times.max()
+    folds = []
+    for j in range(nfolds, 0, -1):
+        low, high = end - j * window, end - (j - 1) * window
+        valid = np.flatnonzero((times > low) & (times <= high))
+        if len(valid):
+            folds.append((np.flatnonzero(times <= low), valid))
+    if not folds or len(folds[0][0]) < len(folds[0][1]):
+        raise ConfigError(
+            f"{nfolds} validation windows of {window:g} of the time column leave fewer earlier "
+            "rows to learn from than the first window holds; use a shorter time_window or fewer "
+            "folds"
+        )
+    _check_time_classes(folds, y, task, "a longer time_window, fewer folds")
+    return folds
+
+
+def _check_time_classes(
+    folds: Folds, y: np.ndarray, task: Task, remedy: str = "fewer folds"
+) -> None:
+    """``ConfigError`` when time-ordered folds cannot validate a classification: the later rows
+    hold one class, or a class has no row in a fold's training rows (``remedy`` says what
+    else to change)."""
     if task == "classification":
         classes = np.unique(y)
         if len(np.unique(y[np.concatenate([valid for _, valid in folds])])) < 2:
@@ -152,9 +197,8 @@ def make_time_folds(
             if len(np.unique(y[train])) < len(classes):
                 raise ConfigError(
                     "a class has no row in the earlier part of a time-ordered validation; "
-                    "use fewer folds or validate without a time column"
+                    f"use {remedy} or validate without a time column"
                 )
-    return folds
 
 
 def covered(folds: Folds, n: int) -> np.ndarray:

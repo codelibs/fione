@@ -152,6 +152,9 @@
           <p class="field__hint" id="time_column-hint">{{ t('train.h.time_column') }}</p>
           {{ error("time_column") }}
         </div>
+        <div class="form-grid">
+          {{ number("time_window", 0, optional=True, step="any") }}
+        </div>
         {{ flag("balance_classes") }}
         <div class="field">
           <label class="field__label" for="f-decision">{{ t('train.f.decision') }}</label>

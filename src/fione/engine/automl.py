@@ -109,7 +109,14 @@ from fione.engine.events import Event, EventSink, jsonable
 from fione.engine.families import FAMILIES, MAX_ROUNDS, FamilySpec
 from fione.engine.features import DateDifferences, repeated_blocks, select_groups
 from fione.engine.model import Member, TrainedModel, feature_importance
-from fione.engine.prep import Prep, Task, infer_task, validate_target
+from fione.engine.prep import (
+    Prep,
+    Task,
+    _integer_dates,
+    infer_task,
+    integer_date_format,
+    validate_target,
+)
 from fione.engine.search import (
     Clock,
     FamilyResult,
@@ -117,6 +124,7 @@ from fione.engine.search import (
     covered,
     error_notice,
     make_time_folds,
+    make_window_folds,
     repeat_folds,
     repeats_for,
     run_family,
@@ -394,6 +402,7 @@ class AutoML:
         if unknown or families == []:
             raise ConfigError(f"unknown families: {unknown}; choose from {known}")
         self.explicit = families is not None  # the caller named the families
+        self._learned_share = 0.5  # of the rows a time-ordered fold learns from, on average
         if config.quantile is not None:
             other = sorted(set(families or ()) - set(QUANTILE_FAMILIES))
             if other:
@@ -672,7 +681,13 @@ class AutoML:
         whole = (dates.max() - dates.min()).days + 1
         # with 2 folds (the least) the first part is a third of the rows: no smaller nfolds exists
         # (fewer folds than nfolds come out when groups or equal times end together)
-        if len(folds) <= 2 or days[0] >= SEASON_DAYS or whole <= TWO_SEASONS_DAYS:
+        # windows learn from all the earlier rows: a smaller nfolds would not lengthen them
+        if (
+            self.config.time_window is not None
+            or len(folds) <= 2
+            or days[0] >= SEASON_DAYS
+            or whole <= TWO_SEASONS_DAYS
+        ):
             return
         self._notice(
             f"the first part of the time-ordered validation spans {_span_text(days[0])} while "
@@ -1471,10 +1486,17 @@ class AutoML:
                     "whole range need the group column without the time column)"
                 )
             times = _time_values(df, c.time_column)
-            order = pd.factorize(times, sort=True)[0].astype(np.int64)
-            folds = first_run = make_time_folds(order, y, task, nfolds, row_groups, **few)
+            if c.time_window is not None:
+                folds = first_run = make_window_folds(
+                    _time_numbers(times, c.time_column), y, task, nfolds, c.time_window, row_groups
+                )
+            else:
+                order = pd.factorize(times, sort=True)[0].astype(np.int64)
+                folds = first_run = make_time_folds(order, y, task, nfolds, row_groups, **few)
+            self._learned_share = float(np.mean([len(train) for train, _ in folds])) / len(y)
             self._notice_time_parts(times, folds, len(y))
-            if row_groups is not None:
+            if row_groups is not None and c.time_window is None:
+                # windows learn from most of the rows by design: no part is lopsided
                 self._notice_lopsided_parts(folds, len(y), nfolds)
         if task == "regression" and not survival and c.quantile is None:
             self._notice_missing_history(
@@ -2105,12 +2127,14 @@ class AutoML:
         refitted: set[str] = set()
         for name in chosen:
             result = results[name]
-            # time-ordered fold models learned from 1/(k+1) to k/(k+1) of the rows: only
-            # the last, with the most, stands in when there is no refit
+            # time-ordered fold models learned from fewer rows than all: only the last, with the
+            # most, stands in when there is no refit
             models = result.models[-1:] if ahead else result.models
             if stop_reason != "cancelled" and not self.should_stop() and result.spec.refit:
                 start = time.monotonic()
-                model, problem = _refit(result, X, y, prep, views, clock, weight, ahead=ahead)
+                model, problem = _refit(
+                    result, X, y, prep, views, clock, weight, ahead=ahead, share=self._learned_share
+                )
                 refit_secs[name] = time.monotonic() - start
                 if model is not None:
                     models = [model]
@@ -2205,6 +2229,7 @@ class AutoML:
                     weight,
                     extra,
                     self.config.time_column is not None,
+                    self._learned_share,
                 )
                 refit_secs[name] += time.monotonic() - start
                 if isinstance(problem, Exception):
@@ -2253,15 +2278,26 @@ def _mb(size: float) -> str:
 
 
 def _refit(
-    result: FamilyResult, X, y, prep, views, clock: Clock, weight, bag: int = 0, ahead: bool = False
+    result: FamilyResult,
+    X,
+    y,
+    prep,
+    views,
+    clock: Clock,
+    weight,
+    bag: int = 0,
+    ahead: bool = False,
+    share: float = 0.5,
 ):
     """``(model refit on all rows, None)``, or ``(None, why)`` with why ``"time"``,
-    ``"cancelled"`` or the exception the refit raised. ``bag`` > 0 refits with another seed."""
+    ``"cancelled"`` or the exception the refit raised. ``bag`` > 0 refits with another seed.
+    ``share`` is the mean share of the rows a time-ordered fold learned from."""
     spec = result.spec
     # A fold trains on (k-1)/k of the rows: the best trial's time / (k-1) per full-data fit. Folds
-    # that look ahead in time train on 1/(k+1) to k/(k+1) of them: k/2 full-data fits in all. The
-    # trial fitted every fold of every repeat.
-    fits = result.repeats * (len(result.models) / 2 if ahead else len(result.models) - 1)
+    # that look ahead in time train on ``share`` of them on average (1/2 for parts of equal size,
+    # nearly all for the last windows): k x share full-data fits in all. The trial fitted every
+    # fold of every repeat.
+    fits = result.repeats * (len(result.models) * share if ahead else len(result.models) - 1)
     if clock.remaining() < REFIT_ROUNDS_FACTOR * result.best_secs / fits:
         return None, "cancelled" if clock.should_stop() else "time"
     try:
@@ -2282,6 +2318,27 @@ def _refit(
         return None, "cancelled" if clock.should_stop() else "time"
     except Exception as e:
         return None, e
+
+
+def _time_numbers(times: pd.Series, column: str) -> np.ndarray:
+    """The times of ``_time_values`` as numbers: days since 1970 for dates (with the time of day
+    as a fraction), whole-number dates (20141021, a Unix time) read as the date features read
+    them, and the numbers themselves otherwise. ``ConfigError`` when a value of whole-number
+    dates is not a date, since its window could not be told."""
+    if not pd.api.types.is_datetime64_any_dtype(times):
+        fmt = integer_date_format(times)
+        if fmt is None:
+            return times.to_numpy(dtype=float)
+        times = _integer_dates(times, fmt)
+        if times.isna().any():
+            raise ConfigError(
+                f"time column '{column}' holds whole-number dates, and "
+                f"{int(times.isna().sum()):,} of its values are not dates; a time_window needs "
+                "every value to be a date"
+            )
+    stamps = times.dt.tz_localize(None) if times.dt.tz is not None else times
+    epoch = pd.Timestamp(0).as_unit(stamps.dt.unit)
+    return ((stamps - epoch) / pd.Timedelta(days=1)).to_numpy(dtype=float)
 
 
 def _time_values(df: pd.DataFrame, column: str) -> pd.Series:
