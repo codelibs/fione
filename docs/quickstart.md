@@ -464,6 +464,23 @@ level), and that number plus the dataset's columns times the rows is limited the
 Nothing is run but this arithmetic: calls to other functions, attribute access, indexing and the
 like are refused with a message, as are an unknown column or one that is not numeric. An expression can nest to about 100 levels.
 
+## Grouping rows without a column to predict
+
+For a table with no column to predict, the built-in modules **K-means (train)** (`kmeans_train`)
+and **Gaussian mixture (train)** (`gmm_train`) add a `cluster` column to every row and keep the
+model, which **K-means (assign clusters)** and **Gaussian mixture (assign clusters)** apply to other
+rows. Name the number columns to group by in `columns` (by default every column). Both fill a gap
+with the column's mean and standardize the columns first (`standardize`).
+
+K-means makes round groups of a similar size. A Gaussian mixture also learns each group's shape:
+`covariance` `full` lets a group be long and tilted, `diag` only stretched along the columns.
+`n_components` is the number of groups; `bayesian` leaves the ones the data does not need nearly
+empty, `power_transform` first makes each column more bell-shaped (Yeo-Johnson), and `probability`
+adds `cluster_probability`, how sure the row's group is. The job tells the rows in each group and
+the BIC of the fit: lower is better between runs with another `n_components` on the same columns,
+but it does not choose the number of groups for you. A mixture is fitted on at most 200,000 rows
+(all are assigned), and one with full covariances over very many columns is refused (use `diag`).
+
 ## Learning a skewed target
 
 For a regression target of 0 or more that is skewed (prices, counts, durations) and is
