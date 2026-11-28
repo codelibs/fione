@@ -994,6 +994,94 @@ def test_the_missing_column_warnings_show_their_figures_in_both_languages(code, 
         assert {f for _, f, _, _ in string.Formatter().parse(template) if f} == placeholders
 
 
+def _labels_frame(rows=200):
+    """Five sentiment shares s1..s5 that sum to 1, three kind flags k1..k3, a text and a number."""
+    rng = np.random.default_rng(5)
+    shares = rng.dirichlet(np.ones(5), rows)
+    frame = pd.DataFrame(shares, columns=[f"s{i}" for i in range(1, 6)])
+    for i in range(1, 4):
+        frame[f"k{i}"] = rng.integers(0, 2, rows).astype(float)
+    frame["x"] = rng.normal(size=rows)
+    return frame
+
+
+def _propose_frame(env, frame, target, later=()):
+    made = [
+        ingest.ingest_batches(
+            env.storage, env.conn, env.project.id, "train", DatasetType.TRAIN, [frame]
+        )
+    ]
+    for kind, other in later:
+        made.append(
+            ingest.ingest_batches(env.storage, env.conn, env.project.id, "later", kind, [other])
+        )
+    try:
+        return call(env, "propose_training_config", {"dataset_id": made[0].id, "target": target})
+    finally:
+        for ds in made:
+            projects.delete_dataset(env.conn, env.storage, ds.id)
+
+
+def _siblings(result):
+    return next((w for w in result["warnings"] if w["code"].startswith("sibling_targets")), None)
+
+
+def test_propose_warns_of_columns_named_like_the_target_with_another_number(env):
+    result = _propose_frame(env, _labels_frame(), "s2")
+    warning = _siblings(result)
+    assert warning is not None and warning["code"] in codes(result)
+    assert warning["params"] == {"target": "s2", "columns": "s1, s3, s4, s5"}  # not the k flags
+    assert "s1" not in result["config"]["ignored_columns"]  # a warning, not a choice
+    flags = _siblings(_propose_frame(env, _labels_frame(), "k2"))
+    assert flags["params"]["columns"] == "k1, k3"
+
+
+def test_propose_names_at_most_five_siblings_and_counts_the_rest(env):
+    rng = np.random.default_rng(6)
+    frame = pd.DataFrame({f"label_{i}": rng.integers(0, 2, 120) for i in range(1, 10)})
+    frame["x"] = rng.normal(size=120)
+    warning = _siblings(_propose_frame(env, frame, "label_4"))
+    assert warning["code"] == "sibling_targets_more"
+    assert warning["params"] == {
+        "target": "label_4",
+        "columns": "label_1, label_2, label_3, label_5, label_6",
+        "more": 3,
+    }
+
+
+def test_propose_leaves_siblings_to_the_test_data_when_there_is_some(env):
+    test = _labels_frame(40)[["x"]]
+    result = _propose_frame(env, _labels_frame(), "s2", [(DatasetType.TEST, test)])
+    assert _siblings(result) is None
+    assert {"s1", "s3", "s4", "s5"} <= set(result["config"]["ignored_columns"])  # not in the test
+
+
+def test_propose_does_not_warn_of_numbered_features_or_other_ranges(env):
+    rng = np.random.default_rng(7)
+    features = pd.DataFrame({f"f{i}": rng.normal(size=150) for i in range(1, 51)})
+    features["price"] = rng.normal(100, 10, 150)
+    assert _siblings(_propose_frame(env, features, "price")) is None  # no shared stem
+    frame = _labels_frame()
+    frame["s3"] = rng.integers(100, 1000, len(frame))  # named alike, but no share
+    warning = _siblings(_propose_frame(env, frame, "s2"))
+    assert warning["params"]["columns"] == "s1, s4, s5"
+    alone = frame.rename(columns={"s1": "a", "s3": "b", "s4": "c", "s5": "d"})
+    assert _siblings(_propose_frame(env, alone, "s2")) is None
+
+
+@pytest.mark.parametrize(
+    ("code", "placeholders"),
+    [
+        ("sibling_targets", {"target", "columns"}),
+        ("sibling_targets_more", {"target", "columns", "more"}),
+    ],
+)
+def test_the_sibling_warnings_show_their_figures_in_both_languages(code, placeholders):
+    for lang in i18n.LANGUAGES:
+        template = i18n.catalog(lang)[f"assistant.warn.{code}"]
+        assert {f for _, f, _, _ in string.Formatter().parse(template) if f} == placeholders
+
+
 def _propose_with_test_values(env, test_values, train_missing=0.0, rows=60, test_rows=30, **args):
     """The proposal for a train dataset (columns x, z, Age; ``z`` missing in ``train_missing`` of
     its rows) next to test datasets whose column ``z`` holds ``test_values`` (a list of lists,

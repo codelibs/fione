@@ -1585,6 +1585,58 @@ def _columns_empty_in_test(empty: list[str]) -> dict | None:
     )
 
 
+# Columns named like the target with another number (s1..s5 beside s2, label_3 beside label_1)
+# and holding values like its own are other answers of the same question: the labels of a
+# multi-label or multi-output table, which the rows to predict do not have.
+_INDEXED_NAME = re.compile(r"^(.*?[^\W\d_]|.*?[^\W\d_][_\-. ])(\d+)$")
+SIBLING_RANGE_SLACK = 0.5  # of the target's range a sibling's lowest and highest may lie beyond it
+
+
+def sibling_targets(profile: DatasetProfile, target: str) -> list[str]:
+    """The other columns whose names are the target's with another trailing number (the same
+    stem and separator) and whose values are alike: both numbers within about the target's range
+    (``SIBLING_RANGE_SLACK``), or both categories of the same values."""
+    match = _INDEXED_NAME.match(target)
+    columns = {c.name: c for c in profile.columns}
+    if match is None or target not in columns:
+        return []
+    named = re.compile(rf"^{re.escape(match[1])}\d+$")
+    own = columns[target]
+    return [
+        c.name
+        for c in profile.columns
+        if c.name != target and named.match(c.name) and _alike(own, c)
+    ]
+
+
+def _alike(target: ColumnProfile, other: ColumnProfile) -> bool:
+    if target.stats and other.stats:  # numbers, or categories coded as numbers
+        low, high = target.stats["min"], target.stats["max"]
+        slack = SIBLING_RANGE_SLACK * max(high - low, 1e-12)
+        return low - slack <= other.stats["min"] and other.stats["max"] <= high + slack
+    if target.kind == other.kind == "categorical" and target.top_values and other.top_values:
+        return {v for v, _ in target.top_values} == {v for v, _ in other.top_values}
+    return False
+
+
+def _sibling_warning(target: str, siblings: list[str]) -> dict | None:
+    if not siblings:
+        return None
+    name = clean_text(target)
+    shown = ", ".join(clean_text(n) for n in siblings[:_MAX_ABSENT_SHOWN])
+    more = len(siblings) - _MAX_ABSENT_SHOWN
+    tail = f" and {more} more" if more > 0 else ""
+    params = {"target": name, "columns": shown} | ({"more": more} if more > 0 else {})
+    return _warning(
+        "sibling_targets_more" if more > 0 else "sibling_targets",
+        f"the columns {shown}{tail} are named like '{name}' with another number and hold values "
+        "like its own: they look like other answers of the same question, which the rows to "
+        "predict will not have. If so, add them to ignored_columns (training on them scores "
+        "well in validation and badly on new rows)",
+        **params,
+    )
+
+
 def _columns_not_in_test(absent: list[str]) -> dict | None:
     """The warning for the columns the model would learn from that no test or predict dataset of
     the project has, or None."""
@@ -1830,6 +1882,14 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
         ignored.append(name)
     if warning := _columns_not_in_test([n for n in absent if n not in set(left_out_here)]):
         warnings.append(warning)
+    # Without test or predict data the proposal cannot see that the siblings will be missing.
+    if not any(
+        other.type in (DatasetType.TEST, DatasetType.PREDICT)
+        for other in projects.list_datasets(ctx.conn, dataset.project_id)
+    ):
+        siblings = [n for n in sibling_targets(profile, target) if n not in ignored]
+        if warning := _sibling_warning(target, siblings):
+            warnings.append(warning)
     # A column the test data has but leaves empty cannot be predicted from either. Only the test
     # datasets count (a predict dataset may hold the columns of a table not yet filled in). A
     # column another train dataset holds is kept, as above: it may have been added to the train and
