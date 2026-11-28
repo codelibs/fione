@@ -305,7 +305,9 @@ whether the rows are summarized, the columns added and what to check (a key that
 matching keys, a result over the limit). Anyone who can read the project sees it; a person who
 can edit the project presses **Create the joined dataset**, which starts a Join job and opens
 it. Fione checks the proposal again before the job starts. The result is a new dataset, and the
-base dataset stays as it is. Join only what is known when the model predicts.
+base dataset stays as it is. Press **Propose a join** again to join the next table: the proposal
+starts from the joined dataset and does not add a dataset joined into it again, and says when
+every link is joined. Join only what is known when the model predicts.
 
 The search reads the 8 oldest datasets of the project, whose columns the list offers, and stops
 after 30 seconds; two searches run at once on the server, and another is asked to wait;

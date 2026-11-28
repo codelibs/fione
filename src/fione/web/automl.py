@@ -257,6 +257,7 @@ JOIN_REFUSALS = {
     "no_target": "join.error.no_target",
     "no_target_column": "join.error.no_column",
     "no_link": "join.error.no_link",
+    "joined": "join.error.joined",
 }
 JOIN_FIELDS = ("dataset_id", "other_dataset_id", "key", "other_key", "summarize", "columns")
 

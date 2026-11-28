@@ -91,6 +91,17 @@ def producer_of(conn: sqlite3.Connection, dataset_id: int) -> Job | None:
     return None if row is None else _job(row)
 
 
+def join_of(conn: sqlite3.Connection, dataset_id: int) -> Job | None:
+    """The finished Join module job whose result is the dataset, or None for any other dataset."""
+    row = conn.execute(
+        "SELECT * FROM jobs WHERE kind = 'module' AND status = 'done'"
+        " AND json_extract(payload_json, '$.module_id') = 'join'"
+        " AND json_extract(result_json, '$.dataset_id') = ? ORDER BY id DESC LIMIT 1",
+        (dataset_id,),
+    ).fetchone()
+    return None if row is None else _job(row)
+
+
 def list_jobs(
     conn: sqlite3.Connection,
     project_id: str | None,

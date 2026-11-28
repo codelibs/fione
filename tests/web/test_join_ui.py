@@ -313,6 +313,12 @@ def test_the_join_job_makes_the_joined_dataset(make_client, monkeypatch):
     assert len(frame) == 60 and frame["rows"].tolist() == [2] * 60
     assert {"id", "churned", "total_mean", "total_sum"} <= set(frame.columns)
     assert shop.client.get(r.headers["location"]).status_code == 200
+    # the orders are joined: the next proposal says so instead of proposing the join again
+    again = shop.propose()
+    assert 'data-join="message"' in again.text
+    assert "are joined already: train on the joined dataset, or add" in shown(again.text)
+    ja = shown(shop.propose(**{"Accept-Language": "ja"}).text)
+    assert "すでに結合されています" in ja
 
 
 def test_only_the_datasets_the_search_reads_are_offered(make_client):

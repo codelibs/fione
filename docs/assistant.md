@@ -242,7 +242,10 @@ first join: the base is the dataset that has that column, and the other dataset 
 best link joins to, among the links that have one row per key on a side. The other dataset is
 summarized when it has several rows per key, and looked up as it is when it has one (a table of
 sales gets its stores' columns). A link on the column to predict itself is left out: a table that
-holds a row for each class would hand the answer to the join. A pair of datasets the person names is proposed with
+holds a row for each class would hand the answer to the join. A dataset that a Join job made takes the
+place of the datasets it was made from: the next proposal starts from it and leaves out the
+datasets already joined into it, so tables are joined one after another; when every link a join
+can follow is joined (or the joined dataset is past the 8 datasets the search reads), it says so. A pair of datasets the person names is proposed with
 `propose_join`. The same first join needs no assistant: the **Propose a join** button of the project's
 dashboard and **Datasets** page proposes it for the column chosen there (see
 [Joining datasets](quickstart.md#joining-datasets)), and MCP clients call `propose_first_join`.
