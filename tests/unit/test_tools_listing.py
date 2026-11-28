@@ -4,6 +4,7 @@ import logging
 import math
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -320,6 +321,39 @@ def test_find_table_links_matches_an_auto_increment_key_the_other_column_mostly_
     (link,) = call(env, "find_table_links", {"project_id": env.b.id})["links"]
     assert link["datasets"] == [by_name["customers"], by_name["orders"]]
     assert link["columns"] == ["id", "client_id"] and link["basis"] == "values"
+
+
+def _persons_and_ratings(n_persons=1_200):
+    rng = np.random.default_rng(0)
+    numbers = rng.choice(np.arange(2 * n_persons), n_persons, replace=False)  # not a run
+    persons = pd.DataFrame({"PersonNo": numbers, "AGE": rng.integers(18, 80, n_persons)})
+    raters = np.r_[numbers[: int(n_persons * 0.95)], np.arange(5 * n_persons, 5 * n_persons + 60)]
+    ratings = pd.DataFrame(
+        {"User": np.repeat(raters, 3), "Track": np.tile([1, 2, 3], len(raters))}
+    ).assign(Rating=lambda d: d.Track * 10)
+    return persons, ratings
+
+
+def test_find_table_links_matches_a_whole_number_key_whose_names_say_nothing(env):
+    persons, ratings = _persons_and_ratings()
+    by_name = _ingest(env, env.b, persons=persons, ratings=ratings)
+    (link,) = call(env, "find_table_links", {"project_id": env.b.id})["links"]
+    assert link["datasets"] == [by_name["persons"], by_name["ratings"]]
+    assert link["columns"] == ["PersonNo", "User"] and link["basis"] == "values"
+    assert link["one_row_per_key"] == by_name["persons"]
+    first = call(env, "propose_first_join", {"project_id": env.b.id, "target": "Rating"})
+    assert first["dataset_id"] == by_name["ratings"]
+    assert first["config"]["other_dataset_id"] == by_name["persons"]
+
+
+def test_find_table_links_wants_a_whole_number_key_not_named_id_long_and_mostly_shared(env):
+    persons, ratings = _persons_and_ratings(600)  # too few values to say they are a key
+    rng = np.random.default_rng(1)
+    flats = pd.DataFrame({"id": rng.choice(31_000, 30_000, replace=False)})  # a long id column
+    # counts of 0 to 1,600 lie inside it, but are 5% of its values
+    nearby = pd.DataFrame({"cafe_count": rng.integers(0, 1_600, 30_000), "n": range(30_000)})
+    _ingest(env, env.b, persons=persons, ratings=ratings, flats=flats, nearby=nearby)
+    assert call(env, "find_table_links", {"project_id": env.b.id})["links"] == []
 
 
 def test_find_table_links_puts_a_link_by_name_before_one_by_values(env):
