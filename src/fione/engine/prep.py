@@ -11,7 +11,7 @@ import pandas as pd
 
 from fione.data import frames
 from fione.data.frames import is_day_first, looks_like_dates, parse_datetimes
-from fione.engine.config import ConfigError, TargetError
+from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, TargetError
 from fione.engine.events import Event, EventSink
 
 Task = Literal["classification", "regression"]
@@ -428,7 +428,21 @@ class Prep:
     trend_column: str | None = None
     trend_carriers: list = []
 
-    def fit(self, X: pd.DataFrame, groups=(), y=None, trend: str | None = None) -> "Prep":
+    def fit(
+        self,
+        X: pd.DataFrame,
+        groups=(),
+        y=None,
+        trend: str | None = None,
+        deadline: Deadline | None = None,
+    ) -> "Prep":
+        """Learn the views from ``X``. ``DeadlineExceeded`` is raised as soon as ``deadline``
+        (when given) has expired, between columns and between the steps."""
+
+        def check() -> None:
+            if deadline is not None and deadline.expired():
+                raise DeadlineExceeded
+
         self.dropped: list[str] = []
         self.trend_carriers = _trend_carriers(X, trend) if trend in X.columns else []
         self.trend_column = trend if self.trend_carriers else None
@@ -445,6 +459,7 @@ class Prep:
         self._unseen = {}
         self._code_shares, self._code_unseen = {}, {}
         for column in X.columns:
+            check()
             s = X[column]
             if s.nunique(dropna=False) <= 1:
                 self.dropped.append(column)
@@ -509,6 +524,7 @@ class Prep:
         self._level_at = {}
         self._native_at = {}
         for column, kind in self._plan:
+            check()
             if kind == "category":
                 self._category_at[f"f{len(self.feature_names)}"] = column
             elif (
@@ -556,10 +572,12 @@ class Prep:
         for group in self.groups:
             self.feature_names += group.names
             self.sources += group.sources
+        check()
         base = self._base(X)
         numbers = base.drop(columns=list(self._category_at))
         self._medians = numbers.median().fillna(0.0).to_dict()
         self._fit_no_trend(base)
+        check()
         self._fit_linear(base, numbers)
         return self
 
