@@ -1077,8 +1077,32 @@ def test_an_upload_over_the_limit_is_a_413_page(make_client):
     big = b"a,b\n" + b"1,2\n" * 300_000  # over the limit plus the multipart slack
     r = upload(client, f"/projects/{pid}/upload", csrf, big, headers=HTML)
     assert r.status_code == 413
-    assert "text/html" in r.headers["content-type"] and "too large to upload" in r.text
+    assert "text/html" in r.headers["content-type"] and "larger than the upload limit" in r.text
+    assert "Files up to 1000 B can be uploaded." in r.text
+    assert f'href="/projects/{pid}/upload"' in r.text and "Back to the form" in r.text
     assert dataset_count(client) == 0
+
+
+def test_an_upload_counted_over_the_limit_is_the_same_page(make_client):
+    client = make_client(max_upload_bytes=1000)
+    user = add_user(client, "ed", Role.EDITOR)
+    login(client, "ed")
+    with closing(connect(client)) as conn:
+        pid = projects.create_project(conn, user, "P").id
+
+    def chunks():  # no Content-Length: the bytes are counted as they arrive
+        yield b'--b\r\nContent-Disposition: form-data; name="file"; filename="d.csv"\r\n\r\n'
+        for _ in range(3):
+            yield b"a,b\n" + b"1,2\n" * 300_000
+
+    r = client.post(
+        f"/projects/{pid}/upload",
+        content=chunks(),
+        headers=HTML | {"Content-Type": "multipart/form-data; boundary=b", "Accept-Language": "ja"},
+    )
+    assert r.status_code == 413 and "text/html" in r.headers["content-type"]
+    assert "アップロードの上限を超えています" in r.text and "1000 B" in r.text
+    assert f'href="/projects/{pid}/upload"' in r.text and dataset_count(client) == 0
 
 
 def test_uploads_are_spooled_under_the_data_dir(owner, monkeypatch):

@@ -132,6 +132,8 @@
   "error.forbidden_hint": "この操作が必要な場合は、プロジェクトの所有者に編集権限を依頼してください。",
   "error.method": "この方法ではページを開けません。",
   "error.too_large": "ファイルが大きすぎるため、アップロードできません。",
+  "error.upload_limit": "アップロードできるのは {limit} までです。",
+  "error.back_to_form": "フォームに戻る",
   "nav.breadcrumb": "現在の場所",
   "action.back_project": "プロジェクトに戻る",
   "time.utc": "{time}(UTC)",

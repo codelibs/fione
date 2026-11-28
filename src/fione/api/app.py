@@ -2,7 +2,8 @@
 web UI (``fione.web``, served outside ``/api``).
 
 A new router is one more entry in ``ROUTERS``; a route that accepts uploads also adds its
-path pattern to ``UPLOAD_PATHS`` (other requests are limited to ``MAX_BODY_BYTES``).
+path pattern to ``UPLOAD_PATHS`` (a web UI form to ``fione.web.views.UI_UPLOAD_PATHS``; other
+requests are limited to ``MAX_BODY_BYTES``).
 """
 
 import asyncio
@@ -73,12 +74,7 @@ UPLOAD_PATHS = [
     re.compile(rf"^{API_PREFIX}/uploads/[^/]+$"),  # PUT, a one-time upload URL
     re.compile(rf"^{API_PREFIX}/projects/[^/]+/models/import$"),
     re.compile(rf"^{API_PREFIX}/modules$"),
-    # The web UI's training-data and prediction-data uploads (fione.web.easyml).
-    re.compile(r"^/projects/[^/]+/upload$"),
-    re.compile(r"^/projects/[^/]+/datasets$"),  # fione.web.automl
-    re.compile(r"^/projects/[^/]+/models/import$"),  # fione.web.models_ui
-    re.compile(r"^/modules/upload$"),  # fione.web.modules_ui
-    re.compile(r"^/projects/[^/]+/models/[^/]+/predict$"),
+    *web.UI_UPLOAD_PATHS,  # the web UI's upload forms
 ]
 
 setup_log = logging.getLogger("fione.setup")
@@ -111,8 +107,10 @@ class BodyLimit:
             status, code = (413, "too_large") if declared.isdigit() else (400, "bad_request")
             request = Request(scope)
             if web.wants_html(request):  # a browser's upload form: the UI's error page
-                response = web.error_page(
-                    request, status, web.HTTP_ERROR_KEYS.get(status, "error.generic")
+                response = (
+                    web.too_large_page(request)
+                    if status == 413
+                    else web.error_page(request, status, "error.generic")
                 )
             else:
                 response = error_response(status, code, "request body too large or malformed")

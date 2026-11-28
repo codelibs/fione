@@ -132,6 +132,8 @@
   "error.forbidden_hint": "Ask the project owner for edit access if you need to do this.",
   "error.method": "This page cannot be opened that way.",
   "error.too_large": "The file is too large to upload.",
+  "error.upload_limit": "Files up to {limit} can be uploaded.",
+  "error.back_to_form": "Back to the form",
   "nav.breadcrumb": "You are here",
   "action.back_project": "Back to the project",
   "time.utc": "{time} UTC",
