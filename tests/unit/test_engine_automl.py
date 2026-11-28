@@ -1576,8 +1576,8 @@ def test_a_fit_without_high_cardinality_strings_does_not_depend_on_their_unseen_
     monkeypatch,
 ):
     class NoUnseenShare(automl_module.Prep):
-        def fit(self, X, groups=(), y=None, trend=None):
-            super().fit(X, groups, y, trend)
+        def fit(self, X, groups=(), y=None, trend=None, deadline=None):
+            super().fit(X, groups, y, trend, deadline)
             self.__dict__.pop("_unseen", None)  # as a Prep pickled without the field
             return self
 
@@ -2358,6 +2358,39 @@ def test_derived_features_are_not_tried_on_a_table_wider_than_the_limit(monkeypa
     monkeypatch.setattr(automl_module, "FEATURE_MAX_COLUMNS", 50)
     _fit(_binary(300), target="y", families=["LightGBM"], max_models=1)
     assert chosen
+
+
+def test_derived_features_are_not_tried_when_their_time_cannot_read_the_table(monkeypatch):
+    chosen = []
+    monkeypatch.setattr(
+        automl_module, "select_groups", lambda *a, **k: chosen.append(1) or ([], [])
+    )
+    # 2,400 cells at 1,000 a second: 2.4 s, more than the 0.3 x 6 s = 1.8 s the choice gets
+    monkeypatch.setattr(automl_module, "FEATURE_CELLS_PER_SEC", 1_000)
+    events = []
+    _fit(_binary(300), events, target="y", families=["Linear"], max_runtime_secs=6, max_models=1)
+    assert not chosen
+    assert any(
+        "derived features are not tried: their time (1.8 s) is shorter than reading the 300 rows "
+        "x 8 columns takes (about 2.4 s)" in e.data.get("message", "")
+        for e in events
+    )
+    monkeypatch.setattr(automl_module, "FEATURE_CELLS_PER_SEC", 2_000)  # 1.2 s: tried
+    _fit(_binary(300), target="y", families=["Linear"], max_runtime_secs=6, max_models=1)
+    assert chosen
+
+
+def test_a_budget_that_runs_out_while_the_data_is_prepared_raises_at_once(monkeypatch):
+    def expired(self, X, groups=(), y=None, trend=None, deadline=None):
+        assert deadline is not None  # the run's own deadline is polled
+        raise DeadlineExceeded
+
+    monkeypatch.setattr(automl_module.Prep, "fit", expired)
+    searched = []
+    monkeypatch.setattr(AutoML, "_search", lambda *a, **k: searched.append(1))
+    with pytest.raises(NoModelError, match="it ran out while the data was prepared"):
+        _fit(_binary(300), target="y", max_models=1)
+    assert not searched
 
 
 def test_the_column_limit_for_derived_features_counts_only_the_columns_the_run_keeps(monkeypatch):

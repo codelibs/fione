@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from fione.data import frames
-from fione.engine.config import ConfigError, TargetError
+from fione.engine.config import ConfigError, Deadline, DeadlineExceeded, TargetError
 from fione.engine.families import LinearWide
 from fione.engine.features import CodeLevels
 from fione.engine.prep import (
@@ -44,6 +44,12 @@ def _frame(n=6000):
 def test_fit_drops_all_null_and_constant_columns():
     prep = Prep().fit(_frame())
     assert prep.dropped == ["empty", "const"]
+
+
+def test_fit_stops_when_its_deadline_has_expired():
+    with pytest.raises(DeadlineExceeded):
+        Prep().fit(_frame(), deadline=Deadline(0))
+    assert Prep().fit(_frame(), deadline=Deadline(60)).columns == Prep().fit(_frame()).columns
 
 
 def test_fit_frequency_encodes_high_cardinality_strings():

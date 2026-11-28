@@ -4,8 +4,10 @@
 spec 5.1/5.7) and spends it in phases:
 
 1. Checks, the choice of derived features (``fione.engine.features``; at most
-   ``FEATURE_SHARE`` of the time, or ``FEATURE_MIN_SECS`` of a short run, and off with
-   ``feature_engineering=False``), ``Prep.fit``, the check for a column that gives the target
+   ``FEATURE_SHARE`` of the time, or ``FEATURE_MIN_SECS`` of a short run, not tried when that
+   is shorter than reading the table at ``FEATURE_CELLS_PER_SEC``, and off with
+   ``feature_engineering=False``), ``Prep.fit`` (a budget that runs out during it raises
+   ``NoModelError`` at once), the check for a column that gives the target
    away on its own, or in a difference between two dates (a notice; at most ``LEAK_SHARE`` of
    the time and ``LEAK_SECS``)
    and the folds (a ``cv_group_column`` keeps the rows of a group in one fold, in the search and
@@ -195,6 +197,10 @@ FEATURE_MAX_SHARE = 0.30
 # out) gets no derived features: reading its columns once for every repeat of the gate's folds
 # takes seconds, which leaves nothing to judge a candidate with.
 FEATURE_MAX_COLUMNS = 5_000
+# The choice of derived features reads every cell of the table before it first looks at its time
+# (about 5 million cells a second on a laptop, the gate's quick model aside): it is not tried
+# when its time is shorter than reading the cells at this rate, a few times faster than that.
+FEATURE_CELLS_PER_SEC = 20_000_000
 DROPPED_SHOWN = 5  # names of left-out columns in the notice
 # The check for a column that predicts the target alone (``fione.data.profile.leak_check``) gets
 # this share of the time, at most LEAK_SECS, and names at most LEAK_SHOWN columns.
@@ -1417,7 +1423,12 @@ class AutoML:
                     if c.time_column
                     else "derived features are not tried with a quantile"
                 )
-        prep = Prep().fit(X, groups, y, trend=c.time_column)
+        try:
+            prep = Prep().fit(X, groups, y, trend=c.time_column, deadline=deadline)
+        except DeadlineExceeded:  # the search would have no time for a first trial
+            raise NoModelError(
+                "time budget too small to train any model: it ran out while the data was prepared"
+            ) from None
         self._notice_dropped_columns(prep, X)
         self._notice_time_trend(prep)
         self._leaked = set()
@@ -1688,13 +1699,22 @@ class AutoML:
     ) -> tuple[list, list[dict] | None]:
         """The derived-feature groups to add and the verdict on every candidate (None when
         switched off). The choice gets at most ``FEATURE_SHARE`` of the time, or of a short run
-        ``FEATURE_MIN_SECS`` (but under ``FEATURE_MAX_SHARE``)."""
+        ``FEATURE_MIN_SECS`` (but under ``FEATURE_MAX_SHARE``), and is not tried when that is
+        shorter than reading the table at ``FEATURE_CELLS_PER_SEC``."""
         if not self.config.feature_engineering:
             return [], None
         if X.shape[1] > FEATURE_MAX_COLUMNS and kept_columns(X) > FEATURE_MAX_COLUMNS:
             self._notice(
                 f"derived features are not tried on a table of more than "
                 f"{FEATURE_MAX_COLUMNS:,} columns"
+            )
+            return [], None
+        secs, reading = self._feature_secs(deadline.remaining()), X.size / FEATURE_CELLS_PER_SEC
+        if secs < reading:
+            self._notice(
+                f"derived features are not tried: their time ({secs:.1f} s) is shorter than "
+                f"reading the {X.shape[0]:,} rows x {X.shape[1]:,} columns takes (about "
+                f"{reading:.1f} s); a longer max_runtime_secs lets the search try them"
             )
             return [], None
         try:
@@ -1704,7 +1724,7 @@ class AutoML:
                 task,
                 nfolds,
                 self.config.seed,
-                deadline.child(self._feature_secs(deadline.remaining())),
+                deadline.child(secs),
                 self.should_stop,
                 row_groups,
             )
