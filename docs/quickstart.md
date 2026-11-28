@@ -525,6 +525,16 @@ A notice gives the rows (and, for a date column, the days) of the first part, wh
 learned from, and of each validation part. When the dates span over two years and the first part
 spans less than one, a second notice says that the first folds learn from less than a yearly
 cycle, so their scores may be pessimistic, and that a smaller `nfolds` makes the parts longer.
+With "Validation window" (`time_window`, in the units of the column: days for dates) the folds
+are instead the last `nfolds` windows of that length, the last one ending at the latest time:
+fold *j* checks the models on window *j* and learns from every row before it, as a model that
+forecasts that stretch from the whole history does. Set it to the length forecast at once (28 for
+the next four weeks of a daily table). The scores then judge the models as they will be used, while
+the equal parts judge the earlier folds on models that learned from a small share of the rows.
+Each fold learns from almost all the rows, so a trial takes longer and fewer trials fit in the
+time. A window with no row gives no fold, and windows that leave fewer earlier rows than the
+first window holds are refused. Whole-number dates (20141021, a Unix time) are counted in days
+too, as the date features read them.
 The assistant's proposal does not set it for you, but takes it (`time_column`, a column other than
 the target with a value on every row). When a column of dates exists and a test dataset of the
 project holds it with at least 99% of its dates after the last training date, the proposal says so

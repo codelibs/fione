@@ -424,7 +424,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
     csrf = world.login("ed")
     r = world.client.post(
         world.path("/projects/{p}/datasets/{train}/train"),
-        data=form_for(csrf),
+        data=form_for(csrf, time_window="0.5"),
         follow_redirects=False,
     )
     job_id = int(location(r).rsplit("/", 1)[1])
@@ -438,6 +438,7 @@ def test_every_training_parameter_round_trips_into_the_job(world):
         "max_models": 9,
         "nfolds": 4,
         "time_column": "petal width (cm)",
+        "time_window": 0.5,
         "seed": 2**32 - 1,
         "balance_classes": True,
         "decision": "argmax",
@@ -465,6 +466,27 @@ def test_every_training_parameter_round_trips_into_the_job(world):
     }
     assert {f.name for f in dataclasses.fields(TrainConfig)} == set(expected)  # all covered
     assert config.to_dict() == expected
+
+
+def test_the_validation_window_is_optional_and_needs_a_positive_number_and_a_time_column(world):
+    csrf = world.login("ed")
+    url = world.path("/projects/{p}/datasets/{train}/train")
+    sent = world.client.post(url, data=form_for(csrf, time_window=""), follow_redirects=False)
+    job_id = int(location(sent).rsplit("/", 1)[1])
+    with closing(connect(world.client)) as conn:
+        assert store.get_job(conn, job_id).payload["config"]["time_window"] is None
+    sent = world.client.post(url, data=form_for(csrf, time_window="28"), follow_redirects=False)
+    job_id = int(location(sent).rsplit("/", 1)[1])
+    with closing(connect(world.client)) as conn:
+        assert store.get_job(conn, job_id).payload["config"]["time_window"] == 28  # shown as 28
+    for changes in (
+        {"time_window": "0"},
+        {"time_window": "-1"},
+        {"time_window": "x"},
+        {"time_window": "3", "time_column": ""},
+    ):
+        refused = world.client.post(url, data=form_for(csrf, **changes))
+        assert i18n.t("train.error.time_window", "en") in refused.text
 
 
 def test_the_time_column_is_optional_and_must_be_a_column_other_than_the_target(world):

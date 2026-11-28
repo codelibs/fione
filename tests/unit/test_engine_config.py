@@ -196,6 +196,17 @@ def test_the_time_column_defaults_to_none_and_must_name_a_column():
         TrainConfig(target="y", time_column="y").validate()
 
 
+def test_the_time_window_is_empty_or_a_positive_number_with_a_time_column():
+    assert TrainConfig(target="y").time_window is None
+    TrainConfig(target="y", time_column="day", time_window=16).validate()
+    TrainConfig(target="y", time_column="day", time_window=0.5).validate()
+    for bad in (0, -1, True, "16", float("inf"), float("nan")):
+        with pytest.raises(ConfigError, match="time_window must be a number above 0"):
+            TrainConfig(target="y", time_column="day", time_window=bad).validate()
+    with pytest.raises(ConfigError, match="time_window needs a time_column"):
+        TrainConfig(target="y", time_window=16).validate()
+
+
 def test_a_time_column_and_a_group_column_may_be_used_together():
     TrainConfig(target="y", time_column="day", cv_group_column="user").validate()
 

@@ -1207,6 +1207,43 @@ def test_time_folds_keep_rows_of_one_moment_together_and_need_two_parts():
         search.make_time_folds(np.ones(10, dtype=int), np.zeros(10), "regression", 3)
 
 
+def test_window_folds_validate_the_last_windows_and_learn_from_every_earlier_row():
+    times = np.random.default_rng(0).permutation(np.repeat(np.arange(100.0), 3))
+    folds = search.make_window_folds(times, np.zeros(300), "regression", 3, 16)
+    assert [sorted(set(times[valid])) for _, valid in folds] == [
+        list(np.arange(52.0, 68.0)),
+        list(np.arange(68.0, 84.0)),
+        list(np.arange(84.0, 100.0)),
+    ]
+    for train, valid in folds:
+        assert set(np.flatnonzero(times < times[valid].min())) == set(train)
+
+
+def test_window_folds_skip_an_empty_window_and_refuse_too_few_earlier_rows():
+    times = np.array([-5.0, -4, -3, -2, 0, 1, 2, 3, 10, 11])  # nothing in (4, 7.5]
+    folds = search.make_window_folds(times, np.zeros(10), "regression", 3, 3.5)
+    assert [list(times[valid]) for _, valid in folds] == [[1.0, 2, 3], [10.0, 11]]
+    assert list(times[folds[0][0]]) == [-5.0, -4, -3, -2, 0]
+    with pytest.raises(ConfigError, match="leave fewer earlier rows"):
+        search.make_window_folds(times, np.zeros(10), "regression", 5, 3.5)
+
+
+def test_window_folds_keep_a_group_on_one_side_by_its_last_row():
+    order, groups = _grouped_times()
+    folds = search.make_window_folds(
+        order.astype(float), np.zeros(len(order)), "regression", 2, 5, groups
+    )
+    for train, valid in folds:
+        assert not set(groups[train]) & set(groups[valid])
+
+
+def test_window_folds_refuse_a_class_missing_from_the_rows_learned_from():
+    times = np.arange(20.0)
+    y = np.array([0] * 18 + [1, 0])  # the one row of class 1 is in the first window
+    with pytest.raises(ConfigError, match="a class has no row.*a longer time_window"):
+        search.make_window_folds(times, y, "classification", 2, 1)
+
+
 def _grouped_times():
     rng = np.random.default_rng(1)
     groups = np.repeat(np.arange(40), 6)

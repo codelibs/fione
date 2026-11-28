@@ -2112,6 +2112,105 @@ def test_the_time_column_may_be_ignored_as_a_feature_and_may_hold_dates():
     assert "when" not in model.columns and (model.fold_assignment >= 0).sum() > 0
 
 
+def test_a_time_window_validates_on_the_last_windows_of_days_of_a_date_column():
+    df = _trend(400)
+    df["when"] = pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D")
+    model = _fit(
+        df,
+        target="y",
+        task="regression",
+        families=["LightGBM"],
+        max_models=1,
+        nfolds=3,
+        time_column="when",
+        time_window=10,
+        ignored_columns=["when"],
+        keep_cv_fold_assignment=True,
+    )
+    fold = model.fold_assignment
+    days = df["day"].to_numpy()
+    assert set(days[fold >= 0]) == set(range(70, 100))  # the last 3 windows of 10 days
+    for j, first in enumerate((70, 80, 90)):
+        assert set(days[fold == j]) == set(range(first, first + 10))
+
+
+def test_a_time_window_that_leaves_too_few_earlier_rows_is_refused():
+    df = _trend(100)
+    with pytest.raises(ConfigError, match="leave fewer earlier rows"):
+        _fit(
+            df,
+            target="y",
+            task="regression",
+            families=["LightGBM"],
+            max_models=1,
+            nfolds=4,
+            time_column="day",
+            time_window=25,
+        )
+
+
+def test_a_time_window_counts_whole_number_dates_in_days():
+    df = _trend(400)
+    df["when"] = (
+        (pd.Timestamp("2021-01-01") + pd.to_timedelta(df["day"], unit="D"))
+        .dt.strftime("%Y%m%d")
+        .astype("int64")
+    )  # 20210101 ...: the month changes jump the number
+    model = _fit(
+        df,
+        target="y",
+        task="regression",
+        families=["LightGBM"],
+        max_models=1,
+        nfolds=3,
+        time_column="when",
+        time_window=10,
+        ignored_columns=["when"],
+        keep_cv_fold_assignment=True,
+    )
+    assert set(df["day"].to_numpy()[model.fold_assignment >= 0]) == set(range(70, 100))
+
+
+def test_time_numbers_read_dates_of_a_time_zone_and_of_text_as_days():
+    stamps = [pd.Timestamp("2021-01-01 12:00"), pd.Timestamp("2021-01-03 00:00")]
+    days = automl_module._time_numbers(pd.Series(stamps).dt.tz_localize("Asia/Tokyo"), "t")
+    assert np.allclose(days - days[0], [0, 1.5])
+    text = automl_module._time_values(pd.DataFrame({"t": ["2021-01-01", "2021-01-11"]}), "t")
+    assert np.allclose(np.diff(automl_module._time_numbers(text, "t")), [10])
+    days = pd.date_range("2015-01-01", periods=1000).strftime("%Y%m%d").astype("int64")
+    dates = pd.Series(np.tile(days, 30))
+    dates.iloc[-1] = 20991399  # one value is no date, outside the sample the format is read from
+    with pytest.raises(ConfigError, match="1 of its values are not dates"):
+        automl_module._time_numbers(dates, "when")
+
+
+def test_a_time_window_of_groups_gives_no_lopsided_parts_notice_and_a_window_may_hold_one_class():
+    rng = np.random.default_rng(0)
+    n = 600
+    df = pd.DataFrame(
+        {"day": np.arange(n) // 4, "user": np.arange(n) // 2, "x": rng.normal(size=n)}
+    )
+    df["y"] = (df["x"] > 0).astype(int)
+    df.loc[df["day"] >= 148, "y"] = 1  # the last window holds one class
+    events = []
+    model = _fit(
+        df,
+        events,
+        target="y",
+        task="classification",
+        families=["LightGBM"],
+        max_models=1,
+        nfolds=2,
+        time_column="day",
+        time_window=2,
+        cv_group_column="user",
+        ignored_columns=["day", "user"],
+    )
+    kinds = {e.data.get("kind") for e in events if e.type == "notice"}
+    assert "time_groups_one_part" not in kinds and "time_validation" in kinds
+    assert np.isfinite(model.leaderboard["cv_score"].iloc[0])
+
+
 def test_a_time_column_that_cannot_order_the_rows_is_refused():
     df = _trend(200)
     options = dict(target="y", task="regression", families=["LightGBM"], max_models=1)
