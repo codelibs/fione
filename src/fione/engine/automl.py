@@ -149,10 +149,15 @@ QUANTILE_FAMILIES = tuple(f for f in FAMILY_ORDER if FAMILIES[f].quantile_object
 # when the data suits it (``FamilySpec.applies``) and a model of it would not be too big.
 # Searched only when the settings ask for them (as a base family, in the time its weight gives it),
 # so that a fit that does not ask is what it was before.
-OPT_IN_ORDER = ("TextEmbedding", "TextEmbedding2", "TextEmbedding3")
+OPT_IN_ORDER = ("TextEmbedding", "TextEmbedding2", "TextEmbedding3", "TextEmbedding4")
 # like TextLinear, the first matters most where there is prose; the others read the same texts
 # with other models, and a trial of each is what the blend needs
-OPT_IN_WEIGHTS = {"TextEmbedding": 0.2, "TextEmbedding2": 0.1, "TextEmbedding3": 0.1}
+OPT_IN_WEIGHTS = {
+    "TextEmbedding": 0.2,
+    "TextEmbedding2": 0.1,
+    "TextEmbedding3": 0.1,
+    "TextEmbedding4": 0.1,
+}
 # The L1 variants of the boosting families are late candidates for a regression ranked by MAE,
 # MEDAE or SMAPE (``MEDIAN_METRICS``) with no quantile: the squared error the others learn is not
 # the loss they are ranked by, and on a heavy-tailed target the median predicts better.

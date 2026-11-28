@@ -103,7 +103,7 @@ def _check_int(name: str, value, minimum: int, optional: bool = False) -> None:
         )
 
 
-MAX_EXTRA_EMBEDDINGS = 2  # (TextEmbedding2 and TextEmbedding3)
+MAX_EXTRA_EMBEDDINGS = 3  # (TextEmbedding2 to TextEmbedding4)
 
 
 @dataclass
@@ -164,7 +164,7 @@ class TrainConfig:
     embedding_max_length: int = 384
     # More models whose vectors are read the same way (up to ``MAX_EXTRA_EMBEDDINGS``), each
     # ``{"model": label, "layer": fraction}`` (the layer defaults to ``embedding_layer``). Each
-    # model's vectors get a family of their own (TextEmbedding2, TextEmbedding3) whose
+    # model's vectors get a family of their own (TextEmbedding2 to TextEmbedding4) whose
     # predictions the ensemble blends with the others.
     embedding_extra: list = field(default_factory=list)
 
@@ -173,7 +173,11 @@ class TrainConfig:
         or None when the settings do not name one."""
         first = self.embedding
         number = family.removeprefix("TextEmbedding")
-        if first is None or not family.startswith("TextEmbedding") or number not in ("", "2", "3"):
+        if (
+            first is None
+            or not family.startswith("TextEmbedding")
+            or number not in ("", "2", "3", "4")
+        ):
             return None
         at = int(number or 1) - 1
         if at == 0:

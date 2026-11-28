@@ -254,7 +254,7 @@ def test_the_settings_of_several_models_are_checked():
     assert ok.validate() is ok
     for bad in (
         {"embedding_extra": "toy2"},
-        {"embedding_extra": [{"model": "a"}, {"model": "b"}, {"model": "c"}]},
+        {"embedding_extra": [{"model": m} for m in "abcd"]},
         {"embedding_extra": [{"name": "toy2"}]},
         {"embedding_extra": [{"model": " "}]},
         {"embedding_extra": [{"model": "toy2", "layer": 2}]},

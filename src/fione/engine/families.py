@@ -1327,6 +1327,12 @@ class TextEmbedding3(TextEmbedding):
     name = "TextEmbedding3"
 
 
+class TextEmbedding4(TextEmbedding):
+    """``TextEmbedding`` on the vectors of the fourth model (see ``TextEmbedding2``)."""
+
+    name = "TextEmbedding4"
+
+
 class _MedianVariant:
     """A boosting family that learns the median (an L1 objective) instead of the mean. It is a
     late candidate for a regression ranked by MAE or MEDAE, and it runs after the family it
@@ -1371,6 +1377,7 @@ FAMILIES: dict[str, type[FamilySpec]] = {
         TextEmbedding,
         TextEmbedding2,
         TextEmbedding3,
+        TextEmbedding4,
         LinearWide,
         LightGBML1,
         XGBoostL1,
