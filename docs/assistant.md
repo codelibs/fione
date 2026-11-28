@@ -168,7 +168,9 @@ model does on new rows. It lists at most 200 columns to leave out, ids first; it
 others: columns that hold one value in the rows examined, which training leaves out by itself,
 and ids beyond the 200, which stay in the training unless you ignore them. When the project already has a test or prediction dataset, the card also
 warns about columns the model would learn from that those datasets lack, because predicting
-needs every column the model learned from. A column that the test datasets have but hold no value in (each of them of at least 20 rows),
+needs every column the model learned from. When a Join job added those columns to the training
+data, the card names the dataset it joined and the key, and says to join the test or prediction
+data with it the same way before predicting. A column that the test datasets have but hold no value in (each of them of at least 20 rows),
 while at most 90% of the training rows examined lack it, is left out of the proposal in the same
 way, since a prediction could not use it; the files' own counts of missing values decide, so every
 row is taken into account. A column the proposal leaves out (an id, or one the test data lacks or

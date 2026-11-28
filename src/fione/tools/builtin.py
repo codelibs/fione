@@ -1759,6 +1759,50 @@ def _columns_not_in_test(absent: list[str]) -> dict | None:
     )
 
 
+def _joins_of(ctx: ToolContext, dataset: Dataset) -> list[tuple[Dataset, str, list[str]]]:
+    """The Join jobs that made the dataset, the last one first, as ``(dataset it added, key,
+    columns it added)``; the key reads ``User = PersonNo`` when the two sides name it apart."""
+    joins = []
+    made, seen = dataset, set()
+    while (job := store.join_of(ctx.conn, made.id)) is not None and made.id not in seen:
+        seen.add(made.id)
+        params = job.payload["params"]
+        try:
+            base = projects.get_dataset(ctx.conn, job.payload["dataset_id"])
+            other = projects.get_dataset(ctx.conn, params["other_dataset_id"])
+        except DatasetNotFound:  # deleted since: the columns cannot be told apart any more
+            break
+        keys = params.get("keys") or [params.get("key")]
+        other_keys = params.get("other_keys") or [params.get("other_key")]
+        key = ", ".join(
+            k if not o or o == k else f"{k} = {o}" for k, o in zip(keys, other_keys, strict=False)
+        )
+        had = {n for n, _ in base.schema}
+        joins.append((other, key, [n for n, _ in made.schema if n not in had]))
+        made = base
+    return joins
+
+
+def _joined_columns_not_in_test(other: Dataset, key: str, absent: list[str]) -> dict:
+    """The warning for columns the test or predict data lacks that a join added to the training
+    data: the test data is to be joined the same way."""
+    shown = ", ".join(clean_text(n) for n in absent[:_MAX_ABSENT_SHOWN])
+    name, key = clean_text(other.name), clean_text(key)
+    more = len(absent) - _MAX_ABSENT_SHOWN
+    listed = f"{shown} and {more} more" if more > 0 else shown
+    return _warning(
+        "joined_columns_not_in_test_more" if more > 0 else "joined_columns_not_in_test",
+        f"the test or predict data of this project lacks the columns {listed}, which the join "
+        f"with dataset '{name}' (key {key}) added to the training data; join the test or "
+        "predict data with it the same way before predicting, or leave these columns out of "
+        "the training",
+        columns=shown,
+        dataset=name,
+        key=key,
+        **({"more": more} if more > 0 else {}),
+    )
+
+
 def _event_column(ctx, dataset, names, target, found, asked) -> str | None:
     """The ``event_column`` the user asked for, checked: another plain column of 0 and 1 (1: the
     event happened), for a target that is a number of 0 or more (the time to the event)."""
@@ -1964,7 +2008,13 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
             {"column": clean_text(name), "reason": "not in the test data", "code": "not_in_test"}
         )
         ignored.append(name)
-    if warning := _columns_not_in_test([n for n in absent if n not in set(left_out_here)]):
+    unexplained = [n for n in absent if n not in set(left_out_here)]
+    # columns a join added: the test data is to be joined the same way
+    for other, key, added in _joins_of(ctx, dataset) if unexplained else []:
+        if joined := [n for n in unexplained if n in set(added)]:
+            warnings.append(_joined_columns_not_in_test(other, key, joined))
+            unexplained = [n for n in unexplained if n not in set(joined)]
+    if warning := _columns_not_in_test(unexplained):
         warnings.append(warning)
     # Without test or predict data the proposal cannot see that the siblings will be missing.
     if not any(
