@@ -214,7 +214,7 @@
   "upload.choose": "Choose a file",
   "upload.rule_format": "CSV, or JSON (an array of objects, or one object per line). CSV columns may be separated by commas, semicolons, tabs or |.",
   "upload.rule_size": "Up to {size}.",
-  "upload.rule_encoding": "Text encodings: UTF-8, Shift_JIS or EUC-JP.",
+  "upload.rule_encoding": "Text encodings: UTF-8, Shift_JIS, EUC-JP or Windows-1252.",
   "upload.rule_header": "The first row must hold the column names.",
   "upload.error.form": "The upload did not arrive in one piece. Choose the file again and retry.",
   "upload.error.missing": "Choose a CSV or JSON file to upload.",
