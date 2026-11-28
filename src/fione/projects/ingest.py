@@ -131,8 +131,21 @@ def _detect_delimiter(text: str) -> str:
     return best
 
 
-def _inspect(path: Path) -> tuple[str, str]:
-    """Return ``(encoding, delimiter)`` from a leading sample of the file."""
+def _quoted_line_break(text: str, delimiter: str) -> bool:
+    """Whether a quoted cell of the sample holds a line break (a text of several lines)."""
+    try:
+        return any(
+            "\n" in cell or "\r" in cell
+            for row in csv.reader(io.StringIO(text), delimiter=delimiter)
+            for cell in row
+        )
+    except csv.Error:  # a cell longer than the csv module takes: read it as one that may
+        return True
+
+
+def _inspect(path: Path) -> tuple[str, str, bool]:
+    """Return ``(encoding, delimiter, whether a quoted cell holds a line break)`` from a leading
+    sample of the file."""
     with path.open("rb") as f:
         sample = f.read(_SAMPLE_SIZE)
         final = len(sample) < _SAMPLE_SIZE
@@ -141,7 +154,8 @@ def _inspect(path: Path) -> tuple[str, str]:
         raise IngestError("empty file")
     if not final and "\n" in text:
         text = text[: text.rindex("\n") + 1]  # drop the line cut by the sample boundary
-    return encoding, _detect_delimiter(text)
+    delimiter = _detect_delimiter(text)
+    return encoding, delimiter, _quoted_line_break(text, delimiter)
 
 
 def unique_names(raw: list[str]) -> list[str]:
@@ -158,12 +172,19 @@ def unique_names(raw: list[str]) -> list[str]:
 
 
 def _open_csv(
-    path: Path, encoding: str, delimiter: str, block_size: int, column_types: dict[str, pa.DataType]
+    path: Path,
+    encoding: str,
+    delimiter: str,
+    block_size: int,
+    column_types: dict[str, pa.DataType],
+    multiline: bool,
 ) -> pacsv.CSVStreamingReader:
+    # A quoted line break is read inside its cell only with newlines_in_values, which costs a
+    # slower pass (10 to 40% on large files), so it is asked for only when a file has one.
     return pacsv.open_csv(
         path,
         read_options=pacsv.ReadOptions(encoding=encoding, block_size=block_size),
-        parse_options=pacsv.ParseOptions(delimiter=delimiter),
+        parse_options=pacsv.ParseOptions(delimiter=delimiter, newlines_in_values=multiline),
         convert_options=pacsv.ConvertOptions(
             strings_can_be_null=True,
             column_types=column_types,
@@ -210,7 +231,12 @@ def _ints_fit_float64(text: pa.Array) -> bool:
 
 
 def _widen_columns(
-    path: Path, encoding: str, delimiter: str, block_size: int, inferred: pa.Schema
+    path: Path,
+    encoding: str,
+    delimiter: str,
+    block_size: int,
+    inferred: pa.Schema,
+    multiline: bool,
 ) -> dict[str, pa.DataType]:
     """The wider type for each column whose inferred type some later value does not fit.
 
@@ -221,7 +247,7 @@ def _widen_columns(
     as_text = {name: pa.string() for name in inferred.names}
     fails: set[str] = set()
     float_fails: set[str] = set()
-    with _open_csv(path, encoding, delimiter, block_size, as_text) as reader:
+    with _open_csv(path, encoding, delimiter, block_size, as_text, multiline) as reader:
         for batch in reader:
             for index, field in enumerate(inferred):
                 if pa.types.is_string(field.type):
@@ -401,7 +427,7 @@ def _read_numbers(parquet: Path, schema: pa.Schema, thousands: bool) -> pa.Schem
 
 
 def _convert(
-    path: Path, out: Path, encoding: str, delimiter: str, block_size: int
+    path: Path, out: Path, encoding: str, delimiter: str, block_size: int, multiline: bool
 ) -> tuple[int, pa.Schema]:
     """CSV to Parquet in one streaming pass; columns that hit a type mismatch are widened.
 
@@ -413,13 +439,13 @@ def _convert(
     while True:
         inferred = None
         try:
-            with _open_csv(path, encoding, delimiter, block_size, forced) as reader:
+            with _open_csv(path, encoding, delimiter, block_size, forced, multiline) as reader:
                 inferred = reader.schema
                 return _write_parquet(reader, unique_names(inferred.names), out)
         except pa.ArrowInvalid:
             if inferred is None:
                 raise
-            widened = _widen_columns(path, encoding, delimiter, block_size, inferred)
+            widened = _widen_columns(path, encoding, delimiter, block_size, inferred, multiline)
             if all(forced.get(name) == dtype for name, dtype in widened.items()):
                 raise
             forced |= widened
@@ -602,9 +628,15 @@ def ingest_csv(
             if n_rows == 0 or not len(schema):
                 raise IngestError("no data rows")
             return _register(storage, conn, project_id, name, type, parquet, n_rows, schema)
-        encoding, delimiter = _inspect(raw)
+        encoding, delimiter, multiline = _inspect(raw)
         try:
-            n_rows, schema = _convert(raw, parquet, encoding, delimiter, block_size)
+            try:
+                n_rows, schema = _convert(raw, parquet, encoding, delimiter, block_size, multiline)
+            except pa.ArrowInvalid as e:
+                # the first quoted line break is past the sample: the reader says so
+                if multiline or "newlines_in_values" not in str(e):
+                    raise
+                n_rows, schema = _convert(raw, parquet, encoding, delimiter, block_size, True)
             # in a comma-delimited file 12,500 is 12500; elsewhere a comma may be a decimal one
             schema = _read_numbers(parquet, schema, delimiter == ",")
         except (pa.ArrowInvalid, UnicodeDecodeError) as e:

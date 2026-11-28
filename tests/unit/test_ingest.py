@@ -128,6 +128,38 @@ def test_delimiters_give_same_frame(conn, storage, project, delim):
     pd.testing.assert_frame_equal(df, expected)
 
 
+def _texts_of_several_lines(rows: int) -> bytes:
+    return b"id,text,score\n" + b"".join(
+        b'%d,"line one of %d\nline two, with a comma\r\nline three",%d\n' % (i, i, i % 7)
+        for i in range(rows)
+    )
+
+
+def test_cells_with_line_breaks_are_read_over_many_blocks(conn, storage, project):
+    ds, df = load(conn, storage, project, _texts_of_several_lines(2_000), block_size=4096)
+    assert ds.n_rows == 2_000 and list(df.columns) == ["id", "text", "score"]
+    assert df["text"][1_999] == "line one of 1999\nline two, with a comma\r\nline three"
+    assert df["score"].tolist() == [i % 7 for i in range(2_000)]
+
+
+def test_a_first_line_break_past_the_sample_is_read_too(conn, storage, project, monkeypatch):
+    plain = b"".join(b'%d,"one line",%d\n' % (i, i % 7) for i in range(2_000))
+    data = b"id,text,score\n" + plain + _texts_of_several_lines(2_000).split(b"\n", 1)[1]
+    monkeypatch.setattr(ingest, "_SAMPLE_SIZE", 4096)  # the sample holds plain rows only
+    ds, df = load(conn, storage, project, data, block_size=4096)
+    assert ds.n_rows == 4_000 and df["text"][3_999].endswith("line three")
+
+
+def test_a_file_without_line_breaks_in_cells_is_read_the_fast_way(
+    conn, storage, project, monkeypatch
+):
+    asked = []
+    real = ingest._open_csv
+    monkeypatch.setattr(ingest, "_open_csv", lambda *a: asked.append(a[-1]) or real(*a))
+    load(conn, storage, project, b'id,text\n1,"a, b"\n2,c\n')
+    assert asked and not any(asked)
+
+
 def test_quoted_delimiter_does_not_confuse_detection(conn, storage, project):
     data = 'a,b\n"x;y;z",1\n"p;q;r",2\n'
     _, df = load(conn, storage, project, data.encode())
