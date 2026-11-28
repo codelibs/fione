@@ -17,7 +17,7 @@
     <div class="field">
       <label class="field__label" for="import-file">{{ t('import.file') }}</label>
       <input class="input" type="file" id="import-file" name="file" accept=".zip,application/zip" required aria-describedby="import-file-hint{% if problem %} upload-error{% endif %}">
-      <p class="field__hint" id="import-file-hint">{{ t('import.file_hint', mb=limit_mb) }}</p>
+      <p class="field__hint" id="import-file-hint">{{ t('import.file_hint', size=limit) }}</p>
     </div>
     <div class="check-field">
       <input class="checkbox" type="checkbox" id="trust-foreign" name="trust_foreign" value="true" aria-describedby="trust-foreign-hint">

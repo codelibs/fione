@@ -413,8 +413,10 @@ def size_text(n: int) -> str:
 
 def too_large_page(request: Request) -> HTMLResponse:
     """The page for a request body over the limit, refused before it is read. An upload form's
-    page says the upload limit and leads back to the form; others get the plain error page."""
-    path = request.url.path
+    page says how large a file the form takes (the upload limit, or the form's own smaller cap)
+    and leads back to the form; others get the plain error page. The path is matched as the body
+    limit matched it (``scope["path"]``)."""
+    path = request.scope["path"]
     form = next((f for f in UI_UPLOAD_FORMS if f[0].match(path)), None)
     if form is None:
         return error_page(request, 413, "error.too_large")
@@ -450,7 +452,10 @@ async def _ui_error(request: Request, exc: UiError) -> Response:
 
 
 # Status -> message of the error page for errors raised outside the UI's own checks.
-HTTP_ERROR_KEYS = {404: "error.not_found", 405: "error.method", 413: "error.too_large"}
+HTTP_ERROR_KEYS = {404: "error.not_found", 405: "error.method"}  # 413: too_large_page
+ERROR_HINTS = {404: "error.not_found_hint", 403: "error.forbidden_hint"}
+KEY_HINTS = {"error.admin_only": "error.admin_only_hint"}
+
 # The UI's upload forms (fione.web.easyml, automl, models_ui, modules_ui): their bodies may be as
 # large as the upload limit, and one over it gets a page that says how large a file the form takes
 # (the upload limit, or the form's own smaller cap) and leads back to it (the same path, opened
@@ -463,8 +468,6 @@ UI_UPLOAD_FORMS = [  # (path, message, the form's own cap or None)
     (re.compile(r"^/modules/upload$"), "error.too_large", MAX_SOURCE_BYTES),
 ]
 UI_UPLOAD_PATHS = [path for path, _, _ in UI_UPLOAD_FORMS]
-ERROR_HINTS = {404: "error.not_found_hint", 403: "error.forbidden_hint"}
-KEY_HINTS = {"error.admin_only": "error.admin_only_hint"}
 
 
 def wants_html(request: Request) -> bool:
