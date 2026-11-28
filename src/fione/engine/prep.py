@@ -991,7 +991,9 @@ def validate_target(
         column = "target" if y.name is None else str(y.name)
         raise TargetError(
             f"target has missing values in {missing} rows; remove those rows (the Slice rows "
-            f"module with the condition '{column} is not empty') or choose another column",
+            f"module with the condition '{column} is not empty') or choose another column. The "
+            "rows with an empty target are usually the ones to predict: Slice rows with the "
+            f"condition '{column} is empty' gives them as a dataset to predict on",
             "missing",
             n=missing,
             column=column,

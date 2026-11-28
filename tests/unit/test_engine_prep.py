@@ -427,6 +427,7 @@ def test_the_missing_target_error_names_the_condition_that_removes_those_rows():
     with pytest.raises(ConfigError, match="'sales is not empty'") as raised:
         validate_target(pd.Series([1.0, None] * 10, name="sales"), "regression", 5)
     assert raised.value.details == {"n": 10, "column": "sales"}
+    assert "'sales is empty' gives them as a dataset to predict on" in str(raised.value)
 
 
 def test_validate_target_rejects_single_value():

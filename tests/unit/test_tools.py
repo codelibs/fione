@@ -780,6 +780,11 @@ def test_propose_says_how_to_remove_the_rows_with_an_empty_target(env):
     warning = next(w for w in result["warnings"] if w["code"] == "target_missing")
     assert warning["params"] == {"column": "sales"}
     assert "'sales is not empty'" in warning["message"]
+    assert "'sales is empty' gives them as a dataset to predict on" in warning["message"]
+    for lang in i18n.LANGUAGES:  # the cards name both conditions, with the column filled in
+        for key in ("assistant.warn.target_missing", "analysis.target_error.missing"):
+            text = i18n.catalog(lang)[key]
+            assert "{column} is not empty" in text and "{column} is empty" in text, (lang, key)
 
 
 def _propose_with_later_data(env, later, train_columns=("x", "z", "Age", "label"), **args):

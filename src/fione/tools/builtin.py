@@ -1764,7 +1764,9 @@ def _propose_training_config(ctx: ToolContext, args: dict) -> dict:
                         "target_missing",
                         "the target has missing values, which training refuses; remove those "
                         "rows with the Slice rows module and the condition "
-                        f"'{clean_text(col.name)} is not empty'",
+                        f"'{clean_text(col.name)} is not empty'. The rows with an empty target "
+                        "are usually the ones to predict: the condition "
+                        f"'{clean_text(col.name)} is empty' gives them as a dataset to predict on",
                         column=clean_text(col.name),
                     )
                 )
