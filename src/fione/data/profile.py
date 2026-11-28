@@ -14,11 +14,12 @@ Kind inference (first matching rule wins; ``n`` = non-null values, ``u`` = disti
 4. Integer dtype: ``id`` if ``u == n`` and ``n >= 20``; ``categorical`` if ``u <= 10`` and
    ``u / n <= 0.05`` (0/1 flags, small codes); otherwise ``numeric``.
 5. Other numeric dtype (floats): ``numeric``. Floats are never ``id``.
-6. String/object: ``id`` if ``u == n`` and ``n >= 20`` and the values are not prose (``is_prose``:
-   comments that are all different are ``text``); ``text`` if ``u`` is 1000 or more and the
-   values are prose (a search query that repeats); ``categorical`` if ``u / n <= 0.5`` or
-   ``u <= 50``; ``text`` if the mean string length is above 30; ``categorical`` if ``u <= 1000``;
-   ``text`` otherwise.
+6. String/object: ``list`` if the values are JSON lists of numbers (``number_list_shape``:
+   ``[1, 2]`` or ``[[1, 2], [3, 4]]``, judged on a spread sample), whatever their count; ``id``
+   if ``u == n`` and ``n >= 20`` and the values are not prose (``is_prose``: comments that are
+   all different are ``text``); ``text`` if ``u`` is 1000 or more and the values are prose (a
+   search query that repeats); ``categorical`` if ``u / n <= 0.5`` or ``u <= 50``; ``text`` if
+   the mean string length is above 30; ``categorical`` if ``u <= 1000``; ``text`` otherwise.
 
 Statistics (``stats``, ``histogram``, ``outlier_rate``) are filled for ``numeric`` columns and for
 integer-coded ``categorical`` columns (their numeric dtype makes the mean of a 0/1 flag
@@ -50,9 +51,10 @@ from fione.engine.prep import (
     infer_task,
     integer_date_format,
     is_prose,
+    number_list_shape,
 )
 
-Kind = Literal["numeric", "categorical", "text", "datetime", "id", "constant"]
+Kind = Literal["numeric", "categorical", "text", "datetime", "id", "constant", "list"]
 
 _HISTOGRAM_BINS = 20
 _TOP_VALUES = 10
@@ -218,6 +220,8 @@ def _infer_kind(nonnull: pd.Series, n_unique: int, n_missing: int = 0) -> Kind:
         return "numeric"
     if looks_like_dates(nonnull):
         return "datetime"
+    if number_list_shape(nonnull):
+        return "list"  # read as numbers, however often its values repeat
     if n_unique == n and n >= _ID_MIN_ROWS:
         return "text" if is_prose(nonnull) else "id"
     if n_unique >= REPEATED_PROSE_VALUES and is_prose(nonnull):

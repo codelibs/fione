@@ -172,6 +172,16 @@ def test_an_aligned_sequence_of_one_length_is_text_and_a_long_hex_hash_an_id():
     assert _kind(pd.Series(hashes)) == "id"
 
 
+def test_number_lists_are_a_list_however_often_they_repeat():
+    rng = np.random.default_rng(3)
+    values = [str(rng.integers(0, 256, 40).tolist()) for _ in range(300)]
+    assert _kind(pd.Series(values)) == "list"
+    values[1] = values[0]  # one repeat made such a column text, all different an id
+    assert _kind(pd.Series(values)) == "list"
+    tags = pd.Series([f'["pool", "garden", "room {i}"]' for i in range(300)])
+    assert _kind(tags) != "list"
+
+
 def test_a_prose_column_reports_its_mean_length_and_other_columns_do_not():
     text = [f"this is a fairly long free text comment number {i % 400}" for i in range(500)]
     unique = [f"every comment here is different, and this is number {i}" for i in range(500)]

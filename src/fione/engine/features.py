@@ -45,6 +45,7 @@ with several sources splits its share equally among them.
 import copy
 import hashlib
 import itertools
+import json
 import re
 import time
 import warnings
@@ -60,10 +61,18 @@ from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import log_loss
 
-from fione.data.frames import is_day_first
+from fione.data.frames import _spread, is_day_first
 from fione.engine.config import Deadline
 from fione.engine.families import n_threads
-from fione.engine.prep import Prep, Task, _as_str, _datetimes, is_notation, is_prose
+from fione.engine.prep import (
+    Prep,
+    Task,
+    _as_str,
+    _datetimes,
+    is_notation,
+    is_prose,
+    number_list_shape,
+)
 from fione.engine.search import make_folds
 
 GATE_ROWS = 20_000  # rows the gate samples
@@ -111,6 +120,13 @@ TEXT_MIN_DISTINCT = 12  # string columns with fewer values are plain categories
 TEXT_MIN_STRUCTURED = 0.2  # share of values with several words or letters mixed with digits
 MAX_TEXT_COLUMNS = 6  # text columns that get groups (the most useful by rank)
 NOTATION_CHARS = 40  # characters of a notation with a share of their own (the most frequent)
+# A column of lists of numbers: a list of at most LIST_POSITIONS numbers, all of one length, gives
+# each position; a longer or ragged one its length and statistics. Lists of k numbers each (the
+# frames of an audio embedding, the points of a path) give the mean and spread of each of the first
+# LIST_MEAN_POSITIONS of the k positions over the lists, their lowest and highest when k is at most
+# LIST_POSITIONS, the count of lists, and each number when there are few (LIST_POSITIONS in all).
+LIST_POSITIONS = 32
+LIST_MEAN_POSITIONS = 128
 MAX_PAIR_TEXTS = 3  # text columns compared pairwise (running texts first, then by rank)
 PAIR_ROWS = 100_000  # rows whose words are held at a time while texts are compared
 MAX_REPEATED_VALUES = 10_000  # repeated values stored per column
@@ -291,6 +307,78 @@ class NotationShares(Group):
             f"{column}__share_other": rest / safe,
         }
         return pd.DataFrame(out, index=df.index).astype(float)
+
+
+class ListValues(Group):
+    """The numbers of a column of JSON lists of numbers (``number_list_shape``), by the caps above.
+    A value that is missing, no list or of another shape gives missing features."""
+
+    _STATS = ("length", "mean", "std", "min", "max", "first", "last")
+
+    def __init__(self, column: str):
+        self.label, self.columns = f"list values of {column}", (column,)
+
+    def _fit(self, X):
+        column = self.columns[0]
+        self._dims, self._width = number_list_shape(X[column]) or (1, 0)
+        lengths = set()
+        for value in _spread(_as_str(X[column]).dropna()):
+            parsed = self._parse(value)
+            if parsed is not None:
+                lengths.add(len(parsed))
+        self._length = lengths.pop() if len(lengths) == 1 else None
+        self._sources = {name: self.columns for name in self._names()}
+
+    def _names(self) -> list[str]:
+        c, n, k = self.columns[0], self._length, self._width
+        if self._dims == 1:
+            if n is not None and n <= LIST_POSITIONS:
+                return [f"{c}__p{i}" for i in range(n)]
+            return [f"{c}__{stat}" for stat in self._STATS]
+        names = [f"{c}__lists"]
+        for j in range(min(k, LIST_MEAN_POSITIONS)):
+            names += [f"{c}__mean_{j}", f"{c}__std_{j}"]
+            if k <= LIST_POSITIONS:
+                names += [f"{c}__min_{j}", f"{c}__max_{j}"]
+        if n is not None and n * k <= LIST_POSITIONS:
+            names += [f"{c}__cell_{i}_{j}" for i in range(n) for j in range(k)]
+        return names
+
+    def _parse(self, value: str) -> np.ndarray | None:
+        try:
+            parsed = np.asarray(json.loads(value), dtype=float)
+        except (ValueError, TypeError):
+            return None
+        shape_ok = parsed.ndim == 1 if self._dims == 1 else parsed.ndim == 2
+        if not shape_ok or not len(parsed) or (self._dims == 2 and parsed.shape[1] != self._width):
+            return None
+        return parsed
+
+    def _row(self, a: np.ndarray) -> list[float]:
+        n, k = self._length, self._width
+        if self._dims == 1:
+            if n is not None and n <= LIST_POSITIONS:
+                return [*a[:n], *[np.nan] * (n - len(a))]
+            return [len(a), a.mean(), a.std(), a.min(), a.max(), a[0], a[-1]]
+        out, means, stds = [len(a)], a.mean(axis=0), a.std(axis=0)
+        for j in range(min(k, LIST_MEAN_POSITIONS)):
+            out += [means[j], stds[j]]
+            if k <= LIST_POSITIONS:
+                out += [a[:, j].min(), a[:, j].max()]
+        if n is not None and n * k <= LIST_POSITIONS:
+            cells = np.full((n, k), np.nan)
+            cells[: min(n, len(a))] = a[:n]
+            out += list(cells.ravel())
+        return out
+
+    def _compute(self, df):
+        names = self._names()
+        out = np.full((len(df), len(names)), np.nan)
+        for i, value in enumerate(_as_str(df[self.columns[0]])):
+            parsed = None if value is None or value != value else self._parse(value)
+            if parsed is not None:
+                out[i] = self._row(parsed)
+        return pd.DataFrame(out, index=df.index, columns=names)
 
 
 class TextTokens(Group):
@@ -1368,7 +1456,12 @@ def candidates(
 
     kinds = {c: prep.kind_of(c) for c in columns}
     durations = set(prep.duration_columns)  # the models read their days, not their words
-    strings = [c for c in columns if kinds[c] in ("category", "frequency") and c not in durations]
+    lists = getattr(prep, "lists", ())  # read as numbers (``ListValues``), not as words or codes
+    strings = [
+        c
+        for c in columns
+        if kinds[c] in ("category", "frequency") and c not in durations and c not in lists
+    ]
     text = [c for c in strings if _structured(X[c])]
     categories = by_rank(c for c in columns if kinds[c] == "category" and c not in durations)
     small = [c for c in categories if X[c].nunique() <= MAX_GROUP_CATEGORIES]
@@ -1379,6 +1472,7 @@ def candidates(
     # A notation has no words to read: what it is made of comes next, being cheap and worth much.
     notations = [c for c in by_rank(strings) if is_notation(X[c])][:MAX_TEXT_COLUMNS]
     found += [NotationShares(c) for c in notations]
+    found += [ListValues(c) for c in by_rank(lists)[:MAX_TEXT_COLUMNS]]
     # Running texts are compared first: their rank is low (nearly every value is unique), but
     # two of them are the pair worth comparing.
     running = [c for c in by_rank(text) if is_prose(X[c])]

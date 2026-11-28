@@ -728,6 +728,15 @@ validation (the "Add derived features" option, `feature_engineering` in the API,
   or DNA sequence or a molecule; up to six of them): the value's length and the share of each of
   the 40 characters most frequent in the training rows, the rarer ones and a character not seen
   in training in one share, `other`. This group is tried right after the topics;
+- lists of numbers (a column whose values are JSON lists, `[0.5, 2, 7]` or lists of lists such as
+  `[[-8.61, 41.14], [-8.62, 41.15]]`, the kind "Number list"; up to six of them), tried right
+  after the notations: a list of at most 32 numbers, all of one length, gives each number; a
+  longer or ragged one its length, mean, spread, lowest, highest, first and last number. Lists of
+  lists of k numbers each (the frames of an audio embedding, the points of a path) give the mean
+  and spread of each of the first 128 positions over the lists, their lowest and highest when k is
+  32 or less, the count of lists, and each number when there are 32 numbers or fewer in all. A
+  value that is no such list gives missing features. Such a column is not read as text (no text
+  model and no word features read it);
 - pairs of text columns: with two or more text columns, for each pair among three of them
   (running texts first), such as a question and its candidate duplicate or a title and a
   description: how many words they share, their share of all the words and of the shorter text,

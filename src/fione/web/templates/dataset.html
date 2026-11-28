@@ -41,7 +41,7 @@
         <div class="stat"><dt>{{ t('dataset.size') }}</dt><dd>{{ size or "—" }}</dd></div>
       </dl>
       <ul class="kind-counts" role="list">
-        {% for kind in ["numeric", "categorical", "text", "datetime", "id", "constant"] %}
+        {% for kind in ["numeric", "categorical", "text", "list", "datetime", "id", "constant"] %}
         {% set n = profile.columns|selectattr("kind", "equalto", kind)|list|length %}
         {% if n %}<li>{{ kind_badge(t, kind) }} <span>{{ t('dataset.kind_count', n=n) }}</span></li>{% endif %}
         {% endfor %}

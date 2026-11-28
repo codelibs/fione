@@ -148,6 +148,7 @@
   "kind.datetime": "Date",
   "kind.id": "ID-like",
   "kind.constant": "One value",
+  "kind.list": "Number list",
   "dataset.type.train": "Training data",
   "dataset.type.test": "Data to predict",
   "dataset.type.predict": "Predictions",

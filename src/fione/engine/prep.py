@@ -1,6 +1,7 @@
 """Target checks and the feature preprocessing shared by all model families."""
 
 import copy
+import json
 import re
 from collections import Counter
 from typing import Literal
@@ -47,6 +48,7 @@ NOTATION_UNIQUE = 0.9  # share of different values
 ALIGNED_LENGTH = 100  # mean characters, at least
 ALIGNED_ALPHABET = 30  # different characters, at most
 ALIGNED_LETTERS = 0.9  # share of the characters that are letters, at least
+LIST_SHARE = 0.95  # of the values judged must be JSON lists of numbers for a column of lists
 MAX_PROSE = 3  # prose columns the text view reads (the first ones)
 CONSOLIDATE_COLUMNS = 2_000  # a view of more columns is joined into few blocks (see _base)
 FEW_LEVELS = (
@@ -266,6 +268,43 @@ def _aligned(values: pd.Series) -> bool:
     return len(chars) <= ALIGNED_ALPHABET and letters >= ALIGNED_LETTERS * sum(chars.values())
 
 
+def number_list_shape(s: pd.Series) -> tuple[int, int] | None:
+    """``(1, 0)`` for a string column of JSON lists of numbers (``[1.5, 2, 3]``), ``(2, k)`` for
+    one of lists of ``k`` numbers each (``[[1, 2], [3, 4]]``, frames of an embedding, points of a
+    path), else None: judged on ``LIST_SHARE`` of the values spread over the column. A list of
+    strings is no such column (it stays text)."""
+    if not (s.dtype == object or pd.api.types.is_string_dtype(s.dtype)):
+        return None
+    judged = frames._spread(_as_str(s).dropna())
+    if len(judged) < MIN_ROWS or (judged.str.lstrip().str[:1] == "[").mean() < LIST_SHARE:
+        return None
+    shapes = [_list_shape(value) for value in judged]
+    found = Counter(shape for shape in shapes if shape is not None)
+    if not found:
+        return None
+    shape, count = found.most_common(1)[0]
+    return shape if count >= LIST_SHARE * len(judged) else None
+
+
+def _list_shape(value: str) -> tuple[int, int] | None:
+    try:
+        items = json.loads(value)
+    except ValueError:
+        return None
+    if not isinstance(items, list) or not items:
+        return None
+    if all(_is_number(x) for x in items):
+        return (1, 0)
+    if all(isinstance(x, list) and x and all(_is_number(v) for v in x) for x in items):
+        widths = {len(x) for x in items}
+        return (2, widths.pop()) if len(widths) == 1 else None
+    return None
+
+
+def _is_number(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
 def is_prose(s: pd.Series) -> bool:
     """Whether a string column holds text: the median value has ``PROSE_WORDS`` words (runs of
     letters, so a timestamp or a code is not prose; nor is a hex id, whose runs are short and
@@ -369,6 +408,7 @@ class Prep:
     _logged: tuple = ()
     _knots: dict = {}  # linear view column -> where the splines view bends it (old: none)
     prose: tuple = ()
+    lists: tuple = ()  # columns of JSON lists of numbers (``number_list_shape``), never prose
     all_different: frozenset = frozenset()  # frequency columns whose values are all different
     dayfirst: tuple = ()  # date string columns that put the day before the month
     integer_dates: dict = {}  # whole-number date column -> its format (``integer_date_format``)
@@ -457,10 +497,10 @@ class Prep:
             for column, kind in self._plan
             if kind == "frequency" and X[column].nunique() == int(X[column].notna().sum())
         )
+        strings = [c for c, kind in self._plan if kind in ("category", "frequency")]
+        self.lists = tuple(c for c in strings if number_list_shape(X[c]))
         self.prose = tuple(
-            [c for c, kind in self._plan if kind in ("category", "frequency") and is_prose(X[c])][
-                :MAX_PROSE
-            ]
+            [c for c in strings if c not in self.lists and is_prose(X[c])][:MAX_PROSE]
         )
         self.feature_names: list[str] = []
         # The input columns behind each feature; a derived one may have several.
