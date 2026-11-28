@@ -47,6 +47,10 @@
     <dt>{{ t('train.f.time_column') }}</dt>
     <dd>{{ c.time_column }}</dd>
     {% endif %}
+    {% if c.event_column %}
+    <dt>{{ t('train.f.event_column') }}</dt>
+    <dd>{{ c.event_column }}</dd>
+    {% endif %}
     {% if c.ignored_columns %}
     <dt>{{ t('assistant.proposal.ignored') }}</dt>
     <dd>{{ c.ignored_columns | join(", ") }}</dd>

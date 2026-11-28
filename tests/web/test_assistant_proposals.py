@@ -105,6 +105,24 @@ def test_the_card_shows_the_settings_that_are_not_the_default(setup):
     assert "Ranking metric" in html and "Quadratic weighted kappa (classification)" in html
 
 
+def test_the_card_shows_the_event_column_of_a_time_that_may_be_cut_short(setup):
+    world, proposal = proposal_of(setup)
+    page = f"/projects/{world.p}/assistant?c={proposal.conversation_id}"
+    world.login("ed")
+    assert "Column telling whether the event happened" not in world.client.get(page).text
+    changed = dict(proposal.config, event_column="status")
+    with closing(connect(world.client)) as conn:
+        conn.execute(
+            "UPDATE chat_proposals SET config_json = ? WHERE id = ?",
+            (json.dumps(changed), proposal.id),
+        )
+        conn.commit()
+    html = world.client.get(page).text
+    assert "Column telling whether the event happened" in html and ">status<" in html
+    world.client.cookies.set(i18n.LANG_COOKIE, "ja")
+    assert "出来事が起きたかを示す列" in world.client.get(page).text
+
+
 def test_the_card_shows_the_costs_and_names_the_class_of_a_miss(setup):
     world, proposal = proposal_of(setup)
     page = f"/projects/{world.p}/assistant?c={proposal.conversation_id}"
