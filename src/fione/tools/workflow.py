@@ -336,7 +336,8 @@ for _tool in (
     ),
     Tool(
         "upload_dataset",
-        "Add a dataset to a project from CSV text sent inline (type train, test or predict), "
+        "Add a dataset to a project from CSV text (or JSON Lines, one object per line) sent "
+        "inline in csv_text (type train, test or predict), "
         f"at most {INLINE_UPLOAD_MAX_BYTES // 1024} KiB; use create_upload_url for larger "
         "files. Returns the dataset: id, row and column counts, column names and types.",
         _schema(
@@ -354,9 +355,10 @@ for _tool in (
     Tool(
         "create_upload_url",
         "Make a one-time URL for adding a dataset (type train, test or predict) to a project "
-        "from a CSV file of any size up to the server's upload limit. It is valid for "
+        "from a CSV or JSON file (an array of objects, or JSON Lines) of any size up to the "
+        "server's upload limit. It is valid for "
         f"{upload_tokens.TTL_SECS // 60} minutes and for one successful upload: send the file "
-        "with the `example` command (an HTTP PUT of the raw CSV, no credentials needed); the "
+        "with the `example` command (an HTTP PUT of the raw file, no credentials needed); the "
         "answer is the dataset. Needs a shell; without one use upload_dataset for small files. "
         "Keep the URL private.",
         _schema(
